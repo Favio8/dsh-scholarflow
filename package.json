@@ -1,23 +1,28 @@
 {
   "name": "dsh-scholarflow",
-  "version": "0.0.0",
+  "version": "0.1.0-dev",
   "private": true,
-  "description": "ScholarFlow - academic project workspace plugin for DeepSeek Harness (G0 integration skeleton).",
+  "description": "ScholarFlow academic project workspace for DeepSeek Harness",
   "type": "module",
-  "main": "./src/host/index.js",
+  "main": "./dist/host.js",
   "exports": {
     ".": {
-      "default": "./src/host/index.js"
+      "default": "./dist/host.js"
     },
     "./client": {
-      "default": "./src/client/index.js"
+      "default": "./dist/client.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./agent": {
+      "default": "./dist/agent.js"
+    }
   },
   "files": [
-    "src",
+    "dist",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "presets",
+    "academic-skills"
   ],
   "engines": {
     "node": ">=22"
@@ -31,10 +36,41 @@
     }
   },
   "peerDependencies": {
-    "cordis": ">=4.0.0-rc <5"
+    "@deepseek-ai/cordis": "~4.0.4"
   },
   "dependencies": {
+    "@citation-js/core": "^0.9.0",
+    "@citation-js/plugin-bibtex": "^0.9.0",
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^6.3.289",
+    "rehype-sanitize": "^6.0.0",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
     "schemastery": "^3.18.0",
+    "unified": "^11.0.5",
+    "yaml": "^2.9.1",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build && node --test tests/unit/*.test.* tests/contracts/*.test.*",
+    "prepack": "pnpm build"
   }
 }

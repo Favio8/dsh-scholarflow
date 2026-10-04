@@ -2,27 +2,24 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 
-const source = readFileSync(new URL('../../src/client/index.js', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../../dist/client.js', import.meta.url), 'utf8')
 
 // Browser globals deliberately have no CommonJS module/exports. DSH supplies
 // only require to the registered factory, then uses its return value.
 function loadClient() {
   let handoff
   const errors = []
-  const react = {
-    createElement(type, props, ...children) {
-      return { $$typeof: Symbol.for('react.transitional.element'), type, props: { ...props, children } }
-    },
-  }
   runInNewContext(source, {
     window: { __ModuleLoader__: { load(value) { handoff = value } } },
     console: { log() {}, error(...args) { errors.push(args) } },
-  }, { filename: 'src/client/index.js' })
+  }, { filename: 'dist/client.js' })
   assert.equal(handoff.id, 'dsh-scholarflow')
   const plugin = handoff.factory((specifier) => {
     assert.equal(specifier, 'react')
-    return react
+    return React
   })
   return { plugin, errors }
 }
@@ -30,7 +27,7 @@ function loadClient() {
 test('browser factory materializes without Node module or exports globals', () => {
   const { plugin } = loadClient()
   assert.equal(typeof plugin.apply, 'function')
-  assert.deepEqual(Array.from(plugin.inject), ['slots'])
+  assert.deepEqual(Array.from(plugin.inject), ['slots', 'connection', 'sessions', 'workspaces'])
 })
 
 test('slot registrations use the DSH options/component contract and React output', () => {
@@ -38,6 +35,7 @@ test('slot registrations use the DSH options/component contract and React output
   const cells = []
   const disposers = []
   plugin.apply({
+    connection: { rpc: { call: async () => ({ ok: true, value: {} }) } },
     effect(setup) {
       const dispose = setup()
       assert.equal(typeof dispose, 'function')
@@ -45,14 +43,18 @@ test('slot registrations use the DSH options/component contract and React output
     },
     slots: {
       inject(name, setup) {
-        return setup()
+        const result = setup()
+        if (typeof result === 'function') return result
+        const nested = Array.from(result)
+        return () => nested.reverse().forEach(dispose => dispose())
       },
       register(options, component) {
         assert.equal(typeof component, 'function', 'component must be the second argument')
         assert.equal('component' in options, false)
-        const tree = component()
-        assert.equal(tree.$$typeof, Symbol.for('react.transitional.element'))
-        assert.equal(typeof tree.type, 'string')
+        const html = renderToStaticMarkup(React.createElement(component, {
+          renderSlot: () => null, renderFactorySlot: () => null, useSession: () => undefined,
+        }))
+        assert.equal(typeof html, 'string')
         const cell = { options, disposed: false }
         cells.push(cell)
         return () => { cell.disposed = true }
@@ -62,6 +64,7 @@ test('slot registrations use the DSH options/component contract and React output
   assert.equal(errors.length, 0, 'slot errors must not be hidden by guards')
   assert.deepEqual(cells.map(({ options }) => [options.name, options.key ?? options.id]), [
     ['main', 'scholarflow'],
+    ['scholarflow.agent', undefined],
     ['sidebar.panellist', 'scholarflow'],
     ['settings.section', 'scholarflow-settings'],
   ])

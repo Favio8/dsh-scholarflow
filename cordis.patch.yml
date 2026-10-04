@@ -18,10 +18,7 @@
 - insert:
     - id: scholarflow
       name: dsh-scholarflow
-      # G0-05 hypothesis: a Settings descriptor may require a row that actually
-      # carries config values, not an empty object. Non-empty on purpose.
       config:
-        g0ProbeMarker: from-bundle-patch
         defaultProjectType: course-paper
 
 - insert:
@@ -36,6 +33,8 @@
         # ScholarFlow tool surface is not built yet, so the Mode declares no
         # capability it cannot honestly back.
         plugins:
+          - id: scholarflow-controlled-tools
+            name: dsh-scholarflow/agent
           - id: persona
             name: '@deepseek-ai/dsh-persona'
             config:
