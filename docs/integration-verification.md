@@ -219,8 +219,8 @@ export interface PresetDefinition {
 | 状态 | 结果 |
 |---|---|
 | 文档生成 | 已完成 |
-| 代码实现 | 已完成探针；`WorkspaceBinding` 适配实现为**部分** |
-| 测试通过 | **部分通过** |
+| 代码实现 | 已完成：宿主机探针 + **`WorkspaceBinding` 适配实现（Core，零宿主依赖）** |
+| 测试通过 | **部分**：绑定单元测试 15/15 通过；真实会话内的绑定链待验证（需 desktop） |
 
 ### 03.1 实测结果
 
@@ -257,6 +257,35 @@ export interface PresetDefinition {
 - **【已实测】** 用户指定的测试工作区 `<USER_HOME>\Desktop\科技论文写作` 目前**不是已登记工作区**
   （`resolveByPath` 为 `undefined`），故「项目尚未初始化」与「目录不属于本工作区」两种情况需要
   由我们区分并给出不同提示。
+
+### 03.4 `WorkspaceBinding` 适配实现 + 离线测试【已实测，15/15 通过】
+
+实现：[`src/core/project/binding.js`](../src/core/project/binding.js)（Core，零宿主依赖）
+与测试：[`tests/unit/binding.test.js`](../tests/unit/binding.test.js)。
+
+```bash
+node --test "tests/unit/binding.test.js"
+# ℹ tests 15   ℹ pass 15   ℹ fail 0
+```
+
+设计要点（均按 SPEC 5.1／5.2）：
+
+| 要点 | 做法 |
+|---|---|
+| **canonicalRoot 不出 Host** | 返回值分成 `{ binding, hostOnly }`：`binding` 只有
+`workspaceId`／`projectId`／`sessionId`／`modeId`／`rootFingerprint`，**序列化后不含任何绝对路径**（有断言） |
+| `rootFingerprint` | `sha256:<64 hex>`，对规范化后的根做折叠（分隔符与结尾分隔符归一、Windows 大小写不敏感），因此同一目录的不同写法得到同一指纹 |
+| 每次写请求重新校验 | `describeBindingProblem(binding, observed)` 对 workspace／session／project／mode／root **逐项**返回各自的错误码（映射 SPEC 24.2 的词汇），而不是一个笼统的「失效」 |
+| 目录被移动 | 由**指纹**捕获（同末级名、不同父目录 → `BINDING_ROOT_CHANGED`），不靠显示名比较 |
+| 冲突识别 | `findProjectIdConflicts()` 只在**同一 projectId 出现在不同 workspace** 时报告副本（→ `PROJECT_ID_CONFLICT`） |
+
+**开发过程中发现并修正的一个逻辑错误（已记入测试）：** 最初按 `projectId` 分组即报冲突，
+但 **PRD §5.4 明确一个项目跨多个会话（Session A/B/C/D）是正常形态**，因此同 workspace 的多个
+session **不得**被当作副本。现以 **workspace** 为判别维度，并加了一条回归测试
+`several sessions of ONE project in one workspace are normal, not a conflict`。
+
+**尚未实测**：在真实会话中取得 `sessionId` 并跑通 `sessionId → workspaceId → projectId` 的
+完整绑定链（需要 desktop 重启后从活会话读取）。
 
 ### 03.3 尚未验证
 
