@@ -26,7 +26,9 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
     setSelection(undefined); setPlan(undefined)
   }, [project.document.contentHash])
   useEffect(() => {
-    if (dirty) buffers.set(projectId, { text, baseHash }); else buffers.delete(projectId)
+    // Only explicit edits create a buffer. A server revision renders before the
+    // adoption effect settles; caching that intermediate old state would turn
+    // an accepted proposal into a spurious stale manual buffer.
     const warn = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = '' } }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
@@ -51,9 +53,11 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
   })
   return <section aria-label="正文编辑"><h3>正文编辑</h3>
     <p>Markdown 是主稿事实源。手工编辑与模型建议均校验当前版本；主稿不会被旧缓冲自动覆盖。</p>
-    <label>Markdown 手工编辑<textarea aria-label="Markdown 手工编辑" rows={10} value={text} onChange={e => {
+    <label>Markdown 手工编辑<textarea aria-label="Markdown 手工编辑" rows={10} disabled={busy} value={text} onChange={e => {
       const edited = project.document.lineEnding === 'crlf' ? e.target.value.replace(/\r\n|\r|\n/g, '\r\n') : e.target.value
-      setText(edited); buffers.set(projectId, { text: edited, baseHash })
+      setText(edited)
+      if (edited === project.document.text && baseHash === project.document.contentHash) buffers.delete(projectId)
+      else buffers.set(projectId, { text: edited, baseHash })
     }} /></label>
     {baseHash !== project.document.contentHash && <p role="alert">服务端稿件版本已改变，当前未保存缓冲已保留。请复制比较后显式采用当前版本。</p>}
     <button disabled={busy || !dirty || baseHash !== project.document.contentHash} onClick={() => run(async () => {
@@ -75,8 +79,9 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
       <p>模型调用预算 {plan.budget.maxModelCalls}；运行时限 {plan.budget.maxDurationMinutes} 分钟；仅生成待审阅建议。</p>
       {plan.sourceText && <pre>{plan.sourceText}</pre>}{plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy} onClick={() => run(async () => {
-        setActiveRun(plan.runId); setProgress(undefined)
-        try { const result = await api('runs.start', { context: context(), planId: plan.planId, planHash: plan.planHash }); setProposal(result); setPlan(undefined); await refresh() }
+        const confirmedPlan = plan
+        setPlan(undefined); setActiveRun(confirmedPlan.runId); setProgress(undefined)
+        try { const result = await api('runs.start', { context: context(), planId: confirmedPlan.planId, planHash: confirmedPlan.planHash }); setProposal(result); await refresh() }
         finally { setActiveRun('') }
       })}>确认生成建议</button>
       <button disabled={busy} onClick={() => setPlan(undefined)}>取消生成计划</button></section>}

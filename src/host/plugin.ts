@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { applicationResult, inspectProject, inspectRequest, prepareInitRequest, initializeRequest, resolveStore, type StoredInitPlan } from './bridge/project-api.ts'
-import { prepareInit, initialize, snapshot } from '../core/project/project.ts'
+import { prepareInit, initialize, snapshot, updateProjectText } from '../core/project/project.ts'
 import { recover } from '../core/store/transactions.ts'
 import { newId, digest } from '../core/store/files.ts'
 import { invariant } from '../shared/errors.ts'
@@ -24,6 +24,8 @@ import { selectedModel, callStageModel } from './executor/model.ts'
 import { runReview, inspectReview, decideIssue } from '../core/review/review.ts'
 import { prepareDelivery, createDelivery, readDelivery, type DeliveryPlan } from '../core/export/delivery.ts'
 import { issueDecisionRequest, exportCreateRequest } from '../shared/review.ts'
+import { requirementUpsertRequest, requirementExtractRequest, requirementConfirmRequest, requirementResolveRequest, projectTextReadRequest, projectTextSaveRequest } from '../shared/requirements.ts'
+import { upsertRequirement, extractRequirements, confirmRequirement, resolveRequirementConflict } from '../core/requirements/requirements.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -222,6 +224,49 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
       const revision = mutationRevision(context), { io } = await resolveStore(this.ctx, context, signal)
       return runReview(io, revision) })
+  }
+
+  @Remote('requirements.upsert')
+  async requirementsUpsert(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = requirementUpsertRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return upsertRequirement(io, input.requirement, mutationRevision(input.context)) })
+  }
+
+  @Remote('requirements.extract')
+  async requirementsExtract(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = requirementExtractRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return extractRequirements(io, input.materialId, mutationRevision(input.context)) })
+  }
+
+  @Remote('requirements.confirm')
+  async requirementsConfirm(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = requirementConfirmRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return confirmRequirement(io, input.requirementId, input.countingPolicyId, mutationRevision(input.context)) })
+  }
+
+  @Remote('requirements.resolveConflict')
+  async requirementsResolveConflict(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = requirementResolveRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return resolveRequirementConflict(io, input.requirementIds, input.selectedId, input.reason, mutationRevision(input.context)) })
+  }
+
+  @Remote('project.readText')
+  async projectReadText(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = projectTextReadRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal), file = await io.read(input.path)
+      invariant(file && Buffer.byteLength(file.text) <= 65536, 'PROJECT_TEXT_UNAVAILABLE', '项目指令文件缺失或超过 64 KiB。')
+      return { path: input.path, text: file.text, contentHash: digest(file.text) } })
+  }
+
+  @Remote('project.saveText')
+  async projectSaveText(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = projectTextSaveRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return updateProjectText(io, input.path, input.text, input.baseHash, mutationRevision(input.context)) })
   }
 
   @Remote('review.inspect')

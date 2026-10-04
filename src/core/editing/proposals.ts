@@ -4,7 +4,7 @@ import { commit, inspectRecovery, type Mutation } from '../store/transactions.ts
 import { proposalSchema, selectionSchema, type EditProposal, type SelectionPayload } from '../../shared/editing.ts'
 import { ledgerSchema, id, type Ledger } from '../../shared/schema.ts'
 import { invariant } from '../../shared/errors.ts'
-import { citationKeys, unicodeBoundary, validateSelection, wordStats, parseMarkdown, walk } from './markdown.ts'
+import { citationKeys, unicodeBoundary, validateSelection, wordStats, parseMarkdown, projectMarkdown, walk } from './markdown.ts'
 import { bibliography } from '../export/bibliography.ts'
 import { MAX_MATERIAL_BYTES, sensitivePath } from '../materials/materials.ts'
 
@@ -26,9 +26,8 @@ export function applyEdits(source: string, edits: EditProposal['edits']) {
   return result
 }
 export function protectedChanges(before: string, after: string) {
-  const facts = (source: string) => { const values: string[] = []; walk(parseMarkdown(source), node => {
-    if (node.type === 'text') values.push(...[...(node.value ?? '').matchAll(/\d+(?:[.,]\d+)*(?:\s*(?:%|％|mg|kg|ms|秒|分钟|小时|人|次|个|年|页))?/g)].map(match => match[0]))
-  }); return values.sort() }
+  const facts = (source: string) => projectMarkdown(source).leaves.filter(leaf => !leaf.citationKeys).flatMap(leaf =>
+    [...leaf.text.matchAll(/\d+(?:[.,]\d+)*(?:\s*(?:%|％|mg|kg|ms|秒|分钟|小时|人|次|个|年|页))?/g)].map(match => match[0])).sort()
   const old = facts(before), next = facts(after)
   const changes: string[] = []
   if (JSON.stringify(old) !== JSON.stringify(next)) changes.push(`数字／单位变化：${old.join('、') || '无'} → ${next.join('、') || '无'}`)

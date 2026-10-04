@@ -1,28 +1,38 @@
-// Opt-in, real installed Host smoke; no model requests and no desktop profile edits.
+// Opt-in, installed Host smoke. --live-model makes a bounded provider request
+// using the Host credential service; keys never enter this script or test output.
 import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile, symlink, stat } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, symlink, stat, readdir } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
 import { prepareInit } from '../../src/core/project/project.ts'
 import { commit } from '../../src/core/store/transactions.ts'
+import { homedir } from 'node:os'
+import { digest } from '../../src/core/store/files.ts'
+import { stringify } from 'yaml'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
 const fixture = resolve('.dsh-tmp/G0 中文工作区 TEST_ONLY')
 await mkdir(fixture, { recursive: true })
-const testHome = resolve('.dsh-tmp/g0-home')
+const liveModel = process.argv.includes('--live-model')
+const credentialPath = join(homedir(), '.dsh/.credentials.yaml')
+const credentialHash = liveModel ? digest(await readFile(credentialPath)) : undefined
+const testHome = resolve(liveModel ? '.dsh-tmp/model-home' : '.dsh-tmp/g0-home')
 const profile = join(testHome, 'profiles/scholarflow-g0')
 await mkdir(join(profile, 'node_modules'), { recursive: true })
 await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'scholarflow-g0-TEST_ONLY', private: true,
   dependencies: { 'dsh-scholarflow': `link:${resolve('.').replaceAll('\\', '/')}` },
   dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-scholarflow'] } } }))
 await writeFile(join(profile, 'cordis.yml'), '[]\n')
+if (liveModel) await writeFile(join(profile, 'cordis.patch.yml'), stringify([
+  { id: 'credentials', name: '@deepseek-ai/dsh-credentials-local', config: { path: credentialPath, watch: false } },
+]))
 try { await symlink(resolve('.'), join(profile, 'node_modules/dsh-scholarflow'), 'junction') } catch (e) { if (e.code !== 'EEXIST') throw e }
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
 let child, page, originalType
 async function start(mode) {
-  child = spawn(join(install, 'DeepSeek Harness.exe'), ['--expose-internals', join(install, 'resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'), 'scholarflow-g0', '--no-open', '--port', '19348'], {
+  child = spawn(join(install, 'DeepSeek Harness.exe'), ['--expose-internals', join(install, 'resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'), 'scholarflow-g0', '--no-open', '--port', liveModel ? '19349' : '19348'], {
     env: { ...process.env, DSH_HOME: testHome, ELECTRON_RUN_AS_NODE: '1', SCHOLARFLOW_G0_VERIFY: '1', DSH_PERMISSION_MODE: mode },
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -98,6 +108,8 @@ try {
   const projectRoot = resolve(`.dsh-tmp/M1 中文论文 TEST_ONLY ${Date.now()}`)
   await mkdir(projectRoot, { recursive: true })
   await writeFile(join(projectRoot, '原始材料.txt'), 'TEST_ONLY raw source: never overwrite this file.\r\n')
+  const assignmentBytes = 'TEST_ONLY 老师要求：论文正文不少于2000字。\r\n'
+  await writeFile(join(projectRoot, 'TEST_ONLY 作业要求.txt'), assignmentBytes)
   const projectWorkspace = await rpc('workspace/create', { request: { path: projectRoot } })
   assert.equal(projectWorkspace.ok, true)
   await page.locator('.sf-project').getByRole('combobox', { name: 'DSH 工作区', exact: true }).selectOption(projectWorkspace.value.workspace.workspaceId)
@@ -124,6 +136,7 @@ try {
   const mismatch = await rpc('scholarflow.v1/project.inspect', { request: { context: { requestId: 'req_TEST_ONLY_mismatch', workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId, projectId: projectLedger.projectId } } })
   assert.equal(mismatch.value.ok, false)
   assert.equal(mismatch.value.error.code, 'SESSION_BINDING_CHANGED')
+  await page.getByRole('tab', { name: /^Research ·/ }).click()
   await page.getByRole('button', { name: '列出可选资料', exact: true }).click()
   await page.getByRole('combobox', { name: '选择本地资料', exact: true }).selectOption('原始材料.txt')
   await page.getByRole('combobox', { name: '资料角色', exact: true }).selectOption('notes')
@@ -142,6 +155,7 @@ try {
   await page.getByRole('textbox', { name: '证据关系理由', exact: true }).fill('TEST_ONLY 原文限定 this file，没有支持跨项目的一般结论。')
   await page.getByRole('button', { name: '确认保存论点', exact: true }).click()
   await page.getByRole('listitem').filter({ hasText: 'partially-supported' }).waitFor()
+  await page.getByRole('tab', { name: /^Outline ·/ }).click()
   await page.getByRole('textbox', { name: '研究问题', exact: true }).fill('TEST_ONLY 当前资料支持什么？')
   await page.getByRole('textbox', { name: '中心论点', exact: true }).fill('TEST_ONLY 保留原始资料并说明支持范围。')
   await page.getByRole('textbox', { name: '章节标题', exact: true }).fill('TEST_ONLY 证据与范围')
@@ -150,6 +164,22 @@ try {
   await page.getByRole('button', { name: '确认大纲并添加章节', exact: true }).click()
   await page.getByRole('heading', { name: '论文大纲 · 已确认', exact: true }).waitFor()
   assert.equal(await readFile(join(projectRoot, '原始材料.txt'), 'utf8'), 'TEST_ONLY raw source: never overwrite this file.\r\n')
+  await page.getByRole('tab', { name: /^Draft ·/ }).click()
+  if (liveModel) {
+    const before = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+    await page.getByRole('textbox', { name: '改写生成指令', exact: true }).fill('这是 TEST_ONLY 功能验证。根据已确认的单章节大纲写一段短文（不超过120个汉字），保留唯一已登记来源引用及限定范围。不要编造实验。')
+    await page.getByRole('button', { name: '预览全文生成计划', exact: true }).click()
+    await page.getByRole('dialog', { name: '模型生成确认', exact: true }).waitFor()
+    assert.ok((await page.getByRole('dialog', { name: '模型生成确认', exact: true }).innerText()).includes('deepseek-official / deepseek-flash'))
+    await page.getByRole('button', { name: '确认生成建议', exact: true }).click()
+    await page.getByRole('region', { name: '建议差异', exact: true }).waitFor({ timeout: 120000 })
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), before)
+    const candidate = await page.getByRole('region', { name: '建议差异', exact: true }).innerText()
+    assert.match(candidate, /\[@sf_/)
+    await page.getByRole('button', { name: '拒绝此条建议', exact: true }).click()
+    await page.getByRole('region', { name: '建议差异', exact: true }).waitFor({ state: 'detached' })
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), before)
+  }
   const selectedLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
   const citeKey = Object.values(selectedLedger.sources)[0].citeKey
   const repeatedParagraph = `TEST_ONLY **限定范围** \\* &amp; &#x1F600; [@${citeKey}]。`
@@ -179,6 +209,25 @@ try {
   assert.equal(await capture.locator('pre').innerText(), repeatedParagraph)
   const secondOffset = manualBody.lastIndexOf(repeatedParagraph)
   assert.match(await capture.innerText(), new RegExp(`\\[${secondOffset}, ${secondOffset + repeatedParagraph.length}\\)`))
+  if (liveModel) {
+    await page.getByRole('textbox', { name: '改写生成指令', exact: true }).fill('这是 TEST_ONLY 功能验证。把当前第二段缩写为“TEST_ONLY 限定范围”，保留当前引用token和段末句号。不要添加任何事实或引用。')
+    await page.getByRole('button', { name: '预览选区改写计划', exact: true }).click()
+    await page.getByRole('dialog', { name: '模型生成确认', exact: true }).waitFor()
+    await page.getByRole('button', { name: '确认生成建议', exact: true }).click()
+    await page.getByRole('region', { name: '建议差异', exact: true }).waitFor({ timeout: 120000 })
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+    await page.getByRole('button', { name: '接受此条建议', exact: true }).click()
+    await page.getByRole('region', { name: '建议差异', exact: true }).waitFor({ state: 'detached' })
+    await page.waitForFunction(() => !document.querySelector('textarea[aria-label="Markdown 手工编辑"]').disabled)
+    const accepted = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+    assert.equal(accepted.slice(0, secondOffset), manualBody.slice(0, secondOffset))
+    assert.ok(accepted.slice(secondOffset).includes(`[@${citeKey}]`))
+    assert.notEqual(accepted, manualBody)
+    // Restore the fixture via actual explicit manual save for the remaining checks.
+    await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).fill(manualBody)
+    await page.getByRole('button', { name: '保存手工稿', exact: true }).click()
+    await page.getByText('手工稿已保存，审查需按新版本重跑。', { exact: true }).waitFor()
+  }
   // Crossing paragraph boundaries must reject rather than silently expand.
   await page.evaluate(() => {
     const paragraphs = document.querySelectorAll('.sf-prose p')
@@ -189,9 +238,59 @@ try {
     paragraphs[1].dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
   })
   await capture.waitFor({ state: 'detached' })
+  if (liveModel) {
+    const beforeCancel = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+    await page.getByRole('textbox', { name: '改写生成指令', exact: true }).fill('TEST_ONLY 取消验证：基于确认大纲输出详细的证据与限制说明，保留引用。')
+    await page.getByRole('button', { name: '预览全文生成计划', exact: true }).click()
+    await page.getByRole('button', { name: '确认生成建议', exact: true }).click()
+    const running = page.getByRole('region', { name: '当前生成运行', exact: true })
+    await running.waitFor()
+    const runId = (await running.innerText()).match(/run_[a-zA-Z0-9_]+/)[0]
+    await page.waitForTimeout(500)
+    await running.getByRole('button', { name: '取消当前生成', exact: true }).click()
+    await running.waitFor({ state: 'detached', timeout: 30000 })
+    const cancelled = JSON.parse(await readFile(join(projectRoot, `.scholarflow/runs/${runId}/state.json`), 'utf8'))
+    assert.equal(cancelled.status, 'cancelled')
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), beforeCancel)
+  }
+  await page.getByRole('tab', { name: /^Research ·/ }).click()
+  await page.getByRole('button', { name: '列出可选资料', exact: true }).click()
+  await page.getByRole('combobox', { name: '选择本地资料', exact: true }).selectOption('TEST_ONLY 作业要求.txt')
+  await page.getByRole('combobox', { name: '资料角色', exact: true }).selectOption('assignment')
+  await page.getByRole('button', { name: '确认登记所选资料', exact: true }).click()
+  await page.getByRole('combobox', { name: '已登记资料', exact: true }).getByRole('option').filter({ hasText: 'registered' }).waitFor({ state: 'attached' })
+  await page.getByRole('button', { name: '解析所选资料', exact: true }).click()
+  await page.getByRole('blockquote', { name: '定位原文', exact: true }).getByText('TEST_ONLY 老师要求：论文正文不少于2000字。').waitFor()
+  const requiredLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  const assignment = Object.values(requiredLedger.materials).find(row => row.role === 'assignment')
+  await page.getByRole('tab', { name: /^Overview ·/ }).click()
+  await page.getByRole('combobox', { name: '要求资料', exact: true }).selectOption(assignment.id)
+  await page.getByRole('button', { name: '提取所选资料要求候选', exact: true }).click()
+  await page.getByRole('textbox', { name: '要求描述', exact: true }).fill('TEST_ONLY 用户误记为1000字。')
+  await page.getByRole('textbox', { name: '约束值', exact: true }).fill('1000')
+  await page.getByRole('button', { name: '保存用户要求候选', exact: true }).click()
+  await page.getByRole('region', { name: '要求冲突处理', exact: true }).waitFor()
+  const conflicting = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  const teacher = Object.values(conflicting.requirements).find(row => row.origin.type === 'material')
+  await page.getByRole('combobox', { name: '本次保留要求', exact: true }).selectOption(teacher.id)
+  await page.getByRole('textbox', { name: '冲突处理理由', exact: true }).fill('TEST_ONLY 以定位的原课程要求为准，用户误记。')
+  await page.getByRole('button', { name: '确认保留所选要求并归档冲突原文', exact: true }).click()
+  await page.getByRole('checkbox', { name: /^确认篇幅使用 sf-body-han-western-v1/ }).check()
+  await page.getByRole('button', { name: `确认要求 ${teacher.id}`, exact: true }).click()
+  await page.getByRole('combobox', { name: '项目指令文件', exact: true }).selectOption('.scholarflow/context/terminology.md')
+  await page.getByRole('button', { name: '读取所选项目指令', exact: true }).click()
+  const terminology = '# 已确认术语\n\nTEST_ONLY 原始资料：经用户选择且保持只读的文件。\n'
+  await page.getByRole('textbox', { name: '项目指令内容', exact: true }).fill(terminology)
+  await page.getByRole('button', { name: '确认保存项目指令', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '项目指令已保存；相关检查需更新。' }).waitFor()
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/context/terminology.md'), 'utf8'), terminology)
+  assert.equal(await readFile(join(projectRoot, 'TEST_ONLY 作业要求.txt'), 'utf8'), assignmentBytes)
+  assert.equal((await readdir(join(projectRoot, '.scholarflow/planning/requirements'))).length, 1)
+  await page.getByRole('tab', { name: /^Review ·/ }).click()
   await page.getByRole('button', { name: '运行确定性审查', exact: true }).click()
   await page.getByRole('list', { name: '审查检查结果', exact: true }).getByText('unknown · model-assisted', { exact: false }).first().waitFor()
   const savedBeforeExport = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+  await page.getByRole('tab', { name: /^Export ·/ }).click()
   await page.getByRole('button', { name: '预检当前版本导出', exact: true }).click()
   await page.getByRole('dialog', { name: '导出确认', exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: '确认导出已审查草稿', exact: true }).count(), 0)
@@ -207,6 +306,26 @@ try {
   const download = page.waitForEvent('download')
   await page.getByRole('button', { name: /^下载 quality-report\.md/ }).click()
   assert.equal((await download).suggestedFilename(), 'quality-report.md')
+  // Tabs keep editor state mounted; keyboard navigation has a single tab stop.
+  const exportTab = page.getByRole('tab', { name: /^Export ·/ })
+  await exportTab.focus(); await exportTab.press('Home')
+  assert.equal(await page.getByRole('tab', { name: /^Overview ·/ }).getAttribute('aria-selected'), 'true')
+  await page.getByRole('tab', { name: /^Overview ·/ }).press('ArrowRight')
+  assert.equal(await page.getByRole('tab', { name: /^Research ·/ }).getAttribute('aria-selected'), 'true')
+  await page.getByRole('tab', { name: /^Draft ·/ }).click()
+  const unsaved = manualBody + '\nTEST_ONLY 未保存缓冲。\n'
+  await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).fill(unsaved)
+  await page.getByRole('tab', { name: /^Research ·/ }).click()
+  await page.getByRole('tab', { name: /^Draft ·/ }).click()
+  assert.equal(await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).inputValue(), unsaved)
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '显式采用服务端版本', exact: true }).click()
+  await page.setViewportSize({ width: 700, height: 800 })
+  assert.equal(await page.getByRole('tablist', { name: '论文工作区页面', exact: true }).isVisible(), true)
+  const overflow = await page.locator('.sf-body').evaluate(element => element.scrollWidth > element.clientWidth + 2)
+  assert.equal(overflow, false, 'ScholarFlow workbench must remain readable on narrow screens')
+  await page.setViewportSize({ width: 1500, height: 960 })
   // Reproduce an interrupted initialization using a TEST_ONLY durable journal,
   // then recover through the actual authenticated UI and sandboxed Host writer.
   const recoveryRoot = resolve(`.dsh-tmp/M1 中断恢复 TEST_ONLY ${Date.now()}`)
@@ -252,7 +371,7 @@ try {
   const reset = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: originalType }, expectedRevision: restored.value.settings[0].revision })
   assert.equal(reset.ok, true)
   assert.deepEqual(errors, [])
-  await writeFile('.dsh-tmp/g0-smoke.json', JSON.stringify({ fixture: 'TEST_ONLY', installed: '0.2.0-rc.2',
+  await writeFile(liveModel ? '.dsh-tmp/model-smoke.json' : '.dsh-tmp/g0-smoke.json', JSON.stringify({ fixture: 'TEST_ONLY', installed: '0.2.0-rc.2',
     settingsProjection: true, settingsPersistAcrossRestart: true, chineseWorkspaceNoGit: true,
     scopedSessionCreated: true, sandboxedWriteRead: true, readOnlyDenial: true,
     nativeUiInitPreviewCancel: true, nativeUiInitConfirm: true, originalSourceBytesPreserved: true,
@@ -262,12 +381,18 @@ try {
     nativeUiManualSaveCitationProjection: true, nativeDomSecondParagraphSelection: true,
     nativeDomEntityUnicodeDecode: true, crossParagraphSelectionRejected: true, manuscriptColdRestore: true,
     nativeUiDeterministicReview: true, nativeUiWorkingDraftExportDownload: true, exportDoesNotMutateBody: true,
+    realProviderDraftReject: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
+    realProviderCancellation: liveModel, nativeUiRequirementConflictResolution: true, nativeUiProjectMemoryEdit: true,
+    sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     clientErrors: errors, desktopProfileTouched: false }, null, 2))
-  console.log('Real DSH G0 smoke passed; evidence: .dsh-tmp/g0-smoke.json')
+  console.log(`Real DSH ${liveModel ? 'model' : 'G0'} smoke passed; evidence: .dsh-tmp/${liveModel ? 'model' : 'g0'}-smoke.json`)
 } catch (error) {
   if (page && !page.isClosed()) {
     await page.screenshot({ path: '.dsh-tmp/host-smoke-failure.png' })
     console.log('TEST_ONLY plugin status:', await page.locator('.sf-project').innerText().catch(() => 'not mounted'))
   }
   throw error
-} finally { await stop(); await browser.close() }
+} finally {
+  await stop(); await browser.close()
+  if (liveModel) assert.equal(digest(await readFile(credentialPath)), credentialHash, 'Host model smoke must not modify the credential store')
+}

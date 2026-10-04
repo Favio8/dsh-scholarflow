@@ -2,10 +2,14 @@ import React, { useState, useEffect } from 'react'
 import { Research, OutlineEditor } from './research.tsx'
 import { Draft } from './draft.tsx'
 import { ReviewExport } from './review-export.tsx'
+import { Overview } from './overview.tsx'
 
 type Host = any
+const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export'] as const
+const TAB_LABELS = ['概览', '资料与研究', '大纲', '正文', '审查', '导出']
 const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-app button,.sf-app select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
 export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'layout']
+const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:6px;padding:8px;resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid #8884;padding:12px 0;margin:12px 0}.sf-tabs button[aria-selected=true]{background:#8882;border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:2px solid currentColor;outline-offset:2px}`
 
 export function apply(ctx: Host) {
   const call = async (method: string, args: unknown = {}) => {
@@ -28,7 +32,7 @@ export function apply(ctx: Host) {
     const [info, setInfo] = useState<Host>()
     const [error, setError] = useState('')
     useEffect(() => { let live = true; call('diagnostics').then(v => live && setInfo(v)).catch(e => live && setError(e.message)); return () => { live = false } }, [])
-    return <div className="sf-app"><style>{CSS}</style><header className="sf-header"><b>ScholarFlow</b> · 宿主连接验证</header>
+    return <div className="sf-app"><style>{CSS + EXTRA_CSS}</style><header className="sf-header"><b>ScholarFlow</b> · 学术写作工作台</header>
       <div className="sf-columns"><main className="sf-body"><h2>论文工作台</h2>
         {error && <p role="alert" className="sf-error">{error}</p>}
         {info && <p role="status">已连接 Host · 协议 v{info.protocol} · {info.settings.length ? '设置可持久化' : '设置能力不足'}</p>}
@@ -46,13 +50,14 @@ export function apply(ctx: Host) {
     const [plan, setPlan] = useState<Host>()
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
+    const [tab, setTab] = useState<(typeof TABS)[number]>('Overview')
     const context = () => ({ requestId: `req_${crypto.randomUUID()}`, workspaceId: workspace?.workspaceId, sessionId: props.sessionId,
       ...(project?.ledger && { expectedLedgerRevision: project.ledger.revision }),
       ...(project?.binding?.projectId && project.binding.workspaceId === workspace?.workspaceId && project.binding.sessionId === props.sessionId
         ? { projectId: project.binding.projectId } : {}) })
     useEffect(() => {
       let live = true
-      setPlan(undefined); setProject(undefined); setError('')
+      setPlan(undefined); setProject(undefined); setError(''); setTab('Overview')
       if (workspace && props.sessionId) api('project.inspect', { context: context() }).then(value => { if (live) setProject(value) }).catch(e => live && setError(e.message))
       return () => { live = false }
     }, [workspace?.workspaceId, props.sessionId])
@@ -96,10 +101,15 @@ export function apply(ctx: Host) {
       {project?.initialized && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId && <><h3>{project.config.project.title}</h3><p>项目已保存 · ledger 版本 {project.ledger.revision} · {project.document.externalChange ? '检测到外部稿件修改' : '主稿版本一致'}</p>
         {!!project.configWarnings?.length && <p role="alert">以下配置键未生效，原文件已保留：{project.configWarnings.join('、')}</p>}
         <p>当前绑定：{project.binding.projectId}。同一工作区的多个 ScholarFlow 会话读取同一份项目数据。</p>
-        <Research key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
-        <OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
-        <Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
-        <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
+        <nav className="sf-tabs" role="tablist" aria-label="论文工作区页面">{TABS.map((name, index) => <button key={name} id={`sf-tab-${name}`} role="tab" aria-controls={`sf-panel-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)} onKeyDown={e => {
+          const next = e.key === 'ArrowRight' ? (index + 1) % TABS.length : e.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1
+          if (next < 0) return; e.preventDefault(); setTab(TABS[next]); e.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`#sf-tab-${TABS[next]}`)?.focus()
+        }}>{name} · {TAB_LABELS[index]}</button>)}</nav>
+        <div id="sf-panel-Overview" role="tabpanel" aria-labelledby="sf-tab-Overview" hidden={tab !== 'Overview'}><Overview key={`overview_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} /></div>
+        <div id="sf-panel-Research" role="tabpanel" aria-labelledby="sf-tab-Research" hidden={tab !== 'Research'}><Research key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} /></div>
+        <div id="sf-panel-Outline" role="tabpanel" aria-labelledby="sf-tab-Outline" hidden={tab !== 'Outline'}><OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} /></div>
+        <div id="sf-panel-Draft" role="tabpanel" aria-labelledby="sf-tab-Draft" hidden={tab !== 'Draft'}><Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} /></div>
+        <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} mode={tab} />
       </>}
     </section>
   }

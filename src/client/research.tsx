@@ -37,10 +37,10 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
     <label>资料目录（相对工作区，留空为根目录）<input aria-label="资料目录" value={directory} onChange={e => setDirectory(e.target.value)} /></label>
     <button disabled={busy} onClick={() => scan()}>列出可选资料</button>
     {cursor !== null && <button disabled={busy} onClick={() => scan(cursor)}>下一页资料</button>}
-    {!!files.length && <><label>选择本地资料<select aria-label="选择本地资料" value={selected} onChange={e => setSelected(e.target.value)}><option value="">请选择</option>
+    {!!files.length && <><label>选择本地资料<select aria-label="选择本地资料" disabled={busy} value={selected} onChange={e => setSelected(e.target.value)}><option value="">请选择</option>
       {files.filter(file => file.type === 'file').map(file => <option key={file.relativePath} value={file.relativePath}>{file.relativePath} ({file.sizeBytes} bytes)</option>)}</select></label>
       {files.filter(file => file.type === 'directory').map(file => <button key={file.relativePath} disabled={busy} onClick={() => { setDirectory(file.relativePath); setFiles([]); setCursor(null) }}>{file.relativePath}/</button>)}
-      <label>资料角色<select aria-label="资料角色" value={role} onChange={e => setRole(e.target.value)}><option value="paper">论文</option><option value="assignment">作业要求</option><option value="rubric">评分标准</option><option value="notes">笔记</option><option value="data">结果数据</option><option value="code">代码（不执行）</option><option value="other">其他</option></select></label>
+      <label>资料角色<select aria-label="资料角色" disabled={busy} value={role} onChange={e => setRole(e.target.value)}><option value="paper">论文</option><option value="assignment">作业要求</option><option value="rubric">评分标准</option><option value="notes">笔记</option><option value="data">结果数据</option><option value="code">代码（不执行）</option><option value="other">其他</option></select></label>
       <button disabled={busy || !selected} onClick={() => run(async () => { const result = await api('materials.register', { context: context(), relativePath: selected, role }); setMaterialId(result.material.id); setParsed(undefined); await refresh() })}>确认登记所选资料</button></>}
     <label>已登记资料<select aria-label="已登记资料" value={materialId} onChange={e => { setMaterialId(e.target.value); setParsed(undefined); setBlockIndex(0) }}><option value="">请选择</option>
       {materials.map(material => <option key={material.id} value={material.id}>{material.projectRelativePath} · {material.parseStatus}</option>)}</select></label>

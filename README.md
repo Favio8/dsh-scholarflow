@@ -14,7 +14,10 @@ ScholarFlow 的预设限制继承工具并安装同步守卫，普通 Mode 的�
 已接入 Markdown 手工编辑与渲染预览、带 UTF-16 源码位置的浏览器选区、不可变建议、
 差异接受／拒绝、版本冲突拒绝和新修订撤销。已实现确定性审查、带理由的问题处理、
 审查过期判断，以及同版本 Markdown／BibTeX／质量报告工作草稿快照与下载。
-有限模型阶段已接入宿主适配器；真实提供方调用尚待这版验证，流程测试使用明确标记的 TEST_ONLY 适配器。
+有限模型阶段已通过真实 DeepSeek 提供方测试：全文候选拒绝、第二重复段落缩写后接受、
+取消并保存运行终态。规则测试的模拟适配器仍明确标记 TEST_ONLY。
+要求可从已解析材料保守提取，冲突需选择并记录理由，篇幅统计口径需确认。
+项目文风和确认记忆提供版本校验编辑；六个工作区页面支持键盘切换和窄屏布局。
 完整工作流、模型辅助审查、在线检索、私有 Skill 库和全部 V1 验收仍在开发。
 此页面不会将集成验证当成完整产品交付。
 
@@ -27,6 +30,8 @@ pnpm typecheck
 pnpm test
 # 可选：真实安装环境，独立 DSH_HOME，不改 desktop profile
 node tests/e2e/installed-host-smoke.mjs
+# 可选：使用现有 Host 凭据服务发起有限真实模型测试（会产生提供方费用）
+node tests/e2e/installed-host-smoke.mjs --live-model
 ```
 
 构建生成 dist/host.js、dist/agent.js 和 dist/client.js；安装源码链接前必须先构建。

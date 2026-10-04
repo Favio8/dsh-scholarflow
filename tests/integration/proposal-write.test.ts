@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
 import { initialize, prepareInit, snapshot, mutateLedger } from '../../src/core/project/project.ts'
-import { saveManual, buildProposal, storeProposal, applyProposal, rejectProposal, undoRevision } from '../../src/core/editing/proposals.ts'
+import { saveManual, buildProposal, storeProposal, applyProposal, rejectProposal, undoRevision, protectedChanges } from '../../src/core/editing/proposals.ts'
 import { projectMarkdown } from '../../src/core/editing/markdown.ts'
 import { registerSource } from '../../src/core/evidence/evidence.ts'
 import { digest } from '../../src/core/store/files.ts'
@@ -89,4 +89,9 @@ test('external ledger edits during a mutation are never overwritten by a refresh
     io.externalEdit('.scholarflow/data/ledger.json', JSON.stringify(external))
   }), { code: 'STALE_LEDGER_REVISION' })
   assert.equal((await snapshot(io)).ledger.outline.title, 'TEST_ONLY 外部编辑的 ledger')
+})
+
+test('protected numbers exclude digits inside parsed citation identities', () => {
+  assert.deepEqual(protectedChanges('TEST_ONLY 12 人 [@sf_123abc]。', 'TEST_ONLY 12 人 [@sf_456def]。'), [])
+  assert.ok(protectedChanges('TEST_ONLY 12 人 [@sf_123abc]。', 'TEST_ONLY 20 人 [@sf_123abc]。').some(change => change.includes('12 人 → 20 人')))
 })

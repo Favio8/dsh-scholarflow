@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { saveManual } from '../../src/core/editing/proposals.ts'
-import { prepareGeneration, executeGeneration } from '../../src/core/pipeline/generation.ts'
+import { prepareGeneration, executeGeneration, validateModelReplacement } from '../../src/core/pipeline/generation.ts'
 import { projectMarkdown } from '../../src/core/editing/markdown.ts'
 const owner = { pid: 12345, bootInstance: 'TEST_ONLY' }
 
@@ -72,4 +72,26 @@ test('external Profile edits invalidate an approved plan before any model call',
   io.externalEdit('.scholarflow/profiles/writing.md', 'TEST_ONLY 用户外部修改了文风')
   await assert.rejects(executeGeneration(io, plan, owner, new AbortController().signal, async () => { calls++; return '' }, () => true), { code: 'STALE_RESOURCE_VERSION' })
   assert.equal(calls, 0)
+})
+
+test('valid JSON with invented selection citations still fails after one repair without a proposal', async () => {
+  const { io, plan } = await setup(); let calls = 0
+  await assert.rejects(executeGeneration(io, plan, owner, new AbortController().signal, async () => {
+    calls++; return JSON.stringify({ replacementText: 'TEST_ONLY [@sf_not_in_input]', limitations: [] })
+  }, () => true), { code: 'MODEL_OUTPUT_INVALID' })
+  assert.equal(calls, 2); assert.equal(Object.keys((await snapshot(io)).ledger.proposalStates).length, 0)
+})
+
+test('whole-document writer must return parsed evidence citations, not bare or parenthesized keys', async () => {
+  const { plan } = await setup()
+  const whole = { ...plan, input: { ...plan.input, selection: undefined }, context: { ...plan.context, sources: [{ citeKey: 'sf_TEST_ONLY' }] } }
+  for (const text of ['TEST_ONLY 无引用。', 'TEST_ONLY (sf_TEST_ONLY)。', 'TEST_ONLY sf_TEST_ONLY。', 'TEST_ONLY `[@sf_TEST_ONLY]`。'])
+    assert.throws(() => validateModelReplacement(whole, text), { code: 'MODEL_CITATION_INVALID' })
+  validateModelReplacement(whole, 'TEST_ONLY 有效引用 [@sf_TEST_ONLY]。')
+})
+
+test('unimplemented section scope cannot silently become a whole-document plan', async () => {
+  const { io, plan } = await setup()
+  await assert.rejects(prepareGeneration(io, { ...plan.input, sectionId: 'sec_TEST_ONLY' }, plan.snapshot.modelDescriptor), { code: 'SECTION_GENERATION_UNAVAILABLE' })
+  assert.equal((await snapshot(io)).document.text, plan.input.selection!.sourceText)
 })

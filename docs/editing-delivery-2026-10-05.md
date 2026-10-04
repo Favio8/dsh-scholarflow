@@ -60,10 +60,48 @@ This smoke makes no model request and does not modify the desktop profile.
 Rebuilding updates disk assets; an already-running Desktop process may still
 hold old loaded modules until its next reload/restart.
 
+## Follow-up verification on 2026-10-05
+
+The new adapter was subsequently tested with actual `deepseek-official /
+deepseek-flash` streams through the installed Host credential service. The
+`--live-model` smoke uses a separate `.dsh-tmp/model-home`, points only the Host
+credentials plugin at the existing credential store, and checks its byte hash
+before/after. It does not parse keys, copy them into fixtures, change the desktop
+profile, or log a credential. All academic materials are TEST_ONLY fixtures.
+
+Verified actual UI paths: a cited whole-document candidate is generated and
+rejected with unchanged manuscript; the second duplicate paragraph is shortened
+and accepted with its citation retained and first paragraph untouched; an active
+model stage is cancelled, its terminal checkpoint is saved, and the manuscript
+remains unchanged. This establishes these execution boundaries, not general
+academic quality or all three paper types.
+
+The first real candidate exposed bare cite keys instead of parsed Markdown
+tokens. This now fails the stage output contract. One repair is allowed; continued
+invalid citations fail with no proposal. Source IDs' digits no longer create
+false numeric-fact warnings. Accept no longer re-caches an intermediate old editor
+state as a stale manual buffer. Consumed/cancelled plans leave the confirmation UI.
+Unimplemented section generation fails explicitly rather than treating section
+output as a whole-document replacement.
+
+`src/core/requirements/requirements.ts` extracts conservative candidates only
+from actually parsed selected blocks, requires origin locators, and leaves
+counting policy unknown until user confirmation. Disagreeing numeric constraints
+block confirmation; an operator's reasoned choice archives both originals and
+still requires confirmation of the selected requirement. Forbidden AI policies
+remain hard constraints. Project Profile/memory editing uses the authenticated
+API and original hash. Test coverage increased to 92 automated cases.
+
+The workbench now has Overview / Research / Outline / Draft / Review / Export
+tabs. Kept-mounted panes preserve unsaved manuscript across tab switches; roving
+keyboard focus, explicit focus rings and narrow layouts are exercised by the
+updated no-model installed smoke. Browser-reload durability is still pending.
+
 ## Remaining acceptance work
 
-Real model generation/selection rewrite; all three paper types end to end;
+All three paper types end to end;
 section generation and claim anchors; model-assisted review; reviewed-draft
 readiness; private Skill resource locking; online research; requirements and
-Profile/memory UI; complete run recovery; durable unsaved-buffer restoration;
-six-tab and narrow-screen UX; approved image packaging; complete P0/AT matrix.
+full editable requirements/history and Profile/memory provenance; complete run
+recovery; durable unsaved-buffer restoration; approved image packaging;
+complete P0/AT matrix.
