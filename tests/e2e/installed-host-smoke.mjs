@@ -461,7 +461,32 @@ try {
     await page.getByRole('button', { name: '预览选区改写计划', exact: true }).click()
     await page.getByRole('dialog', { name: '模型生成确认', exact: true }).waitFor()
     await page.getByRole('button', { name: '确认生成建议', exact: true }).click()
+    await page.getByRole('button', { name: '暂停当前生成', exact: true }).click()
+    await page.getByText('运行已暂停，检查点已保存；可从历史预览恢复。', { exact: true }).waitFor({ timeout: 120000 })
+    const pausedImage = await readFile(join(projectRoot, '.scholarflow/runs/active.json'), 'utf8'), pausedRun = JSON.parse(pausedImage)
+    assert.equal(pausedRun.status, 'paused')
+    const pausedCheckpoint = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', pausedRun.runId, 'checkpoint.json'), 'utf8'))
+    assert.equal(pausedCheckpoint.pendingCall, false)
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+    await page.getByRole('button', { name: `预览恢复运行 ${pausedRun.runId}`, exact: true }).click()
+    await page.getByRole('dialog', { name: '运行操作确认', exact: true }).waitFor()
+    await page.getByRole('button', { name: '取消运行操作预览', exact: true }).click()
+    await page.getByRole('dialog', { name: '运行操作确认', exact: true }).waitFor({ state: 'detached' })
+    assert.equal(await readFile(join(projectRoot, '.scholarflow/runs/active.json'), 'utf8'), pausedImage)
+    // Resume from the project fact source in a fresh real ScholarFlow session.
+    const previousUiSession = await page.locator('.sf-project').getAttribute('data-sf-session-id')
+    await page.getByRole('button', { name: '新建 ScholarFlow 会话', exact: true }).click()
+    await page.waitForFunction(previous => { const element = document.querySelector('.sf-project'); return element?.getAttribute('data-sf-session-id') && element.getAttribute('data-sf-session-id') !== previous }, previousUiSession)
+    await page.getByText('项目已保存', { exact: false }).waitFor({ timeout: 15000 })
+    await page.getByRole('tab', { name: /^Draft ·/ }).click()
+    await page.getByRole('button', { name: `预览恢复运行 ${pausedRun.runId}`, exact: true }).click()
+    await page.getByRole('button', { name: '确认运行操作', exact: true }).click()
     await page.getByRole('region', { name: '建议差异', exact: true }).waitFor({ timeout: 120000 })
+    const resumedRun = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', pausedRun.runId, 'run.json'), 'utf8'))
+    assert.equal(resumedRun.runId, pausedRun.runId)
+    assert.equal(resumedRun.sessionId, pausedRun.sessionId)
+    assert.notEqual(resumedRun.executionSessionId, pausedRun.sessionId)
+    if (pausedCheckpoint.output) assert.equal(resumedRun.usedModelCalls, pausedRun.usedModelCalls, 'valid checkpoint must not incur another model call')
     assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
     await page.getByRole('button', { name: '接受此条建议', exact: true }).click()
     await page.getByRole('region', { name: '建议差异', exact: true }).waitFor({ state: 'detached' })
@@ -725,6 +750,7 @@ try {
     realProviderSectionCandidateAcceptWithClaimAnchors: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
     nativeUiManualParagraphClaimAssociation: true, renderedSelectionDisplaysCurrentClaims: true,
     nativeUiLegacyRunStorageMigrationKeepsAllBytes: true,
+    realModelPauseAndCrossSessionResume: liveModel, cancelledRunActionPreviewLeavesStateUnchanged: liveModel,
     realProviderCancellation: liveModel, nativeUiRequirementConflictResolution: true, nativeUiProjectMemoryEdit: true,
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,

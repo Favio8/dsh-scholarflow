@@ -29,6 +29,7 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
   const [activeRun, setActiveRun] = useState('')
   const [progress, setProgress] = useState<any>()
   const [history, setHistory] = useState<any>(), [historySequence, setHistorySequence] = useState(0), [migrationPlan, setMigrationPlan] = useState<any>()
+  const [actionPlan, setActionPlan] = useState<any>()
   const [skills, setSkills] = useState<any[]>([]), [skillBindingId, setSkillBindingId] = useState('')
   const [bufferReady, setBufferReady] = useState(false), [bufferMessage, setBufferMessage] = useState('正在读取宿主暂存缓冲…'), [recoverable, setRecoverable] = useState<any>()
   const bufferHash = useRef<string | null>(null), hostDirty = useRef(false), persistence = useRef(Promise.resolve()), persistenceBlocked = useRef(false)
@@ -200,17 +201,38 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
       <button disabled={busy} onClick={() => run(async () => {
         const confirmedPlan = plan
         setPlan(undefined); setActiveRun(confirmedPlan.runId); setProgress(undefined)
-        try { const result = await api('runs.start', { context: context(), planId: confirmedPlan.planId, planHash: confirmedPlan.planHash }); setProposal(result); await refresh() }
-        finally { setActiveRun('') }
+        try { const result = await api('runs.start', { context: context(), planId: confirmedPlan.planId, planHash: confirmedPlan.planHash }); if (result.proposal) setProposal(result); if (result.paused) setMessage('运行已暂停，检查点已保存；可从历史预览恢复。'); await refresh() }
+        finally { setActiveRun(''); setHistorySequence(value => value + 1) }
       })}>确认生成建议</button>
       <button disabled={busy} onClick={() => setPlan(undefined)}>取消生成计划</button></section>}
     {activeRun && <section aria-label="当前生成运行"><p role="status">运行 {activeRun} · {progress?.status ?? '准备开始'} · 已调用模型 {progress?.usedModelCalls ?? 0} 次</p>
+      <button onClick={() => api('runs.pause', { context: context(), runId: activeRun }).then(() => setMessage('已请求暂停：当前调用结束后保存检查点，不再调度新工作。')).catch(e => setMessage(e.message))}>暂停当前生成</button>
       <button onClick={() => api('runs.cancel', { context: context(), runId: activeRun }).then(() => setMessage('已请求取消，等待阶段保存检查点。')).catch(e => setMessage(e.message))}>取消当前生成</button></section>}
     <section aria-label="写作运行历史"><h4>写作运行历史</h4><button disabled={busy} onClick={() => setHistorySequence(value => value + 1)}>刷新写作运行历史</button>
       {history?.diagnostics.map((warning: string, index: number) => <p role="alert" key={index}>{warning}</p>)}
       {history?.runs.map((row: any) => <p key={row.runId}>{row.runId} · {row.status} · 已调用模型 {row.usedModelCalls} 次{row.errorCode ? ` · ${row.errorCode}` : ''}
+        {row.parentRunId && <span> · 重试来源 {row.parentRunId}</span>}
+        {['paused', 'interrupted', 'running', 'queued', 'waiting-input'].includes(row.status) && <>
+          {!row.legacyStorage && <button disabled={busy || dirty} onClick={() => run(async () => setActionPlan(await api('runs.prepareAction', { context: context(), runId: row.runId, action: 'resume' })))}>预览恢复运行 {row.runId}</button>}
+          <button disabled={busy} onClick={() => run(async () => setActionPlan(await api('runs.prepareAction', { context: context(), runId: row.runId, action: 'close' })))}>预览结束未完成运行 {row.runId}</button></>}
+        {!row.legacyStorage && row.planHash && ['failed', 'cancelled'].includes(row.status) && <button disabled={busy || dirty} onClick={() => run(async () => setActionPlan(await api('runs.prepareAction', { context: context(), runId: row.runId, action: 'retry' })))}>预览关联重试 {row.runId}</button>}
         {row.legacyStorage && <button disabled={busy} onClick={() => run(async () => setMigrationPlan(await api('runs.prepareMigration', { context: context(), runId: row.runId })))}>预览迁移旧运行记录 {row.runId}</button>}</p>)}
       {history && !history.runs.length && <p>本项目暂无写作运行记录。</p>}</section>
+    {actionPlan && <section role="dialog" aria-label="运行操作确认"><h4>确认{actionPlan.action === 'resume' ? '恢复' : actionPlan.action === 'retry' ? '关联重试' : '结束未完成运行'}</h4>
+      <p>原运行 {actionPlan.previousRunId} · 已调用模型 {actionPlan.usedModelCalls} 次{actionPlan.action === 'retry' ? `；新运行 ${actionPlan.runId}` : ''}</p>
+      {actionPlan.model && <p>{actionPlan.model.providerId} / {actionPlan.model.modelId} · 输入约 {actionPlan.inputBytes} bytes · 调用预算 {actionPlan.budget.maxModelCalls} · {actionPlan.budget.maxDurationMinutes} 分钟</p>}
+      {actionPlan.existingProposalId && <p>已有建议 {actionPlan.existingProposalId}，保留当前接受／拒绝状态。</p>}
+      <p>固定 Skill：{actionPlan.skillDigests?.map((row: any) => `${row.qualifiedId} · ${row.digest}`).join('；') || '无模型调用或无 Skill'}</p>
+      {actionPlan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
+      <button disabled={busy || (dirty && actionPlan.action !== 'close')} onClick={() => run(async () => {
+        const confirmed = actionPlan; setActionPlan(undefined)
+        if (confirmed.action !== 'close') { setActiveRun(confirmed.runId); setProgress(undefined) }
+        try { const result = await api('runs.confirmAction', { context: context(), planId: confirmed.planId, planHash: confirmed.planHash });
+          if (result.proposal && (!result.proposalState || result.proposalState === 'pending')) setProposal(result)
+          setMessage(result.recoveredArtifact ? '已有建议终态已恢复；没有重复生成或接受修改。' : result.paused ? '运行已暂停，检查点已保存。' : '运行操作完成。'); await refresh()
+        } finally { setActiveRun(''); setHistorySequence(value => value + 1) }
+      })}>确认运行操作</button>
+      <button disabled={busy} onClick={() => run(async () => { await api('runs.dismissAction', { planId: actionPlan.planId }); setActionPlan(undefined) })}>取消运行操作预览</button></section>}
     {migrationPlan && <section role="dialog" aria-label="运行存储迁移确认"><h4>确认迁移旧运行存储</h4><p>{migrationPlan.runId}</p>
       {migrationPlan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy} onClick={() => run(async () => { await api('runs.migrate', { context: context(), planId: migrationPlan.planId, planHash: migrationPlan.planHash }); setMigrationPlan(undefined); setHistorySequence(value => value + 1) })}>确认迁移旧运行存储</button>

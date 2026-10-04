@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { applicationResult, inspectProject, inspectRequest, prepareInitRequest, initializeRequest, resolveStore, type StoredInitPlan } from './bridge/project-api.ts'
 import { prepareInit, initialize, snapshot, updateProjectText } from '../core/project/project.ts'
 import { recover } from '../core/store/transactions.ts'
-import { newId, digest } from '../core/store/files.ts'
+import { newId, digest, json } from '../core/store/files.ts'
 import { invariant } from '../shared/errors.ts'
 import { scanRequest, registerMaterialRequest, parseMaterialRequest, readMaterialRequest } from '../shared/materials.ts'
 import { registerSourceRequest, confirmEvidenceRequest, upsertClaimRequest, confirmOutlineRequest } from '../shared/research.ts'
@@ -45,6 +45,7 @@ import { anchorUpsertRequest } from '../shared/editing.ts'
 import { upsertAnchor } from '../core/editing/anchors.ts'
 import { listProjectSkills, projectSkillEntry } from '../core/skills/project-resources.ts'
 import { readRun, inspectRuns, prepareRunMigration, migrateRun } from '../core/pipeline/run-store.ts'
+import { prepareRunAction, validateRunAction, closeRun, type RunActionPlan } from '../core/pipeline/run-control.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -66,7 +67,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private initPlans = new Map<string, StoredInitPlan>()
   private recoveryPlans = new Map<string, { context: StoredInitPlan['context']; peerId: string; hash: string; expires: number }>()
   private generationPlans = new Map<string, { plan: GenerationPlan; peerId: string; expires: number; selected: { provider: string; model: string; reasoningEffort?: string } }>()
-  private running = new Map<string, { controller: AbortController; context: RequestContext }>()
+  private running = new Map<string, { controller: AbortController; context: RequestContext; pauseRequested: boolean }>()
+  private runActionPlans = new Map<string, { plan: RunActionPlan; generation?: GenerationPlan; selected?: { provider: string; model: string; reasoningEffort?: string }; context: RequestContext; peerId: string; expires: number }>()
   private exportPlans = new Map<string, { plan: DeliveryPlan; context: RequestContext; peerId: string; expires: number }>()
   private bootInstance = randomUUID()
   private researchProvider: ResearchProvider
@@ -89,7 +91,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
       timer.unref()
-      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear() }
+      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear(); this.runActionPlans.clear() }
     }, 'scholarflow: expire operator skill previews')
   }
 
@@ -168,6 +170,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   }
 
   private pruneSkills() {
+    for (const [key, row] of this.runActionPlans) if (row.expires < Date.now()) this.runActionPlans.delete(key)
     for (const [key, row] of this.runMigrationPlans) if (row.expires < Date.now()) this.runMigrationPlans.delete(key)
     for (const [key, row] of this.skillSources) if (row.expires < Date.now()) this.skillSources.delete(key)
     for (const [key, row] of this.githubSources) if (row.expires < Date.now()) this.githubSources.delete(key)
@@ -543,16 +546,114 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal)
       const controller = new AbortController(), runId = row.plan.snapshot.runId
       invariant(!this.running.has(runId), 'RUN_IN_PROGRESS', '该运行已经开始。')
-      this.running.set(runId, { controller, context: row.plan.input.context })
+      const active = { controller, context: row.plan.input.context, pauseRequested: false }
+      this.running.set(runId, active)
       this.generationPlans.delete(input.planId)
       const owner = { pid: process.pid, bootInstance: this.bootInstance }
       try {
         return await executeGeneration(io, row.plan, owner, AbortSignal.any([signal, controller.signal]),
-          call => callStageModel(this.ctx, model.session, model.selected, call), candidate => {
-            if (candidate.pid === process.pid) return candidate.bootInstance === this.bootInstance
-            try { process.kill(candidate.pid, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH' }
-          })
+          call => callStageModel(this.ctx, model.session, model.selected, call), candidate => this.ownerAlive(candidate),
+          { pauseRequested: () => active.pauseRequested })
       } finally { this.running.delete(runId) }
+    })
+  }
+
+  private ownerAlive(candidate: { pid: number; bootInstance: string }) {
+    // An old plugin instance in this same PID may still be settling an aborted
+    // request. A different boot token is not proof of process death.
+    try { process.kill(candidate.pid, 0); return true }
+    catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH' }
+  }
+
+  @Remote('runs.pause')
+  async runsPause(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = runControlRequest.parse(request)
+      await resolveStore(this.ctx, input.context, signal)
+      const active = this.running.get(input.runId)
+      invariant(active && active.context.projectId === input.context.projectId && active.context.workspaceId === input.context.workspaceId && active.context.sessionId === input.context.sessionId,
+        'RUN_CONTROL_UNAVAILABLE', '仅原执行会话可以暂停当前调用；停止后的运行从历史预览恢复。')
+      active.pauseRequested = true
+      return { runId: input.runId, pauseRequested: true, detail: '当前调用结束后保存检查点，停止调度下一次工作。' }
+    })
+  }
+
+  @Remote('runs.prepareAction')
+  async runsPrepareAction(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = runControlRequest.extend({ action: z.enum(['resume', 'retry', 'close']) }).parse(request)
+      mutationRevision(input.context); this.pruneSkills()
+      invariant(!this.running.has(input.runId), 'RUN_IN_PROGRESS', '当前执行器尚未停止，请等待检查点保存。')
+      invariant(this.runActionPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请处理已有运行操作预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), plan = await prepareRunAction(io, input.runId, input.action, candidate => this.ownerAlive(candidate))
+      let generation: GenerationPlan | undefined, selected: { provider: string; model: string; reasoningEffort?: string } | undefined
+      if (input.action !== 'close' && !plan.existingProposalId) {
+        const model = await selectedModel(this.ctx, input.context.sessionId, signal)
+        const selection: { provider: string; model: string; reasoningEffort?: string } = model.selected; selected = selection
+        if (input.action === 'retry') {
+          const fresh = await prepareGeneration(io, { ...plan.frozen!.input, context: input.context },
+            { providerId: selection.provider, modelId: selection.model }, binding => readPrivateSkill(binding, io))
+          const { contentHash: _hash, ...body } = fresh
+          const linked = { ...body, parentRunId: input.runId }
+          generation = { ...linked, contentHash: digest(json(linked)) }
+        } else {
+          generation = plan.frozen!
+          invariant(generation.snapshot.modelDescriptor.providerId === selection.provider && generation.snapshot.modelDescriptor.modelId === selection.model,
+            'MODEL_SELECTION_CHANGED', '恢复需要原提供方与模型；请选择原模型，或结束旧运行后为新模型预览新任务。')
+        }
+        invariant(generation.inputBytes + 6096 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '恢复输入超过当前模型上下文限额。')
+      }
+      this.runActionPlans.set(plan.id, { plan, generation, selected, context: input.context, peerId, expires: Date.now() + 600000 })
+      const stored = await readRun(io, input.runId, plan.projectId)
+      return { planId: plan.id, planHash: plan.contentHash, action: input.action, runId: generation?.snapshot.runId ?? input.runId, previousRunId: input.runId,
+        model: generation?.snapshot.modelDescriptor, inputBytes: generation?.inputBytes, usedModelCalls: stored.run.usedModelCalls,
+        budget: generation?.snapshot.budget, skillDigests: generation?.snapshot.skillDigests, existingProposalId: plan.existingProposalId,
+        risks: input.action === 'close' ? ['将未结束记录标记为用户取消，保留检查点和原状态历史；不调用模型、不修改主稿、不撤销已接受建议。'] :
+          plan.existingProposalId ? ['恢复已保存建议的终态记录；保留建议当前接受／拒绝状态，不调用模型、不重放补丁。'] : input.action === 'retry' ?
+            ['创建关联新运行，保留原失败／取消终态；按当前已确认项目输入、文风、记忆和固定 Skill 重新生成待审阅建议。', '将所列资料范围发送给当前宿主模型，只有明确接受建议才修改主稿。'] :
+            ['使用冻结输入和已用预算，从最后检查点继续。保存过的有效候选将复用；中断时未保存结果的调用已计费并计入预算，继续可能需要新调用。',
+              '将原已确认输入发送给所列宿主模型；采用当前会话模型推理设置。不会重放已经接受的修改。'] }
+    })
+  }
+
+  @Remote('runs.confirmAction')
+  async runsConfirmAction(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = onlineConfirmRequest.parse(request), row = this.runActionPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请重新预览当前运行操作。')
+      invariant(row.context.workspaceId === input.context.workspaceId && row.context.sessionId === input.context.sessionId && row.context.projectId === input.context.projectId,
+        'SESSION_BINDING_CHANGED', '运行操作不属于当前项目会话。')
+      const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal)
+      signal.throwIfAborted()
+      invariant(!this.running.has(row.plan.runId), 'RUN_IN_PROGRESS', '原执行器仍运行，未接管。')
+      if (row.plan.action === 'close') { this.runActionPlans.delete(input.planId); return closeRun(io, row.plan, candidate => this.ownerAlive(candidate)) }
+      const generation = row.generation ?? row.plan.frozen!
+      let model: Awaited<ReturnType<typeof selectedModel>> | undefined
+      if (!row.plan.existingProposalId) {
+        model = await selectedModel(this.ctx, input.context.sessionId, signal)
+        invariant(JSON.stringify(model.selected) === JSON.stringify(row.selected), 'MODEL_SELECTION_CHANGED', '确认期间宿主模型设置改变。')
+      }
+      // Retry validation has no mutation. The new run rechecks its own inputs
+      // and active projection under the same project writer lock.
+      if (row.plan.action === 'retry') await validateRunAction(io, row.plan, candidate => this.ownerAlive(candidate))
+      const controller = new AbortController(), runId = generation.snapshot.runId
+      const active = { controller, context: input.context, pauseRequested: false }
+      invariant(!this.running.has(runId), 'RUN_IN_PROGRESS', '此运行已经执行。')
+      this.running.set(runId, active); this.runActionPlans.delete(input.planId)
+      try { return await executeGeneration(io, generation, { pid: process.pid, bootInstance: this.bootInstance }, AbortSignal.any([signal, controller.signal]),
+        call => { invariant(model, 'MODEL_NOT_SELECTED', '恢复已有产物不应调用模型。'); return callStageModel(this.ctx, model.session, model.selected, call) },
+        candidate => this.ownerAlive(candidate), { pauseRequested: () => active.pauseRequested, executionSessionId: input.context.sessionId,
+          ...(row.plan.action === 'resume' && { resume: row.plan }) }) }
+      finally { this.running.delete(runId) }
+    })
+  }
+
+  @Remote('runs.dismissAction')
+  async runsDismissAction(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ planId: z.string().min(1).max(200) }).strict().parse(request)
+      signal.throwIfAborted(); if (this.runActionPlans.get(input.planId)?.peerId === peerId) this.runActionPlans.delete(input.planId)
+      return { dismissed: true }
     })
   }
 

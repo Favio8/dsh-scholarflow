@@ -4,9 +4,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
-import { saveManual } from '../../src/core/editing/proposals.ts'
+import { saveManual, applyProposal } from '../../src/core/editing/proposals.ts'
 import { prepareGeneration, executeGeneration, validateModelReplacement } from '../../src/core/pipeline/generation.ts'
 import { projectMarkdown } from '../../src/core/editing/markdown.ts'
+import { prepareRunAction, closeRun } from '../../src/core/pipeline/run-control.ts'
+import { readRun, runFile, ACTIVE_RUN } from '../../src/core/pipeline/run-store.ts'
+import { json, digest } from '../../src/core/store/files.ts'
 const owner = { pid: 12345, bootInstance: 'TEST_ONLY' }
 
 async function setup() {
@@ -106,4 +109,114 @@ test('external run-state edits cannot be overwritten by a refreshed persistence 
   }, () => true), { code: 'RUN_STATE_CHANGED' })
   assert.equal(JSON.parse((await io.read(path))!.text).errorCode, 'TEST_ONLY_EXTERNAL')
   assert.equal((await snapshot(io)).document.text, original)
+})
+
+test('pause stops dispatch, persists frozen inputs, and resumes after explicit unchanged-input confirmation', async () => {
+  const { io, plan } = await setup(), original = (await snapshot(io)).document.text
+  const paused = await executeGeneration(io, plan, owner, new AbortController().signal, async () => { throw new Error('paused must not dispatch') }, () => true,
+    { pauseRequested: () => true })
+  assert.equal(paused.run.status, 'paused'); assert.equal(paused.run.usedModelCalls, 0)
+  const writes = io.writes, preview = await prepareRunAction(io, plan.snapshot.runId, 'resume', () => true)
+  assert.equal(io.writes, writes, 'preview must be read-only')
+  const resumed = await executeGeneration(io, preview.frozen!, { pid: 9999, bootInstance: 'TEST_ONLY_new' }, new AbortController().signal,
+    async () => JSON.stringify({ replacementText: 'TEST_ONLY 明确恢复的新候选。', limitations: [] }), () => true,
+    { resume: preview, pauseRequested: () => false, executionSessionId: 'ses_TEST_ONLY_second' })
+  assert.equal(resumed.run.usedModelCalls, 1); assert.equal(resumed.run.sessionId, plan.snapshot.sessionId)
+  assert.equal(resumed.run.executionSessionId, 'ses_TEST_ONLY_second')
+  assert.equal((await snapshot(io)).document.text, original)
+  assert.equal(resumed.run.status, 'completed-with-issues')
+})
+
+test('a paused format repair resumes only the remaining attempt and never renews its budget', async () => {
+  const { io, plan } = await setup(); let requested = false, calls = 0
+  const paused = await executeGeneration(io, plan, owner, new AbortController().signal, async () => { calls++; requested = true; return 'TEST_ONLY invalid JSON' }, () => true,
+    { pauseRequested: () => requested })
+  assert.equal(paused.run.status, 'paused'); assert.equal(calls, 1)
+  const preview = await prepareRunAction(io, plan.snapshot.runId, 'resume', () => true)
+  await assert.rejects(executeGeneration(io, preview.frozen!, owner, new AbortController().signal, async request => {
+    assert.ok(request.repair); calls++; return 'TEST_ONLY still invalid'
+  }, () => true, { resume: preview, pauseRequested: () => false }), { code: 'MODEL_OUTPUT_INVALID' })
+  assert.equal(calls, 2)
+  assert.equal((await readRun(io, plan.snapshot.runId, plan.snapshot.projectId)).run.usedModelCalls, 2)
+})
+
+test('validated output checkpoint is reused without a second paid call after pause', async () => {
+  const { io, plan } = await setup(); let requested = false
+  const paused = await executeGeneration(io, plan, owner, new AbortController().signal, async () => {
+    requested = true; return JSON.stringify({ replacementText: 'TEST_ONLY 已保存的有效候选。', limitations: ['TEST_ONLY'] })
+  }, () => true, { pauseRequested: () => requested })
+  assert.equal(paused.run.status, 'paused'); assert.equal(Object.keys((await snapshot(io)).ledger.proposalStates).length, 0)
+  const preview = await prepareRunAction(io, plan.snapshot.runId, 'resume', () => true)
+  const resumed = await executeGeneration(io, preview.frozen!, owner, new AbortController().signal, async () => { throw new Error('must reuse validated candidate') },
+    () => true, { resume: preview, pauseRequested: () => false })
+  assert.equal(resumed.proposal!.edits[0].replacementText, 'TEST_ONLY 已保存的有效候选。')
+  assert.equal(resumed.run.usedModelCalls, 1)
+})
+
+test('dead-owner recovery charges unanswered calls and never steals a live process', async () => {
+  const { io, plan } = await setup(); let crashed!: MemoryStore
+  await executeGeneration(io, plan, owner, new AbortController().signal, async () => {
+    // TEST_ONLY process image captured after call charge, before its response.
+    crashed = new MemoryStore(Object.fromEntries([...io.files].map(([path, image]) => [path, image.text])))
+    return JSON.stringify({ replacementText: 'TEST_ONLY old process candidate.', limitations: [] })
+  }, () => true)
+  const writes = crashed.writes
+  await assert.rejects(prepareRunAction(crashed, plan.snapshot.runId, 'resume', () => true), { code: 'RUN_OWNER_ALIVE' })
+  assert.equal(crashed.writes, writes)
+  const preview = await prepareRunAction(crashed, plan.snapshot.runId, 'resume', () => false)
+  const resumed = await executeGeneration(crashed, preview.frozen!, { pid: 23456, bootInstance: 'TEST_ONLY_restart' }, new AbortController().signal,
+    async () => JSON.stringify({ replacementText: 'TEST_ONLY 明确恢复后的结果。', limitations: [] }), () => false,
+    { resume: preview, pauseRequested: () => false })
+  assert.equal(resumed.run.usedModelCalls, 2)
+  assert.equal(Object.keys((await snapshot(crashed)).ledger.proposalStates).length, 1)
+})
+
+test('recovery of an already accepted proposal cannot repeat model calls or accepted manuscript edits', async () => {
+  const { io, plan } = await setup()
+  const result = await executeGeneration(io, plan, owner, new AbortController().signal,
+    async () => JSON.stringify({ replacementText: 'TEST_ONLY 已接受的用户稿。', limitations: [] }), () => true)
+  assert.ok(result.proposal)
+  const current = await snapshot(io)
+  await applyProposal(io, result.proposal.id, current.ledger.revision, result.proposalHash!)
+  // TEST_ONLY fault image: proposal published, terminal state not yet saved.
+  const stored = await readRun(io, plan.snapshot.runId, plan.snapshot.projectId)
+  const interrupted = json({ ...stored.run, status: 'running', proposalId: undefined })
+  io.externalEdit(runFile(plan.snapshot.runId), interrupted); io.externalEdit(ACTIVE_RUN, interrupted)
+  const before = await snapshot(io), preview = await prepareRunAction(io, plan.snapshot.runId, 'resume', () => false)
+  assert.equal(preview.existingProposalState, 'accepted')
+  const recovered = await executeGeneration(io, preview.frozen!, { pid: 23456, bootInstance: 'TEST_ONLY_restart' }, new AbortController().signal,
+    async () => { throw new Error('accepted proposal must never regenerate') }, () => false, { resume: preview, pauseRequested: () => false })
+  assert.equal(recovered.run.proposalId, result.proposal.id); assert.equal(recovered.run.status, 'completed-with-issues')
+  const after = await snapshot(io)
+  assert.equal(after.ledgerHash, before.ledgerHash); assert.equal(after.document.text, before.document.text)
+  await assert.rejects(prepareRunAction(io, plan.snapshot.runId, 'resume', () => false), { code: 'RUN_TERMINAL' })
+})
+
+test('resume confirmation rejects changed inputs and close preserves them while releasing the old run', async () => {
+  const { io, plan } = await setup()
+  await executeGeneration(io, plan, owner, new AbortController().signal, async () => '', () => true, { pauseRequested: () => true })
+  const preview = await prepareRunAction(io, plan.snapshot.runId, 'resume', () => true)
+  io.externalEdit('.scholarflow/profiles/writing.md', 'TEST_ONLY 外部文风变更')
+  await assert.rejects(executeGeneration(io, preview.frozen!, owner, new AbortController().signal, async () => { throw new Error('must not dispatch') },
+    () => true, { resume: preview, pauseRequested: () => false }), { code: 'STALE_RESOURCE_VERSION' })
+  const original = (await snapshot(io)).document.text, close = await prepareRunAction(io, plan.snapshot.runId, 'close', () => true)
+  await closeRun(io, close, () => true)
+  assert.equal((await snapshot(io)).document.text, original)
+  assert.equal((await io.read('.scholarflow/profiles/writing.md'))!.text, 'TEST_ONLY 外部文风变更')
+  assert.equal((await readRun(io, plan.snapshot.runId, plan.snapshot.projectId)).run.status, 'cancelled')
+  assert.equal((await readRun(io, plan.snapshot.runId, plan.snapshot.projectId)).run.usedModelCalls, 0)
+})
+
+test('failed-run retry creates linked new history rather than erasing the original terminal record', async () => {
+  const { io, plan } = await setup()
+  await assert.rejects(executeGeneration(io, plan, owner, new AbortController().signal, async () => { throw new Error('TEST_ONLY provider unavailable') }, () => true))
+  const failed = (await io.read(runFile(plan.snapshot.runId)))!.text
+  const preview = await prepareRunAction(io, plan.snapshot.runId, 'retry', () => false)
+  const fresh = await prepareGeneration(io, preview.frozen!.input, plan.snapshot.modelDescriptor)
+  const { contentHash: _hash, ...body } = fresh, linked = { ...body, parentRunId: plan.snapshot.runId }
+  const result = await executeGeneration(io, { ...linked, contentHash: digest(json(linked)) }, owner, new AbortController().signal,
+    async () => JSON.stringify({ replacementText: 'TEST_ONLY 用户明确重试。', limitations: [] }), () => true)
+  assert.notEqual(result.run.runId, plan.snapshot.runId); assert.equal(result.run.parentRunId, plan.snapshot.runId)
+  assert.equal((await io.read(runFile(plan.snapshot.runId)))!.text, failed)
+  assert.equal(result.run.usedModelCalls, 1)
 })

@@ -101,7 +101,7 @@ export function apply(ctx: Host) {
       ctx.uiWorkspace.openSession(sessionId)
       ctx.layout.selectPanel('scholarflow')
     })
-    return <section className="sf-project" aria-label="ScholarFlow 项目">
+    return <section className="sf-project" aria-label="ScholarFlow 项目" data-sf-session-id={props.sessionId}>
       <label>DSH 工作区 <select aria-label="DSH 工作区" value={selectedWorkspace || workspace?.workspaceId || ''} onChange={e => setSelectedWorkspace(e.target.value)}><option value="">请选择</option>
         {workspaces.map((item: Host) => <option key={item.workspaceId} value={item.workspaceId}>{item.title}</option>)}</select></label>
       <button disabled={busy} onClick={startSession}>新建 ScholarFlow 会话</button>
