@@ -49,7 +49,7 @@ export function parseLedger(text: string): Ledger {
 export interface InitPlan {
   id: string; config: ProjectConfig; files: Array<{ path: string; text: string }>; contentHash: string; risks: string[]
 }
-export async function prepareInit(io: FileStore, input: { title: string; type: string; language?: string; manuscriptDir?: string }): Promise<InitPlan> {
+export async function prepareInit(io: FileStore, input: { title: string; type: string; language?: string; manuscriptDir?: string; maxModelCalls?: number }): Promise<InitPlan> {
   const output = relativePath.parse(input.manuscriptDir ?? 'manuscript')
   invariant(!['.scholarflow', '.git', 'node_modules'].includes(output.split('/')[0]), 'OUTPUT_PATH_CONFLICT', '请选择论文输出专属目录。')
   invariant(!await io.stat('.scholarflow'), 'OUTPUT_PATH_CONFLICT', '.scholarflow 已存在，请检查或恢复原项目。')
@@ -63,7 +63,7 @@ export async function prepareInit(io: FileStore, input: { title: string; type: s
     materials: { selection: 'explicit', include: [], exclude: ['**/.env*', '**/node_modules/**', '**/.git/**', '**/credentials/**', '**/secrets/**'] },
     writing: { preset: `builtin:${input.type}-${input.language === 'en' ? 'en' : 'zh'}`, projectProfile: '.scholarflow/profiles/writing.md', useApprovedProjectMemory: true },
     skills: { bindings: [] }, workflow: { executionMode: 'guided', confirmOutline: true, maxReviewRounds: 2,
-      budget: { maxModelCalls: 40, maxSearchQueries: 12, maxCandidateSources: 80, maxDurationMinutes: 30 } },
+      budget: { maxModelCalls: input.maxModelCalls ?? 40, maxSearchQueries: 12, maxCandidateSources: 80, maxDurationMinutes: 30 } },
     research: { providerRefs: [], allowLocalOnly: true, fullTextDownload: 'ask' }, privacy: { sendSelectedContentOnly: true, verboseModelLogging: false },
     output: { formats: ['markdown', 'bibtex', 'quality-report'] },
   })

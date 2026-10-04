@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
 import { prepareInit, initialize, snapshot, parseConfig, parseConfigWithWarnings, parseLedger, mutateLedger, updateProjectText } from '../../src/core/project/project.ts'
 import { digest } from '../../src/core/store/files.ts'
+import { resolveInitDefaults } from '../../src/shared/project-defaults.ts'
 
 test('AT-01: inspect and cancelled initialization plans leave original bytes unchanged', async () => {
   const io = new MemoryStore({ '零散笔记.md': '用户原始资料', 'old/thesis.txt': '保留稿件' })
@@ -91,4 +92,23 @@ test('external manuscript bytes are detected and retained', async () => {
   const current = await snapshot(io)
   assert.equal(current.document.externalChange, true)
   assert.equal(current.document.text, '# 外部人工稿\n')
+})
+
+test('new project defaults are frozen in the approved plan and never reset an existing project', async () => {
+  const io = new MemoryStore({ 'raw.txt': 'TEST_ONLY immutable material' })
+  const defaults = { defaultProjectType: 'literature-review' as const, language: 'en' as const, maxModelCalls: 7 }
+  const plan = await prepareInit(io, resolveInitDefaults({ title: 'TEST_ONLY English review' }, defaults))
+  assert.equal(io.writes, 0)
+  assert.equal(plan.config.project.type, 'literature-review'); assert.equal(plan.config.project.language, 'en')
+  assert.equal(plan.config.writing.preset, 'builtin:literature-review-en'); assert.equal(plan.config.workflow.budget.maxModelCalls, 7)
+  defaults.maxModelCalls = 3
+  await initialize(io, plan)
+  assert.equal((await snapshot(io)).config.workflow.budget.maxModelCalls, 7)
+  const before = [...io.files.entries()]
+  await assert.rejects(prepareInit(io, resolveInitDefaults({ title: 'TEST_ONLY later' }, defaults)), { code: 'OUTPUT_PATH_CONFLICT' })
+  assert.deepEqual([...io.files.entries()], before)
+  assert.deepEqual(resolveInitDefaults({ title: 'TEST_ONLY overrides', type: 'research-paper', language: 'zh-CN', maxModelCalls: 12 }, defaults),
+    { title: 'TEST_ONLY overrides', type: 'research-paper', language: 'zh-CN', maxModelCalls: 12 })
+  for (const maxModelCalls of [0, 41, 1.5, NaN]) assert.throws(() => resolveInitDefaults({ title: 'TEST_ONLY', maxModelCalls }, defaults))
+  assert.equal((await io.read('raw.txt'))!.text, 'TEST_ONLY immutable material')
 })

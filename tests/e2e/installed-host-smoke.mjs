@@ -33,7 +33,7 @@ if (liveModel) await writeFile(join(profile, 'cordis.patch.yml'), stringify([
 ]))
 try { await symlink(resolve('.'), join(profile, 'node_modules/dsh-scholarflow'), 'junction') } catch (e) { if (e.code !== 'EEXIST') throw e }
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
-let child, page, originalType
+let child, page, originalType, originalDefaults
 async function start(mode) {
   child = spawn(join(install, 'DeepSeek Harness.exe'), ['--expose-internals', join(install, 'resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'), 'scholarflow-g0', '--no-open', '--port', liveModel ? '19349' : '19348'], {
     env: { ...process.env, DSH_HOME: testHome, ELECTRON_RUN_AS_NODE: '1', SCHOLARFLOW_G0_VERIFY: '1', DSH_PERMISSION_MODE: mode },
@@ -95,7 +95,8 @@ try {
   const settings = diagnostics.value.settings[0]
   assert.ok(settings, 'volatile Config must project into real Host settings')
   originalType = settings.value.defaultProjectType
-  const settingsWrite = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: 'literature-review' }, expectedRevision: settings.revision })
+  originalDefaults = { language: settings.value.language, maxModelCalls: settings.value.maxModelCalls }
+  const settingsWrite = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: 'literature-review', language: 'en', maxModelCalls: 7 }, expectedRevision: settings.revision })
   assert.equal(settingsWrite.ok, true, JSON.stringify(settingsWrite))
   const networkDisabled = await rpc('settings/update', { ns: 'scholarflow', patch: { networkEnabled: false }, expectedRevision: settingsWrite.value.revision })
   assert.equal(networkDisabled.ok, true)
@@ -120,6 +121,8 @@ try {
   await page.getByRole('button', { name: '设置', exact: true }).click()
   const settingsDialog = page.getByRole('dialog', { name: '设置', exact: true })
   await settingsDialog.getByRole('button', { name: 'ScholarFlow', exact: true }).click()
+  assert.equal(await settingsDialog.getByRole('combobox', { name: '新项目默认语言', exact: true }).inputValue(), 'en')
+  assert.equal(await settingsDialog.getByRole('combobox', { name: '新项目默认模型调用上限', exact: true }).inputValue(), '7')
   const skillsUi = page.getByRole('region', { name: 'Academic Skills 私有库', exact: true })
   await skillsUi.getByRole('textbox', { name: 'Host Skill 来源目录', exact: true }).fill(skillSource)
   await skillsUi.getByRole('button', { name: '扫描本地 Skill 候选', exact: true }).click()
@@ -211,6 +214,12 @@ try {
   await page.locator('.sf-project').getByRole('combobox', { name: 'DSH 工作区', exact: true }).selectOption(projectWorkspace.value.workspace.workspaceId)
   await page.getByRole('button', { name: '新建 ScholarFlow 会话', exact: true }).click()
   await page.getByText(`当前工作区：${projectWorkspace.value.workspace.title} · 尚未初始化`, { exact: true }).waitFor()
+  assert.equal(await page.getByRole('combobox', { name: '论文类型', exact: true }).inputValue(), 'literature-review')
+  assert.equal(await page.getByRole('combobox', { name: '论文语言', exact: true }).inputValue(), 'en')
+  assert.equal(await page.getByRole('spinbutton', { name: '每次运行模型调用上限', exact: true }).inputValue(), '7')
+  await page.getByRole('combobox', { name: '论文类型', exact: true }).selectOption('course-paper')
+  await page.getByRole('combobox', { name: '论文语言', exact: true }).selectOption('zh-CN')
+  await page.getByRole('spinbutton', { name: '每次运行模型调用上限', exact: true }).fill('40')
   await page.getByRole('textbox', { name: '项目标题', exact: true }).fill('TEST_ONLY 原始资料保护项目')
   await page.getByRole('button', { name: '预览初始化计划', exact: true }).click()
   await page.getByRole('dialog', { name: '初始化确认' }).waitFor()
@@ -218,10 +227,15 @@ try {
   await page.getByRole('button', { name: '取消', exact: true }).click()
   await assert.rejects(stat(join(projectRoot, '.scholarflow')), { code: 'ENOENT' })
   await page.getByRole('button', { name: '预览初始化计划', exact: true }).click()
+  await page.getByRole('dialog', { name: '初始化确认' }).getByText('类型：course-paper · 语言：zh-CN · 每次运行模型调用上限：40', { exact: true }).waitFor()
+  const priorDefaults = (await rpc('scholarflow.v1/diagnostics')).value.settings[0]
+  const updatedDefaults = await rpc('settings/update', { ns: 'scholarflow', patch: { language: 'zh', maxModelCalls: 5 }, expectedRevision: priorDefaults.revision })
+  assert.equal(updatedDefaults.ok, true)
   await page.getByRole('button', { name: '确认初始化', exact: true }).click()
   await page.getByText('项目已保存', { exact: false }).waitFor({ timeout: 15000 })
   assert.equal(await readFile(join(projectRoot, '原始材料.txt'), 'utf8'), 'TEST_ONLY raw source: never overwrite this file.\r\n')
   const projectConfig = await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8')
+  assert.match(projectConfig, /type: course-paper/); assert.match(projectConfig, /language: zh-CN/); assert.match(projectConfig, /maxModelCalls: 40/)
   const projectLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
   assert.ok(projectConfig.includes(projectLedger.projectId))
   const projectSkillRoot = join(projectRoot, '.scholarflow/skills/test-only/local-revision')
@@ -777,6 +791,7 @@ try {
   errors = await start('read-only')
   const restored = await rpc('scholarflow.v1/diagnostics')
   assert.equal(restored.value.settings[0].value.defaultProjectType, 'literature-review')
+  assert.equal(restored.value.settings[0].value.language, 'zh'); assert.equal(restored.value.settings[0].value.maxModelCalls, 5)
   const coldSkills = await rpc('scholarflow.v1/skills.library', { request: {} })
   assert.equal(coldSkills.value.ok, true)
   assert.ok(coldSkills.value.data.versions.some(row => row.digest === installedSkill.digest))
@@ -797,7 +812,7 @@ try {
   const denied = await rpc('scholarflow.v1/verifyGateway', { request: { sessionId: readOnlySession.value.sessionId } })
   assert.equal(denied.ok, false)
   assert.match(denied.error.message, /read-only/)
-  const reset = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: originalType }, expectedRevision: restored.value.settings[0].revision })
+  const reset = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: originalType, ...originalDefaults }, expectedRevision: restored.value.settings[0].revision })
   assert.equal(reset.ok, true)
   assert.deepEqual(errors, [])
   const evidenceName = liveModel ? 'model' : liveResearch ? 'research' : liveSkills ? 'skills' : 'g0'
@@ -805,6 +820,7 @@ try {
     settingsProjection: true, settingsPersistAcrossRestart: true, chineseWorkspaceNoGit: true,
     scopedSessionCreated: true, sandboxedWriteRead: true, readOnlyDenial: true,
     nativeUiInitPreviewCancel: true, nativeUiInitConfirm: true, originalSourceBytesPreserved: true,
+    nativeNewProjectDefaultsAndExplicitOverrides: true, initializationPlanSurvivesDefaultSettingChange: true,
     twoSessionProjectRestore: true, coldProjectBindingRestore: true, mismatchedBindingRejected: true,
     nativeUiInterruptedInitRecovery: true,
     nativeUiMaterialParseEvidenceClaimOutline: true, evidenceChainColdRestore: true,

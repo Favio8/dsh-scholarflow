@@ -1,13 +1,14 @@
 import { z } from 'zod'
-import { requestContext, projectType, relativePath, hash, type RequestContext } from '../../shared/schema.ts'
+import { requestContext, hash, type RequestContext } from '../../shared/schema.ts'
 import { ScholarError, invariant } from '../../shared/errors.ts'
 import { digest } from '../../core/store/files.ts'
 import { snapshot, parseConfig, CONFIG_PATH, type InitPlan } from '../../core/project/project.ts'
 import { readTransactionJournals, inspectRecovery } from '../../core/store/transactions.ts'
 import { HostFileStore } from '../gateway/file-store.ts'
+import { initInputSchema } from '../../shared/project-defaults.ts'
 type Host = any
 export const inspectRequest = z.object({ context: requestContext }).strict()
-export const prepareInitRequest = z.object({ context: requestContext, input: z.object({ title: z.string().min(1).max(300), type: projectType, language: z.enum(['zh-CN', 'en']).optional(), manuscriptDir: relativePath.optional() }).strict() }).strict()
+export const prepareInitRequest = z.object({ context: requestContext, input: initInputSchema }).strict()
 export const initializeRequest = z.object({ context: requestContext, planId: z.string(), planHash: hash }).strict()
 export interface StoredInitPlan { plan: InitPlan; context: RequestContext; peerId: string; expires: number }
 

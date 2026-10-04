@@ -47,6 +47,9 @@ export function apply(ctx: Host) {
     const [project, setProject] = useState<Host>()
     const [title, setTitle] = useState('')
     const [type, setType] = useState('course-paper')
+    const [language, setLanguage] = useState('zh-CN')
+    const [maxModelCalls, setMaxModelCalls] = useState(40)
+    const defaultsScope = useRef('')
     const [output, setOutput] = useState('manuscript')
     const [plan, setPlan] = useState<Host>()
     const [error, setError] = useState('')
@@ -63,6 +66,10 @@ export function apply(ctx: Host) {
     const publish = (value: Host) => {
       if (`${value.binding.workspaceId}:${value.binding.sessionId}` !== liveBinding.current) return
       readSequence.current++ // Invalidate reads started before a committed mutation.
+      if (!value.initialized && value.defaults && defaultsScope.current !== liveBinding.current) {
+        defaultsScope.current = liveBinding.current
+        setType(value.defaults.defaultProjectType); setLanguage(value.defaults.language === 'en' ? 'en' : 'zh-CN'); setMaxModelCalls(value.defaults.maxModelCalls)
+      }
       setProject(value)
     }
     const refresh = async () => {
@@ -74,6 +81,7 @@ export function apply(ctx: Host) {
     useEffect(() => {
       let live = true
       setPlan(undefined); setProject(undefined); setError(''); setTab('Overview')
+      defaultsScope.current = ''; setTitle(''); setOutput('manuscript')
       if (workspace && props.sessionId) refresh().catch(e => live && setError(e.message))
       return () => { live = false }
     }, [workspace?.workspaceId, props.sessionId])
@@ -117,11 +125,14 @@ export function apply(ctx: Host) {
         </section> : project.metadataExists ? <p role="alert">检测到既有 .scholarflow 目录，请先检查项目，禁止覆盖。</p> : <>
           <label>项目标题 <input aria-label="项目标题" value={title} onChange={e => setTitle(e.target.value)} maxLength={300} /></label>
           <label>论文类型 <select aria-label="论文类型" value={type} onChange={e => setType(e.target.value)}><option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></label>
+          <label>论文语言 <select aria-label="论文语言" value={language} onChange={e => setLanguage(e.target.value)}><option value="zh-CN">中文</option><option value="en">英文</option></select></label>
+          <label>每次运行模型调用上限 <input aria-label="每次运行模型调用上限" type="number" min={1} max={40} step={1} value={maxModelCalls} onChange={e => setMaxModelCalls(Number(e.target.value))} /></label>
           <label>论文输出目录 <input aria-label="论文输出目录" value={output} onChange={e => setOutput(e.target.value)} /></label>
-          <button disabled={busy || !title.trim()} onClick={() => act(async () => setPlan(await api('project.prepareInit', { context: context(), input: { title: title.trim(), type, manuscriptDir: output } })))}>预览初始化计划</button>
+          <button disabled={busy || !title.trim() || !Number.isInteger(maxModelCalls) || maxModelCalls < 1 || maxModelCalls > 40} onClick={() => act(async () => setPlan(await api('project.prepareInit', { context: context(), input: { title: title.trim(), type, language, maxModelCalls, manuscriptDir: output } })))}>预览初始化计划</button>
         </>}
       </>}
       {plan && <section role="dialog" aria-modal="false" aria-label="初始化确认"><h3>确认创建专属项目文件</h3>
+        <p>类型：{plan.project.type} · 语言：{plan.project.language} · 每次运行模型调用上限：{plan.budget.maxModelCalls}</p>
         <ul>{plan.files.map((file: Host) => <li key={file.relativePath}>{file.relativePath}</li>)}</ul>
         {plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
         <button disabled={busy} onClick={() => act(async () => { publish(await api('project.initialize', { context: context(), planId: plan.planId, planHash: plan.planHash })); setPlan(undefined) })}>确认初始化</button>
@@ -155,6 +166,8 @@ export function apply(ctx: Host) {
     return <section className="sf-app sf-settings" style={{ overflow: 'auto' }}><style>{CSS + EXTRA_CSS}</style><h2>ScholarFlow 设置</h2>
       {row ? <><label>新项目默认类型 <select aria-label="新项目默认类型" value={row.value.defaultProjectType} onChange={e => save('defaultProjectType', e.target.value)}>
         <option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></label>
+        <label>新项目默认语言 <select aria-label="新项目默认语言" value={row.value.language} onChange={e => save('language', e.target.value)}><option value="zh">中文</option><option value="en">英文</option></select></label>
+        <label>新项目默认模型调用上限 <select aria-label="新项目默认模型调用上限" value={row.value.maxModelCalls} onChange={e => save('maxModelCalls', Number(e.target.value))}>{Array.from({ length: 40 }, (_, i) => i + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
         <label><input type="checkbox" checked={row.value.networkEnabled} onChange={e => save('networkEnabled', e.target.checked)} />允许外部检索与公开 Skill 读取（每次操作展示发送范围）</label></>
         : <p>正在读取宿主设置…</p>}<p role="status">{message}</p><AcademicSkills api={api} /></section>
   }

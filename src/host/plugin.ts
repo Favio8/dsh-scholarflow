@@ -46,6 +46,7 @@ import { upsertAnchor } from '../core/editing/anchors.ts'
 import { listProjectSkills, projectSkillEntry } from '../core/skills/project-resources.ts'
 import { readRun, inspectRuns, prepareRunMigration, migrateRun } from '../core/pipeline/run-store.ts'
 import { prepareRunAction, validateRunAction, closeRun, readGenerationCheckpoint, type RunActionPlan } from '../core/pipeline/run-control.ts'
+import { newProjectDefaultsSchema, resolveInitDefaults } from '../shared/project-defaults.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -55,7 +56,7 @@ export const Config = Schema.object({
   defaultProjectType: Schema.union(['course-paper', 'literature-review', 'research-paper']).default('course-paper').volatile(),
   language: Schema.union(['zh', 'en']).default('zh').volatile(),
   networkEnabled: Schema.boolean().default(false).volatile(),
-  maxModelCalls: Schema.number().min(1).max(40).default(40).volatile(),
+  maxModelCalls: Schema.number().min(1).max(40).step(1).default(40).volatile(),
 })
 const sessionRequest = z.object({ sessionId: z.string().min(1).max(200) }).strict()
 const mutationRevision = (context: RequestContext) => {
@@ -107,7 +108,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
         this.recoveryPlans.set(planId, { context: inspectRequest.parse(request).context, peerId, hash: result.recovery.planHash, expires: Date.now() + 600000 })
         return { ...result, recovery: { ...result.recovery, planId } }
       }
-      return result
+      return result.initialized ? result : { ...result, defaults: this.projectDefaults() }
     })
   }
 
@@ -132,11 +133,11 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const peerId = this.requireOperator()
       const { context, input } = prepareInitRequest.parse(request)
       const { io } = await resolveStore(this.ctx, context, signal, input.manuscriptDir)
-      const plan = await prepareInit(io, input)
+      const plan = await prepareInit(io, resolveInitDefaults(input, this.projectDefaults()))
       for (const [id, row] of this.initPlans) if (row.expires < Date.now()) this.initPlans.delete(id)
       invariant(this.initPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有初始化计划。')
       this.initPlans.set(plan.id, { plan, context, peerId, expires: Date.now() + 10 * 60 * 1000 })
-      return { planId: plan.id, planHash: plan.contentHash, project: plan.config.project,
+      return { planId: plan.id, planHash: plan.contentHash, project: plan.config.project, budget: plan.config.workflow.budget,
         files: plan.files.map(file => ({ relativePath: file.path, sizeBytes: Buffer.byteLength(file.text) })), risks: plan.risks }
     })
   }
@@ -167,6 +168,12 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private requireNetwork() {
     const settings = (this.ctx as Host).settings.describe({ redactSecrets: true }).find((row: Host) => row.ns === 'scholarflow')
     invariant(settings?.value.networkEnabled === true, 'NETWORK_DISABLED', '在线检索尚未开启；请先在 ScholarFlow 设置中启用，再预览本次查询发送范围。')
+  }
+
+  private projectDefaults() {
+    const row = (this.ctx as Host).settings.describe({ redactSecrets: true }).find((entry: Host) => entry.ns === 'scholarflow')
+    invariant(row, 'HOST_CAPABILITY_UNAVAILABLE', '宿主未提供 ScholarFlow 新项目设置，请检查插件设置能力。')
+    return newProjectDefaultsSchema.parse(row.value)
   }
 
   private pruneSkills() {
