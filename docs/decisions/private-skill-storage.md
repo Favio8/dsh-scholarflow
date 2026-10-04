@@ -82,4 +82,27 @@ denial, built-in binding and the selection menu. Real DeepSeek model execution
 with the new bindings also passed draft rejection, citation-preserving repeated
 paragraph rewrite/acceptance and cancellation. Actual resources are retained in
 the isolated test run directories. These checks do not certify all other V1 work.
-Project-local resource resolution and reference-aware safe version removal remain.
+Project-local resource resolution remains.
+
+## Reference-aware retirement follow-up — 2026-10-05
+
+The operator prechecks a specific installed version before confirming removal.
+Only the Host's registered local workspace metadata and bounded run snapshots are
+read. Reference observations are hashed; absolute roots and configuration text
+are not returned. Project and historical run references block removal. Missing,
+inconsistent or unreadable reference state also blocks rather than being counted
+as unreferenced. The UI states that unknown or remote copies are outside this scan.
+
+Binding commits and version retirement use the same SDK cross-process catalog
+lock. Retirement rechecks the reference observation hash after confirmation.
+An unreferenced version is atomically moved into an owned `.retired/` directory;
+its original bytes remain, and same-version reimport restores catalog availability.
+There is no recursive deletion, project/run cleanup, or cleanup of global Skill
+roots. Model tools cannot initiate this operation. External editors that bypass
+both plugin locks remain outside a cross-filesystem transaction guarantee.
+
+128 automated cases pass. Native DSH additionally verifies an active project
+reference blocks retirement and that an unused version can be prechecked and
+retired through Settings without altering the active version or original source.
+The isolated `.dsh-tmp/g0-smoke.json` records these checks. Unit tests verify retained
+binary/original/script bytes and same-version reimport after retirement.

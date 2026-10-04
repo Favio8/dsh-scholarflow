@@ -258,6 +258,34 @@ try {
   assert.equal(skillTools.value.readOk, true, JSON.stringify(skillTools.value))
   assert.equal(skillTools.value.contentHash, digest(originalSkill))
   assert.equal(skillTools.value.scriptDenied, true)
+  const referencedRetirement = await rpc('scholarflow.v1/skills.prepareRetirement', { request: { qualifiedId: installedSkill.metadata.qualifiedId, digest: installedSkill.digest } })
+  assert.equal(referencedRetirement.value.ok, true, JSON.stringify(referencedRetirement))
+  assert.equal(referencedRetirement.value.data.blocked, true)
+  assert.ok(referencedRetirement.value.data.references.some(row => row.recordId === projectLedger.projectId))
+  const unusedSource = await rpc('scholarflow.v1/skills.scanLocal', { request: { path: join(skillSource, 'two') } })
+  assert.equal(unusedSource.value.ok, true)
+  const unusedPreview = await rpc('scholarflow.v1/skills.prepareLocal', { request: { sourceId: unusedSource.value.data.sourceId, subpath: '',
+    options: { capabilities: ['selection-transform'], suggestedStages: ['revision'] } } })
+  assert.equal(unusedPreview.value.ok, true)
+  const unusedInstall = await rpc('scholarflow.v1/skills.install', { request: { planId: unusedPreview.value.data.planId, planHash: unusedPreview.value.data.planHash } })
+  assert.equal(unusedInstall.value.ok, true)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await settingsDialog.getByRole('button', { name: 'ScholarFlow', exact: true }).click()
+  await skillsUi.getByRole('button', { name: /^预检卸载 TEST_ONLY-second ·/ }).click()
+  const retirementDialog = page.getByRole('dialog', { name: '私有 Skill 卸载预检', exact: true })
+  await retirementDialog.waitFor()
+  assert.match(await retirementDialog.innerText(), /未登记或在其他机器/u)
+  await retirementDialog.getByRole('button', { name: '确认卸载到私有回收区', exact: true }).click()
+  await skillsUi.getByRole('status').filter({ hasText: '版本已移入私有回收区' }).waitFor()
+  const unusedCatalogAfter = await rpc('scholarflow.v1/skills.library', { request: {} })
+  assert.equal(unusedCatalogAfter.value.data.versions.some(row => row.digest === unusedInstall.value.data.manifest.digest), false)
+  const retiredPrefix = `retired-${digest(unusedInstall.value.data.manifest.metadata.qualifiedId).slice(7)}-${unusedInstall.value.data.manifest.digest.slice(7)}-`
+  const retiredDirectories = (await readdir(join(testHome, 'scholarflow/skills/.retired'))).filter(name => name.startsWith(retiredPrefix))
+  assert.equal(retiredDirectories.length, 1)
+  assert.equal(await readFile(join(testHome, 'scholarflow/skills/.retired', retiredDirectories[0], 'files/SKILL.md'), 'utf8'), '---\nname: TEST_ONLY-second\ndescription: TEST_ONLY second candidate\n---\nStatic text.\n')
+  assert.equal(await readFile(join(privateSkillPath, 'SKILL.md'), 'utf8'), originalSkill)
+  assert.equal(await readFile(join(skillSource, 'two/SKILL.md'), 'utf8'), '---\nname: TEST_ONLY-second\ndescription: TEST_ONLY second candidate\n---\nStatic text.\n')
+  await settingsDialog.getByRole('button', { name: '关闭', exact: true }).click()
   const academic = await rpc('scholarflow.v1/verifyAcademicTools', { request: { sessionId: second.value.sessionId } })
   assert.equal(academic.ok, true, JSON.stringify(academic))
   assert.equal(academic.value.projectId, projectLedger.projectId)
@@ -635,6 +663,7 @@ try {
     nativeUiProjectSkillBindingCancelAndConfirm: true, boundAgentSkillReadStageAndScriptDenial: true,
     builtinSkillBindingAndCompatibleSelectionMenu: true,
     realModelStageWithFixedSkillInstructions: liveModel,
+    referencedSkillRetirementDenied: true, nativeUiUnreferencedSkillRetirementRetainsBytes: true,
     clientErrors: errors, desktopProfileTouched: false }, null, 2))
   console.log(`Real DSH ${evidenceName} smoke passed; evidence: .dsh-tmp/${evidenceName}-smoke.json`)
 } catch (error) {

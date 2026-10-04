@@ -71,3 +71,22 @@ test('local source and private library reject junctions instead of following an 
   await symlink(outside, join(f.home, 'scholarflow'), process.platform === 'win32' ? 'junction' : 'dir')
   await assert.rejects(f.library.list(), { code: 'SKILL_LIBRARY_PATH_INVALID' })
 })
+
+test('referenced versions stay installed; an unreferenced retirement retains all bytes and supports same-version reimport', async () => {
+  const f = await fixture(), source = await LocalSkillSource.open(f.source)
+  const bundle = await source.package('nested/test-only-private', options, signal())
+  await f.library.install(bundle)
+  await assert.rejects(f.library.retire(bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, async () => {
+    throw Object.assign(new Error('TEST_ONLY referenced by a fixed run'), { code: 'SKILL_VERSION_REFERENCED' })
+  }), { code: 'SKILL_VERSION_REFERENCED' })
+  assert.equal((await f.library.read(bundle.manifest.metadata.qualifiedId, bundle.manifest.digest)).instructions, instructions)
+  const retired = await f.library.retire(bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, async () => {})
+  assert.equal(retired.retainedBytes, true)
+  assert.equal((await f.library.list()).versions.length, 0)
+  await assert.rejects(f.library.read(bundle.manifest.metadata.qualifiedId, bundle.manifest.digest), { code: 'SKILL_RESOURCE_MISSING' })
+  const retained = join(f.home, 'scholarflow/skills/.retired', retired.retirementId, 'files')
+  assert.equal(await readFile(join(retained, 'SKILL.md'), 'utf8'), instructions)
+  assert.equal(await readFile(join(retained, 'scripts/no-run.js'), 'utf8'), script)
+  assert.equal((await f.library.install(bundle)).alreadyInstalled, false)
+  assert.equal((await f.library.read(bundle.manifest.metadata.qualifiedId, bundle.manifest.digest)).instructions, instructions)
+})

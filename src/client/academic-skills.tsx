@@ -8,12 +8,13 @@ const toggle = (values: string[], value: string, enabled: boolean) => enabled ? 
 
 export function AcademicSkills({ api }: { api: Api }) {
   const [catalog, setCatalog] = useState<any>(), [source, setSource] = useState<any>(), [plan, setPlan] = useState<any>()
+  const [retirement, setRetirement] = useState<any>()
   const [path, setPath] = useState(''), [subpath, setSubpath] = useState('')
   const [kind, setKind] = useState<'local' | 'github'>('local'), [url, setUrl] = useState(''), [ref, setRef] = useState(''), [githubPath, setGithubPath] = useState('')
   const [capabilities, setCapabilities] = useState<string[]>(['selection-transform']), [stages, setStages] = useState<string[]>(['revision'])
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('')
   const pending = useRef({ sourceId: undefined as string | undefined, planId: undefined as string | undefined })
-  pending.current = { sourceId: source?.sourceId, planId: plan?.planId }
+  pending.current = { sourceId: source?.sourceId, planId: plan?.planId ?? retirement?.planId }
   useEffect(() => {
     let live = true
     api('skills.library', {}).then(result => live && setCatalog(result)).catch(error => live && setError(error.message))
@@ -92,6 +93,22 @@ export function AcademicSkills({ api }: { api: Api }) {
     {catalog?.versions.length ? <ul>{catalog.versions.map((manifest: SkillManifest) => <li key={`${manifest.metadata.qualifiedId}:${manifest.digest}`}>
       <b>{manifest.metadata.displayName}</b> · {manifest.metadata.compatibility === 'partial' ? '部分支持' : '说明性支持'}
       <p>{manifest.metadata.description}</p><p>身份：{manifest.metadata.qualifiedId}<br />固定摘要：{manifest.digest}</p>
+      <button disabled={busy} onClick={() => act(async () => {
+        if (retirement?.planId) await api('skills.dismiss', { planId: retirement.planId })
+        setRetirement(await api('skills.prepareRetirement', { qualifiedId: manifest.metadata.qualifiedId, digest: manifest.digest }))
+      })}>预检卸载 {manifest.metadata.displayName} · {manifest.digest.slice(7, 19)}</button>
     </li>)}</ul> : <p>尚未安装外部 Skill。</p>}
+    {retirement && <section role="dialog" aria-modal="false" aria-label="私有 Skill 卸载预检"><h4>{retirement.name} · 卸载预检</h4>
+      <p>{retirement.limitation}</p><p>已检查 {retirement.checkedWorkspaces} 个本机工作区、{retirement.checkedRuns} 个历史运行。</p>
+      {retirement.blocked ? <><p role="alert">已有项目或历史运行引用此版本，不能卸载。请先明确迁移；历史运行引用仍需保留。</p>
+        <ul>{retirement.references.map((row: any) => <li key={`${row.workspaceId}:${row.kind}:${row.recordId}`}>{row.workspaceId} · {row.kind} · {row.recordId}</li>)}</ul></>
+        : <><p>确认后从可安装目录移入私有回收区，完整字节保留。项目、运行和原来源文件不会清理。重新导入相同资源可恢复此固定版本。</p>
+          <p>{retirement.qualifiedId} · {retirement.digest}</p>
+          <button disabled={busy} onClick={() => act(async () => {
+            await api('skills.retire', { planId: retirement.planId, planHash: retirement.planHash }); setRetirement(undefined)
+            await refresh(); setMessage('版本已移入私有回收区，完整资源字节保留。')
+          })}>确认卸载到私有回收区</button></>}
+      <button disabled={busy} onClick={() => act(async () => { if (retirement.planId) await api('skills.dismiss', { planId: retirement.planId }); setRetirement(undefined) })}>关闭卸载预检</button>
+    </section>}
   </section>
 }

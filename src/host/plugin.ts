@@ -40,6 +40,7 @@ import { prepareBindings, applyBindings, readBindings, currentSkillStage, select
 import { readPrivateSkill, libraryEntry, builtinSkills } from './skills/reader.ts'
 import { stage } from '../shared/schema.ts'
 import type { ResourceBinding } from '../shared/skills.ts'
+import { knownSkillReferences } from './skills/references.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -74,6 +75,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private githubProvider: ReturnType<typeof githubSkills>
   private preparingSkill = false
   private bindingPlans = new Map<string, { plan: BindingPlan; context: RequestContext; peerId: string; expires: number }>()
+  private retirementPlans = new Map<string, { qualifiedId: string; digest: string; observationHash: string; hash: string; peerId: string; expires: number }>()
   constructor(ctx: Host) {
     super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
     this.researchProvider = crossrefProvider(ctx.web)
@@ -82,7 +84,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
       timer.unref()
-      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear() }
+      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear() }
     }, 'scholarflow: expire operator skill previews')
   }
 
@@ -165,6 +167,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     for (const [key, row] of this.githubSources) if (row.expires < Date.now()) this.githubSources.delete(key)
     for (const [key, row] of this.skillPlans) if (row.expires < Date.now()) this.skillPlans.delete(key)
     for (const [key, row] of this.bindingPlans) if (row.expires < Date.now()) this.bindingPlans.delete(key)
+    for (const [key, row] of this.retirementPlans) if (row.expires < Date.now()) this.retirementPlans.delete(key)
   }
 
   @Remote('skills.library')
@@ -234,9 +237,42 @@ export class ScholarFlowRemote extends TypertRemoteService {
       invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.plan.projectId,
         'SESSION_BINDING_CHANGED', '绑定确认不属于当前项目会话。')
       const { io } = await resolveStore(this.ctx, input.context, signal)
-      for (const binding of row.plan.bindings) await readPrivateSkill(binding)
-      signal.throwIfAborted(); this.bindingPlans.delete(input.planId)
-      return applyBindings(io, row.plan)
+      return this.skillLibrary.withCatalogLock(async () => {
+        for (const binding of row.plan.bindings) await readPrivateSkill(binding)
+        signal.throwIfAborted(); this.bindingPlans.delete(input.planId)
+        return applyBindings(io, row.plan)
+      })
+    })
+  }
+
+  @Remote('skills.prepareRetirement')
+  async skillsPrepareRetirement(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.pruneSkills()
+      const input = z.object({ qualifiedId: z.string().max(1000), digest: hash }).strict().parse(request)
+      invariant(this.retirementPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先完成已有卸载预览。')
+      const bundle = await this.skillLibrary.read(input.qualifiedId, input.digest)
+      const scan = await knownSkillReferences(this.ctx, input.qualifiedId, input.digest, signal)
+      if (scan.references.length) return { blocked: true, ...scan, name: bundle.manifest.metadata.displayName }
+      const planId = newId('skill_retirement'), planHash = digest(JSON.stringify({ planId, ...input, observationHash: scan.observationHash }))
+      this.retirementPlans.set(planId, { ...input, observationHash: scan.observationHash, hash: planHash, peerId, expires: Date.now() + 600000 })
+      return { blocked: false, planId, planHash, ...scan, name: bundle.manifest.metadata.displayName, qualifiedId: input.qualifiedId, digest: input.digest }
+    })
+  }
+
+  @Remote('skills.retire')
+  async skillsRetire(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ planId: z.string().max(200), planHash: hash }).strict().parse(request)
+      const row = this.retirementPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.hash === input.planHash, 'INVALID_APPROVAL', '请重新预览并确认此版本卸载。')
+      signal.throwIfAborted(); this.retirementPlans.delete(input.planId)
+      return this.skillLibrary.retire(row.qualifiedId, row.digest, async () => {
+        const scan = await knownSkillReferences(this.ctx, row.qualifiedId, row.digest, signal)
+        invariant(!scan.references.length, 'SKILL_VERSION_REFERENCED', '已有项目或历史运行引用此版本，未卸载。')
+        invariant(scan.observationHash === row.observationHash, 'SKILL_REFERENCES_CHANGED', '确认期间本机引用状态改变，请重新预览；未卸载。')
+        signal.throwIfAborted()
+      })
     })
   }
 
@@ -357,6 +393,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       if (input.sourceId && this.githubSources.get(input.sourceId)?.peerId === peerId) this.githubSources.delete(input.sourceId)
       if (input.planId && this.skillPlans.get(input.planId)?.peerId === peerId) this.skillPlans.delete(input.planId)
       if (input.planId && this.bindingPlans.get(input.planId)?.peerId === peerId) this.bindingPlans.delete(input.planId)
+      if (input.planId && this.retirementPlans.get(input.planId)?.peerId === peerId) this.retirementPlans.delete(input.planId)
       return { dismissed: true }
     })
   }

@@ -21,6 +21,34 @@ async function observed(path: string) { try { return await lstat(path) } catch (
 export class PrivateSkillLibrary {
   private readonly home: string
   constructor(home = resolveDshHome()) { this.home = resolve(home) }
+  async withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
+    const root = await this.root()
+    if (!root) return operation() // No installed library version exists yet.
+    return withFileLock(join(root, 'catalog-owner.json'), async () => {
+      invariant(same((await this.root())!, root), 'SKILL_LIBRARY_PATH_INVALID', '私有库根发生改变。')
+      return operation()
+    }, { waitMs: 2000 })
+  }
+  async retire(qualifiedId: string, resourceDigest: string, checkReferences: () => Promise<void>) {
+    return this.withCatalogLock(async () => {
+      const bundle = await this.read(qualifiedId, resourceDigest), root = await this.root()
+      invariant(root, 'SKILL_RESOURCE_MISSING', '私有库不存在。')
+      const version = await this.directory(root, [key(qualifiedId), resourceDigest.slice(7)])
+      invariant(version, 'SKILL_RESOURCE_MISSING', '固定版本不存在。')
+      const parent = await this.directory(root, [key(qualifiedId)])
+      invariant(parent, 'SKILL_RESOURCE_MISSING', '固定版本目录不存在。')
+      await checkReferences()
+      // A reversible catalog retirement. All bytes remain in the private home;
+      // no recursive delete and no project/run cleanup is performed.
+      const retirementId = `retired-${key(qualifiedId)}-${resourceDigest.slice(7)}-${randomUUID()}`
+      const retired = await this.directory(root, ['.retired'], true)
+      invariant(retired, 'SKILL_LIBRARY_PATH_INVALID', '私有回收区创建失败。')
+      await this.directory(root, [key(qualifiedId)])
+      invariant(!await observed(join(retired, retirementId)), 'SKILL_VERSION_CONFLICT', '私有回收记录重名。')
+      await rename(version, join(retired, retirementId))
+      return { retirementId, qualifiedId, digest: bundle.manifest.digest, retainedBytes: true }
+    })
+  }
   private async root(create = false) {
     const home = await realpath(this.home)
     let current = home
