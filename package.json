@@ -9,6 +9,9 @@
     ".": {
       "default": "./src/host/index.js"
     },
+    "./client": {
+      "default": "./src/client/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -22,6 +25,9 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   },
   "peerDependencies": {

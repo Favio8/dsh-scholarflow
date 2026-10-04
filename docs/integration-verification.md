@@ -272,7 +272,7 @@ export interface PresetDefinition {
 |---|---|
 | 文档生成 | 部分（本节记录已取得的契约） |
 | 代码实现 | **未开始**（客户端半体尚未编写） |
-| 测试通过 | **否 —— 未实现**；扩展点契约已确认可用 |
+| 测试通过 | **否 —— 未实现**；扩展点契约已确认，**客户端半体打包已实测被服务与注入** |
 
 ### 04.1 已取得的契约【已实测】
 
@@ -358,7 +358,36 @@ window.__ModuleLoader__.load({
 3. **注意：非 `conversation` 的 key 不获得 Session 绑定** —— 工作台需要自己经
    `useSessions`/`host.call` 取得当前会话，这一点要在 M1 设计里明确。
 
-### 04.3 尚未验证（阻塞项）
+### 04.4 客户端半体打包已实测（模块被服务并注入页面）
+
+已编写最小客户端半体 `src/client/index.js`，并声明 `package.json` 的
+`exports['./client']` 与 `dsh.client.platform = 'web'`。把本插件**作为真实依赖**安装进
+验证 profile 后启动宿主，取服务端返回的页面 HTML，**实测到**：
+
+```html
+href="plugins/??…,dsh-scholarflow/client.js,…&rev=aa1c2d240a40"
+```
+
+即 **`dsh-scholarflow/client.js` 已出现在浏览器启动图的模块清单中**（该 HTML 里
+`scholarflow` 共出现 5 次）。这说明：
+
+1. `dsh.client` 字段确实被 `clientModules` 扫描（与该服务自述一致，见 ADR-003）；
+2. `exports['./client']` 被解析并作为客户端模块提供；
+3. 客户端半体进入浏览器启动图，**不需要构建工具** —— 手写
+   `window.__ModuleLoader__.load({ id, factory })` 包装即可（形状取自本机可工作插件）。
+
+**这不等于 UI 已验证。** 模块被加载 ≠ 面板渲染正确、≠ 与原侧栏共存、≠ 截图通过。
+渲染、三栏共存与窄屏行为仍必须在**有浏览器的 desktop 表面**确认。
+
+半体目前注册三处，每处单独 `try/catch` 以免一个错误假设拖垮整体：
+
+| 座位 | 注册 | 状态 |
+|---|---|---|
+| `main`（keyed） | `{ name:'main', key:'scholarflow', component }` | **推断形状**，未渲染验证 |
+| `sidebar.panellist` | `{ name:'sidebar.panellist', id, order, label, component }` | **推断形状**，未渲染验证 |
+| `settings.section` | `{ name:'settings.section', id, order, label, component }` | 形状有本机先例（G0-05 path B） |
+
+### 04.5 尚未验证（阻塞项）
 
 - **【仍未知】** `ctx.slots.register` 对 keyed 座位的精确调用形状
   （本机可工作客户端半体展示的是 list 座位：`register({ name, id, order, label, component })`；
@@ -432,10 +461,16 @@ prepareDocument(): Promise<string>          // 返回 profile patch 路径
 
 - **【已实测】** 插件声明 schemastery `Config` 是可行的，且默认值会被物化并传入 `apply`。
 - **【已实测】** `settings.configure({auto:true})` 可正常注册页面策略。
-- **【仍未知】** 设置页投影的准确前置条件。**决定性验证必须在 desktop profile 完成** ——
-  那里本插件是通过 `dsh.profile.bundles` 安装的 bundle（可寻址），且已带 `Config`；
-  但 desktop 宿主当前加载的是**旧缓存模块**（不含 `Config` 转发），需要一次重启才能生效。
-- 因此 G0-05 的状态是：**机制已走通到 `Config` 生效，最后一步（表单投影）待 desktop 重启后验证。**
+- **【已实测】「只有 bundle 管理的 entry 才被投影」这一假设已被推翻。**
+  在验证 profile 中把本插件**作为真实依赖安装**（`dsh plugin --profile scholarflow-g0 add <路径>`，
+  随后 `dsh.profile.bundles` 含 `dsh-scholarflow`），`apply` 仍收到物化默认值，
+  但 `settings.describe()` 依旧 `ownCount: 0`。所以 bundle/可寻址性**不是**原因。
+- **【仍未知】** 设置页投影的准确前置条件。已知的排除项：schema 库缺失、schema 类型、
+  缺 `settings.configure`、非 bundle 安装。**剩余待查方向**（尚未验证，不作为结论）：
+  ① 行必须携带非空 `config`（我们的是 `{}`）；
+  ② 需要 `settings.mutate/replace` 或 `configEditor.edit` 先行建立可编辑文档；
+  ③ `describe()` 只投影官方 bundle 自带的 entry；
+  ④ desktop profile 与验证 profile 行为不同。
 
 ### 05.4 尚未验证
 
