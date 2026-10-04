@@ -488,8 +488,16 @@ prepareDocument(): Promise<string>          // 返回 profile patch 路径
 
 ### 05.3 结论与下一步
 
+- **【已实测】投影出的 19 个命名空间全部属于官方插件**，没有一个来自第三方：
+  `agent-default-model`、`agent-loop`、`agent-preset-registry`、`llm-deepseek`、
+  `llm-deepseek-account`、`llm-pi-ai`、`locale`、`permission`、`pwsh-sandbox`、
+  `session-log-deepseek`、`subagent`、`subagent-model-selection-settings`、`ui-chat`、
+  `ui-conversation`、`ui-settings`、`ui-settings-account`、`ui-settings-general`、
+  `ui-theme`、`web-search-deepseek`。
+- **【已实测】** `autoGenerate` 是**逐条目的页面策略**（实测分布 `true: 6`、`false: 13`），
+  **不是**能否被投影的门槛 —— 我们调用 `configure({auto:true})` 成功注册，
+  却连条目都不在列表里。
 - **【已实测】** 插件声明 schemastery `Config` 是可行的，且默认值会被物化并传入 `apply`。
-- **【已实测】** `settings.configure({auto:true})` 可正常注册页面策略。
 - **【已实测】「只有 bundle 管理的 entry 才被投影」这一假设已被推翻。**
   在验证 profile 中把本插件**作为真实依赖安装**（`dsh plugin --profile scholarflow-g0 add <路径>`，
   随后 `dsh.profile.bundles` 含 `dsh-scholarflow`），`apply` 仍收到物化默认值，
@@ -998,6 +1006,82 @@ name 为 `sf-test-skill-a` / `sf-test-skill-b`）。用 `agentPresets.acquireSco
 - **profile 组合可能在会话间变化**：本项目实测到一次 desktop bundle 被移除（原因未定）。
   M1 的启动自检应包含「本插件是否真的在组合里」，而不是只看依赖存在。
 - **`ctx.fs` 的沙箱不是 OS 级隔离**：`node:fs` 可绕过（07.4）。不得对外宣称强隔离。
+
+---
+
+## 附录 B：如何独立复现本次 G0 验证
+
+所有命令均在本机实际执行过。`<REPO>` = 本仓库目录，`<DSH>` = DSH 安装目录。
+
+### B1. Core 离线测试（无需宿主、不碰文件系统、可重复）
+
+```bash
+cd <REPO>
+pnpm install                       # link: 安装不会自动装依赖，本包依赖必须显式安装（ADR-004）
+node --test "tests/unit/path-containment.test.js"
+node --test "tests/unit/binding.test.js"
+```
+
+预期：`tests 19 / pass 19` 与 `tests 15 / pass 15`，`fail 0`。
+
+> 注：`node --test tests/unit`（直接给目录）在本机 Node 24.15.0 上会被当作模块加载而失败，
+> 请用**文件路径**。
+
+### B2. 在 desktop profile 上安装／启用／停用（G0-01、AT-25）
+
+```text
+plugin_manager list_bundles
+plugin_manager install_bundle  target=<REPO 绝对路径>
+plugin_manager set_bundle      target=dsh-scholarflow  enabled=false
+plugin_manager set_bundle      target=dsh-scholarflow  enabled=true
+```
+
+- 安装前请先备份 `%USERPROFILE%\.dsh\profiles\desktop\{package.json,cordis.patch.yml,cordis.yml,pnpm-workspace.yaml}`。
+- 回滚脚本：`<REPO>/scripts/rollback-profile.ps1 -ProfileDir <profile> -BackupDir <备份目录>`。
+- 期望：三次操作都返回 `application: "applied"`（desktop 是 live profile）。
+- **动手前务必读一次 profile 组合**（本项目实测到过一次不明原因的 bundle 移除）。
+
+### B3. 宿主平面验证夹具（独立进程，不影响 desktop）
+
+```powershell
+$DSH = "<DSH>\resources\runtime\cli\bin\dsh.cmd"
+& $DSH scholarflow-g0 --from-default-profile web --dump-config   # 建立 profile + 转储组合树
+& $DSH plugin --profile scholarflow-g0 add "<REPO>"              # 真实依赖安装（dsh.client 才会被扫描）
+& $DSH scholarflow-g0 --no-open --port 0                         # 启动（每次都是干净进程）
+```
+
+插件把探针结果写入 `<DSH_HOME>/scholarflow-g0/lifecycle.jsonl`；
+可用环境变量 `SCHOLARFLOW_G0_LOG` 分流到别的文件，避免与 desktop 的记录混在一起。
+
+读取（**必须用 UTF-8**，否则中文会被 PowerShell 按 ANSI 解码成乱码）：
+
+```powershell
+Get-Content "$env:USERPROFILE\.dsh\scholarflow-g0\lifecycle.jsonl" -Encoding UTF8 -Tail 30
+```
+
+> 注意：`dsh desktop --dump-config` 会被拒绝 —— desktop profile 由 Electron 应用独占管理。
+> 该限制已记入 `compatibility.md`。
+
+### B4. 客户端半体是否真的被服务（G0-04 的打包部分）
+
+启动夹具后，脚本会打印形如 `dsh web: http://127.0.0.1:<port>/?token=...` 的地址。
+取回该页面 HTML 并搜索 `scholarflow`，应能看到我们的客户端模块出现在浏览器启动图的模块清单里：
+
+```powershell
+$resp = Invoke-WebRequest -Uri "<打印出来的 URL>" -UseBasicParsing
+$resp.Content -match 'dsh-scholarflow/client\.js'
+```
+
+> 该 URL 含一次性 token，属会话凭据：**不要**写进文档、提交或分享。
+
+### B5. 组合树与能力探查
+
+```text
+host Config.listConfigs   { name: "dsh-scholarflow" }     # loader 行是否存在
+host Config.listConfigs   { entry: "include:storage-json" } # 后端 Config schema
+client Slots.listSubTree  { root: "main" }                 # 座位占用者（需要已连接页面）
+host Service.listService  { service: "agentPresets" }      # 精确签名与引用类型
+```
 
 ---
 

@@ -1151,6 +1151,15 @@ async function probeSettings(ctx) {
     ownCount: own.length,
     own: own.map(summarize),
     ownValue: own[0]?.value ?? null,
+    // The full projection list, to characterise WHICH entries get a namespace:
+    // every shipped namespace answers an official plugin, so this shows whether a
+    // third-party bundle ever appears here at all.
+    allNamespaces: (descriptors ?? []).map((descriptor) => String(descriptor.ns)).sort(),
+    autoGenerateHistogram: (descriptors ?? []).reduce((accumulator, descriptor) => {
+      const key = String(descriptor.autoGenerate)
+      accumulator[key] = (accumulator[key] ?? 0) + 1
+      return accumulator
+    }, {}),
     // Record the shape of a shipped namespace's projected schema so the Config
     // form a plugin must emit is measured, not guessed.
     sampleNamespace: descriptors?.[0] ? String(descriptors[0].ns) : null,
