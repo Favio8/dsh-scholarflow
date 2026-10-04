@@ -17,6 +17,7 @@ const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
 const fixture = resolve('.dsh-tmp/G0 中文工作区 TEST_ONLY')
 await mkdir(fixture, { recursive: true })
 const liveModel = process.argv.includes('--live-model')
+const liveResearch = process.argv.includes('--live-research')
 const credentialPath = join(homedir(), '.dsh/.credentials.yaml')
 const credentialHash = liveModel ? digest(await readFile(credentialPath)) : undefined
 const testHome = resolve(liveModel ? '.dsh-tmp/model-home' : '.dsh-tmp/g0-home')
@@ -95,6 +96,8 @@ try {
   originalType = settings.value.defaultProjectType
   const settingsWrite = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: 'literature-review' }, expectedRevision: settings.revision })
   assert.equal(settingsWrite.ok, true, JSON.stringify(settingsWrite))
+  const networkDisabled = await rpc('settings/update', { ns: 'scholarflow', patch: { networkEnabled: false }, expectedRevision: settingsWrite.value.revision })
+  assert.equal(networkDisabled.ok, true)
   const workspace = await rpc('workspace/create', { request: { path: fixture } })
   assert.equal(workspace.ok, true, JSON.stringify(workspace))
   assert.equal(resolve(workspace.value.workspace.path), fixture)
@@ -161,6 +164,12 @@ try {
   assert.equal(academic.value.shellDenied, true)
   assert.equal(academic.value.scopedPolicy, true)
   assert.deepEqual([...academic.value.promptTools].sort(), [...academicToolNames].sort())
+  const offlineQuery = await rpc('scholarflow.v1/research.prepare', { request: { context: { requestId: 'req_TEST_ONLY_offline_search',
+    workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId, expectedLedgerRevision: 0 },
+    search: { query: 'TEST_ONLY should never reach provider', purpose: 'TEST_ONLY network denial verification', limit: 1 } } })
+  assert.equal(offlineQuery.value.ok, false)
+  assert.equal(offlineQuery.value.error.code, 'NETWORK_DISABLED')
+  await assert.rejects(stat(join(projectRoot, '.scholarflow/research')), { code: 'ENOENT' })
   const mismatch = await rpc('scholarflow.v1/project.inspect', { request: { context: { requestId: 'req_TEST_ONLY_mismatch', workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId, projectId: projectLedger.projectId } } })
   assert.equal(mismatch.value.ok, false)
   assert.equal(mismatch.value.error.code, 'SESSION_BINDING_CHANGED')
@@ -334,6 +343,53 @@ try {
   const download = page.waitForEvent('download')
   await page.getByRole('button', { name: /^下载 quality-report\.md/ }).click()
   assert.equal((await download).suggestedFilename(), 'quality-report.md')
+  if (liveResearch) {
+    const beforeResearch = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+    const currentSettings = (await rpc('scholarflow.v1/diagnostics')).value.settings[0]
+    const enabled = await rpc('settings/update', { ns: 'scholarflow', patch: { networkEnabled: true }, expectedRevision: currentSettings.revision })
+    assert.equal(enabled.ok, true)
+    await page.getByRole('tab', { name: /^Research ·/ }).click()
+    await page.getByRole('textbox', { name: '文献查询词', exact: true }).fill('Deep learning LeCun Bengio Hinton')
+    await page.getByRole('textbox', { name: '文献查询用途', exact: true }).fill('TEST_ONLY 验证真实元数据提供方；本测试不把候选当成正文支持证据。')
+    await page.getByRole('spinbutton', { name: '文献候选上限', exact: true }).fill('3')
+    await page.getByRole('button', { name: '预览在线文献查询', exact: true }).click()
+    await page.getByRole('dialog', { name: '在线查询确认', exact: true }).waitFor()
+    await page.getByRole('button', { name: '取消在线查询', exact: true }).click()
+    await assert.rejects(stat(join(projectRoot, '.scholarflow/research')), { code: 'ENOENT' })
+    await page.getByRole('button', { name: '预览在线文献查询', exact: true }).click()
+    await page.getByRole('button', { name: '确认发送本次查询', exact: true }).click()
+    await page.getByRole('status').filter({ hasText: /检索 search_.* · completed/u }).waitFor({ timeout: 35000 })
+    const searchFiles = (await readdir(join(projectRoot, '.scholarflow/research'))).filter(name => name.startsWith('search_'))
+    assert.equal(searchFiles.length, 1)
+    const actualSearch = JSON.parse(await readFile(join(projectRoot, '.scholarflow/research', searchFiles[0]), 'utf8'))
+    assert.equal(actualSearch.state, 'completed')
+    assert.ok(actualSearch.records.length > 0)
+    assert.ok(actualSearch.records.every(row => row.provider === 'crossref' && row.textAccess === 'metadata'))
+    const actualCandidate = actualSearch.records[0]
+    const candidateRegion = page.getByRole('region', { name: `文献候选 ${actualCandidate.candidateId}`, exact: true })
+    await candidateRegion.getByRole('textbox', { name: `文献决定理由 ${actualCandidate.candidateId}`, exact: true }).fill('TEST_ONLY 用于真实提供方身份核验；没有全文支持结论。')
+    await candidateRegion.getByRole('button', { name: '确认纳入此来源', exact: true }).click()
+    await candidateRegion.getByText('已纳入来源：TEST_ONLY 用于真实提供方身份核验；没有全文支持结论。', { exact: true }).waitFor()
+    const afterSearchLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+    const actualSource = Object.values(afterSearchLedger.sources).find(row => row.identifiers.doi === actualCandidate.recordId)
+    assert.ok(actualSource)
+    assert.equal(actualSource.identity.status, 'unverified')
+    assert.equal(actualSource.textAccess, 'metadata')
+    assert.equal(Object.values(afterSearchLedger.evidence).some(row => row.sourceId === actualSource.id), false)
+    await page.getByRole('combobox', { name: '来源', exact: true }).selectOption(actualSource.id)
+    await page.getByRole('button', { name: '预览所选来源 DOI 查询', exact: true }).click()
+    await page.getByRole('dialog', { name: 'DOI 查询确认', exact: true }).waitFor()
+    await page.getByRole('button', { name: '确认发送 DOI 查询', exact: true }).click()
+    await page.getByRole('combobox', { name: '来源', exact: true }).getByRole('option').filter({ hasText: /matched/u }).waitFor({ state: 'attached', timeout: 35000 })
+    const matchedLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+    assert.equal(matchedLedger.sources[actualSource.id].identity.status, 'matched')
+    assert.equal(matchedLedger.sources[actualSource.id].citeKey, actualSource.citeKey)
+    assert.equal(matchedLedger.sources[actualSource.id].textAccess, 'metadata')
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), beforeResearch)
+    const disableAgain = await rpc('settings/update', { ns: 'scholarflow', patch: { networkEnabled: false }, expectedRevision: enabled.value.revision })
+    assert.equal(disableAgain.ok, true)
+    await page.getByRole('tab', { name: /^Export ·/ }).click()
+  }
   // Tabs keep editor state mounted; keyboard navigation has a single tab stop.
   const exportTab = page.getByRole('tab', { name: /^Export ·/ })
   await exportTab.focus(); await exportTab.press('Home')
@@ -423,7 +479,8 @@ try {
   const reset = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: originalType }, expectedRevision: restored.value.settings[0].revision })
   assert.equal(reset.ok, true)
   assert.deepEqual(errors, [])
-  await writeFile(liveModel ? '.dsh-tmp/model-smoke.json' : '.dsh-tmp/g0-smoke.json', JSON.stringify({ fixture: 'TEST_ONLY', installed: '0.2.0-rc.2',
+  const evidenceName = liveModel ? 'model' : liveResearch ? 'research' : 'g0'
+  await writeFile(`.dsh-tmp/${evidenceName}-smoke.json`, JSON.stringify({ fixture: 'TEST_ONLY', installed: '0.2.0-rc.2',
     settingsProjection: true, settingsPersistAcrossRestart: true, chineseWorkspaceNoGit: true,
     scopedSessionCreated: true, sandboxedWriteRead: true, readOnlyDenial: true,
     nativeUiInitPreviewCancel: true, nativeUiInitConfirm: true, originalSourceBytesPreserved: true,
@@ -438,8 +495,13 @@ try {
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,
     unsavedHostBufferColdRestartRestore: true,
+    nineAcademicToolsExecutedWithBoundAgent: true, forgedToolScopeDenied: true, scopedPromptAndToolsIsolated: true,
+    blankModeSwitchRestoresOrdinaryCatalog: true, newlyRegisteredGlobalToolMasked: true, refreshPreservesUnsavedEditor: true,
+    offlineResearchDeniedBeforePlanOrIO: true, realCrossrefSearchMetadataOnly: liveResearch,
+    cancelledSearchPreviewDoesNotSend: liveResearch, realCrossrefCandidateIncludedWithReason: liveResearch,
+    realCrossrefDoiIdentityMatchedWithoutEvidenceUpgrade: liveResearch,
     clientErrors: errors, desktopProfileTouched: false }, null, 2))
-  console.log(`Real DSH ${liveModel ? 'model' : 'G0'} smoke passed; evidence: .dsh-tmp/${liveModel ? 'model' : 'g0'}-smoke.json`)
+  console.log(`Real DSH ${evidenceName} smoke passed; evidence: .dsh-tmp/${evidenceName}-smoke.json`)
 } catch (error) {
   if (page && !page.isClosed()) {
     await page.screenshot({ path: '.dsh-tmp/host-smoke-failure.png' })

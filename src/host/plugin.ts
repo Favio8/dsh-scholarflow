@@ -28,11 +28,14 @@ import { requirementUpsertRequest, requirementExtractRequest, requirementConfirm
 import { upsertRequirement, extractRequirements, confirmRequirement, resolveRequirementConflict } from '../core/requirements/requirements.ts'
 import { bufferWriteRequest } from '../shared/editor-buffer.ts'
 import { readEditorBuffer, writeEditorBuffer } from '../core/editing/buffer.ts'
+import { searchPrepareRequest, onlineConfirmRequest, candidateDecisionRequest, lookupPrepareRequest, type ResearchProvider } from '../shared/online-research.ts'
+import { crossrefProvider } from './providers/crossref.ts'
+import { prepareSearch, executeSearch, listSearches, readSearch, decideCandidate, prepareLookup, executeLookup, type SearchPlan, type LookupPlan } from '../core/research/online.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
 export const name = 'scholarflow'
-export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools', 'systemPrompt', 'agentPresets', 'llm', 'agentDefaultModel', 'sessionProjections']
+export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools', 'systemPrompt', 'agentPresets', 'llm', 'agentDefaultModel', 'sessionProjections', 'web']
 export const Config = Schema.object({
   defaultProjectType: Schema.union(['course-paper', 'literature-review', 'research-paper']).default('course-paper').volatile(),
   language: Schema.union(['zh', 'en']).default('zh').volatile(),
@@ -52,8 +55,12 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private running = new Map<string, { controller: AbortController; context: RequestContext }>()
   private exportPlans = new Map<string, { plan: DeliveryPlan; context: RequestContext; peerId: string; expires: number }>()
   private bootInstance = randomUUID()
+  private researchProvider: ResearchProvider
+  private searchPlans = new Map<string, { plan: SearchPlan; context: RequestContext; peerId: string; expires: number }>()
+  private lookupPlans = new Map<string, { plan: LookupPlan; context: RequestContext; peerId: string; expires: number }>()
   constructor(ctx: Host) {
     super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
+    this.researchProvider = crossrefProvider(ctx.web)
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
   }
 
@@ -124,6 +131,88 @@ export class ScholarFlowRemote extends TypertRemoteService {
     const ctx = this.ctx as Host
     invariant(ctx.invocation?.peer && ctx.invocation.peer === ctx.connection.operator, 'INVALID_APPROVAL', '此操作需要宿主已认证的用户界面调用。')
     return ctx.invocation.peer.id
+  }
+
+  private requireNetwork() {
+    const settings = (this.ctx as Host).settings.describe({ redactSecrets: true }).find((row: Host) => row.ns === 'scholarflow')
+    invariant(settings?.value.networkEnabled === true, 'NETWORK_DISABLED', '在线检索尚未开启；请先在 ScholarFlow 设置中启用，再预览本次查询发送范围。')
+  }
+
+  @Remote('research.prepare')
+  async researchPrepare(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.requireNetwork()
+      const input = searchPrepareRequest.parse(request); mutationRevision(input.context)
+      const { io } = await resolveStore(this.ctx, input.context, signal), plan = await prepareSearch(io, input.search)
+      for (const [key, value] of this.searchPlans) if (value.expires < Date.now()) this.searchPlans.delete(key)
+      invariant(this.searchPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有检索计划。')
+      this.searchPlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, provider: 'crossref', destination: 'https://api.crossref.org', search: plan.search,
+        risks: ['仅发送所列查询词、数量与年份筛选；用途留在项目检索日志，不发送资料、主稿、Profile 或记忆。', '只返回元数据候选；尚未纳入来源，不下载全文，不证明论点支持。'] }
+    })
+  }
+
+  @Remote('research.execute')
+  async researchExecute(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.requireNetwork()
+      const input = onlineConfirmRequest.parse(request), row = this.searchPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请重新预览并确认此查询。')
+      invariant(row.context.workspaceId === input.context.workspaceId && row.context.sessionId === input.context.sessionId && row.plan.projectId === input.context.projectId,
+        'SESSION_BINDING_CHANGED', '检索确认不属于当前会话项目。')
+      signal.throwIfAborted()
+      const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal)
+      this.searchPlans.delete(input.planId)
+      return executeSearch(io, row.plan, this.researchProvider, AbortSignal.any([signal, AbortSignal.timeout(25000)]))
+    })
+  }
+
+  @Remote('research.list')
+  async researchList(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal); return listSearches(io) })
+  }
+
+  @Remote('research.read')
+  async researchRead(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = z.object({ context: inspectRequest.shape.context, searchId: z.string().min(1).max(100) }).strict().parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal); return (await readSearch(io, input.searchId)).record })
+  }
+
+  @Remote('research.decide')
+  async researchDecide(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = candidateDecisionRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return decideCandidate(io, input.searchId, input.candidateId, input.decision, input.reason, revision) })
+  }
+
+  @Remote('sources.prepareLookup')
+  async sourcesPrepareLookup(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.requireNetwork()
+      const input = lookupPrepareRequest.parse(request); mutationRevision(input.context)
+      const { io } = await resolveStore(this.ctx, input.context, signal), plan = await prepareLookup(io, input.sourceId)
+      for (const [key, value] of this.lookupPlans) if (value.expires < Date.now()) this.lookupPlans.delete(key)
+      invariant(this.lookupPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有核验计划。')
+      this.lookupPlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, sourceId: plan.sourceId, doi: plan.doi, destination: 'https://api.crossref.org',
+        risks: ['只向 Crossref 发送此 DOI；比较已登记标题及可比较作者和年份。', '不覆盖用户元数据或证据；身份匹配不代表正文支持。查询失败会记录不可用原因，不断言来源伪造。'] }
+    })
+  }
+
+  @Remote('sources.lookup')
+  async sourcesLookup(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.requireNetwork()
+      const input = onlineConfirmRequest.parse(request), row = this.lookupPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.plan.contentHash === input.planHash && row.expires > Date.now(), 'INVALID_APPROVAL', '请重新预览并确认 DOI 查询。')
+      invariant(row.context.projectId === input.context.projectId && row.context.sessionId === input.context.sessionId && row.context.workspaceId === input.context.workspaceId,
+        'SESSION_BINDING_CHANGED', '核验确认不属于当前会话项目。')
+      signal.throwIfAborted()
+      const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal)
+      this.lookupPlans.delete(input.planId)
+      return executeLookup(io, row.plan, this.researchProvider, AbortSignal.any([signal, AbortSignal.timeout(25000)]))
+    })
   }
 
   @Remote('materials.scan')

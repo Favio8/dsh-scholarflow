@@ -7,7 +7,7 @@ import { saveManual } from '../../src/core/editing/proposals.ts'
 
 async function setup() { const io = new MemoryStore(); await initialize(io, await prepareInit(io, { title: 'TEST_ONLY 未提交编辑', type: 'course-paper' })); return io }
 
-test('SF-031: staged unsaved buffers persist per session without changing manuscript or ledger revision', async () => {
+test('SF-014/028: staged unsaved buffers persist per session without changing manuscript or ledger revision', async () => {
   const io = await setup(), original = await snapshot(io)
   const saved = await writeEditorBuffer(io, 'ses_TEST_ONLY_A', { text: 'TEST_ONLY 尚未提交的人工正文。\r\n', baseHash: original.document.contentHash, baseBufferHash: null, state: 'dirty' })
   const restored = await readEditorBuffer(io, 'ses_TEST_ONLY_A')

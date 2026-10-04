@@ -22,7 +22,9 @@ ScholarFlow 的预设提供九个受控学术工具，并限制继承工具、�
 外部记忆变更需要明确确认后才进入模型上下文。未提交正文按会话暂存到宿主，
 刷新和重连可恢复；恢复旧缓冲不会绕过主稿版本校验。
 工作台可主动刷新，空闲时同步其他会话的项目状态；保留本会话未提交编辑。
-完整工作流、模型辅助审查、在线检索、私有 Skill 库和全部 V1 验收仍在开发。
+已接入需预览确认的 Crossref 单次元数据查询、候选纳入／排除理由和 DOI 核验。
+不下载全文，身份匹配不会自动生成证据或覆盖既有来源；请求和冲突结果保留检查点。
+完整工作流、模型辅助审查、多查询检索阶段、私有 Skill 库和全部 V1 验收仍在开发。
 此页面不会将集成验证当成完整产品交付。
 
 ## 开发与验证
@@ -36,6 +38,8 @@ pnpm test
 node tests/e2e/installed-host-smoke.mjs
 # 可选：使用现有 Host 凭据服务发起有限真实模型测试（会产生提供方费用）
 node tests/e2e/installed-host-smoke.mjs --live-model
+# 可选：真实 Crossref 查询和 DOI 核验，不调用模型，不读取模型凭据
+node tests/e2e/installed-host-smoke.mjs --live-research
 ```
 
 构建生成 dist/host.js、dist/agent.js 和 dist/client.js；安装源码链接前必须先构建。

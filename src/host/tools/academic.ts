@@ -10,6 +10,7 @@ import { prepareDelivery } from '../../core/export/delivery.ts'
 import { id } from '../../shared/schema.ts'
 import { unicodeBoundary } from '../../core/editing/markdown.ts'
 import { approvedMemory } from '../../core/project/memory.ts'
+import { listSearches, readSearch } from '../../core/research/online.ts'
 
 export const academicToolNames = ['scholar_project', 'scholar_materials', 'scholar_research', 'scholar_evidence', 'scholar_outline',
   'scholar_manuscript', 'scholar_review', 'scholar_skill', 'scholar_export'] as const
@@ -46,7 +47,7 @@ export function academicDefinitions(ctx: Host) {
       if (args.action === 'memory') return { memory: await approvedMemory(io, current.ledger.projectId), scope: 'current-project-only' }
       return { project: current.config.project, ledgerRevision: current.ledger.revision, documentHash: current.document.contentHash, revisionId: current.document.revisionId,
         externalChange: current.document.externalChange, outlineConfirmation: current.ledger.outline.confirmation, budget: current.config.workflow.budget,
-        capabilities: { localMaterials: true, guardedProposals: true, deterministicReview: true, onlineResearch: false, privateSkillImport: false },
+        capabilities: { localMaterials: true, guardedProposals: true, deterministicReview: true, onlineResearch: 'operator-confirmed-Crossref-metadata', privateSkillImport: false },
         nextStep: '在工作台确认要求、证据和大纲；正文候选和改写通过 Draft 的可见计划发起，主稿只由用户明确接受建议后改变。' }
     }),
     make('scholar_materials', ['list', 'read'], '列出已登记资料，分块读取实际解析内容；不会扫描未选资料或读取凭据。',
@@ -63,9 +64,18 @@ export function academicDefinitions(ctx: Host) {
           totalBlocks: parsed.blocks.length, charOffset: args.charOffset, nextCharOffset: end < block.text.length ? end : null, text: block.text.slice(args.charOffset, end),
           warnings: [...parsed.warnings, '本次返回所选解析单元的分块；没有自动读取其余页面或未选资料。'] }
       }),
-    make('scholar_research', ['sources'], '查看当前已登记来源的元数据、身份与文本访问状态。在线提供方尚未接入，不能假称搜索成功。', {}, simple(['sources']), async (_args, io) => {
+    make('scholar_research', ['sources', 'history', 'readSearch'], '查看已登记来源及真实检索快照。在线 Crossref 查询必须由用户在 Research 预览并确认，此工具不能自行批准网络。',
+      { searchId: { type: 'string' }, candidateOffset: { type: 'integer' } },
+      z.object({ action: actions(['sources', 'history', 'readSearch']), searchId: id.optional(), candidateOffset: z.number().int().min(0).max(80).default(0) }).strict(), async (args, io) => {
+      if (args.action === 'history') return { searches: await listSearches(io), scope: 'current-project-only' }
+      if (args.action === 'readSearch') {
+        invariant(args.searchId, 'INVALID_REQUEST', '需要指定真实检索记录。')
+        const { record } = await readSearch(io, args.searchId), start = args.candidateOffset, end = Math.min(start + 10, record.records.length)
+        invariant(start <= record.records.length, 'INVALID_REQUEST', '候选范围无效。')
+        return { ...record, records: record.records.slice(start, end), candidateOffset: start, nextCandidateOffset: end < record.records.length ? end : null }
+      }
       const current = await snapshot(io)
-      return { sources: Object.values(current.ledger.sources).slice(0, 80), onlineResearch: 'unavailable', distinction: '登记或身份匹配不等于正文支持关系核验。' }
+      return { sources: Object.values(current.ledger.sources).slice(0, 80), onlineResearch: 'operator-confirmed-Crossref-metadata', distinction: '登记或身份匹配不等于正文支持关系核验。' }
     }),
     make('scholar_evidence', ['list', 'read'], '查看论点及支持范围；读取已确认定位证据，不把模型摘录自行标记为已定位。', { evidenceId: { type: 'string' }, charOffset: { type: 'integer' } },
       z.object({ action: actions(['list', 'read']), evidenceId: id.optional(), charOffset: offset }).strict(), async (args, io) => {

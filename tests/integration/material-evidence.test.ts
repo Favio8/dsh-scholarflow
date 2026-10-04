@@ -32,7 +32,7 @@ test('scan/register are metadata-only and sensitive material cannot be selected'
   await assert.rejects(registerMaterial(io, { relativePath: '.env', role: 'notes', confirmExcludedFile: true }, 1), { code: 'MATERIAL_ACCESS_DENIED' })
 })
 
-test('AT-09/10: a real local quotation, scoped claim and confirmed outline survive reopen', async () => {
+test('SF-011/012: a real local quotation, scoped claim and confirmed outline survive reopen', async () => {
   const io = await setup(), original = (await io.read('资料/原始笔记.txt'))!.text
   const { parsed, source } = await materialAndSource(io)
   assert.equal(source.source.identity.status, 'unverified', 'a parsed quotation does not prove publication identity')

@@ -95,7 +95,31 @@ registration remains hidden from ScholarFlow. Tests use isolated DSH_HOME only.
 G0 verification Remotes require the actual authenticated operator plus the
 explicit test environment flag. Full prompt text and credentials are not returned.
 
-Online lookup, private Skill resolution, model-native proposal creation, section
-generation, and model-assisted review remain incomplete. The nine registered
-tool names do not imply those actions are implemented. Production reports these
-limits explicitly. This addendum is not full V1 acceptance.
+At that checkpoint online lookup, private Skill resolution, model-native proposal
+creation, section generation, and model-assisted review remained incomplete.
+Operator-confirmed Crossref lookup is now verified in the follow-up below; the
+other limits remain. Tool names do not imply all actions are implemented.
+
+## Operator-confirmed online research follow-up — 2026-10-05
+
+`--live-research` performs one real bibliographic query and one DOI lookup using
+the installed Host's selected public fetch provider. The adapter sends a fixed
+Crossref HTTPS request, without keys or a separate network stack. Enabling online
+requests and cancelling a query preview are exercised in an isolated DSH_HOME.
+Network-disabled requests fail before plan creation or IO. The native UI shows
+the actual query, result cap, year filters, destination and material-free scope.
+
+Verified: real metadata candidates are persisted without creating sources;
+reasoned inclusion creates a stable source with unverified identity; separate DOI
+lookup matches that identity while keeping metadata-only access, no evidence
+upgrade, and unchanged manuscript. Search and DOI request counts are checkpointed
+before IO. Provider failure, cancellation and concurrent-source conflict have
+durable terminal records; IO does not hold the project writer lock. Bibliographic
+changes from the provider do not silently replace user metadata or evidence.
+
+110 automated cases and typecheck pass. Actual native online verification writes
+`.dsh-tmp/research-smoke.json`; it does not touch desktop settings or model keys.
+Provider documentation and current API assumptions are recorded in
+`src/host/providers/README.md`. The multi-query Research Pipeline and its shared
+stage budget remain follow-up work; the manual single-query action does not
+claim exhaustive retrieval or complete V1 acceptance.

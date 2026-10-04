@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { OnlineResearch } from './online-research.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 export function Research({ project, context, api, refresh, run, busy }: Props) {
@@ -67,6 +68,7 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
       setSourceId(result.source.id); await refresh()
     })}>登记该资料的来源</button>
     <label>来源<select aria-label="来源" value={sourceId} onChange={e => setSourceId(e.target.value)}><option value="">请选择</option>{sources.map(source => <option key={source.id} value={source.id}>{source.title} · {source.identity.status} · [@{source.citeKey}]</option>)}</select></label>
+    <OnlineResearch project={project} sourceId={sourceId} context={context} api={api} refresh={refresh} run={run} busy={busy} />
     <button disabled={busy || !block || !sourceId || project.ledger.sources[sourceId]?.materialId !== materialId} onClick={() => run(async () => {
       const result = await api('evidence.confirm', { context: context(), sourceId, sourceContentHash: parsed.sourceContentHash, locator: block.locator, excerpt: block.text, kind: 'quotation' })
       setEvidenceId(result.evidence.id); await refresh()
