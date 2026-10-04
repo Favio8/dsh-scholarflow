@@ -4,9 +4,9 @@ import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { applicationResult, inspectProject, inspectRequest, prepareInitRequest, initializeRequest, resolveStore, type StoredInitPlan } from './bridge/project-api.ts'
-import { prepareInit, initialize } from '../core/project/project.ts'
+import { prepareInit, initialize, snapshot } from '../core/project/project.ts'
 import { recover } from '../core/store/transactions.ts'
-import { newId } from '../core/store/files.ts'
+import { newId, digest } from '../core/store/files.ts'
 import { invariant } from '../shared/errors.ts'
 import { scanRequest, registerMaterialRequest, parseMaterialRequest, readMaterialRequest } from '../shared/materials.ts'
 import { registerSourceRequest, confirmEvidenceRequest, upsertClaimRequest, confirmOutlineRequest } from '../shared/research.ts'
@@ -15,11 +15,20 @@ import { parseRegisteredMaterial } from '../core/materials/parse.ts'
 import { parseMaterialBytes } from './parsers/parse.ts'
 import { registerSource, confirmEvidence, upsertClaim, confirmOutline } from '../core/evidence/evidence.ts'
 import type { RequestContext } from '../shared/schema.ts'
+import { saveDocumentRequest, proposalRequest, applyProposalRequest, undoDocumentRequest } from '../shared/document-api.ts'
+import { saveManual, applyProposal, rejectProposal, undoRevision, proposalImage } from '../core/editing/proposals.ts'
+import { wordStats } from '../core/editing/markdown.ts'
+import { generationRequest, runStartRequest, runControlRequest, runStateSchema } from '../shared/runs.ts'
+import { prepareGeneration, executeGeneration, type GenerationPlan } from '../core/pipeline/generation.ts'
+import { selectedModel, callStageModel } from './executor/model.ts'
+import { runReview, inspectReview, decideIssue } from '../core/review/review.ts'
+import { prepareDelivery, createDelivery, readDelivery, type DeliveryPlan } from '../core/export/delivery.ts'
+import { issueDecisionRequest, exportCreateRequest } from '../shared/review.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
 export const name = 'scholarflow'
-export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools']
+export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools', 'llm', 'agentDefaultModel', 'sessionProjections']
 export const Config = Schema.object({
   defaultProjectType: Schema.union(['course-paper', 'literature-review', 'research-paper']).default('course-paper').volatile(),
   language: Schema.union(['zh', 'en']).default('zh').volatile(),
@@ -35,7 +44,14 @@ const mutationRevision = (context: RequestContext) => {
 export class ScholarFlowRemote extends TypertRemoteService {
   private initPlans = new Map<string, StoredInitPlan>()
   private recoveryPlans = new Map<string, { context: StoredInitPlan['context']; peerId: string; hash: string; expires: number }>()
-  constructor(ctx: Host) { super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' }) }
+  private generationPlans = new Map<string, { plan: GenerationPlan; peerId: string; expires: number; selected: { provider: string; model: string; reasoningEffort?: string } }>()
+  private running = new Map<string, { controller: AbortController; context: RequestContext }>()
+  private exportPlans = new Map<string, { plan: DeliveryPlan; context: RequestContext; peerId: string; expires: number }>()
+  private bootInstance = randomUUID()
+  constructor(ctx: Host) {
+    super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
+    ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
+  }
 
   @Remote('project.inspect')
   async projectInspect(request: unknown, signal: AbortSignal) {
@@ -111,6 +127,187 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const input = scanRequest.parse(request)
       const { io } = await resolveStore(this.ctx, input.context, signal)
       return scanMaterials(io, input.directory, input.cursor, input.limit) })
+  }
+
+  @Remote('document.read')
+  async documentRead(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal), current = await snapshot(io)
+      return { document: current.document, revision: current.ledger.revision, statistics: wordStats(current.document.text) } })
+  }
+
+  @Remote('writing.prepare')
+  async writingPrepare(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = generationRequest.parse(request)
+      mutationRevision(input.context)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      const model = await selectedModel(this.ctx, input.context.sessionId, signal)
+      const plan = await prepareGeneration(io, input, { providerId: model.selected.provider, modelId: model.selected.model })
+      invariant(plan.inputBytes + 6096 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '选定范围超过模型上下文预算；请缩小章节和证据范围，未截掉关键证据继续生成。')
+      for (const [key, row] of this.generationPlans) if (row.expires < Date.now()) this.generationPlans.delete(key)
+      invariant(this.generationPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有生成计划。')
+      this.generationPlans.set(plan.id, { plan, selected: model.selected, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, runId: plan.snapshot.runId, model: plan.snapshot.modelDescriptor, stage: plan.snapshot.stage,
+        inputBytes: plan.inputBytes, evidenceIds: plan.evidenceIds, budget: plan.snapshot.budget,
+        scope: input.selection ? input.selection.sourceRange : { startUtf16: 0, endUtf16: (await snapshot(io)).document.text.length },
+        sourceText: input.selection?.sourceText, risks: ['将选定证据、当前稿件范围、项目文风和确认记忆发送给所列宿主模型提供方；本地资料模式不等于模型离线处理。',
+          '生成结果为待审阅建议，接受前不会改写主稿。宿主会话日志保留模型请求以供追溯；项目诊断日志不另存完整 Prompt。'] }
+    })
+  }
+
+  @Remote('runs.start')
+  async runsStart(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = runStartRequest.parse(request), row = this.generationPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请预览并确认当前宿主生成的计划。')
+      invariant(row.plan.input.context.workspaceId === input.context.workspaceId && row.plan.input.context.sessionId === input.context.sessionId && row.plan.snapshot.projectId === input.context.projectId,
+        'SESSION_BINDING_CHANGED', '生成确认不属于此工作区、会话或项目。')
+      const model = await selectedModel(this.ctx, input.context.sessionId, signal)
+      invariant(JSON.stringify(model.selected) === JSON.stringify(row.selected), 'MODEL_SELECTION_CHANGED', '宿主模型已改变，请重新预览资料发送范围。')
+      signal.throwIfAborted()
+      // Persistence must settle even when the request/model signal is cancelled.
+      // It still revalidates the original project binding and live Host policy.
+      const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal)
+      const controller = new AbortController(), runId = row.plan.snapshot.runId
+      invariant(!this.running.has(runId), 'RUN_IN_PROGRESS', '该运行已经开始。')
+      this.running.set(runId, { controller, context: row.plan.input.context })
+      this.generationPlans.delete(input.planId)
+      const owner = { pid: process.pid, bootInstance: this.bootInstance }
+      try {
+        return await executeGeneration(io, row.plan, owner, AbortSignal.any([signal, controller.signal]),
+          call => callStageModel(this.ctx, model.session, model.selected, call), candidate => {
+            if (candidate.pid === process.pid) return candidate.bootInstance === this.bootInstance
+            try { process.kill(candidate.pid, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH' }
+          })
+      } finally { this.running.delete(runId) }
+    })
+  }
+
+  @Remote('runs.cancel')
+  async runsCancel(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = runControlRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal), active = this.running.get(input.runId)
+      if (active) {
+        invariant(active.context.projectId === input.context.projectId && active.context.workspaceId === input.context.workspaceId && active.context.sessionId === input.context.sessionId,
+          'SESSION_BINDING_CHANGED', '取消操作不属于当前会话运行。')
+        active.controller.abort('user-cancel'); return { runId: input.runId, cancellationRequested: true }
+      }
+      const file = await io.read(`.scholarflow/runs/${input.runId}/state.json`)
+      invariant(file, 'RUN_NOT_FOUND', '运行不存在。')
+      return { run: runStateSchema.parse(JSON.parse(file.text)), cancellationRequested: false }
+    })
+  }
+
+  @Remote('runs.inspect')
+  async runsInspect(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = runControlRequest.parse(request), { io } = await resolveStore(this.ctx, input.context, signal)
+      const file = await io.read(`.scholarflow/runs/${input.runId}/state.json`)
+      invariant(file, 'RUN_NOT_FOUND', '运行尚未登记或不存在。')
+      return { run: runStateSchema.parse(JSON.parse(file.text)) }
+    })
+  }
+
+  @Remote('document.saveManual')
+  async documentSaveManual(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = saveDocumentRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return saveManual(io, input.text, input.baseHash, revision) })
+  }
+
+  @Remote('review.run')
+  async reviewRun(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const revision = mutationRevision(context), { io } = await resolveStore(this.ctx, context, signal)
+      return runReview(io, revision) })
+  }
+
+  @Remote('review.inspect')
+  async reviewInspect(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal)
+      return inspectReview(io) })
+  }
+
+  @Remote('review.decideIssue')
+  async reviewDecideIssue(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = issueDecisionRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return decideIssue(io, input.issueId, input.state, input.reason, revision) })
+  }
+
+  @Remote('export.preflight')
+  async exportPreflight(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), { context } = inspectRequest.parse(request), { io } = await resolveStore(this.ctx, context, signal)
+      const plan = await prepareDelivery(io)
+      for (const [key, row] of this.exportPlans) if (row.expires < Date.now()) this.exportPlans.delete(key)
+      invariant(this.exportPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有导出计划。')
+      this.exportPlans.set(plan.id, { plan, context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.planHash, documentHash: plan.documentHash, revisionId: plan.revisionId,
+        reviewState: plan.reviewState, reviewedAllowed: plan.reviewedAllowed, sourceIds: plan.sourceIds, unresolvedIssueIds: plan.unresolvedIssueIds,
+        formats: plan.formats, limitations: plan.limitations }
+    })
+  }
+
+  @Remote('export.create')
+  async exportCreate(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = exportCreateRequest.parse(request), row = this.exportPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.planHash === input.planHash, 'INVALID_APPROVAL', '请重新预检并确认宿主生成的导出计划。')
+      invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.context.projectId,
+        'SESSION_BINDING_CHANGED', '导出确认的项目或会话发生变化。')
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      const result = await createDelivery(io, row.plan, input.deliveryType, mutationRevision(input.context))
+      this.exportPlans.delete(input.planId); return result
+    })
+  }
+
+  @Remote('export.read')
+  async exportRead(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator()
+      const input = z.object({ context: inspectRequest.shape.context, deliveryId: z.string().regex(/^delivery_[\w]+$/) }).strict().parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return readDelivery(io, input.deliveryId) })
+  }
+
+  @Remote('document.undo')
+  async documentUndo(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = undoDocumentRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return undoRevision(io, input.revisionId, input.baseHash, revision) })
+  }
+
+  @Remote('edits.list')
+  async editsList(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal), { ledger } = await snapshot(io)
+      return { states: Object.values(ledger.proposalStates).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50) } })
+  }
+
+  @Remote('edits.read')
+  async editsRead(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = proposalRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal), { ledger } = await snapshot(io)
+      invariant(ledger.proposalStates[input.proposalId], 'PROPOSAL_NOT_FOUND', '建议不属于当前项目。')
+      const image = await proposalImage(io, input.proposalId)
+      return { proposal: image.proposal, proposalHash: image.contentHash, state: ledger.proposalStates[input.proposalId] } })
+  }
+
+  @Remote('edits.apply')
+  async editsApply(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = applyProposalRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return applyProposal(io, input.proposalId, revision, input.proposalHash) })
+  }
+
+  @Remote('edits.reject')
+  async editsReject(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = proposalRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return rejectProposal(io, input.proposalId, revision) })
   }
 
   @Remote('materials.register')

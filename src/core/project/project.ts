@@ -68,6 +68,7 @@ export async function prepareInit(io: FileStore, input: { title: string; type: s
   })
   const revision = newId('rev')
   const paper = `# ${config.project.title.replaceAll('\n', ' ')}\n\n[待补：已确认的写作要求、可定位证据与大纲。]\n`
+  const references = '% No cited sources in this document.\n'
   const ledger: Ledger = { schemaVersion: 1, projectId, revision: 0, requirements: {}, materials: {}, sources: {}, evidence: {}, claims: {},
     outline: { version: 0, title: config.project.title, researchQuestion: '', thesis: '', confirmation: 'draft', sections: [] },
     documents: { paper: { id: 'paper', relativePath: config.paths.mainDocument, format: 'markdown', currentHash: digest(paper), revisionId: revision, encoding: 'utf-8', lineEnding: 'lf', initialPlaceholder: true } },
@@ -75,7 +76,7 @@ export async function prepareInit(io: FileStore, input: { title: string; type: s
   const writingProfile = '# 项目文风\n\n清晰、准确、具体。区分来源事实与作者推论，保留限定条件与引用，不编造实验或数据。\n'
   const files = [
     { path: CONFIG_PATH, text: stringify(config) },
-    { path: config.paths.mainDocument, text: paper }, { path: config.paths.references, text: '% References are generated from cited project sources.\n' },
+    { path: config.paths.mainDocument, text: paper }, { path: config.paths.references, text: references },
     { path: '.scholarflow/.gitignore', text: 'cache/\ntmp/\nlogs/\ntransactions/\nstate.json\n' },
     { path: '.scholarflow/profiles/writing.md', text: writingProfile },
     { path: '.scholarflow/profiles/review.md', text: '# 项目审查\n\n分别报告规则检查、模型判断和未执行项目。真实性与引用问题优先。\n' },
@@ -84,7 +85,7 @@ export async function prepareInit(io: FileStore, input: { title: string; type: s
     { path: '.scholarflow/context/writing-memory.md', text: '# 已确认写作记忆\n' },
     { path: '.scholarflow/resources.lock.json', text: json({ schemaVersion: 1, projectId, skills: [], profiles: [{ ref: config.writing.preset, contentHash: digest(writingProfile), content: writingProfile }] }) },
     { path: `.scholarflow/drafts/${revision}/paper.md`, text: paper },
-    { path: `.scholarflow/drafts/${revision}/manifest.json`, text: json({ schemaVersion: 1, revisionId: revision, documentId: 'paper', contentHash: digest(paper), createdAt: new Date().toISOString() }) },
+    { path: `.scholarflow/drafts/${revision}/manifest.json`, text: json({ schemaVersion: 1, revisionId: revision, documentId: 'paper', contentHash: digest(paper), referencesHash: digest(references), createdAt: new Date().toISOString() }) },
     { path: LEDGER_PATH, text: json(ledgerSchema.parse(ledger)) },
   ]
   return { id: newId('plan'), config, files, contentHash: digest(json(files)), risks: ['创建列出的正文与项目文件，以及 .scholarflow 内部事务与锁元数据。原始资料保持只读。禁止覆盖既有文件。'] }
@@ -117,7 +118,7 @@ export async function snapshot(io: FileStore) {
   invariant(documentFile, 'DOCUMENT_NOT_FOUND', '主稿缺失，已保留项目记录。')
   invariant((await io.read(CONFIG_PATH))?.version === configFile.version && (await io.read(LEDGER_PATH))?.version === ledgerFile.version,
     'STALE_LEDGER_REVISION', '读取期间项目发生提交，请重新读取完整快照。')
-  return { config, configWarnings, configHash: digest(configFile.text), ledger, document: { ...ledger.documents.paper, text: documentFile.text,
+  return { config, configWarnings, configHash: digest(configFile.text), ledgerHash: digest(ledgerFile.text), ledger, document: { ...ledger.documents.paper, text: documentFile.text,
     contentHash: digest(documentFile.text), externalChange: digest(documentFile.text) !== ledger.documents.paper.currentHash } }
 }
 
@@ -130,6 +131,8 @@ export async function mutateLedger(io: FileStore, expectedRevision: number, chan
     const mutations = await change(next, current.config) ?? []
     next.revision++
     const ledgerFile = await io.read(LEDGER_PATH)
+    invariant(ledgerFile && digest(ledgerFile.text) === current.ledgerHash && digest((await io.read(CONFIG_PATH))!.text) === current.configHash,
+      'STALE_LEDGER_REVISION', '提交前项目记录或配置被外部修改，已保留改动。')
     await commit(io, [...mutations, { path: LEDGER_PATH, before: ledgerFile, after: json(ledgerSchema.parse(next)) }])
     return { revision: next.revision, ledger: next }
   })

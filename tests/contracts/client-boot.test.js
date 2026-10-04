@@ -13,6 +13,10 @@ function loadClient() {
   let handoff
   const errors = []
   runInNewContext(source, {
+    // micromark's browser entity decoder creates its DOM helper during import.
+    // This contract checks factory/Slot boot only; actual decoding/selection is
+    // exercised in real Chromium, rather than emulated by this VM stub.
+    document: { createElement(tag) { assert.equal(tag, 'i'); return { get textContent() { throw new Error('Entity decoding requires the real Chromium test') } } } },
     window: { __ModuleLoader__: { load(value) { handoff = value } } },
     console: { log() {}, error(...args) { errors.push(args) } },
   }, { filename: 'dist/client.js' })

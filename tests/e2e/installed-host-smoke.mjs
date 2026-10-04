@@ -150,6 +150,63 @@ try {
   await page.getByRole('button', { name: '确认大纲并添加章节', exact: true }).click()
   await page.getByRole('heading', { name: '论文大纲 · 已确认', exact: true }).waitFor()
   assert.equal(await readFile(join(projectRoot, '原始材料.txt'), 'utf8'), 'TEST_ONLY raw source: never overwrite this file.\r\n')
+  const selectedLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  const citeKey = Object.values(selectedLedger.sources)[0].citeKey
+  const repeatedParagraph = `TEST_ONLY **限定范围** \\* &amp; &#x1F600; [@${citeKey}]。`
+  const manualBody = `# TEST_ONLY 源码与渲染选区\n\n${repeatedParagraph}\n\n${repeatedParagraph}\n`
+  await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).fill(manualBody)
+  await page.getByRole('button', { name: '保存手工稿', exact: true }).click()
+  await page.getByText('手工稿已保存，审查需按新版本重跑。', { exact: true }).waitFor()
+  await page.locator('.sf-prose p').nth(1).getByText('限定范围', { exact: true }).waitFor()
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+  assert.match(await readFile(join(projectRoot, 'manuscript/references.bib'), 'utf8'), new RegExp(`@[^\\{]+\\{${citeKey},`))
+  const browserSelection = await page.evaluate(() => {
+    const paragraphs = document.querySelectorAll('.sf-prose p')
+    const second = paragraphs[1]
+    const leaves = second.querySelectorAll('[data-sf-leaf]')
+    const range = document.createRange()
+    range.setStart(leaves[0].firstChild, 0)
+    const last = leaves[leaves.length - 1].firstChild
+    range.setEnd(last, last.textContent.length)
+    const selected = window.getSelection()
+    selected.removeAllRanges(); selected.addRange(range)
+    second.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    return selected.toString()
+  })
+  assert.equal(browserSelection, 'TEST_ONLY 限定范围 * & 😀 [1]。')
+  const capture = page.getByRole('region', { name: '已捕获选区', exact: true })
+  await capture.waitFor()
+  assert.equal(await capture.locator('pre').innerText(), repeatedParagraph)
+  const secondOffset = manualBody.lastIndexOf(repeatedParagraph)
+  assert.match(await capture.innerText(), new RegExp(`\\[${secondOffset}, ${secondOffset + repeatedParagraph.length}\\)`))
+  // Crossing paragraph boundaries must reject rather than silently expand.
+  await page.evaluate(() => {
+    const paragraphs = document.querySelectorAll('.sf-prose p')
+    const first = paragraphs[0].querySelector('[data-sf-leaf]').firstChild
+    const last = paragraphs[1].querySelector('[data-sf-leaf]').firstChild
+    const range = document.createRange(); range.setStart(first, 0); range.setEnd(last, 4)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    paragraphs[1].dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  })
+  await capture.waitFor({ state: 'detached' })
+  await page.getByRole('button', { name: '运行确定性审查', exact: true }).click()
+  await page.getByRole('list', { name: '审查检查结果', exact: true }).getByText('unknown · model-assisted', { exact: false }).first().waitFor()
+  const savedBeforeExport = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+  await page.getByRole('button', { name: '预检当前版本导出', exact: true }).click()
+  await page.getByRole('dialog', { name: '导出确认', exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '确认导出已审查草稿', exact: true }).count(), 0)
+  await page.getByRole('button', { name: '确认导出工作草稿', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '工作草稿已导出：' }).waitFor()
+  const deliveryLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  const delivered = Object.values(deliveryLedger.deliveries)[0]
+  assert.equal(delivered.reviewState, 'draft-incomplete')
+  const deliveredRoot = join(projectRoot, 'manuscript/exports', delivered.id)
+  assert.equal(await readFile(join(deliveredRoot, 'paper.md'), 'utf8'), manualBody)
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), savedBeforeExport)
+  assert.ok((await readFile(join(deliveredRoot, 'quality-report.md'), 'utf8')).includes(delivered.revisionId))
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: /^下载 quality-report\.md/ }).click()
+  assert.equal((await download).suggestedFilename(), 'quality-report.md')
   // Reproduce an interrupted initialization using a TEST_ONLY durable journal,
   // then recover through the actual authenticated UI and sandboxed Host writer.
   const recoveryRoot = resolve(`.dsh-tmp/M1 中断恢复 TEST_ONLY ${Date.now()}`)
@@ -186,6 +243,7 @@ try {
   assert.equal(Object.keys(cold.value.data.ledger.evidence).length, 1)
   assert.equal(Object.values(cold.value.data.ledger.claims)[0].status, 'partially-supported')
   assert.equal(cold.value.data.ledger.outline.confirmation, 'confirmed')
+  assert.equal(cold.value.data.document.text, manualBody)
   const readOnlySession = await rpc('session/create', { request: { workspaceId: workspace.value.workspace.workspaceId, agentPreset: 'scholarflow' } })
   assert.equal(readOnlySession.ok, true, JSON.stringify(readOnlySession))
   const denied = await rpc('scholarflow.v1/verifyGateway', { request: { sessionId: readOnlySession.value.sessionId } })
@@ -201,6 +259,9 @@ try {
     twoSessionProjectRestore: true, coldProjectBindingRestore: true, mismatchedBindingRejected: true,
     nativeUiInterruptedInitRecovery: true,
     nativeUiMaterialParseEvidenceClaimOutline: true, evidenceChainColdRestore: true,
+    nativeUiManualSaveCitationProjection: true, nativeDomSecondParagraphSelection: true,
+    nativeDomEntityUnicodeDecode: true, crossParagraphSelectionRejected: true, manuscriptColdRestore: true,
+    nativeUiDeterministicReview: true, nativeUiWorkingDraftExportDownload: true, exportDoesNotMutateBody: true,
     clientErrors: errors, desktopProfileTouched: false }, null, 2))
   console.log('Real DSH G0 smoke passed; evidence: .dsh-tmp/g0-smoke.json')
 } catch (error) {

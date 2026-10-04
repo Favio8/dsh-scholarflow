@@ -11,7 +11,11 @@ ScholarFlow 的预设限制继承工具并安装同步守卫，普通 Mode 的�
 事务恢复确认和外部改稿检测。配置缺省值只作用于读取，未知键显示警告，不覆盖用户 YAML。
 已接入资料清单／明确登记、TXT/MD/文字 PDF/DOCX 受限解析，以及来源、定位证据、
 支持范围论点和小大纲的确认与恢复。扫描 PDF 无 OCR，图表／公式内容不冒充已核验。
-在线检索生成、选区建议、Review、私有 Skill 库与三格式导出仍在开发。
+已接入 Markdown 手工编辑与渲染预览、带 UTF-16 源码位置的浏览器选区、不可变建议、
+差异接受／拒绝、版本冲突拒绝和新修订撤销。已实现确定性审查、带理由的问题处理、
+审查过期判断，以及同版本 Markdown／BibTeX／质量报告工作草稿快照与下载。
+有限模型阶段已接入宿主适配器；真实提供方调用尚待这版验证，流程测试使用明确标记的 TEST_ONLY 适配器。
+完整工作流、模型辅助审查、在线检索、私有 Skill 库和全部 V1 验收仍在开发。
 此页面不会将集成验证当成完整产品交付。
 
 ## 开发与验证
@@ -36,6 +40,7 @@ node tests/e2e/installed-host-smoke.mjs
 - 最新真实宿主验证：[G0 installed Host](docs/g0-installed-host-2026-10-04.md)
 - 项目持久化验证：[M1 project store](docs/m1-project-store-2026-10-04.md)
 - 本地证据链验证：[M2 local evidence](docs/m2-local-evidence-2026-10-04.md)
+- 编辑、审查与交付验证：[Editing and delivery](docs/editing-delivery-2026-10-05.md)
 - 历史验证：[integration-verification](docs/integration-verification.md)
 - 版本范围：[compatibility](docs/compatibility.md)
 

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Research, OutlineEditor } from './research.tsx'
+import { Draft } from './draft.tsx'
+import { ReviewExport } from './review-export.tsx'
 
 type Host = any
 const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-app button,.sf-app select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
@@ -96,6 +98,8 @@ export function apply(ctx: Host) {
         <p>当前绑定：{project.binding.projectId}。同一工作区的多个 ScholarFlow 会话读取同一份项目数据。</p>
         <Research key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
         <OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
+        <Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
+        <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
       </>}
     </section>
   }
