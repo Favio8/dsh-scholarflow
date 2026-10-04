@@ -18,6 +18,7 @@ const fixture = resolve('.dsh-tmp/G0 中文工作区 TEST_ONLY')
 await mkdir(fixture, { recursive: true })
 const liveModel = process.argv.includes('--live-model')
 const liveResearch = process.argv.includes('--live-research')
+const liveSkills = process.argv.includes('--live-skills')
 const credentialPath = join(homedir(), '.dsh/.credentials.yaml')
 const credentialHash = liveModel ? digest(await readFile(credentialPath)) : undefined
 const testHome = resolve(liveModel ? '.dsh-tmp/model-home' : '.dsh-tmp/g0-home')
@@ -98,6 +99,80 @@ try {
   assert.equal(settingsWrite.ok, true, JSON.stringify(settingsWrite))
   const networkDisabled = await rpc('settings/update', { ns: 'scholarflow', patch: { networkEnabled: false }, expectedRevision: settingsWrite.value.revision })
   assert.equal(networkDisabled.ok, true)
+  // Operator-owned private resource storage is independent of workspace writes.
+  // The source and script are explicit TEST_ONLY fixtures; neither is executed.
+  const skillSource = resolve(`.dsh-tmp/G0 Skill 来源 TEST_ONLY ${Date.now()}`)
+  await mkdir(join(skillSource, 'one/scripts'), { recursive: true })
+  await mkdir(join(skillSource, 'two'), { recursive: true })
+  const originalSkill = '\uFEFF---\r\nname: TEST_ONLY-private-static\r\ndescription: TEST_ONLY never executed import fixture\r\nallowed-tools: Bash(*)\r\n---\r\nTEST_ONLY run scripts/no-run.js.\r\n'
+  const inertScript = 'throw new Error("TEST_ONLY Skill scripts must never execute")\n'
+  await writeFile(join(skillSource, 'one/SKILL.md'), originalSkill)
+  await writeFile(join(skillSource, 'one/scripts/no-run.js'), inertScript)
+  await writeFile(join(skillSource, 'two/SKILL.md'), '---\nname: TEST_ONLY-second\ndescription: TEST_ONLY second candidate\n---\nStatic text.\n')
+  await mkdir(join(testHome, 'skills'), { recursive: true })
+  const globalSentinel = join(testHome, 'skills/TEST_ONLY-scholarflow-global-sentinel.md')
+  await writeFile(globalSentinel, 'TEST_ONLY global catalog remains unchanged')
+  const catalogBefore = await rpc('scholarflow.v1/skills.library', { request: {} })
+  assert.equal(catalogBefore.value.ok, true, JSON.stringify(catalogBefore))
+  const offlineGithub = await rpc('scholarflow.v1/skills.scanGithub', { request: { url: 'https://github.com/openai/skills', subpath: 'skills/.system' } })
+  assert.equal(offlineGithub.value.ok, false)
+  assert.equal(offlineGithub.value.error.code, 'NETWORK_DISABLED')
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const settingsDialog = page.getByRole('dialog', { name: '设置', exact: true })
+  await settingsDialog.getByRole('button', { name: 'ScholarFlow', exact: true }).click()
+  const skillsUi = page.getByRole('region', { name: 'Academic Skills 私有库', exact: true })
+  await skillsUi.getByRole('textbox', { name: 'Host Skill 来源目录', exact: true }).fill(skillSource)
+  await skillsUi.getByRole('button', { name: '扫描本地 Skill 候选', exact: true }).click()
+  await skillsUi.getByRole('combobox', { name: '选择具体 Skill', exact: true }).selectOption('one')
+  assert.equal(await skillsUi.getByRole('combobox', { name: '选择具体 Skill' }).locator('option').count(), 2)
+  await skillsUi.getByRole('button', { name: '预览 Skill 导入', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Skill 导入确认', exact: true }).waitFor()
+  assert.match(await skillsUi.innerText(), /部分支持/)
+  await skillsUi.getByRole('button', { name: '取消 Skill 导入', exact: true }).click()
+  const afterCancel = await rpc('scholarflow.v1/skills.library', { request: {} })
+  assert.deepEqual(afterCancel.value.data.versions, catalogBefore.value.data.versions)
+  await skillsUi.getByRole('button', { name: '预览 Skill 导入', exact: true }).click()
+  await skillsUi.getByRole('button', { name: '确认安装到私有库', exact: true }).click()
+  await skillsUi.getByRole('status').filter({ hasText: '已安装到私有库' }).waitFor()
+  const privateCatalog = await rpc('scholarflow.v1/skills.library', { request: {} })
+  assert.equal(privateCatalog.value.ok, true)
+  const installedSkill = privateCatalog.value.data.versions.find(row => row.metadata.displayName === 'TEST_ONLY-private-static' && row.origin.rootFingerprint === digest(skillSource.toLowerCase()))
+  assert.ok(installedSkill)
+  const privateSkillPath = join(testHome, 'scholarflow/skills', digest(installedSkill.metadata.qualifiedId).slice(7), installedSkill.digest.slice(7), 'files')
+  assert.equal(await readFile(join(privateSkillPath, 'SKILL.md'), 'utf8'), originalSkill)
+  assert.equal(await readFile(join(privateSkillPath, 'scripts/no-run.js'), 'utf8'), inertScript)
+  assert.equal(await readFile(join(skillSource, 'one/SKILL.md'), 'utf8'), originalSkill)
+  assert.equal(await readFile(globalSentinel, 'utf8'), 'TEST_ONLY global catalog remains unchanged')
+  if (liveSkills) {
+    const enabled = await rpc('settings/update', { ns: 'scholarflow', patch: { networkEnabled: true }, expectedRevision: networkDisabled.value.revision })
+    assert.equal(enabled.ok, true)
+    await skillsUi.getByRole('combobox', { name: 'Skill 导入来源', exact: true }).selectOption('github')
+    await skillsUi.getByRole('textbox', { name: 'GitHub Skill 地址', exact: true }).fill('https://github.com/openai/skills')
+    await skillsUi.getByRole('textbox', { name: 'GitHub Skill 子目录', exact: true }).fill('skills/.system')
+    await skillsUi.getByRole('button', { name: '读取 GitHub Skill 候选', exact: true }).click()
+    const githubCandidates = skillsUi.getByRole('combobox', { name: '选择具体 Skill', exact: true })
+    await githubCandidates.selectOption('skill-installer', { timeout: 60000 })
+    assert.ok(await githubCandidates.locator('option').count() >= 2, 'real public repository exposes multiple Skill candidates')
+    await skillsUi.getByRole('button', { name: '预览 Skill 导入', exact: true }).click()
+    const githubPreview = page.getByRole('dialog', { name: 'Skill 导入确认', exact: true })
+    await githubPreview.waitFor({ timeout: 30000 })
+    assert.match(await githubPreview.innerText(), /固定 commit：[a-f0-9]{40}/u)
+    await skillsUi.getByRole('button', { name: '确认安装到私有库', exact: true }).click()
+    await skillsUi.getByRole('status').filter({ hasText: /已安装到私有库|此固定版本已在私有库/ }).waitFor({ timeout: 120000 })
+    const installed = await rpc('scholarflow.v1/skills.library', { request: {} })
+    assert.equal(installed.value.ok, true)
+    const version = installed.value.data.versions.find(row => row.metadata.qualifiedId === 'github:openai/skills:skills/.system/skill-installer')
+    assert.ok(version)
+    assert.equal(version.origin.kind, 'github')
+    assert.match(version.origin.commit, /^[a-f0-9]{40}$/u)
+    assert.equal(version.metadata.executionPolicy, 'instructions-only')
+    const resourceRoot = join(testHome, 'scholarflow/skills', digest(version.metadata.qualifiedId).slice(7), version.digest.slice(7), 'files')
+    for (const file of version.files) assert.equal(digest(await readFile(join(resourceRoot, file.relativePath))), file.hash)
+    assert.equal(await readFile(globalSentinel, 'utf8'), 'TEST_ONLY global catalog remains unchanged')
+    const disabled = await rpc('settings/update', { ns: 'scholarflow', patch: { networkEnabled: false }, expectedRevision: enabled.value.revision })
+    assert.equal(disabled.ok, true)
+  }
+  await settingsDialog.getByRole('button', { name: '关闭', exact: true }).click()
   const workspace = await rpc('workspace/create', { request: { path: fixture } })
   assert.equal(workspace.ok, true, JSON.stringify(workspace))
   assert.equal(resolve(workspace.value.workspace.path), fixture)
@@ -460,6 +535,10 @@ try {
   errors = await start('read-only')
   const restored = await rpc('scholarflow.v1/diagnostics')
   assert.equal(restored.value.settings[0].value.defaultProjectType, 'literature-review')
+  const coldSkills = await rpc('scholarflow.v1/skills.library', { request: {} })
+  assert.equal(coldSkills.value.ok, true)
+  assert.ok(coldSkills.value.data.versions.some(row => row.digest === installedSkill.digest))
+  assert.equal(await readFile(globalSentinel, 'utf8'), 'TEST_ONLY global catalog remains unchanged')
   const cold = await rpc('scholarflow.v1/project.inspect', { request: { context: { requestId: 'req_TEST_ONLY_cold', workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
   assert.equal(cold.value.ok, true, JSON.stringify(cold.value))
   assert.equal(cold.value.data.ledger.projectId, projectLedger.projectId)
@@ -479,7 +558,7 @@ try {
   const reset = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: originalType }, expectedRevision: restored.value.settings[0].revision })
   assert.equal(reset.ok, true)
   assert.deepEqual(errors, [])
-  const evidenceName = liveModel ? 'model' : liveResearch ? 'research' : 'g0'
+  const evidenceName = liveModel ? 'model' : liveResearch ? 'research' : liveSkills ? 'skills' : 'g0'
   await writeFile(`.dsh-tmp/${evidenceName}-smoke.json`, JSON.stringify({ fixture: 'TEST_ONLY', installed: '0.2.0-rc.2',
     settingsProjection: true, settingsPersistAcrossRestart: true, chineseWorkspaceNoGit: true,
     scopedSessionCreated: true, sandboxedWriteRead: true, readOnlyDenial: true,
@@ -500,6 +579,10 @@ try {
     offlineResearchDeniedBeforePlanOrIO: true, realCrossrefSearchMetadataOnly: liveResearch,
     cancelledSearchPreviewDoesNotSend: liveResearch, realCrossrefCandidateIncludedWithReason: liveResearch,
     realCrossrefDoiIdentityMatchedWithoutEvidenceUpgrade: liveResearch,
+    nativeUiPrivateSkillMultiCandidateImport: true, cancelledSkillPreviewDoesNotInstall: true,
+    privateSkillOriginalBytesAndInertScriptsPreserved: true, globalSkillCatalogNotModified: true,
+    privateSkillVersionsSurviveReadOnlyHostRestart: true,
+    githubNetworkDisabledBeforeIO: true, realPublicGithubMultiSkillPreviewAndImport: liveSkills,
     clientErrors: errors, desktopProfileTouched: false }, null, 2))
   console.log(`Real DSH ${evidenceName} smoke passed; evidence: .dsh-tmp/${evidenceName}-smoke.json`)
 } catch (error) {

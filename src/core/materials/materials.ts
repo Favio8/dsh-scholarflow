@@ -8,7 +8,7 @@ import { snapshot, mutateLedger, CONFIG_PATH, invalidateReviews } from '../proje
 export const MAX_MATERIAL_BYTES = 50 * 1024 * 1024
 const secretExtension = /\.(pem|key|p12|pfx|kdbx)$/i
 export function sensitivePath(path: string) {
-  return path.split('/').some(part => /^(?:\.env(?:\..*)?|\.ssh|\.aws|\.azure|\.gnupg|credentials?|secrets?|id_rsa|id_ed25519|token(?:s)?(?:\..*)?)$/i.test(part) || secretExtension.test(part))
+  return path.split('/').some(part => /^(?:\.env.*|\.ssh|\.aws|\.azure|\.gnupg|\.npmrc|\.pypirc|\.netrc|\.authinfo|\.?credentials?(?:\..*)?|secrets?|id_rsa|id_ed25519|token(?:s)?(?:\..*)?)$/i.test(part) || secretExtension.test(part))
 }
 export function excludedPath(path: string, config: ProjectConfig) {
   return path === config.paths.manuscriptDir || path.startsWith(config.paths.manuscriptDir + '/') ||

@@ -31,6 +31,11 @@ import { readEditorBuffer, writeEditorBuffer } from '../core/editing/buffer.ts'
 import { searchPrepareRequest, onlineConfirmRequest, candidateDecisionRequest, lookupPrepareRequest, type ResearchProvider } from '../shared/online-research.ts'
 import { crossrefProvider } from './providers/crossref.ts'
 import { prepareSearch, executeSearch, listSearches, readSearch, decideCandidate, prepareLookup, executeLookup, type SearchPlan, type LookupPlan } from '../core/research/online.ts'
+import { PrivateSkillLibrary } from './skills/library.ts'
+import { LocalSkillSource } from './skills/local.ts'
+import { skillOptions, type SkillBundle } from '../shared/skills.ts'
+import { hash } from '../shared/schema.ts'
+import { githubLocation, githubSkills, type GithubDiscovery, type GithubSkillPreview } from './skills/github.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -58,10 +63,22 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private researchProvider: ResearchProvider
   private searchPlans = new Map<string, { plan: SearchPlan; context: RequestContext; peerId: string; expires: number }>()
   private lookupPlans = new Map<string, { plan: LookupPlan; context: RequestContext; peerId: string; expires: number }>()
+  private skillLibrary = new PrivateSkillLibrary()
+  private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
+  private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
+  private skillPlans = new Map<string, { resource: { kind: 'local'; bundle: SkillBundle } | { kind: 'github'; preview: GithubSkillPreview }; hash: string; peerId: string; expires: number }>()
+  private githubProvider: ReturnType<typeof githubSkills>
+  private preparingSkill = false
   constructor(ctx: Host) {
     super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
     this.researchProvider = crossrefProvider(ctx.web)
+    this.githubProvider = githubSkills(ctx.web)
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
+    ctx.effect(() => {
+      const timer = setInterval(() => this.pruneSkills(), 60000)
+      timer.unref()
+      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear() }
+    }, 'scholarflow: expire operator skill previews')
   }
 
   @Remote('project.inspect')
@@ -136,6 +153,134 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private requireNetwork() {
     const settings = (this.ctx as Host).settings.describe({ redactSecrets: true }).find((row: Host) => row.ns === 'scholarflow')
     invariant(settings?.value.networkEnabled === true, 'NETWORK_DISABLED', '在线检索尚未开启；请先在 ScholarFlow 设置中启用，再预览本次查询发送范围。')
+  }
+
+  private pruneSkills() {
+    for (const [key, row] of this.skillSources) if (row.expires < Date.now()) this.skillSources.delete(key)
+    for (const [key, row] of this.githubSources) if (row.expires < Date.now()) this.githubSources.delete(key)
+    for (const [key, row] of this.skillPlans) if (row.expires < Date.now()) this.skillPlans.delete(key)
+  }
+
+  @Remote('skills.library')
+  async skillsLibrary(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); z.object({}).strict().parse(request); signal.throwIfAborted()
+      const catalog = await this.skillLibrary.list()
+      const picker = (this.ctx as Host).get('directoryPicker')?.capability()
+      return { ...catalog, pickerKind: picker?.kind ?? 'unavailable', location: '<DSH_HOME>/scholarflow/skills',
+        executionPolicy: 'instructions-only' }
+    })
+  }
+
+  @Remote('skills.pickLocal')
+  async skillsPickLocal(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); z.object({}).strict().parse(request)
+      const picker = (this.ctx as Host).get('directoryPicker')?.capability()
+      invariant(picker?.kind === 'native', 'SKILL_PICKER_UNAVAILABLE', '当前 Host 没有原生目录选择器；可明确输入 Host 上的目录再扫描。')
+      return { path: await picker.pick(signal) }
+    })
+  }
+
+  @Remote('skills.scanLocal')
+  async skillsScanLocal(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ path: z.string().min(1).max(4000) }).strict().parse(request)
+      this.pruneSkills()
+      invariant(this.skillSources.size < 8, 'TOO_MANY_PENDING_PLANS', '请先关闭已有来源预览。')
+      const source = await LocalSkillSource.open(input.path), discovery = await source.discover(signal)
+      signal.throwIfAborted()
+      invariant(this.skillSources.size < 8, 'TOO_MANY_PENDING_PLANS', '已有来源预览过多。')
+      const sourceId = newId('skill_source')
+      this.skillSources.set(sourceId, { source, candidates: discovery.candidates.map(row => row.subpath), peerId, expires: Date.now() + 600000 })
+      return { sourceId, ...discovery }
+    })
+  }
+
+  @Remote('skills.prepareLocal')
+  async skillsPrepareLocal(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ sourceId: z.string().max(200), subpath: z.string().max(800), options: skillOptions }).strict().parse(request)
+      this.pruneSkills()
+      const row = this.skillSources.get(input.sourceId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.candidates.includes(input.subpath), 'INVALID_APPROVAL', '请重新选择来源目录中的 Skill 候选。')
+      invariant(!this.preparingSkill && this.skillPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请完成或取消当前 Skill 预览。')
+      this.preparingSkill = true
+      try {
+        const bundle = await row.source.package(input.subpath, input.options, signal)
+        signal.throwIfAborted()
+        const planId = newId('skill_import'), planHash = digest(JSON.stringify(bundle.manifest))
+        this.skillPlans.set(planId, { resource: { kind: 'local', bundle }, hash: planHash, peerId, expires: Date.now() + 600000 })
+        return { planId, planHash, manifest: bundle.manifest, instructions: bundle.instructions,
+          risks: ['仅复制所列静态文件到 ScholarFlow 私有库；原始来源保持不变。', '不会运行脚本、安装依赖或授予上游声明的工具权限。', '安装后仍需在具体项目中明确启用阶段及固定版本。'] }
+      } finally { this.preparingSkill = false }
+    })
+  }
+
+  @Remote('skills.scanGithub')
+  async skillsScanGithub(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.requireNetwork(); this.pruneSkills()
+      const input = z.object({ url: z.string().max(3000), ref: z.string().max(300).optional(), subpath: z.string().max(800).optional() }).strict().parse(request)
+      const location = githubLocation(input.url, input.ref, input.subpath)
+      invariant(this.githubSources.size < 8, 'TOO_MANY_PENDING_PLANS', '请关闭已有 GitHub 来源预览。')
+      const discovery = await this.githubProvider.discover(location, AbortSignal.any([signal, AbortSignal.timeout(60000)]))
+      invariant(this.githubSources.size < 8, 'TOO_MANY_PENDING_PLANS', '已有 GitHub 来源预览过多。')
+      const sourceId = newId('github_source')
+      this.githubSources.set(sourceId, { discovery, peerId, expires: Date.now() + 600000 })
+      return { sourceId, repository: discovery.repository, ref: discovery.ref, commit: discovery.commit, subpath: discovery.subpath,
+        candidates: discovery.candidates.map(subpath => ({ subpath })), warnings: discovery.warnings }
+    })
+  }
+
+  @Remote('skills.prepareGithub')
+  async skillsPrepareGithub(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.requireNetwork(); this.pruneSkills()
+      const input = z.object({ sourceId: z.string().max(200), subpath: z.string().max(800), options: skillOptions }).strict().parse(request)
+      const row = this.githubSources.get(input.sourceId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now(), 'INVALID_APPROVAL', '请重新扫描固定 GitHub 来源。')
+      invariant(!this.preparingSkill && this.skillPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请完成或取消当前 Skill 预览。')
+      this.preparingSkill = true
+      try {
+        const preview = await this.githubProvider.preview(row.discovery, input.subpath, input.options, AbortSignal.any([signal, AbortSignal.timeout(25000)]))
+        const planId = newId('github_import'), planHash = digest(JSON.stringify(preview))
+        this.skillPlans.set(planId, { resource: { kind: 'github', preview }, hash: planHash, peerId, expires: Date.now() + 600000 })
+        return { planId, planHash, manifest: { metadata: preview.metadata, files: preview.files, origin: { kind: 'github', repository: row.discovery.repository,
+          commit: row.discovery.commit, subpath: preview.subpath, license: row.discovery.license } }, instructions: preview.instructions,
+          risks: ['确认后通过 Host 向 api.github.com 下载所列固定 Git blob；最多 200 个文件、20 MiB，Host 响应上限仍适用。',
+            '不读取凭据，不克隆仓库，不运行脚本、安装依赖或启动服务；网络错误与限流会停止，需明确重新预览。',
+            '私有库安装不修改项目绑定；最终摘要按全部实际下载字节计算，原分支后续变化不影响此 commit。'] }
+      } finally { this.preparingSkill = false }
+    })
+  }
+
+  @Remote('skills.install')
+  async skillsInstall(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ planId: z.string().max(200), planHash: hash }).strict().parse(request)
+      const row = this.skillPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.hash === input.planHash, 'INVALID_APPROVAL', '请重新预览并确认此固定资源版本。')
+      signal.throwIfAborted()
+      if (row.resource.kind === 'github') this.requireNetwork()
+      this.skillPlans.delete(input.planId) // A confirmation cannot be replayed.
+      const bundle = row.resource.kind === 'local' ? row.resource.bundle : await this.githubProvider.download(row.resource.preview,
+        AbortSignal.any([signal, AbortSignal.timeout(120000)]))
+      signal.throwIfAborted()
+      return this.skillLibrary.install(bundle)
+    })
+  }
+
+  @Remote('skills.dismiss')
+  async skillsDismiss(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ sourceId: z.string().max(200).optional(), planId: z.string().max(200).optional() }).strict().parse(request)
+      signal.throwIfAborted()
+      if (input.sourceId && this.skillSources.get(input.sourceId)?.peerId === peerId) this.skillSources.delete(input.sourceId)
+      if (input.sourceId && this.githubSources.get(input.sourceId)?.peerId === peerId) this.githubSources.delete(input.sourceId)
+      if (input.planId && this.skillPlans.get(input.planId)?.peerId === peerId) this.skillPlans.delete(input.planId)
+      return { dismissed: true }
+    })
   }
 
   @Remote('research.prepare')

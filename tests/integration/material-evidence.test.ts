@@ -8,7 +8,8 @@ import { parseMaterialBytes } from '../../src/host/parsers/parse.ts'
 import { registerSource, confirmEvidence, upsertClaim, confirmOutline } from '../../src/core/evidence/evidence.ts'
 
 async function setup() {
-  const io = new MemoryStore({ '资料/原始笔记.txt': 'TEST_ONLY 提示支持课堂样本中的有限结论。\r\n不支持泛化到全部人群。\r\n', '.env': 'TEST_ONLY_SECRET', 'credentials/key.txt': 'TEST_ONLY_SECRET' })
+  const io = new MemoryStore({ '资料/原始笔记.txt': 'TEST_ONLY 提示支持课堂样本中的有限结论。\r\n不支持泛化到全部人群。\r\n', '.env': 'TEST_ONLY_SECRET', 'credentials/key.txt': 'TEST_ONLY_SECRET',
+    '.credentials.yaml': 'TEST_ONLY never a real key', '.npmrc': 'TEST_ONLY never a real token' })
   await initialize(io, await prepareInit(io, { title: 'TEST_ONLY 证据链', type: 'course-paper' }))
   return io
 }
@@ -25,11 +26,12 @@ test('scan/register are metadata-only and sensitive material cannot be selected'
   const original = io.readBytes.bind(io); io.readBytes = async (path, limit) => { reads.push(path); return original(path, limit) }
   const scan = await scanMaterials(io)
   assert.ok(scan.files.some(file => file.relativePath === '资料'))
-  assert.ok(!scan.files.some(file => file.relativePath === '.env' || file.relativePath === 'credentials'))
+  assert.ok(!scan.files.some(file => ['.env', 'credentials', '.credentials.yaml', '.npmrc'].includes(file.relativePath)))
   assert.equal(scan.contentRead, false)
   await registerMaterial(io, { relativePath: '资料/原始笔记.txt', role: 'notes', confirmExcludedFile: false }, 0)
   assert.deepEqual(reads, [])
   await assert.rejects(registerMaterial(io, { relativePath: '.env', role: 'notes', confirmExcludedFile: true }, 1), { code: 'MATERIAL_ACCESS_DENIED' })
+  for (const path of ['.credentials.yaml', '.npmrc']) await assert.rejects(registerMaterial(io, { relativePath: path, role: 'notes', confirmExcludedFile: true }, 1), { code: 'MATERIAL_ACCESS_DENIED' })
 })
 
 test('SF-011/012: a real local quotation, scoped claim and confirmed outline survive reopen', async () => {

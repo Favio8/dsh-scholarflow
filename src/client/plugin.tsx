@@ -3,6 +3,7 @@ import { Research, OutlineEditor } from './research.tsx'
 import { Draft } from './draft.tsx'
 import { ReviewExport } from './review-export.tsx'
 import { Overview } from './overview.tsx'
+import { AcademicSkills } from './academic-skills.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export'] as const
@@ -151,11 +152,11 @@ export function apply(ctx: Host) {
         setRow(result.value); setMessage('已保存，仅影响新项目默认值。')
       } catch (e) { setMessage((e as Error).message) }
     }
-    return <section className="sf-app sf-settings"><style>{CSS}</style><h2>ScholarFlow 设置</h2>
+    return <section className="sf-app sf-settings" style={{ overflow: 'auto' }}><style>{CSS + EXTRA_CSS}</style><h2>ScholarFlow 设置</h2>
       {row ? <><label>新项目默认类型 <select aria-label="新项目默认类型" value={row.value.defaultProjectType} onChange={e => save('defaultProjectType', e.target.value)}>
         <option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></label>
-        <label><input type="checkbox" checked={row.value.networkEnabled} onChange={e => save('networkEnabled', e.target.checked)} />允许外部检索（查询词发送给检索提供方）</label></>
-        : <p>正在读取宿主设置…</p>}<p role="status">{message}</p></section>
+        <label><input type="checkbox" checked={row.value.networkEnabled} onChange={e => save('networkEnabled', e.target.checked)} />允许外部检索与公开 Skill 读取（每次操作展示发送范围）</label></>
+        : <p>正在读取宿主设置…</p>}<p role="status">{message}</p><AcademicSkills api={api} /></section>
   }
   ctx.effect(() => ctx.slots.inject('main', function* () {
     yield ctx.slots.register({ name: 'main', key: 'scholarflow', children: { 'scholarflow.agent': { kind: 'single', scope: 'session-maybe' }, 'scholarflow.project': { kind: 'single', scope: 'session-maybe' } } }, Workspace)
