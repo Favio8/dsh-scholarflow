@@ -32,7 +32,7 @@ import { readEditorBuffer, writeEditorBuffer } from '../core/editing/buffer.ts'
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
 export const name = 'scholarflow'
-export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools', 'llm', 'agentDefaultModel', 'sessionProjections']
+export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools', 'systemPrompt', 'agentPresets', 'llm', 'agentDefaultModel', 'sessionProjections']
 export const Config = Schema.object({
   defaultProjectType: Schema.union(['course-paper', 'literature-review', 'research-paper']).default('course-paper').volatile(),
   language: Schema.union(['zh', 'en']).default('zh').volatile(),
@@ -433,9 +433,64 @@ export class ScholarFlowRemote extends TypertRemoteService {
 
   // A G0-only endpoint. Never exposed in normal desktop processes or to model tools.
   @Remote
+  async verifyPresetSwitch(request: unknown) {
+    this.requireOperator()
+    invariant(process.env.SCHOLARFLOW_G0_VERIFY === '1', 'UNSUPPORTED_DSH_CAPABILITY', '此接口仅供隔离 G0 验证。')
+    const ctx = this.ctx as Host, { sessionId } = sessionRequest.parse(request)
+    const resolved = await ctx.sessionController.resolveAgent(sessionId)
+    if (resolved.error) throw resolved.error
+    const agent = resolved.agent
+    const original = ctx.agentPresets.composedPreset(agent.ctx)
+    invariant(original === 'standard', 'INVALID_REQUEST', '测试只允许使用空白 standard 会话。')
+    let dispose: (() => void) | undefined
+    try {
+      await ctx.agentPresets.select(agent, 'scholarflow')
+      const academicTools = ctx.tools.schemas(agent).map((tool: Host) => tool.name)
+      // Prove a tool registered after the preset mounted is masked too.
+      const template = ctx.tools.get(academicTools[0], agent)
+      dispose = ctx.tools.register({ ...template, name: 'TEST_ONLY_late_global', description: 'TEST_ONLY never executed',
+        execute: async () => { throw new Error('TEST_ONLY forbidden body') } })
+      const lateGlobalHidden = !ctx.tools.schemas(agent).some((tool: Host) => tool.name === 'TEST_ONLY_late_global')
+      dispose?.(); dispose = undefined
+      await ctx.agentPresets.select(agent, 'standard')
+      const ordinaryTools = ctx.tools.schemas(agent).map((tool: Host) => tool.name)
+      const ordinaryPrompt = await ctx.systemPrompt.assemble({ scope: agent, agent })
+      return { academicTools, lateGlobalHidden, ordinaryTools,
+        ordinaryPolicyAbsent: !ordinaryPrompt.sections.some((section: Host) => section.name === 'scholarflow:policy') }
+    } finally {
+      dispose?.()
+      if (ctx.agentPresets.composedPreset(agent.ctx) !== original) await ctx.agentPresets.select(agent, original)
+    }
+  }
+
+  @Remote
+  async verifyAcademicTools(request: unknown, signal: AbortSignal) {
+    this.requireOperator()
+    invariant(process.env.SCHOLARFLOW_G0_VERIFY === '1', 'UNSUPPORTED_DSH_CAPABILITY', '此接口仅供隔离 G0 验证。')
+    const ctx = this.ctx as Host, { sessionId } = sessionRequest.parse(request)
+    const resolved = await ctx.sessionController.resolveAgent(sessionId)
+    if (resolved.error) throw resolved.error
+    const agent = resolved.agent
+    const call = (name: string, args: unknown) => ctx.tools.execute({ callId: newId('call'), name, arguments: args, agent, signal })
+    const inspect = await call('scholar_project', { action: 'inspect' })
+    const manuscript = await call('scholar_manuscript', { action: 'read' })
+    const forged = await call('scholar_project', { action: 'inspect', workspaceId: 'workspace_TEST_ONLY_forged', root: 'C:/' })
+    const shell = await call('bash', { command: 'echo TEST_ONLY_FORBIDDEN' })
+    const prompt = await ctx.systemPrompt.assemble({ scope: agent, agent, signal })
+    return { projectId: inspect.value?.data?.project?.id, inspectOk: !inspect.isError && inspect.value?.ok === true,
+      manuscriptOk: !manuscript.isError && manuscript.value?.ok === true,
+      documentHash: manuscript.value?.data?.documentHash,
+      forgedDenied: forged.isError || forged.value?.ok === false,
+      shellDenied: shell.isError,
+      scopedPolicy: prompt.sections.length === 1 && prompt.sections[0].name === 'scholarflow:policy',
+      promptTools: prompt.tools.map((tool: Host) => tool.name) }
+  }
+
+  @Remote
   async verifyGateway(request: unknown, signal: AbortSignal) {
     const ctx = this.ctx as Host
-    if (process.env.SCHOLARFLOW_G0_VERIFY !== '1' || !ctx.invocation?.peer)
+    this.requireOperator()
+    if (process.env.SCHOLARFLOW_G0_VERIFY !== '1')
       throw new Error('UNSUPPORTED_DSH_CAPABILITY: verification requires isolated authenticated G0 Host')
     const { sessionId } = sessionRequest.parse(request)
     const { meta } = await ctx.sessionController.inspect(sessionId, signal)
@@ -451,9 +506,11 @@ export class ScholarFlowRemote extends TypertRemoteService {
     const outcome = await ctx.fs.writeText(target, 'ScholarFlow G0 authorized filesystem verification\n',
       { kind: 'createIfAbsent' }, signal, policy)
     const read = await ctx.fs.readText(target, signal)
+    const prompt = await ctx.systemPrompt.assemble({ scope: resolved.agent, agent: resolved.agent, signal })
     return { sessionId, mode: policy.mode, relativePath, root: meta.cwd, target: target.displayPath, version: outcome.version,
       recovered: read === 'ScholarFlow G0 authorized filesystem verification\n',
       allowedTools: ctx.tools.schemas(resolved.agent).map((tool: Host) => tool.name),
+      hasAcademicPolicy: prompt.sections.some((section: Host) => section.name === 'scholarflow:policy'),
       globalToolCount: ctx.tools.schemas().length }
   }
 }

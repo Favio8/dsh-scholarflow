@@ -29,9 +29,8 @@
         name: ScholarFlow
         description: 学术项目工作区：以项目文件夹为中心、以可追溯证据为基础的论文写作会话。
         order: 50
-        # G0-02 verifies registration, visibility and isolation only. The real
-        # ScholarFlow tool surface is not built yet, so the Mode declares no
-        # capability it cannot honestly back.
+        # The agent entry registers nine controlled academic tools and its
+        # scoped policy. Body changes still require a real operator's acceptance.
         plugins:
           - id: scholarflow-controlled-tools
             name: dsh-scholarflow/agent

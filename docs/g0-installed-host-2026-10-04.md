@@ -32,10 +32,9 @@ and generated evidence are ignored under `.dsh-tmp/`.
   policy returned by `sandboxPolicy.resolve({session})`. Workspace writes succeed;
   a fresh read-only session fails with the real sandbox denial. Existing sessions
   preserve their own policy overrides across Host restarts.
-- The scoped preset calls `tools.restrict({allow:[]})` and installs a monotonic
-  guard. ScholarFlow cannot inherit arbitrary filesystem/shell tools. A separately
-  created Standard session still sees its own tools. Academic tools will be
-  registered locally under this preset during implementation.
+- The initial scoped preset used `tools.restrict({allow:[]})` with a monotonic
+  guard. The actual academic registrations require the corrected ancestor-scope
+  mask described in the 2026-10-05 addendum below.
 
 ## Reproduction and evidence
 
@@ -70,3 +69,33 @@ The old automatically executing G0 probe entry has been retired. Production boot
 no longer start probe model calls. The `verifyGateway` endpoint is refused unless
 the isolated Host explicitly sets `SCHOLARFLOW_G0_VERIFY=1` and has an authenticated
 invocation; it is never registered as a model tool.
+
+## Academic tool scope addendum — 2026-10-05
+
+The installed Host smoke now executes the real Tool SDK with a bound Agent,
+without making a model request. The preset exposes exactly nine controlled tools:
+`scholar_project`, `scholar_materials`, `scholar_research`, `scholar_evidence`,
+`scholar_outline`, `scholar_manuscript`, `scholar_review`, `scholar_skill`,
+`scholar_export`. Current actions read actual project data, run deterministic
+review, or preflight export. They cannot accept proposals, grant user approval,
+install Skills, initialize projects, write manuscripts, or publish.
+
+`tools.restrict({allow:[]})` on a standing preset also masks that preset's own
+registrations when inherited by an Agent. The corrected mask denies inherited
+global names, updates on `tools/change`, and keeps an exact-name monotonic guard.
+The effect belongs to the preset, so switching a blank session to ScholarFlow
+and back does not leave an Agent-owned restriction on Standard.
+
+Verified in `tests/e2e/installed-host-smoke.mjs`: exact nine-tool catalog;
+scoped complete policy with normal runtime contexts retained; project identity
+and manuscript hash from actual tool execution; forged root/workspace rejected;
+shell execution denied; academic tools and policy absent from Standard; blank
+Standard → ScholarFlow → Standard restores the original catalog; a later global
+registration remains hidden from ScholarFlow. Tests use isolated DSH_HOME only.
+G0 verification Remotes require the actual authenticated operator plus the
+explicit test environment flag. Full prompt text and credentials are not returned.
+
+Online lookup, private Skill resolution, model-native proposal creation, section
+generation, and model-assisted review remain incomplete. The nine registered
+tool names do not imply those actions are implemented. Production reports these
+limits explicitly. This addendum is not full V1 acceptance.

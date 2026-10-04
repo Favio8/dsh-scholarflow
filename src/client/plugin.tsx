@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Research, OutlineEditor } from './research.tsx'
 import { Draft } from './draft.tsx'
 import { ReviewExport } from './review-export.tsx'
@@ -51,15 +51,41 @@ export function apply(ctx: Host) {
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
     const [tab, setTab] = useState<(typeof TABS)[number]>('Overview')
+    const bindingKey = `${workspace?.workspaceId ?? ''}:${props.sessionId ?? ''}`
+    const liveBinding = useRef(bindingKey), readSequence = useRef(0)
+    const latest = useRef({ busy, project })
+    liveBinding.current = bindingKey; latest.current = { busy, project }
     const context = () => ({ requestId: `req_${crypto.randomUUID()}`, workspaceId: workspace?.workspaceId, sessionId: props.sessionId,
       ...(project?.ledger && { expectedLedgerRevision: project.ledger.revision }),
       ...(project?.binding?.projectId && project.binding.workspaceId === workspace?.workspaceId && project.binding.sessionId === props.sessionId
         ? { projectId: project.binding.projectId } : {}) })
+    const publish = (value: Host) => {
+      if (`${value.binding.workspaceId}:${value.binding.sessionId}` !== liveBinding.current) return
+      readSequence.current++ // Invalidate reads started before a committed mutation.
+      setProject(value)
+    }
+    const refresh = async () => {
+      const scope = bindingKey, sequence = ++readSequence.current
+      const value = await api('project.inspect', { context: context() })
+      if (sequence === readSequence.current && scope === liveBinding.current) publish(value)
+    }
+    const refreshRef = useRef(refresh); refreshRef.current = refresh
     useEffect(() => {
       let live = true
       setPlan(undefined); setProject(undefined); setError(''); setTab('Overview')
-      if (workspace && props.sessionId) api('project.inspect', { context: context() }).then(value => { if (live) setProject(value) }).catch(e => live && setError(e.message))
+      if (workspace && props.sessionId) refresh().catch(e => live && setError(e.message))
       return () => { live = false }
+    }, [workspace?.workspaceId, props.sessionId])
+    useEffect(() => {
+      if (!workspace || !props.sessionId) return
+      let live = true
+      const timer = window.setInterval(() => {
+        if (!live || document.hidden || latest.current.busy || !latest.current.project?.initialized) return
+        refreshRef.current().catch(error => {
+          if (live) setError(`刷新未完成，当前页面和编辑仍保留：${error.message}`)
+        })
+      }, 10000)
+      return () => { live = false; clearInterval(timer) }
     }, [workspace?.workspaceId, props.sessionId])
     const act = async (fn: () => Promise<unknown>) => { setBusy(true); setError(''); try { await fn() } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }
     const startSession = () => act(async () => {
@@ -78,6 +104,7 @@ export function apply(ctx: Host) {
       <label>DSH 工作区 <select aria-label="DSH 工作区" value={selectedWorkspace || workspace?.workspaceId || ''} onChange={e => setSelectedWorkspace(e.target.value)}><option value="">请选择</option>
         {workspaces.map((item: Host) => <option key={item.workspaceId} value={item.workspaceId}>{item.title}</option>)}</select></label>
       <button disabled={busy} onClick={startSession}>新建 ScholarFlow 会话</button>
+      <button disabled={busy || !workspace || !props.sessionId} onClick={() => act(refresh)}>刷新项目状态</button>
       {error && <p role="alert" className="sf-error">{error}</p>}
       {!project && <p>选择 DSH 工作区并创建专属会话，切换 Mode 本身不会创建论文目录。</p>}
       {project && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId && !project.initialized && <>
@@ -85,7 +112,7 @@ export function apply(ctx: Host) {
         {project.recovery ? <section aria-label="事务恢复确认"><h3>检测到未完成的项目事务</h3>
           <p>恢复只会完成已记录的提交。若文件出现外部修改，保留当前稿件并停止恢复。</p>
           {project.recovery.transactions.map((txn: Host) => <div key={txn.id}><p>{txn.id}</p><ul>{txn.files.map((file: Host) => <li key={file.relativePath}>{file.relativePath} · {file.status === 'published' ? '已写入' : '待恢复'}</li>)}</ul></div>)}
-          <button disabled={busy} onClick={() => act(async () => setProject(await api('project.recover', { context: context(), planId: project.recovery.planId, planHash: project.recovery.planHash })))}>确认恢复已记录事务</button>
+          <button disabled={busy} onClick={() => act(async () => publish(await api('project.recover', { context: context(), planId: project.recovery.planId, planHash: project.recovery.planHash })))}>确认恢复已记录事务</button>
         </section> : project.metadataExists ? <p role="alert">检测到既有 .scholarflow 目录，请先检查项目，禁止覆盖。</p> : <>
           <label>项目标题 <input aria-label="项目标题" value={title} onChange={e => setTitle(e.target.value)} maxLength={300} /></label>
           <label>论文类型 <select aria-label="论文类型" value={type} onChange={e => setType(e.target.value)}><option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></label>
@@ -96,7 +123,7 @@ export function apply(ctx: Host) {
       {plan && <section role="dialog" aria-modal="false" aria-label="初始化确认"><h3>确认创建专属项目文件</h3>
         <ul>{plan.files.map((file: Host) => <li key={file.relativePath}>{file.relativePath}</li>)}</ul>
         {plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
-        <button disabled={busy} onClick={() => act(async () => { setProject(await api('project.initialize', { context: context(), planId: plan.planId, planHash: plan.planHash })); setPlan(undefined) })}>确认初始化</button>
+        <button disabled={busy} onClick={() => act(async () => { publish(await api('project.initialize', { context: context(), planId: plan.planId, planHash: plan.planHash })); setPlan(undefined) })}>确认初始化</button>
         <button disabled={busy} onClick={() => setPlan(undefined)}>取消</button></section>}
       {project?.initialized && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId && <><h3>{project.config.project.title}</h3><p>项目已保存 · ledger 版本 {project.ledger.revision} · {project.document.externalChange ? '检测到外部稿件修改' : '主稿版本一致'}</p>
         {!!project.configWarnings?.length && <p role="alert">以下配置键未生效，原文件已保留：{project.configWarnings.join('、')}</p>}
@@ -105,11 +132,11 @@ export function apply(ctx: Host) {
           const next = e.key === 'ArrowRight' ? (index + 1) % TABS.length : e.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1
           if (next < 0) return; e.preventDefault(); setTab(TABS[next]); e.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`#sf-tab-${TABS[next]}`)?.focus()
         }}>{name} · {TAB_LABELS[index]}</button>)}</nav>
-        <div id="sf-panel-Overview" role="tabpanel" aria-labelledby="sf-tab-Overview" hidden={tab !== 'Overview'}><Overview key={`overview_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} /></div>
-        <div id="sf-panel-Research" role="tabpanel" aria-labelledby="sf-tab-Research" hidden={tab !== 'Research'}><Research key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} /></div>
-        <div id="sf-panel-Outline" role="tabpanel" aria-labelledby="sf-tab-Outline" hidden={tab !== 'Outline'}><OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} /></div>
-        <div id="sf-panel-Draft" role="tabpanel" aria-labelledby="sf-tab-Draft" hidden={tab !== 'Draft'}><Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} /></div>
-        <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} mode={tab} />
+        <div id="sf-panel-Overview" role="tabpanel" aria-labelledby="sf-tab-Overview" hidden={tab !== 'Overview'}><Overview key={`overview_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
+        <div id="sf-panel-Research" role="tabpanel" aria-labelledby="sf-tab-Research" hidden={tab !== 'Research'}><Research key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
+        <div id="sf-panel-Outline" role="tabpanel" aria-labelledby="sf-tab-Outline" hidden={tab !== 'Outline'}><OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
+        <div id="sf-panel-Draft" role="tabpanel" aria-labelledby="sf-tab-Draft" hidden={tab !== 'Draft'}><Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
+        <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} mode={tab} />
       </>}
     </section>
   }

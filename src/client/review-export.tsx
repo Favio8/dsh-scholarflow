@@ -7,7 +7,7 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode }
   useEffect(() => { let live = true; setPlan(undefined)
     api('review.inspect', { context: context() }).then(value => live && setReview(value)).catch(error => live && setMessage(error.message))
     return () => { live = false }
-  }, [project.ledger.revision])
+  }, [project.ledger.revision, project.document.contentHash, project.document.externalChange])
   const issues = Object.values(project.ledger.reviewIssues) as any[]
   return <>
     <section id="sf-panel-Review" role="tabpanel" aria-labelledby="sf-tab-Review" hidden={mode !== 'Review'} aria-label="审查"><h3>审查</h3>

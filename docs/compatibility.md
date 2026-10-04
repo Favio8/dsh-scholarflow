@@ -1,5 +1,10 @@
 # 兼容性记录（ScholarFlow × DSH）
 
+2026-10-05 更新：九个受控学术工具、专属提示词、伪造项目参数拒绝、
+新注册全局工具屏蔽与空白会话 Mode 往返恢复均已在真实隔离 Host 验证。
+Preset 是 Agent 的祖先作用域；空 allowlist 会连自身工具一起屏蔽。
+当前使用动态继承工具 deny mask 与精确名称守卫，见最新 G0 记录的附录。
+
 2026-10-04 更新：设置 volatile 投影、RPC、会话沙箱与宿主会话 Factory 已真实验证，
 详见 [最新 G0 记录](g0-installed-host-2026-10-04.md)。当前入口为构建后的
 `dist/host.js` 和 `dist/client.js`；下面保留早期验证上下文。
