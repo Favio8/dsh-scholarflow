@@ -123,6 +123,37 @@ try {
   await settingsDialog.getByRole('button', { name: 'ScholarFlow', exact: true }).click()
   assert.equal(await settingsDialog.getByRole('combobox', { name: '新项目默认语言', exact: true }).inputValue(), 'en')
   assert.equal(await settingsDialog.getByRole('combobox', { name: '新项目默认模型调用上限', exact: true }).inputValue(), '7')
+  const profilesUi = settingsDialog.getByRole('region', { name: 'Writing Profiles 私有模板库', exact: true })
+  const profileName = `TEST_ONLY 文风 ${Date.now()}`, profileInstructions = '\uFEFF# TEST_ONLY 项目文风\r\n保留引用、数字与限定范围，不编造实验结果。\r\n'
+  const profileFile = join(skillSource, `${profileName}.md`)
+  await writeFile(profileFile, profileInstructions)
+  const profilesBefore = (await rpc('scholarflow.v1/profiles.library', { request: {} })).value.data.profiles
+  await profilesUi.getByLabel('导入本机文风说明文件', { exact: true }).setInputFiles(profileFile)
+  await page.waitForFunction(name => document.querySelector('input[aria-label="文风模板名称"]')?.value === name, profileName)
+  await profilesUi.getByRole('button', { name: '预览导入文风模板', exact: true }).click()
+  await profilesUi.getByRole('dialog', { name: '文风模板导入确认', exact: true }).waitFor()
+  await profilesUi.getByRole('button', { name: '取消文风模板导入', exact: true }).click()
+  await profilesUi.getByRole('dialog', { name: '文风模板导入确认', exact: true }).waitFor({ state: 'detached' })
+  assert.deepEqual((await rpc('scholarflow.v1/profiles.library', { request: {} })).value.data.profiles, profilesBefore)
+  await profilesUi.getByRole('button', { name: '预览导入文风模板', exact: true }).click()
+  await profilesUi.getByRole('button', { name: '确认导入文风模板', exact: true }).click()
+  await profilesUi.getByText('文风模板已保存；当前论文未改变。', { exact: true }).waitFor()
+  const installedProfile = (await rpc('scholarflow.v1/profiles.library', { request: {} })).value.data.profiles.find(row => row.displayName === profileName)
+  assert.ok(installedProfile); assert.equal(installedProfile.instructions, profileInstructions)
+  const profileDownload = page.waitForEvent('download')
+  await profilesUi.getByRole('button', { name: '导出所选文风说明', exact: true }).click()
+  const downloadedProfile = await profileDownload
+  const profileExport = resolve('.dsh-tmp/TEST_ONLY-exported-writing-profile.md'); await downloadedProfile.saveAs(profileExport)
+  assert.equal(await readFile(profileExport, 'utf8'), profileInstructions)
+  await profilesUi.getByRole('button', { name: '编辑文风模板为新版本', exact: true }).click()
+  const updatedProfileInstructions = '# TEST_ONLY updated writing profile\n保留原文中的未知和限定条件。\n'
+  await profilesUi.getByRole('textbox', { name: '文风模板说明', exact: true }).fill(updatedProfileInstructions)
+  await profilesUi.getByRole('button', { name: '预览导入文风模板', exact: true }).click()
+  await profilesUi.getByRole('button', { name: '确认导入文风模板', exact: true }).click()
+  await profilesUi.getByRole('dialog', { name: '文风模板导入确认', exact: true }).waitFor({ state: 'detached' })
+  const profileVersions = (await rpc('scholarflow.v1/profiles.library', { request: {} })).value.data.profiles.filter(row => row.id === installedProfile.id)
+  assert.equal(profileVersions.length, 2)
+  assert.equal(profileVersions.find(row => row.sourceDigest === installedProfile.sourceDigest).instructions, profileInstructions)
   const skillsUi = page.getByRole('region', { name: 'Academic Skills 私有库', exact: true })
   await skillsUi.getByRole('textbox', { name: 'Host Skill 来源目录', exact: true }).fill(skillSource)
   await skillsUi.getByRole('button', { name: '扫描本地 Skill 候选', exact: true }).click()
@@ -300,6 +331,22 @@ try {
   assert.equal(referencedRetirement.value.ok, true, JSON.stringify(referencedRetirement))
   assert.equal(referencedRetirement.value.data.blocked, true)
   assert.ok(referencedRetirement.value.data.references.some(row => row.recordId === projectLedger.projectId))
+  const projectProfiles = page.getByRole('region', { name: '当前项目文风模板', exact: true })
+  const writingPath = join(projectRoot, '.scholarflow/profiles/writing.md'), oldWriting = await readFile(writingPath, 'utf8')
+  const beforeProfileConfig = await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8')
+  await projectProfiles.getByRole('combobox', { name: '当前项目文风模板版本', exact: true }).selectOption(`${installedProfile.id}:${installedProfile.sourceDigest}`)
+  await projectProfiles.getByRole('button', { name: '预览复制文风到本项目', exact: true }).click()
+  await projectProfiles.getByRole('button', { name: '取消项目文风复制', exact: true }).click()
+  await projectProfiles.getByRole('dialog', { name: '项目文风复制确认', exact: true }).waitFor({ state: 'detached' })
+  assert.equal(await readFile(writingPath, 'utf8'), oldWriting)
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8'), beforeProfileConfig)
+  await projectProfiles.getByRole('button', { name: '预览复制文风到本项目', exact: true }).click()
+  await projectProfiles.getByRole('button', { name: '确认复制文风到本项目', exact: true }).click()
+  await projectProfiles.getByText(`当前文风：${installedProfile.id}@${installedProfile.sourceDigest.slice(7)} · 已复制固定模板`, { exact: true }).waitFor()
+  assert.equal(await readFile(writingPath, 'utf8'), profileInstructions)
+  const profileHistory = await readdir(join(projectRoot, '.scholarflow/profiles/history'))
+  assert.equal(profileHistory.length, 1)
+  assert.equal(JSON.parse(await readFile(join(projectRoot, '.scholarflow/profiles/history', profileHistory[0]), 'utf8')).previousText, oldWriting)
   const unusedSource = await rpc('scholarflow.v1/skills.scanLocal', { request: { path: join(skillSource, 'two') } })
   assert.equal(unusedSource.value.ok, true)
   const unusedPreview = await rpc('scholarflow.v1/skills.prepareLocal', { request: { sourceId: unusedSource.value.data.sourceId, subpath: '',
@@ -792,6 +839,8 @@ try {
   const restored = await rpc('scholarflow.v1/diagnostics')
   assert.equal(restored.value.settings[0].value.defaultProjectType, 'literature-review')
   assert.equal(restored.value.settings[0].value.language, 'zh'); assert.equal(restored.value.settings[0].value.maxModelCalls, 5)
+  const coldProfile = await rpc('scholarflow.v1/profiles.read', { request: { id: installedProfile.id, sourceDigest: installedProfile.sourceDigest } })
+  assert.equal(coldProfile.value.ok, true); assert.equal(coldProfile.value.data.instructions, profileInstructions)
   const coldSkills = await rpc('scholarflow.v1/skills.library', { request: {} })
   assert.equal(coldSkills.value.ok, true)
   assert.ok(coldSkills.value.data.versions.some(row => row.digest === installedSkill.digest))
@@ -821,6 +870,7 @@ try {
     scopedSessionCreated: true, sandboxedWriteRead: true, readOnlyDenial: true,
     nativeUiInitPreviewCancel: true, nativeUiInitConfirm: true, originalSourceBytesPreserved: true,
     nativeNewProjectDefaultsAndExplicitOverrides: true, initializationPlanSurvivesDefaultSettingChange: true,
+    nativeUiPrivateProfileImportCancelVersionExportAndProjectCopy: true, oldProfileBytesAndProjectCopyPreservedAcrossRestart: true,
     twoSessionProjectRestore: true, coldProjectBindingRestore: true, mismatchedBindingRejected: true,
     nativeUiInterruptedInitRecovery: true,
     nativeUiMaterialParseEvidenceClaimOutline: true, evidenceChainColdRestore: true,

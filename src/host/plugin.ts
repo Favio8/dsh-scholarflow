@@ -47,6 +47,9 @@ import { listProjectSkills, projectSkillEntry } from '../core/skills/project-res
 import { readRun, inspectRuns, prepareRunMigration, migrateRun } from '../core/pipeline/run-store.ts'
 import { prepareRunAction, validateRunAction, closeRun, readGenerationCheckpoint, type RunActionPlan } from '../core/pipeline/run-control.ts'
 import { newProjectDefaultsSchema, resolveInitDefaults } from '../shared/project-defaults.ts'
+import { profileImportRequest, profileReadRequest, profileCopyRequest, profileConfirmRequest, profileCopyConfirmRequest, writingProfileSchema, type WritingProfile } from '../shared/profiles.ts'
+import { builtinProfiles, profileDigest, verifyProfile, profileText, prepareProfileCopy, applyProfileCopy, projectProfile, type ProfileCopyPlan } from '../core/project/profiles.ts'
+import { PrivateProfileLibrary } from './profiles/library.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -76,6 +79,9 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private searchPlans = new Map<string, { plan: SearchPlan; context: RequestContext; peerId: string; expires: number }>()
   private lookupPlans = new Map<string, { plan: LookupPlan; context: RequestContext; peerId: string; expires: number }>()
   private skillLibrary = new PrivateSkillLibrary()
+  private profileLibrary = new PrivateProfileLibrary()
+  private profilePlans = new Map<string, { profile: WritingProfile; hash: string; peerId: string; expires: number }>()
+  private profileCopyPlans = new Map<string, { plan: ProfileCopyPlan; context: RequestContext; peerId: string; expires: number }>()
   private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
   private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
   private skillPlans = new Map<string, { resource: { kind: 'local'; bundle: SkillBundle } | { kind: 'github'; preview: GithubSkillPreview }; hash: string; peerId: string; expires: number }>()
@@ -92,7 +98,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
       timer.unref()
-      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear(); this.runActionPlans.clear() }
+      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear(); this.runActionPlans.clear(); this.profilePlans.clear(); this.profileCopyPlans.clear() }
     }, 'scholarflow: expire operator skill previews')
   }
 
@@ -176,7 +182,87 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return newProjectDefaultsSchema.parse(row.value)
   }
 
+  private async readProfile(id: string, sourceDigest: string) {
+    const builtin = builtinProfiles.find(profile => profile.id === id)
+    if (builtin) { invariant(builtin.sourceDigest === sourceDigest, 'PROFILE_DIGEST_MISMATCH', '内置文风版本不同，未自动更新。'); return verifyProfile(builtin) }
+    return this.profileLibrary.read(id, sourceDigest)
+  }
+
+  @Remote('profiles.library')
+  async profilesLibrary(request: unknown) {
+    return applicationResult(async () => { this.requireOperator(); z.object({}).strict().parse(request)
+      const library = await this.profileLibrary.list()
+      return { profiles: [...builtinProfiles, ...library.profiles], diagnostics: library.diagnostics }
+    })
+  }
+
+  @Remote('profiles.prepareImport')
+  async profilesPrepareImport(request: unknown) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), { profile: input } = profileImportRequest.parse(request)
+      invariant(!input.id || /^user_[\w.-]{1,190}$/u.test(input.id), 'PROFILE_INVALID', '自定义文风使用私有身份，内置模板不可覆盖。')
+      const base = writingProfileSchema.parse({ ...input, id: input.id ?? newId('user'), scope: 'library', sourceDigest: digest('') })
+      const profile = verifyProfile({ ...base, sourceDigest: profileDigest(base) })
+      this.pruneSkills(); invariant(this.profilePlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有文风导入预览。')
+      const planId = newId('profileimport'), hash = digest(json(profile))
+      this.profilePlans.set(planId, { profile, hash, peerId, expires: Date.now() + 600000 })
+      return { planId, planHash: hash, profile, risks: ['仅导入私有文风模板，不启用项目、不修改全局 Skill 或现有论文。表达偏好不授予权限，不能覆盖真实性规则。编辑模板会生成新固定版本，旧版本保留。'] }
+    })
+  }
+
+  @Remote('profiles.install')
+  async profilesInstall(request: unknown) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = profileConfirmRequest.parse(request), row = this.profilePlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.hash === input.planHash, 'INVALID_APPROVAL', '文风导入需确认当前用户的有效预览。')
+      const result = await this.profileLibrary.install(row.profile); this.profilePlans.delete(input.planId); return result
+    })
+  }
+
+  @Remote('profiles.dismiss')
+  async profilesDismiss(request: unknown) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), { planId } = z.object({ planId: z.string() }).strict().parse(request)
+      const row = this.profilePlans.get(planId) ?? this.profileCopyPlans.get(planId)
+      invariant(row && row.peerId === peerId, 'INVALID_APPROVAL', '文风预览不属于当前用户。')
+      this.profilePlans.delete(planId); this.profileCopyPlans.delete(planId); return { dismissed: true }
+    })
+  }
+
+  @Remote('profiles.read')
+  async profilesRead(request: unknown) {
+    return applicationResult(async () => { this.requireOperator(); const input = profileReadRequest.parse(request); return this.readProfile(input.id, input.sourceDigest) })
+  }
+
+  @Remote('profiles.project')
+  async profilesProject(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request), { io } = await resolveStore(this.ctx, context, signal); return projectProfile(io) })
+  }
+
+  @Remote('profiles.prepareCopy')
+  async profilesPrepareCopy(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = profileCopyRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal), profile = await this.readProfile(input.id, input.sourceDigest)
+      const plan = await prepareProfileCopy(io, profile, revision)
+      this.pruneSkills(); invariant(this.profileCopyPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有项目文风复制预览。')
+      this.profileCopyPlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, profile, copiedText: profileText(profile), previousHash: plan.baseHash,
+        risks: ['将替换本项目 writing.md 并归档原文风与来源；共享模板、其他项目、正文与已核验来源不变。相关文风检查需更新，后续运行采用新文本。'] }
+    })
+  }
+
+  @Remote('profiles.copyToProject')
+  async profilesCopyToProject(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = profileCopyConfirmRequest.parse(request), row = this.profileCopyPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '项目文风复制需要确认有效预览。')
+      invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.context.projectId,
+        'SESSION_BINDING_CHANGED', '文风复制的项目会话改变。')
+      const { io } = await resolveStore(this.ctx, row.context, signal)
+      const result = await applyProfileCopy(io, row.plan, row.context.sessionId); this.profileCopyPlans.delete(input.planId); return result
+    })
+  }
+
   private pruneSkills() {
+    for (const [key, row] of this.profilePlans) if (row.expires < Date.now()) this.profilePlans.delete(key)
+    for (const [key, row] of this.profileCopyPlans) if (row.expires < Date.now()) this.profileCopyPlans.delete(key)
     for (const [key, row] of this.runActionPlans) if (row.expires < Date.now()) this.runActionPlans.delete(key)
     for (const [key, row] of this.runMigrationPlans) if (row.expires < Date.now()) this.runMigrationPlans.delete(key)
     for (const [key, row] of this.skillSources) if (row.expires < Date.now()) this.skillSources.delete(key)

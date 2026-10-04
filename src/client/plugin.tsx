@@ -4,6 +4,7 @@ import { Draft } from './draft.tsx'
 import { ReviewExport } from './review-export.tsx'
 import { Overview } from './overview.tsx'
 import { AcademicSkills } from './academic-skills.tsx'
+import { WritingProfiles } from './writing-profiles.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export'] as const
@@ -169,7 +170,7 @@ export function apply(ctx: Host) {
         <label>新项目默认语言 <select aria-label="新项目默认语言" value={row.value.language} onChange={e => save('language', e.target.value)}><option value="zh">中文</option><option value="en">英文</option></select></label>
         <label>新项目默认模型调用上限 <select aria-label="新项目默认模型调用上限" value={row.value.maxModelCalls} onChange={e => save('maxModelCalls', Number(e.target.value))}>{Array.from({ length: 40 }, (_, i) => i + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
         <label><input type="checkbox" checked={row.value.networkEnabled} onChange={e => save('networkEnabled', e.target.checked)} />允许外部检索与公开 Skill 读取（每次操作展示发送范围）</label></>
-        : <p>正在读取宿主设置…</p>}<p role="status">{message}</p><AcademicSkills api={api} /></section>
+        : <p>正在读取宿主设置…</p>}<p role="status">{message}</p><WritingProfiles api={api} /><AcademicSkills api={api} /></section>
   }
   ctx.effect(() => ctx.slots.inject('main', function* () {
     yield ctx.slots.register({ name: 'main', key: 'scholarflow', children: { 'scholarflow.agent': { kind: 'single', scope: 'session-maybe' }, 'scholarflow.project': { kind: 'single', scope: 'session-maybe' } } }, Workspace)

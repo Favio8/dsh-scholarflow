@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { projectTextPaths } from '../shared/requirements.ts'
 import { ProjectSkills } from './project-skills.tsx'
+import { ProjectWritingProfile } from './writing-profiles.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 export function Overview({ project, context, api, refresh, run, busy }: Props) {
@@ -83,6 +84,7 @@ export function Overview({ project, context, api, refresh, run, busy }: Props) {
       })}>确认保留所选要求并归档冲突原文</button>
     </section>}
     <h3>项目文风与已确认记忆</h3><p>只进入当前 ScholarFlow 项目的阶段输入。保存会使相关检查需更新，其他项目保持独立。</p>
+    <ProjectWritingProfile project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} dirty={!!file && text !== file.text} />
     <label>项目指令文件<select aria-label="项目指令文件" disabled={busy || (!!file && text !== file.text)} value={path} onChange={e => { setPath(e.target.value as typeof path); setFile(undefined); setText('') }}>
       {projectTextPaths.map(path => <option key={path} value={path}>{path}</option>)}</select></label>
     <button disabled={busy || (!!file && text !== file.text)} onClick={() => run(async () => { const result = await api('project.readText', { context: context(), path }); setFile(result); setText(result.text) })}>读取所选项目指令</button>

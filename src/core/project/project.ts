@@ -4,6 +4,7 @@ import { ScholarError, invariant } from '../../shared/errors.ts'
 import { digest, newId, json, type FileStore, type FileImage } from '../store/files.ts'
 import { commit, inspectRecovery, type Mutation } from '../store/transactions.ts'
 import { MEMORY_APPROVALS, memoryApprovalsSchema } from './memory.ts'
+import { builtinProjectProfile } from './profiles.ts'
 
 export const CONFIG_PATH = '.scholarflow/project.yaml'
 export const LEDGER_PATH = '.scholarflow/data/ledger.json'
@@ -74,12 +75,15 @@ export async function prepareInit(io: FileStore, input: { title: string; type: s
     outline: { version: 0, title: config.project.title, researchQuestion: '', thesis: '', confirmation: 'draft', sections: [] },
     documents: { paper: { id: 'paper', relativePath: config.paths.mainDocument, format: 'markdown', currentHash: digest(paper), revisionId: revision, encoding: 'utf-8', lineEnding: 'lf', initialPlaceholder: true } },
     claimAnchors: {}, proposalStates: {}, reviewIssues: {}, deliveries: {} }
-  const writingProfile = '# 项目文风\n\n清晰、准确、具体。区分来源事实与作者推论，保留限定条件与引用，不编造实验或数据。\n'
+  const initialProfile = builtinProjectProfile(config.project.type, config.project.language)
+  const writingProfile = initialProfile.instructions
   const files = [
     { path: CONFIG_PATH, text: stringify(config) },
     { path: config.paths.mainDocument, text: paper }, { path: config.paths.references, text: references },
     { path: '.scholarflow/.gitignore', text: 'cache/\ntmp/\nlogs/\ntransactions/\nstate.json\ndrafts/editor-buffers/\n' },
     { path: '.scholarflow/profiles/writing.md', text: writingProfile },
+    { path: '.scholarflow/profiles/writing-source.json', text: json({ schemaVersion: 1, projectId, path: '.scholarflow/profiles/writing.md',
+      profile: initialProfile, operation: 'initialization', confirmedAt: new Date().toISOString() }) },
     { path: '.scholarflow/profiles/review.md', text: '# 项目审查\n\n分别报告规则检查、模型判断和未执行项目。真实性与引用问题优先。\n' },
     { path: '.scholarflow/context/decisions.md', text: '# 已确认决定\n' },
     { path: '.scholarflow/context/terminology.md', text: '# 已确认术语\n' },
@@ -154,6 +158,12 @@ export async function updateProjectText(io: FileStore, path: string, text: strin
     invariant(file && digest(file.text) === expectedHash, 'STALE_DOCUMENT_VERSION', '项目 Profile 或记忆已更新，请重新读取。')
     invalidateReviews(ledger, path.endsWith('/review.md') ? undefined : path.includes('/profiles/') ? ['style'] : ['style', 'logic'])
     const mutations: Mutation[] = [{ path, before: file, after: text }]
+    if (path.includes('/profiles/') && file.text !== text) {
+      const history = `.scholarflow/profiles/history/${newId('profile')}.json`
+      mutations.push({ path: history, before: undefined, after: json({ schemaVersion: 1, projectId: ledger.projectId,
+        operation: 'edit-project-profile', path, previousText: file.text, previousHash: expectedHash, text, contentHash: digest(text),
+        sourceSessionId, confirmedAt: new Date().toISOString() }) })
+    }
     if (path.includes('/context/')) {
       const previous = await io.read(MEMORY_APPROVALS)
       const approvals = previous ? memoryApprovalsSchema.parse(JSON.parse(previous.text)) : { schemaVersion: 1 as const, projectId: ledger.projectId, entries: {} as MemoryEntries }
