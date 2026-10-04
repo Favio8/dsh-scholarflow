@@ -23,6 +23,8 @@ import { join } from 'node:path'
 // Static on purpose: see the TLA note below.
 import { z } from 'zod'
 import Schema from 'schemastery'
+// Core layer, same package, no host dependency.
+import { rootFingerprint } from '../core/project/binding.js'
 
 /** Plugin name used by loader diagnostics. */
 export const name = 'scholarflow'
@@ -677,6 +679,75 @@ async function probePromptIsolation(ctx) {
   })
 }
 
+/**
+ * Probe G0-03 (the binding chain): resolve `sessionId -> workspaceId` for every
+ * LIVE session, and record which agent preset each session actually runs.
+ *
+ * Source facts (measured): `sessions.list()` returns live sessions and each
+ * `Session.header` is `{ version, id, createdAt, cwd?, parentSession?, isSeeded,
+ * origin?, delegationDepth?, agentPreset? }`. `workspaceRegistry.resolveByPath`
+ * maps a canonical directory to the workspace that owns it.
+ *
+ * Privacy: absolute paths are NOT recorded. Each session's cwd is reduced to a
+ * `rootFingerprint` (the same Core function the binding adapter uses), which is
+ * enough to assert that the resolution worked without exporting user paths.
+ */
+async function probeLiveSessionBindings(ctx) {
+  const sessions = service(ctx, 'sessions')
+  const workspaceRegistry = service(ctx, 'workspaceRegistry')
+  if (!sessions || !workspaceRegistry) {
+    record('probe:live-sessions', {
+      ok: false,
+      reason: `service unavailable: sessions=${Boolean(sessions)} workspaceRegistry=${Boolean(workspaceRegistry)}`,
+    })
+    return
+  }
+
+  try {
+    const live = sessions.list() ?? []
+    const rows = []
+    for (const session of live.slice(0, 25)) {
+      const header = session?.header ?? {}
+      const cwd = typeof header.cwd === 'string' ? header.cwd : null
+      let workspaceId = null
+      let resolveError = null
+      if (cwd) {
+        try {
+          const workspace = await workspaceRegistry.resolveByPath(cwd)
+          workspaceId = workspace ? String(workspace.id) : null
+        } catch (error) {
+          resolveError = String(error?.code ?? error?.message ?? error)
+        }
+      }
+      rows.push({
+        sessionId: String(header.id ?? session?.id ?? 'unknown'),
+        agentPreset: header.agentPreset ?? null,
+        isSeeded: header.isSeeded ?? null,
+        hasCwd: Boolean(cwd),
+        cwdFingerprint: cwd ? rootFingerprint(cwd) : null,
+        workspaceId,
+        bound: Boolean(workspaceId),
+        resolveError,
+      })
+    }
+
+    record('probe:live-sessions', {
+      ok: true,
+      liveCount: live.length,
+      rows,
+      boundCount: rows.filter((row) => row.bound).length,
+      scholarflowSessions: rows.filter((row) => row.agentPreset === 'scholarflow').length,
+      presetHistogram: rows.reduce((accumulator, row) => {
+        const key = row.agentPreset ?? '(none)'
+        accumulator[key] = (accumulator[key] ?? 0) + 1
+        return accumulator
+      }, {}),
+    })
+  } catch (error) {
+    record('probe:live-sessions-error', { message: String(error?.message ?? error) })
+  }
+}
+
 /** Probe G0-03 (partial): can the host report real workspace identity? */
 async function probeWorkspaceIdentity(ctx) {
   const workspaceRegistry = service(ctx, 'workspaceRegistry')
@@ -874,6 +945,11 @@ async function runProbes(ctx) {
     await probeWorkspaceIdentity(ctx)
   } catch (error) {
     record('probe:workspace-failed', { message: String(error?.message ?? error) })
+  }
+  try {
+    await probeLiveSessionBindings(ctx)
+  } catch (error) {
+    record('probe:live-sessions-failed', { message: String(error?.message ?? error) })
   }
   try {
     await probeSkillIsolation(ctx)
