@@ -18,7 +18,11 @@
 - insert:
     - id: scholarflow
       name: dsh-scholarflow
-      config: {}
+      # G0-05 hypothesis: a Settings descriptor may require a row that actually
+      # carries config values, not an empty object. Non-empty on purpose.
+      config:
+        g0ProbeMarker: from-bundle-patch
+        defaultProjectType: course-paper
 
 - insert:
     - id: preset-scholarflow

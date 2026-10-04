@@ -53,7 +53,7 @@
 | **`ctx.fs` 无 mkdir** | 目录创建只能经 `node:fs`；而 `node:fs` **不受 `ctx.fs` 沙箱约束**——沙箱不是操作系统级隔离。 |
 | **`fs.readBytes` 语义** | `maxBytes` 是**整文件大小上限**，不是单次切片长度（9.7 KB 文件传 64 → `FS_TOO_LARGE`）。 |
 | **`Config` 需要 schemastery** | 纯 JSON Schema 与 zod schema 声明 `Config` 都**不产生**设置命名空间且无报错；换 schemastery 后 loader 立即读取并物化默认值（`apply` 收到 `{g0ProbeMarker:"", defaultProjectType:"course-paper"}`）。官方 schema 投影为 schemastery 内部 `{uid, refs, dict}` 形态。 |
-| **设置命名空间** | `settings.describe()` 的 `ns` ＝ profile loader entry id。声明 schemastery `Config` + `settings.configure({auto:true})` 之后，验证 profile 中**仍为 0 个命名空间**；待验证假设是「只有 bundle 管理／可寻址的 entry 才会被投影」。 |
+| **设置命名空间** | `settings.describe()` 的 `ns` ＝ profile loader entry id。本项目已声明 schemastery `Config`（loader 确认读取并物化默认值）并注册 `settings.configure({auto:true})`，但**投影始终为 0**；已排除 7 个假设。本机可工作的第三方插件改为自建 `settings.section` 页面（path B），SPEC §11.1 允许该做法。 |
 | **入口壳须转发全部导出** | `Config` 等 loader 识别的导出若未从入口模块转发，会**静默丢失**（无报错、无诊断）。 |
 | **Mode 注册** | 组合树中一行 `@deepseek-ai/dsh-agent-preset`，`config` 为 `PresetDefinition { id, name?, description?, order?, plugins[] }`；或 `ctx.agentPresets.register(definition)`。 |
 | **Mode 选择限制** | `select(agent, preset)` 仅限「before a session starts its first turn」；`recompose` 仅限 blank Agent。 |

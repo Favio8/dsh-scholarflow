@@ -465,12 +465,30 @@ prepareDocument(): Promise<string>          // 返回 profile patch 路径
   在验证 profile 中把本插件**作为真实依赖安装**（`dsh plugin --profile scholarflow-g0 add <路径>`，
   随后 `dsh.profile.bundles` 含 `dsh-scholarflow`），`apply` 仍收到物化默认值，
   但 `settings.describe()` 依旧 `ownCount: 0`。所以 bundle/可寻址性**不是**原因。
-- **【仍未知】** 设置页投影的准确前置条件。已知的排除项：schema 库缺失、schema 类型、
-  缺 `settings.configure`、非 bundle 安装。**剩余待查方向**（尚未验证，不作为结论）：
-  ① 行必须携带非空 `config`（我们的是 `{}`）；
-  ② 需要 `settings.mutate/replace` 或 `configEditor.edit` 先行建立可编辑文档；
-  ③ `describe()` 只投影官方 bundle 自带的 entry；
-  ④ desktop profile 与验证 profile 行为不同。
+- **【仍未知】** 设置页投影的准确前置条件。已排除的原因（每项单独实测）：
+
+  | 假设 | 结果 |
+  |---|---|
+  | schema 库不可导入 | 已解决（见 ADR-004） |
+  | 纯 JSON Schema 作为 `Config` | 不投影 |
+  | zod schema 作为 `Config` | 不投影 |
+  | 入口壳未转发 `Config` | 是 bug，已修；修后 loader 读取并物化默认值 |
+  | 缺 `settings.configure({auto:true})` | 调用成功注册策略，投影仍为 0 |
+  | 行非 bundle 安装 | 已按真实 bundle 安装，投影仍为 0 |
+  | 行 `config` 为空对象 | 改为**非空** `config`（`g0ProbeMarker: from-bundle-patch`），`apply` 收到该值，**投影仍为 0** |
+
+- **【已实测的关键对照】本机可工作的第三方插件 `@dsh-external/dsh-super-injector` 根本没有声明
+  `Config`**，它是自己在 `settings.section` 槽里注册了一个**自有设置页**，并通过自己的 HTTP 路由
+  （`ctx.webServer.register`）持久化。这说明**「Config → 自动设置页」并不是第三方插件实际走的路**，
+  至少不是唯一可用的路。
+- **因此 G0-05 的实际结论分两半：**
+  1. **可用的实现路径已确认（path B）**：插件在 `settings.section` 注册自有页面（`settings.section`
+     是本机第三方插件实测使用的座位），设置项自己负责持久化。SPEC §11.1 明确允许这种做法
+     （「若目标 DSH 版本提供的是插件专属配置页而不是独立 Settings section，可使用等价的官方页面入口」）。
+     本项目的客户端半体已注册该页面（见 04.4）。
+  2. **宿主 `Config` → 自动命名空间这一条仍未走通**，且已排除 7 个假设，说明它可能依赖
+     我们尚未观察到的条件（例如只有官方 bundle 自带的 entry 才可投影，或需要 `configEditor`
+     先建立可编辑文档）。**该条不再继续黑盒猜测**，转为 M1 的已知开放问题。
 
 ### 05.4 尚未验证
 
@@ -696,10 +714,17 @@ name 为 `sf-test-skill-a` / `sf-test-skill-b`）。用 `agentPresets.acquireSco
 - 本插件用**最小** spec（1 个表、1 个 zod 对象 schema、`version: 1`、默认 `layout`）调用，
   仍返回 `malformed-medium`。
 
-→ **`malformed-medium` 的确切前置条件仍未知**：可能是后端需要先经
-`storage.mount(form, facility)` 声明路由、或 `layout: 'single'` 与默认后端不匹配、
-或本机 zod 主版本（4.x）与宿主期望的 v3 内部 API 不兼容。**没有一个是已证实的**，
-因此不写成结论，只记录现象与下一步要查的方向。
+→ **`malformed-medium` 的确切前置条件仍未知**，且已进一步缩小：
+
+- **未生成任何介质文件**：在 `<DSH_HOME>` 与验证 profile 下按域名搜索，**找不到**
+  名为 `scholarflow*` 的存储文件；`<DSH_HOME>/storages` 下只有宿主自有的
+  `workspace.json` 与 `session_projcache`。→ 因此**不是**「已有介质损坏」，而是后端在
+  **打开/投影 unit 阶段**就判定失败。
+- 尝试把本机 zod 从 4.6.5 换到 3.25.0 以排除主版本偏差，但 **zod v3 在该安装方式下
+  反而无法解析**（`probe:module-resolution` 返回 `zod: failed: ERR_MODULE_NOT_FOUND`），
+  所以该假设**未能验证**；随后已恢复 zod 4.6.5（可解析）。
+- 因此 `storageDomain` 路径需要新的调查角度（例如先经 `storage.mount(form, facility)`
+  声明路由，或改 `layout`），**本轮不写成结论**。
 
 ### 09.2 已确认的跨进程持久事实（非本项目自有状态）
 
