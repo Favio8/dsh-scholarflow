@@ -13,7 +13,7 @@ import { registerSourceRequest, confirmEvidenceRequest, upsertClaimRequest, conf
 import { scanMaterials, registerMaterial, readParsed } from '../core/materials/materials.ts'
 import { parseRegisteredMaterial } from '../core/materials/parse.ts'
 import { parseMaterialBytes } from './parsers/parse.ts'
-import { registerSource, confirmEvidence, upsertClaim, confirmOutline } from '../core/evidence/evidence.ts'
+import { registerSource, confirmEvidence, upsertClaim, confirmOutline, saveOutline } from '../core/evidence/evidence.ts'
 import type { RequestContext } from '../shared/schema.ts'
 import { saveDocumentRequest, proposalRequest, applyProposalRequest, undoDocumentRequest } from '../shared/document-api.ts'
 import { saveManual, applyProposal, rejectProposal, undoRevision, proposalImage } from '../core/editing/proposals.ts'
@@ -932,6 +932,13 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const input = confirmOutlineRequest.parse(request)
       const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
       return confirmOutline(io, input.outline, revision, input.expectedOutlineVersion) })
+  }
+
+  @Remote('outline.save')
+  async outlineSave(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = confirmOutlineRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return saveOutline(io, input.outline, revision, input.expectedOutlineVersion, 'draft') })
   }
 
   @Remote

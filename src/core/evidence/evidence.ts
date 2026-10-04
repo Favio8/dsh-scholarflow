@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { sourceSchema, evidenceSchema, claimSchema, outlineSchema, type Claim, type Evidence } from '../../shared/schema.ts'
+import { proposalSchema } from '../../shared/editing.ts'
 import { sourceInput, confirmEvidenceRequest, upsertClaimRequest } from '../../shared/research.ts'
-import { newId, digest, type FileStore } from '../store/files.ts'
+import { newId, digest, json, type FileStore } from '../store/files.ts'
 import { mutateLedger, invalidateReviews } from '../project/project.ts'
 import { readParsed, MAX_MATERIAL_BYTES } from '../materials/materials.ts'
 import { invariant } from '../../shared/errors.ts'
@@ -72,19 +73,57 @@ export async function upsertClaim(io: FileStore, input: z.infer<typeof upsertCla
   return { claim: result.ledger.claims[claimId], revision: result.revision }
 }
 
-export async function confirmOutline(io: FileStore, input: z.infer<typeof outlineSchema>, revision: number, outlineVersion: number) {
+export function outlineProjection(outline: z.infer<typeof outlineSchema>) {
+  const lines = [`# ${outline.title}`, '', `版本：${outline.version} · ${outline.confirmation}`, '', `研究问题：${outline.researchQuestion}`, '', `中心论点：${outline.thesis}`, '']
+  const visit = (parentId?: string, depth = 2) => {
+    for (const section of outline.sections.filter(row => row.parentId === parentId)) {
+      lines.push(`${'#'.repeat(Math.min(6, depth))} ${section.title}`, '', section.purpose, '', `论点：${section.claimIds.join('、') || '无'}`,
+        ...(section.targetLength ? [`目标篇幅：${section.targetLength.value} ${section.targetLength.unit}`] : []),
+        ...section.missingEvidence.map(gap => `- 缺口：${gap}`), '')
+      visit(section.id, depth + 1)
+    }
+  }
+  visit(); return lines.join('\n') + '\n'
+}
+
+export async function saveOutline(io: FileStore, input: z.infer<typeof outlineSchema>, revision: number, outlineVersion: number, confirmation: 'draft' | 'confirmed') {
   input = outlineSchema.parse(input)
-  const result = await mutateLedger(io, revision, ledger => {
-    invariant(ledger.outline.version === outlineVersion, 'STALE_OUTLINE_VERSION', '大纲已改变，请重新确认。')
+  invariant(input.sections.length <= 200 && Buffer.byteLength(json(input)) <= 1024 * 1024, 'OUTLINE_TOO_LARGE', '大纲超过当前编辑范围。')
+  const result = await mutateLedger(io, revision, async ledger => {
+    invariant(ledger.outline.version === outlineVersion && input.version === outlineVersion, 'STALE_OUTLINE_VERSION', '大纲已改变，请重新确认。')
     invariant(new Set(input.sections.map(section => section.id)).size === input.sections.length, 'OUTLINE_INVALID', '大纲章节标识重复。')
     for (const section of input.sections) {
       invariant(!section.parentId || input.sections.some(parent => parent.id === section.parentId && parent.id !== section.id), 'OUTLINE_INVALID', '大纲父章节不存在。')
       const ancestors = new Set([section.id]); let current = section
       while (current.parentId) { invariant(!ancestors.has(current.parentId), 'OUTLINE_INVALID', '大纲父章节形成循环。'); ancestors.add(current.parentId); current = input.sections.find(parent => parent.id === current.parentId)! }
+      invariant(ancestors.size <= 5 && new Set(section.claimIds).size === section.claimIds.length, 'OUTLINE_INVALID', '章节最多五层，关联论点不得重复。')
       for (const claimId of section.claimIds) invariant(ledger.claims[claimId], 'CLAIM_NOT_FOUND', '大纲包含不存在的论点。')
     }
-    ledger.outline = { ...input, version: outlineVersion + 1, confirmation: 'confirmed' }
+    invariant(confirmation !== 'confirmed' || input.researchQuestion.trim() && input.thesis.trim() && input.sections.length,
+      'OUTLINE_CONFIRMATION_REQUIRED', '确认大纲需要研究问题、中心论点及至少一个章节；未完成结构可以先保存草稿。')
+    const previous = structuredClone(ledger.outline), projection = await io.read('.scholarflow/planning/outline.md'), projectionManifest = await io.read('.scholarflow/planning/outline-projection.json')
+    const projectionMetadata = projectionManifest && z.object({ schemaVersion: z.literal(1), projectId: z.string(), version: z.number().int().min(0),
+      hash: z.string().regex(/^sha256:[0-9a-f]{64}$/) }).strict().parse(JSON.parse(projectionManifest.text))
+    invariant(projectionMetadata ? projection && projectionMetadata.projectId === ledger.projectId && projectionMetadata.version === previous.version &&
+      digest(projection.text) === projectionMetadata.hash : !projection || projection.text === outlineProjection(previous),
+      'OUTLINE_PROJECTION_CHANGED', '大纲可读投影被外部编辑；保留该文件，请先按 ledger 大纲核对，不会自动覆盖。')
+    ledger.outline = { ...input, version: outlineVersion + 1, confirmation }
+    for (const state of Object.values(ledger.proposalStates).filter(row => row.state === 'pending')) {
+      const file = await io.read(`.scholarflow/proposals/${state.proposalId}.json`)
+      invariant(file, 'PROPOSAL_NOT_FOUND', '待审阅建议文件缺失，先检查项目。')
+      const proposal = proposalSchema.parse(JSON.parse(file.text))
+      invariant(proposal.projectId === ledger.projectId, 'PROJECT_ID_CONFLICT', '待审阅建议身份不属于项目。')
+      if (proposal.scope !== 'selection') { state.state = 'stale'; state.updatedAt = new Date().toISOString() }
+    }
     invalidateReviews(ledger, ['structure', 'logic'])
+    return [{ path: `.scholarflow/planning/outline-history/${newId('outline')}.json`, before: undefined,
+      after: json({ schemaVersion: 1, projectId: ledger.projectId, previous, outline: ledger.outline, savedAt: new Date().toISOString() }) },
+      { path: '.scholarflow/planning/outline.md', before: projection, after: outlineProjection(ledger.outline) },
+      { path: '.scholarflow/planning/outline-projection.json', before: projectionManifest,
+        after: json({ schemaVersion: 1, projectId: ledger.projectId, version: ledger.outline.version, hash: digest(outlineProjection(ledger.outline)) }) }]
   })
   return { outline: result.ledger.outline, revision: result.revision }
+}
+export async function confirmOutline(io: FileStore, input: z.infer<typeof outlineSchema>, revision: number, outlineVersion: number) {
+  return saveOutline(io, input, revision, outlineVersion, 'confirmed')
 }

@@ -87,24 +87,4 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
   </section>
 }
 
-export function OutlineEditor({ project, context, api, refresh, run, busy }: Props) {
-  const [question, setQuestion] = useState(project.ledger.outline.researchQuestion)
-  const [thesis, setThesis] = useState(project.ledger.outline.thesis)
-  const [title, setTitle] = useState('')
-  const [purpose, setPurpose] = useState('')
-  const [claimIds, setClaimIds] = useState<string[]>([])
-  return <section aria-label="论文大纲"><h3>论文大纲 · {project.ledger.outline.confirmation === 'confirmed' ? '已确认' : '待确认'}</h3>
-    <label>研究问题<input aria-label="研究问题" value={question} onChange={e => setQuestion(e.target.value)} /></label>
-    <label>中心论点<input aria-label="中心论点" value={thesis} onChange={e => setThesis(e.target.value)} /></label>
-    <label>章节标题<input aria-label="章节标题" value={title} onChange={e => setTitle(e.target.value)} /></label>
-    <label>章节目的<textarea aria-label="章节目的" value={purpose} onChange={e => setPurpose(e.target.value)} /></label>
-    <fieldset><legend>本章节使用的论点</legend>{(Object.values(project.ledger.claims) as any[]).map(claim => <label key={claim.id}><input type="checkbox" checked={claimIds.includes(claim.id)} onChange={e => setClaimIds(e.target.checked ? [...claimIds, claim.id] : claimIds.filter(id => id !== claim.id))} />{claim.text} · {claim.status}</label>)}</fieldset>
-    <button disabled={busy || !question.trim() || !thesis.trim() || !title.trim() || !claimIds.length} onClick={() => run(async () => {
-      const outline = project.ledger.outline
-      await api('outline.confirm', { context: context(), expectedOutlineVersion: outline.version, outline: { ...outline, researchQuestion: question, thesis,
-        sections: [...outline.sections, { id: `sec_${crypto.randomUUID()}`, title, purpose, claimIds, missingEvidence: [] }] } })
-      setTitle(''); setPurpose(''); setClaimIds([]); await refresh()
-    })}>确认大纲并添加章节</button>
-    <ol>{project.ledger.outline.sections.map((section: any) => <li key={section.id}><b>{section.title}</b><p>{section.purpose}</p><p>{section.claimIds.map((id: string) => project.ledger.claims[id]?.text).join('；')}</p></li>)}</ol>
-  </section>
-}
+export { OutlineEditor } from './outline.tsx'

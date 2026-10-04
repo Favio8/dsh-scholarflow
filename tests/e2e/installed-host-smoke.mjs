@@ -355,7 +355,32 @@ try {
   await page.getByRole('textbox', { name: '章节目的', exact: true }).fill('TEST_ONLY 展示有定位的证据。')
   await page.getByRole('group', { name: '本章节使用的论点', exact: true }).getByRole('checkbox').check()
   await page.getByRole('button', { name: '确认大纲并添加章节', exact: true }).click()
-  await page.getByRole('heading', { name: '论文大纲 · 已确认', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '论文大纲 · 版本 1 · 已确认', exact: true }).waitFor()
+  const originalOutlineLedger = await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), beforeOutlineBody = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+  await page.getByRole('button', { name: '编辑章节 TEST_ONLY 证据与范围', exact: true }).click()
+  await page.getByRole('textbox', { name: '章节目的', exact: true }).fill('TEST_ONLY 展示定位证据与限定范围。')
+  await page.getByRole('spinbutton', { name: '章节目标篇幅', exact: true }).fill('120')
+  await page.getByRole('textbox', { name: '章节证据缺口', exact: true }).fill('TEST_ONLY 外推结果尚未核验。')
+  await page.getByRole('button', { name: '更新本地章节编辑', exact: true }).click()
+  await page.getByRole('textbox', { name: '章节标题', exact: true }).fill('TEST_ONLY 临时大纲章节')
+  await page.getByRole('textbox', { name: '章节证据缺口', exact: true }).fill('TEST_ONLY 无证据，不作为已完成章节。')
+  await page.getByRole('button', { name: '加入本地编辑大纲', exact: true }).click()
+  await page.getByRole('button', { name: '上移章节 TEST_ONLY 临时大纲章节', exact: true }).click()
+  await page.getByRole('button', { name: '预览保存大纲草稿', exact: true }).click()
+  await page.getByRole('button', { name: '取消完整大纲保存', exact: true }).click()
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), originalOutlineLedger)
+  await page.getByRole('button', { name: '预览保存大纲草稿', exact: true }).click()
+  await page.getByRole('button', { name: '确认保存完整大纲', exact: true }).click()
+  await page.getByRole('heading', { name: '论文大纲 · 版本 2 · 待确认', exact: true }).waitFor()
+  const savedOutline = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).outline
+  assert.equal(savedOutline.sections[0].title, 'TEST_ONLY 临时大纲章节')
+  assert.equal(savedOutline.sections[1].targetLength.value, 120)
+  await page.getByRole('button', { name: '从本地大纲移除章节 TEST_ONLY 临时大纲章节', exact: true }).click()
+  await page.getByRole('button', { name: '预览确认完整大纲', exact: true }).click()
+  await page.getByRole('button', { name: '确认保存完整大纲', exact: true }).click()
+  await page.getByRole('heading', { name: '论文大纲 · 版本 3 · 已确认', exact: true }).waitFor()
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), beforeOutlineBody)
+  assert.equal((await readdir(join(projectRoot, '.scholarflow/planning/outline-history'))).length, 3)
   assert.equal(await readFile(join(projectRoot, '原始材料.txt'), 'utf8'), 'TEST_ONLY raw source: never overwrite this file.\r\n')
   await page.getByRole('tab', { name: /^Draft ·/ }).click()
   const selectionSkills = page.getByRole('combobox', { name: '已启用的选区 Skill', exact: true })
@@ -744,6 +769,7 @@ try {
     twoSessionProjectRestore: true, coldProjectBindingRestore: true, mismatchedBindingRejected: true,
     nativeUiInterruptedInitRecovery: true,
     nativeUiMaterialParseEvidenceClaimOutline: true, evidenceChainColdRestore: true,
+    nativeUiOutlineEditReorderDraftCancelDeleteAndConfirm: true,
     nativeUiManualSaveCitationProjection: true, nativeDomSecondParagraphSelection: true,
     nativeDomEntityUnicodeDecode: true, crossParagraphSelectionRejected: true, manuscriptColdRestore: true,
     nativeUiDeterministicReview: true, nativeUiWorkingDraftExportDownload: true, exportDoesNotMutateBody: true,
