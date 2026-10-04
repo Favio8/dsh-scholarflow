@@ -97,7 +97,7 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
   useEffect(() => {
     if (!activeRun) return
     let live = true
-    const timer = window.setInterval(() => api('runs.inspect', { context: context(), runId: activeRun }).then(result => live && setProgress(result.run)).catch(() => {}), 1000)
+    const timer = window.setInterval(() => api('runs.inspect', { context: context(), runId: activeRun }).then(result => live && setProgress({ ...result.run, checkpoint: result.checkpoint })).catch(() => {}), 1000)
     return () => { live = false; clearInterval(timer) }
   }, [activeRun])
   const capture = () => {
@@ -206,6 +206,7 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
       })}>确认生成建议</button>
       <button disabled={busy} onClick={() => setPlan(undefined)}>取消生成计划</button></section>}
     {activeRun && <section aria-label="当前生成运行"><p role="status">运行 {activeRun} · {progress?.status ?? '准备开始'} · 已调用模型 {progress?.usedModelCalls ?? 0} 次</p>
+      {!!progress?.checkpoint?.transientRetries && <p>临时错误重试 {progress.checkpoint.transientRetries} / 2{progress.checkpoint.retryNotBefore ? `；等待到 ${new Date(progress.checkpoint.retryNotBefore).toLocaleTimeString()}` : ''}</p>}
       <button onClick={() => api('runs.pause', { context: context(), runId: activeRun }).then(() => setMessage('已请求暂停：当前调用结束后保存检查点，不再调度新工作。')).catch(e => setMessage(e.message))}>暂停当前生成</button>
       <button onClick={() => api('runs.cancel', { context: context(), runId: activeRun }).then(() => setMessage('已请求取消，等待阶段保存检查点。')).catch(e => setMessage(e.message))}>取消当前生成</button></section>}
     <section aria-label="写作运行历史"><h4>写作运行历史</h4><button disabled={busy} onClick={() => setHistorySequence(value => value + 1)}>刷新写作运行历史</button>
@@ -222,6 +223,7 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
       <p>原运行 {actionPlan.previousRunId} · 已调用模型 {actionPlan.usedModelCalls} 次{actionPlan.action === 'retry' ? `；新运行 ${actionPlan.runId}` : ''}</p>
       {actionPlan.model && <p>{actionPlan.model.providerId} / {actionPlan.model.modelId} · 输入约 {actionPlan.inputBytes} bytes · 调用预算 {actionPlan.budget.maxModelCalls} · {actionPlan.budget.maxDurationMinutes} 分钟</p>}
       {actionPlan.existingProposalId && <p>已有建议 {actionPlan.existingProposalId}，保留当前接受／拒绝状态。</p>}
+      {actionPlan.retryNotBefore && <p>提供方重试窗口：{new Date(actionPlan.retryNotBefore).toLocaleString()} 之后才会调度新调用。</p>}
       <p>固定 Skill：{actionPlan.skillDigests?.map((row: any) => `${row.qualifiedId} · ${row.digest}`).join('；') || '无模型调用或无 Skill'}</p>
       {actionPlan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy || (dirty && actionPlan.action !== 'close')} onClick={() => run(async () => {

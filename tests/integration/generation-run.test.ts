@@ -10,6 +10,7 @@ import { projectMarkdown } from '../../src/core/editing/markdown.ts'
 import { prepareRunAction, closeRun } from '../../src/core/pipeline/run-control.ts'
 import { readRun, runFile, ACTIVE_RUN } from '../../src/core/pipeline/run-store.ts'
 import { json, digest } from '../../src/core/store/files.ts'
+import { ScholarError } from '../../src/shared/errors.ts'
 const owner = { pid: 12345, bootInstance: 'TEST_ONLY' }
 
 async function setup() {
@@ -219,4 +220,49 @@ test('failed-run retry creates linked new history rather than erasing the origin
   assert.notEqual(result.run.runId, plan.snapshot.runId); assert.equal(result.run.parentRunId, plan.snapshot.runId)
   assert.equal((await io.read(runFile(plan.snapshot.runId)))!.text, failed)
   assert.equal(result.run.usedModelCalls, 1)
+})
+
+test('temporary errors stop after two retries, retain every charged call, and never invent a format result', async () => {
+  const { io, plan } = await setup(); let calls = 0
+  await assert.rejects(executeGeneration(io, plan, owner, new AbortController().signal, async () => {
+    calls++; throw new ScholarError('SERVER', 'TEST_ONLY provider failure', { status: 503 })
+  }, () => true), { code: 'SERVER' })
+  const stored = await readRun(io, plan.snapshot.runId, plan.snapshot.projectId), checkpoint = JSON.parse((await io.read(`.scholarflow/runs/${stored.run.runId}/checkpoint.json`))!.text)
+  assert.equal(calls, 3); assert.equal(stored.run.usedModelCalls, 3); assert.equal(stored.run.status, 'failed')
+  assert.equal(checkpoint.transientRetries, 2); assert.equal(checkpoint.formatAttempts, 0)
+  assert.equal(Object.keys((await snapshot(io)).ledger.proposalStates).length, 0)
+})
+
+test('authentication errors never auto-retry, while pause preserves a provider window across recovery', async () => {
+  const auth = await setup(); let authCalls = 0
+  await assert.rejects(executeGeneration(auth.io, auth.plan, owner, new AbortController().signal, async () => {
+    authCalls++; throw new ScholarError('AUTH', 'TEST_ONLY invalid credential', { status: 401 })
+  }, () => true), { code: 'AUTH' })
+  assert.equal(authCalls, 1)
+  const { io, plan } = await setup(); let pause = false
+  const before = Date.now()
+  const paused = await executeGeneration(io, plan, owner, new AbortController().signal, async () => {
+    pause = true; throw new ScholarError('RATE_LIMIT', 'TEST_ONLY', { status: 429, providerRetryAfterMs: 120000 })
+  }, () => true, { pauseRequested: () => pause })
+  const preview = await prepareRunAction(io, plan.snapshot.runId, 'resume', () => true)
+  assert.equal(paused.run.status, 'paused'); assert.ok(preview.retryNotBefore! >= before + 120000)
+  let calls = 0
+  const cancel = new AbortController()
+  const resumed = executeGeneration(io, preview.frozen!, owner, cancel.signal, async () => { calls++; return '' }, () => true,
+    { resume: preview, pauseRequested: () => false })
+  // TEST_ONLY wait only for durable resume registration, then cancel its timer.
+  while ((await readRun(io, plan.snapshot.runId, plan.snapshot.projectId)).run.status === 'paused') await new Promise(resolve => setTimeout(resolve, 5))
+  cancel.abort('user-cancel')
+  await assert.rejects(resumed, { code: 'CANCELLED' }); assert.equal(calls, 0)
+  assert.equal((await readRun(io, plan.snapshot.runId, plan.snapshot.projectId)).run.usedModelCalls, 1)
+})
+
+test('project inputs are rechecked before a format repair or transient retry dispatch', async () => {
+  const { io, plan } = await setup(); let calls = 0
+  await assert.rejects(executeGeneration(io, plan, owner, new AbortController().signal, async () => {
+    calls++; io.externalEdit('.scholarflow/profiles/writing.md', 'TEST_ONLY permissions and instruction inputs changed')
+    return 'TEST_ONLY invalid JSON'
+  }, () => true), { code: 'STALE_RESOURCE_VERSION' })
+  assert.equal(calls, 1)
+  assert.equal((await readRun(io, plan.snapshot.runId, plan.snapshot.projectId)).run.status, 'paused')
 })

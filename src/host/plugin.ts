@@ -45,7 +45,7 @@ import { anchorUpsertRequest } from '../shared/editing.ts'
 import { upsertAnchor } from '../core/editing/anchors.ts'
 import { listProjectSkills, projectSkillEntry } from '../core/skills/project-resources.ts'
 import { readRun, inspectRuns, prepareRunMigration, migrateRun } from '../core/pipeline/run-store.ts'
-import { prepareRunAction, validateRunAction, closeRun, type RunActionPlan } from '../core/pipeline/run-control.ts'
+import { prepareRunAction, validateRunAction, closeRun, readGenerationCheckpoint, type RunActionPlan } from '../core/pipeline/run-control.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -594,7 +594,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
           const fresh = await prepareGeneration(io, { ...plan.frozen!.input, context: input.context },
             { providerId: selection.provider, modelId: selection.model }, binding => readPrivateSkill(binding, io))
           const { contentHash: _hash, ...body } = fresh
-          const linked = { ...body, parentRunId: input.runId }
+          const linked = { ...body, parentRunId: input.runId, ...(plan.retryNotBefore && { retryNotBefore: plan.retryNotBefore }) }
           generation = { ...linked, contentHash: digest(json(linked)) }
         } else {
           generation = plan.frozen!
@@ -607,7 +607,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const stored = await readRun(io, input.runId, plan.projectId)
       return { planId: plan.id, planHash: plan.contentHash, action: input.action, runId: generation?.snapshot.runId ?? input.runId, previousRunId: input.runId,
         model: generation?.snapshot.modelDescriptor, inputBytes: generation?.inputBytes, usedModelCalls: stored.run.usedModelCalls,
-        budget: generation?.snapshot.budget, skillDigests: generation?.snapshot.skillDigests, existingProposalId: plan.existingProposalId,
+        budget: generation?.snapshot.budget, skillDigests: generation?.snapshot.skillDigests, existingProposalId: plan.existingProposalId, retryNotBefore: plan.retryNotBefore,
         risks: input.action === 'close' ? ['将未结束记录标记为用户取消，保留检查点和原状态历史；不调用模型、不修改主稿、不撤销已接受建议。'] :
           plan.existingProposalId ? ['恢复已保存建议的终态记录；保留建议当前接受／拒绝状态，不调用模型、不重放补丁。'] : input.action === 'retry' ?
             ['创建关联新运行，保留原失败／取消终态；按当前已确认项目输入、文风、记忆和固定 Skill 重新生成待审阅建议。', '将所列资料范围发送给当前宿主模型，只有明确接受建议才修改主稿。'] :
@@ -643,7 +643,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       try { return await executeGeneration(io, generation, { pid: process.pid, bootInstance: this.bootInstance }, AbortSignal.any([signal, controller.signal]),
         call => { invariant(model, 'MODEL_NOT_SELECTED', '恢复已有产物不应调用模型。'); return callStageModel(this.ctx, model.session, model.selected, call) },
         candidate => this.ownerAlive(candidate), { pauseRequested: () => active.pauseRequested, executionSessionId: input.context.sessionId,
-          ...(row.plan.action === 'resume' && { resume: row.plan }) }) }
+          ...(row.plan.action === 'resume' && { resume: row.plan }), ...(row.plan.action === 'retry' && { retry: row.plan }) }) }
       finally { this.running.delete(runId) }
     })
   }
@@ -677,7 +677,9 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => {
       this.requireOperator(); const input = runControlRequest.parse(request), { io } = await resolveStore(this.ctx, input.context, signal)
       const stored = await readRun(io, input.runId, input.context.projectId!)
-      return { run: stored.run, legacyStorage: stored.legacy }
+      const progress = stored.run.checkpointHash ? (await readGenerationCheckpoint(io, stored.run)).checkpoint : undefined
+      return { run: stored.run, legacyStorage: stored.legacy, checkpoint: progress && { formatAttempts: progress.formatAttempts,
+        transientRetries: progress.transientRetries ?? 0, retryNotBefore: progress.retryNotBefore, savedCandidate: !!progress.output } }
     })
   }
 

@@ -18,6 +18,7 @@ export const runStateSchema = z.object({ schemaVersion: z.literal(1), runId: id,
   owner: z.object({ pid: z.number().int().min(1), bootInstance: z.string() }).strict() }).strict()
 export const generationCheckpointSchema = z.object({ schemaVersion: z.literal(1), runId: id, projectId: id, planHash: hash,
   formatAttempts: z.number().int().min(0).max(2), pendingCall: z.boolean(), repair: z.string().max(2000).optional(),
+  transientRetries: z.number().int().min(0).max(2).optional(), retryNotBefore: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), lastTransientCode: z.string().max(64).optional(),
   output: modelOutputSchema.optional(), proposal: proposalSchema.optional() }).strict()
 export type GenerationCheckpoint = z.infer<typeof generationCheckpointSchema>
 export type RunState = z.infer<typeof runStateSchema>

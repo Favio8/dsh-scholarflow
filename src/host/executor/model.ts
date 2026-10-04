@@ -37,7 +37,10 @@ export async function callStageModel(ctx: Host, session: Host, selected: { provi
   if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '宿主模型调用已取消。')
   if (finish?.kind === 'error') {
     const code = /^[A-Z_]{1,64}$/.test(finish.failure?.code ?? '') ? finish.failure.code : 'MODEL_CALL_FAILED'
-    throw new ScholarError(code, '宿主模型调用失败；请在 DSH 中检查模型、凭据或服务状态。')
+    const facts: Record<string, number> = {}, failure = finish.failure
+    if (Number.isInteger(failure?.status) && failure.status >= 100 && failure.status <= 599) facts.status = failure.status
+    if (Number.isFinite(failure?.providerRetryAfterMs) && failure.providerRetryAfterMs > 0) facts.providerRetryAfterMs = failure.providerRetryAfterMs
+    throw new ScholarError(code, '宿主模型调用失败；请在 DSH 中检查模型、凭据或服务状态。', facts)
   }
   invariant(finish?.kind === 'stop' && text.trim(), 'MODEL_OUTPUT_INCOMPLETE', '模型输出未正常结束或为空；未应用任何正文修改。')
   return text

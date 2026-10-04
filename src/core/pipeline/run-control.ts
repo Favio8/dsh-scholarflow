@@ -13,7 +13,7 @@ export const frozenPlanFile = (runId: string) => `.scholarflow/runs/${id.parse(r
 export const checkpointFile = (runId: string) => `.scholarflow/runs/${id.parse(runId)}/checkpoint.json`
 const frozenSchema = z.object({ id, contentHash: hash, snapshot: runSnapshotSchema, input: generationRequest,
   context: z.record(z.string(), z.unknown()), evidenceIds: z.array(id).max(10000), inputBytes: z.number().int().min(0), ledgerHash: hash,
-  parentRunId: id.optional(), sectionTarget: z.object({ sectionId: id, title: z.string(), depth: z.number().int().min(1).max(6),
+  parentRunId: id.optional(), retryNotBefore: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), sectionTarget: z.object({ sectionId: id, title: z.string(), depth: z.number().int().min(1).max(6),
     mode: z.enum(['insert', 'replace-body']), startUtf16: z.number().int().min(0), endUtf16: z.number().int().min(0) }).strict().optional() }).strict()
 
 export async function readFrozenGeneration(io: FileStore, runId: string, projectId: string) {
@@ -74,7 +74,7 @@ export async function prepareRunAction(io: FileStore, runId: string, action: 're
   const body = { id: newId('run_action'), projectId: current.ledger.projectId, runId, action, stateHash: digest(stored.file.text),
     statePath: stored.path, activeHash: active ? digest(active.text) : null, frozenHash: frozen ? digest(frozen.file.text) : null,
     checkpointHash: progress ? digest(progress.file.text) : null, ledgerHash: current.ledgerHash, configHash: current.configHash,
-    documentHash: current.document.contentHash, existingProposalId, existingProposalState }
+    documentHash: current.document.contentHash, existingProposalId, existingProposalState, retryNotBefore: progress?.checkpoint.retryNotBefore }
   return { ...body, contentHash: digest(json(body)), frozen: frozen?.plan }
 }
 export type RunActionPlan = Awaited<ReturnType<typeof prepareRunAction>>
