@@ -41,6 +41,8 @@ import { readPrivateSkill, libraryEntry, builtinSkills } from './skills/reader.t
 import { stage } from '../shared/schema.ts'
 import type { ResourceBinding } from '../shared/skills.ts'
 import { knownSkillReferences } from './skills/references.ts'
+import { anchorUpsertRequest } from '../shared/editing.ts'
+import { upsertAnchor } from '../core/editing/anchors.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -503,9 +505,20 @@ export class ScholarFlowRemote extends TypertRemoteService {
       this.generationPlans.set(plan.id, { plan, selected: model.selected, peerId, expires: Date.now() + 600000 })
       return { planId: plan.id, planHash: plan.contentHash, runId: plan.snapshot.runId, model: plan.snapshot.modelDescriptor, stage: plan.snapshot.stage,
         inputBytes: plan.inputBytes, evidenceIds: plan.evidenceIds, budget: plan.snapshot.budget, skillDigests: plan.snapshot.skillDigests,
-        scope: input.selection ? input.selection.sourceRange : { startUtf16: 0, endUtf16: (await snapshot(io)).document.text.length },
-        sourceText: input.selection?.sourceText, risks: ['将选定证据、当前稿件范围、项目文风、确认记忆和当前阶段固定 Skill 说明／文本参考发送给所列宿主模型提供方；本地资料模式不等于模型离线处理。',
+        scope: input.selection ? input.selection.sourceRange : plan.sectionTarget ? { startUtf16: plan.sectionTarget.startUtf16, endUtf16: plan.sectionTarget.endUtf16 } : { startUtf16: 0, endUtf16: (await snapshot(io)).document.text.length },
+        sectionTarget: plan.sectionTarget, sourceText: input.selection?.sourceText, risks: [
+          ...(plan.sectionTarget ? ['本节候选仅修改上述范围；为核对摘要、结论与跨节一致性，同时向模型发送当前全部已保存主稿。待补项不能作为已有结果。'] : []),
+          '将选定证据、当前稿件范围、项目文风、确认记忆和当前阶段固定 Skill 说明／文本参考发送给所列宿主模型提供方；本地资料模式不等于模型离线处理。',
           '生成结果为待审阅建议，接受前不会改写主稿。宿主会话日志保留模型请求以供追溯；项目诊断日志不另存完整 Prompt。'] }
+    })
+  }
+
+  @Remote('anchors.upsert')
+  async anchorsUpsert(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const { context, ...input } = anchorUpsertRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal)
+      return upsertAnchor(io, input, mutationRevision(context))
     })
   }
 

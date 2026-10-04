@@ -2,6 +2,7 @@ import { digest, newId, json, type FileStore } from '../store/files.ts'
 import { snapshot, LEDGER_PATH, CONFIG_PATH, invalidateReviews } from '../project/project.ts'
 import { commit, inspectRecovery, type Mutation } from '../store/transactions.ts'
 import { proposalSchema, selectionSchema, type EditProposal, type SelectionPayload } from '../../shared/editing.ts'
+import { sectionEdit } from './sections.ts'
 import { ledgerSchema, id, type Ledger } from '../../shared/schema.ts'
 import { invariant } from '../../shared/errors.ts'
 import { citationKeys, unicodeBoundary, validateSelection, wordStats, parseMarkdown, projectMarkdown, walk } from './markdown.ts'
@@ -36,7 +37,7 @@ export function protectedChanges(before: string, after: string) {
   return changes
 }
 
-export function buildProposal(current: Snapshot, input: { runId: string; instruction: string; replacementText: string; selection?: SelectionPayload; dependentEvidenceIds: string[] }): EditProposal {
+export function buildProposal(current: Snapshot, input: { runId: string; instruction: string; replacementText: string; selection?: SelectionPayload; section?: EditProposal['section']; dependentEvidenceIds: string[] }): EditProposal {
   invariant(!current.document.externalChange, 'STALE_DOCUMENT_VERSION', '先确认采用外部稿件版本，再生成建议。')
   let from = 0, to = current.document.text.length
   if (input.selection) {
@@ -46,18 +47,20 @@ export function buildProposal(current: Snapshot, input: { runId: string; instruc
     validateSelection(current.document.text, selection)
     from = selection.sourceRange.startUtf16; to = selection.sourceRange.endUtf16
   }
-  const expectedText = current.document.text.slice(from, to)
-  const edits = [{ startUtf16: from, endUtf16: to, expectedText, replacementText: input.replacementText }]
+  invariant(!(input.selection && input.section), 'PROPOSAL_RANGE_INVALID', '选区与章节范围不能混用。')
+  const section = input.section && sectionEdit(current.document.text, current.ledger.outline, input.section)
+  const edits = [section?.edit ?? { startUtf16: from, endUtf16: to, expectedText: current.document.text.slice(from, to), replacementText: input.replacementText }]
+  const expectedText = edits[0].expectedText
   const changed = applyEdits(current.document.text, edits)
   const beforeKeys = citationKeys(current.document.text), afterKeys = citationKeys(changed)
   const added = afterKeys.filter(key => !beforeKeys.includes(key)), removed = beforeKeys.filter(key => !afterKeys.includes(key))
   bibliography(changed, current.ledger)
   invariant(!input.selection || (!added.length && !removed.length), 'CITATION_CHANGE_REQUIRES_CONFIRMATION', '基础选区改写必须保留引用 token；引用变更须单独提出。')
   for (const evidenceId of input.dependentEvidenceIds) invariant(current.ledger.evidence[evidenceId]?.validation === 'located', 'EVIDENCE_NOT_CURRENT', '建议依赖的证据未定位或已过期。')
-  const factChanges = protectedChanges(expectedText, input.replacementText)
+  const factChanges = protectedChanges(expectedText, edits[0].replacementText)
   return proposalSchema.parse({ schemaVersion: 1, id: newId('prop'), projectId: current.config.project.id, runId: input.runId, documentId: 'paper',
-    baseDocumentHash: current.document.contentHash, baseRevisionId: current.document.revisionId, scope: input.selection ? 'selection' : 'document',
-    instruction: input.instruction, ...(input.selection && { selection: input.selection }), edits,
+    baseDocumentHash: current.document.contentHash, baseRevisionId: current.document.revisionId, scope: input.selection ? 'selection' : input.section ? 'section' : 'document',
+    instruction: input.instruction, ...(input.selection && { selection: input.selection }), ...(input.section && { section: input.section }), edits,
     citationChanges: { added, removed }, protectedFactChanges: factChanges, dependentEvidenceIds: [...new Set(input.dependentEvidenceIds)], createdAt: now(),
     checks: [{ id: 'citation-keys', status: 'pass', detail: '引用键均对应项目来源记录；这不代表出版身份或论点支持已核验。' },
       { id: 'protected-facts', status: factChanges.length ? 'unknown' : 'pass', detail: factChanges.length ? '数字或限定条件变化，需要人工判断。' : '规则检查未发现列出的数字／限定词变化。' },
@@ -97,7 +100,7 @@ export async function proposalImage(io: FileStore, proposalId: string) {
   return { proposal: proposalSchema.parse(JSON.parse(file.text)), contentHash: digest(file.text) }
 }
 
-async function documentMutation(io: FileStore, current: Snapshot, ledger: Ledger, text: string, origin: string) {
+async function documentMutation(io: FileStore, current: Snapshot, ledger: Ledger, text: string, origin: string, edits?: EditProposal['edits']) {
   invariant(text.isWellFormed(), 'DOCUMENT_INVALID', '正文包含无效 Unicode。')
   const statistics = wordStats(text)
   const revisionId = newId('rev'), documentHash = digest(text), baseDocumentHash = current.document.contentHash
@@ -112,7 +115,19 @@ async function documentMutation(io: FileStore, current: Snapshot, ledger: Ledger
   const bib = bibliography(text, ledger)
   ledger.documents.paper = { ...ledger.documents.paper, currentHash: documentHash, revisionId, initialPlaceholder: false,
     lineEnding: text.includes('\r\n') ? text.replaceAll('\r\n', '').includes('\n') ? 'mixed' : 'crlf' : 'lf' }
-  for (const anchor of Object.values(ledger.claimAnchors)) anchor.status = 'needs-remap'
+  const beforeBlocks = projectMarkdown(current.document.text).blocks, afterBlocks = projectMarkdown(text).blocks
+  for (const anchor of Object.values(ledger.claimAnchors)) {
+    const old = beforeBlocks.find(block => block.id === anchor.blockId)
+    if (anchor.documentId !== 'paper' || anchor.status !== 'current' || anchor.documentHash !== baseDocumentHash || !old || digest(current.document.text.slice(old.start, old.end)) !== anchor.blockTextHash) { anchor.status = 'needs-remap'; continue }
+    let candidates = afterBlocks.filter(block => digest(text.slice(block.start, block.end)) === anchor.blockTextHash)
+    if (edits) {
+      const untouched = edits.every(edit => edit.endUtf16 <= old.start || edit.startUtf16 >= old.end)
+      const shift = edits.filter(edit => edit.endUtf16 <= old.start).reduce((sum, edit) => sum + edit.replacementText.length - (edit.endUtf16 - edit.startUtf16), 0)
+      candidates = untouched ? candidates.filter(block => block.start === old.start + shift && block.end === old.end + shift) : []
+    }
+    if (candidates.length === 1) { anchor.blockId = candidates[0].id; anchor.documentHash = documentHash }
+    else anchor.status = 'needs-remap'
+  }
   invalidateReviews(ledger)
   const mutations: Mutation[] = [
     { path: `.scholarflow/drafts/${revisionId}/preimage.md`, before: undefined, after: paper.text },
@@ -152,6 +167,10 @@ export async function applyProposal(io: FileStore, proposalId: string, revision:
       invariant(proposal.scope === 'selection' && proposal.edits.length === 1 && proposal.edits[0].startUtf16 === proposal.selection.sourceRange.startUtf16 &&
         proposal.edits[0].endUtf16 === proposal.selection.sourceRange.endUtf16 && proposal.edits[0].expectedText === proposal.selection.sourceText,
         'PROPOSAL_RANGE_INVALID', '实际建议修改超出已展示的选区范围。')
+    } else if (proposal.section) {
+      invariant(proposal.scope === 'section' && proposal.edits.length === 1 &&
+        JSON.stringify(sectionEdit(current.document.text, current.ledger.outline, proposal.section).edit) === JSON.stringify(proposal.edits[0]),
+        'PROPOSAL_RANGE_INVALID', '章节建议超出重新验证的大纲范围。')
     } else invariant(proposal.scope === 'document', 'PROPOSAL_RANGE_INVALID', '当前建议没有有效的范围合同。')
     for (const evidenceId of proposal.dependentEvidenceIds) {
       const evidence = current.ledger.evidence[evidenceId], source = current.ledger.sources[evidence?.sourceId], material = current.ledger.materials[source?.materialId ?? '']
@@ -164,7 +183,20 @@ export async function applyProposal(io: FileStore, proposalId: string, revision:
     invariant(JSON.stringify(afterKeys.filter(key => !beforeKeys.includes(key))) === JSON.stringify(proposal.citationChanges.added) &&
       JSON.stringify(beforeKeys.filter(key => !afterKeys.includes(key))) === JSON.stringify(proposal.citationChanges.removed), 'PROPOSAL_INVALID', '建议引用差异与实际内容不一致。')
     invariant(!proposal.selection || (!proposal.citationChanges.added.length && !proposal.citationChanges.removed.length), 'CITATION_CHANGE_REQUIRES_CONFIRMATION', '选区改写不能静默增删引用。')
-    const ledger = structuredClone(current.ledger), change = await documentMutation(io, current, ledger, text, proposal.id)
+    const ledger = structuredClone(current.ledger), change = await documentMutation(io, current, ledger, text, proposal.id, proposal.edits)
+    if (proposal.section) {
+      const candidate = sectionEdit(current.document.text, current.ledger.outline, proposal.section), projection = projectMarkdown(text)
+      for (const mapping of proposal.section.paragraphClaims) {
+        const block = candidate.blocks[mapping.paragraphIndex], start = candidate.edit.startUtf16 + candidate.bodyOffset + block.start, end = candidate.edit.startUtf16 + candidate.bodyOffset + block.end
+        const actual = projection.blocks.find(row => row.start === start && row.end === end)
+        invariant(actual, 'SECTION_CLAIM_MAPPING_INVALID', '候选段落无法对应新稿 AST，未提交正文。')
+        if (mapping.claimIds.length) {
+          const anchorId = newId('anchor')
+          ledger.claimAnchors[anchorId] = { id: anchorId, documentId: 'paper', documentHash: change.documentHash, blockId: actual.id,
+            blockTextHash: digest(text.slice(start, end)), claimIds: mapping.claimIds, status: 'current' }
+        }
+      }
+    }
     ledger.proposalStates[proposal.id] = { ...state, state: 'accepted', acceptedRevisionId: change.revisionId, updatedAt: now() }
     const nextRevision = await publishLedger(io, current, ledger, change.mutations)
     return { revisionId: change.revisionId, documentHash: change.documentHash, revision: nextRevision, alreadyApplied: false }

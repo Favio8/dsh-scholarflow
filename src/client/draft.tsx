@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { projectMarkdown, wordStats } from '../core/editing/markdown.ts'
+import { projectMarkdown, wordStats, textOf } from '../core/editing/markdown.ts'
+import { sectionTarget } from '../core/editing/sections.ts'
 import { MarkdownView, captureSelection } from './markdown.tsx'
 import type { SelectionPayload } from '../shared/editing.ts'
 
@@ -21,6 +22,8 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
   const [selection, setSelection] = useState<SelectionPayload>()
   const [message, setMessage] = useState('')
   const [instruction, setInstruction] = useState('改善表达，保留事实、适用范围和引用。')
+  const [sectionId, setSectionId] = useState('')
+  const [anchorId, setAnchorId] = useState(''), [anchorClaimIds, setAnchorClaimIds] = useState<string[]>([])
   const [plan, setPlan] = useState<any>()
   const [proposal, setProposal] = useState<any>()
   const [activeRun, setActiveRun] = useState('')
@@ -95,6 +98,9 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
     try {
       if (!window.getSelection()?.toString()) return
       const payload = captureSelection(root.current!, projection, project.document, projectId)
+      payload.claimIds = [...new Set((Object.values(project.ledger.claimAnchors) as any[]).filter(anchor => anchor.status === 'current' && anchor.documentId === 'paper' &&
+        anchor.documentHash === project.document.contentHash && payload.blockIds.includes(anchor.blockId)).flatMap(anchor => anchor.claimIds))] as string[]
+      setAnchorClaimIds(payload.claimIds); setAnchorId('')
       setSelection(payload); setMessage('已捕获源码范围；预览会显示实际修改内容。')
     } catch (error) { setSelection(undefined); setMessage((error as Error).message) }
   }
@@ -129,16 +135,60 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
       persistenceBlocked.current = false; setBufferReady(true); setRecoverable(result.buffer?.state === 'dirty' ? result.buffer : undefined); setBufferMessage('已重读宿主缓冲，请比较保留的本页面编辑与宿主副本。')
     })}>重读冲突暂存缓冲</button>
     <p>{statistics.chineseCharacters} 汉字 · {statistics.westernWords} 西文词元。{statistics.detail}</p>
+    <nav aria-label="正文标题导航">{projection.tree.children?.filter(node => node.type === 'heading').map(node => <button key={node.position!.start.offset} onClick={() => {
+      const heading = root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${node.position!.start.offset}"]`)
+      heading?.scrollIntoView({ block: 'nearest' }); heading?.focus()
+    }}>{textOf(node) || '无文字标题'}</button>)}</nav>
+    <section aria-label="章节正文状态"><h4>大纲与已保存正文</h4><p>以下状态仅说明正文是否已保存；有正文不等于已完成研究或通过审查。</p>
+      {project.ledger.outline.sections.map((section: any) => {
+        let status = '尚无对应标题／正文'
+        try {
+          const target = sectionTarget(project.document.text, project.ledger.outline, section.id)
+          if (target.mode === 'replace-body') {
+            const body = project.document.text.slice(target.startUtf16, target.endUtf16)
+            status = body.trim() ? /\[待补[：:]/.test(body) ? '正文已保存 · 含待补项' : '正文已保存 · 待审查' : '已有标题 · 正文尚空'
+          }
+        } catch (error) { status = (error as Error).message }
+        return <p key={section.id}>{section.title}：{status}</p>
+      })}</section>
     <h4>已保存主稿预览</h4><div ref={root} onMouseUp={capture} onKeyUp={capture}><MarkdownView projection={projection} /></div>
-    {selection && <section aria-label="已捕获选区"><h4>实际改写范围 [{selection.sourceRange.startUtf16}, {selection.sourceRange.endUtf16})</h4><pre>{selection.sourceText}</pre><p>引用：{selection.citationKeys.join('、') || '无'} · 段落 {selection.blockIds.join('、')}</p></section>}
+    {selection && <section aria-label="已捕获选区"><h4>实际改写范围 [{selection.sourceRange.startUtf16}, {selection.sourceRange.endUtf16})</h4><pre>{selection.sourceText}</pre><p>引用：{selection.citationKeys.join('、') || '无'} · 段落 {selection.blockIds.join('、')} · 论点：{selection.claimIds.join('、') || '尚无当前关联'}</p></section>}
+    {selection && <section aria-label="确认段落论点关联"><h4>关联整段与论点</h4><p>关联针对选区所在的完整段落；它不会修改正文或自动提升论点支持状态。</p>
+      <pre>{(() => { const block = projection.blocks.find(row => row.id === selection.blockIds[0]); return block && project.document.text.slice(block.start, block.end) })()}</pre>
+      <label>要重新定位的关联<select aria-label="要重新定位的关联" value={anchorId} onChange={e => {
+        setAnchorId(e.target.value); setAnchorClaimIds(project.ledger.claimAnchors[e.target.value]?.claimIds ?? selection.claimIds)
+      }}><option value="">创建／更新当前段落关联</option>
+        {(Object.values(project.ledger.claimAnchors) as any[]).map(anchor => <option key={anchor.id} value={anchor.id}>{anchor.id} · {anchor.status}</option>)}</select></label>
+      <fieldset><legend>段落关联论点</legend>{(Object.values(project.ledger.claims) as any[]).map(claim => <label key={claim.id}><input type="checkbox" checked={anchorClaimIds.includes(claim.id)} onChange={e => setAnchorClaimIds(e.target.checked ? [...anchorClaimIds, claim.id] : anchorClaimIds.filter(id => id !== claim.id))} />{claim.text}</label>)}</fieldset>
+      <p>没有勾选论点时，确认会解除所选已有关联。</p>
+      <button disabled={busy || dirty} onClick={() => run(async () => {
+        const block = projection.blocks.find(row => row.id === selection.blockIds[0])!
+        const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(project.document.text.slice(block.start, block.end)))
+        const blockTextHash = `sha256:${Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('')}`
+        const currentAnchor = (Object.values(project.ledger.claimAnchors) as any[]).find(anchor => anchor.status === 'current' && anchor.documentHash === project.document.contentHash && anchor.blockId === block.id)
+        await api('anchors.upsert', { context: context(), documentHash: project.document.contentHash, blockId: block.id, blockTextHash,
+          ...((anchorId || currentAnchor?.id) && { anchorId: anchorId || currentAnchor.id }), claimIds: anchorClaimIds })
+        setSelection(undefined); setAnchorId(''); setAnchorClaimIds([]); await refresh(); setMessage('段落论点关联已明确保存，证据与论证审查需复查。')
+      })}>确认保存段落论点关联</button></section>}
+    {!!Object.keys(project.ledger.claimAnchors).length && <section aria-label="正文论点定位"><h4>正文段落与论点</h4>
+      {(Object.values(project.ledger.claimAnchors) as any[]).map(anchor => <p key={anchor.id}>{anchor.blockId} · {anchor.status === 'current' && anchor.documentHash === project.document.contentHash ? '当前关联' : '待重新定位'} → {anchor.claimIds.join('、')}
+        <button disabled={anchor.status !== 'current' || anchor.documentHash !== project.document.contentHash} onClick={() => {
+          root.current?.querySelector<HTMLElement>(`[data-sf-block="${anchor.blockId}"]`)?.scrollIntoView({ block: 'center' })
+        }}>定位段落 {anchor.id}</button></p>)}</section>}
     <label>改写／生成指令<textarea aria-label="改写生成指令" value={instruction} onChange={e => setInstruction(e.target.value)} /></label>
     {!!skills.length && <label>已启用的选区 Skill<select aria-label="已启用的选区 Skill" value={skillBindingId} onChange={e => setSkillBindingId(e.target.value)}><option value="">使用修订阶段的默认启用顺序</option>
       {skills.map(row => <option key={row.binding.bindingId} value={row.binding.bindingId}>{row.metadata.displayName} · {row.binding.digest.slice(7, 19)}</option>)}</select></label>}
     <button disabled={busy || dirty || !selection || !instruction.trim()} onClick={() => prepare(false)}>预览选区改写计划</button>
+    <label>按大纲生成章节<select aria-label="按大纲生成章节" value={sectionId} onChange={e => setSectionId(e.target.value)}><option value="">选择已确认的大纲章节</option>
+      {project.ledger.outline.sections.map((section: any) => <option key={section.id} value={section.id}>{section.title}</option>)}</select></label>
+    <button disabled={busy || dirty || !sectionId || project.ledger.outline.confirmation !== 'confirmed' || !instruction.trim()} onClick={() => run(async () => {
+      setPlan(await api('writing.prepare', { context: context(), instruction, sectionId }))
+    })}>预览本节生成计划</button>
     <button disabled={busy || dirty || !instruction.trim()} onClick={() => prepare(true)}>预览全文生成计划</button>
     {plan && <section role="dialog" aria-modal="false" aria-label="模型生成确认"><h4>确认宿主模型调用</h4>
       <p>{plan.model.providerId} / {plan.model.modelId} · 输入约 {plan.inputBytes} bytes · 源码范围 [{plan.scope.startUtf16}, {plan.scope.endUtf16})</p>
       <p>模型调用预算 {plan.budget.maxModelCalls}；运行时限 {plan.budget.maxDurationMinutes} 分钟；仅生成待审阅建议。</p>
+      {plan.sectionTarget && <p>目标章节：{plan.sectionTarget.title} · {plan.sectionTarget.mode === 'insert' ? '插入新章节' : '替换本节正文并保留标题及子章节'}</p>}
       <p>本次固定 Skill：{plan.skillDigests?.map((row: any) => `${row.qualifiedId} · ${row.digest}`).join('；') || '无'}</p>
       {plan.sourceText && <pre>{plan.sourceText}</pre>}{plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy} onClick={() => run(async () => {
@@ -154,6 +204,9 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
     {proposal && <section aria-label="建议差异"><h4>待审阅差异 · {proposal.proposal.id}</h4><p>范围：{proposal.proposal.scope}。接受会使旧审查过期。</p>
       {proposal.proposal.edits.map((edit: any, index: number) => <div key={index}><p>源码 [{edit.startUtf16}, {edit.endUtf16})</p><b>− 原文</b><pre>{edit.expectedText}</pre><b>+ 新文</b><pre>{edit.replacementText}</pre></div>)}
       <p>引用新增：{proposal.proposal.citationChanges.added.join('、') || '无'}；删除：{proposal.proposal.citationChanges.removed.join('、') || '无'}。</p>
+      {proposal.proposal.section && <div><p>章节 {proposal.proposal.section.sectionId} · 大纲版本 {proposal.proposal.section.outlineVersion}。段落映射是待核对的关联，不能证明证据支持。</p>
+        {proposal.proposal.section.paragraphClaims.map((row: any) => <p key={row.paragraphIndex}>段落 {row.paragraphIndex + 1} → {row.claimIds.join('、') || '无论点关联／待补'}</p>)}
+        {proposal.proposal.section.limitations.map((gap: string, i: number) => <p key={i}>缺口：{gap}</p>)}</div>}
       {proposal.proposal.protectedFactChanges.map((change: string) => <p key={change}>{change}</p>)}
       {proposal.proposal.checks.map((check: any) => <p key={check.id}>{check.status} · {check.detail}</p>)}
       <button disabled={busy || dirty} onClick={() => run(async () => { await api('edits.apply', { context: context(), proposalId: proposal.proposal.id, proposalHash: proposal.proposalHash }); remember(); setProposal(undefined); await refresh() })}>接受此条建议</button>

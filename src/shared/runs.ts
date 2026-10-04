@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { hash, id, requestContext } from './schema.ts'
 import { selectionSchema } from './editing.ts'
 export const generationRequest = z.object({ context: requestContext, instruction: z.string().min(1).max(16000), selection: selectionSchema.optional(), sectionId: id.optional(), skillBindingId: id.optional() }).strict()
+  .refine(input => !(input.selection && input.sectionId), 'Selection and section scopes are mutually exclusive')
 export const runStartRequest = z.object({ context: requestContext, planId: id, planHash: hash }).strict()
 export const runControlRequest = z.object({ context: requestContext, runId: id }).strict()
 export const runSnapshotSchema = z.object({ schemaVersion: z.literal(1), runId: id, projectId: id, sessionId: id, stage: z.enum(['drafting', 'revision']), configHash: hash,

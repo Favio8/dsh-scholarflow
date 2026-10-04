@@ -341,8 +341,11 @@ try {
   assert.doesNotMatch(await selectionSkills.innerText(), /TEST_ONLY-private-static/u)
   if (liveModel) {
     const before = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
-    await page.getByRole('textbox', { name: '改写生成指令', exact: true }).fill('这是 TEST_ONLY 功能验证。根据已确认的单章节大纲写一段短文（不超过120个汉字），保留唯一已登记来源引用及限定范围。不要编造实验。')
-    await page.getByRole('button', { name: '预览全文生成计划', exact: true }).click()
+    const readyLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+    const targetSection = readyLedger.outline.sections[0]
+    await page.getByRole('textbox', { name: '改写生成指令', exact: true }).fill('这是 TEST_ONLY 功能验证。只生成所选章节正文，恰好一段不超过120个汉字，使用本节的实际论点ID给段落0建立 paragraphClaims 映射，保留唯一已登记来源引用及限定范围。不要编造实验。不返回任何标题。')
+    await page.getByRole('combobox', { name: '按大纲生成章节', exact: true }).selectOption(targetSection.id)
+    await page.getByRole('button', { name: '预览本节生成计划', exact: true }).click()
     await page.getByRole('dialog', { name: '模型生成确认', exact: true }).waitFor()
     assert.ok((await page.getByRole('dialog', { name: '模型生成确认', exact: true }).innerText()).includes('deepseek-official / deepseek-flash'))
     await page.getByRole('button', { name: '确认生成建议', exact: true }).click()
@@ -350,9 +353,18 @@ try {
     assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), before)
     const candidate = await page.getByRole('region', { name: '建议差异', exact: true }).innerText()
     assert.match(candidate, /\[@sf_/)
-    await page.getByRole('button', { name: '拒绝此条建议', exact: true }).click()
+    assert.match(candidate, /范围：section/u)
+    await page.getByRole('button', { name: '接受此条建议', exact: true }).click()
     await page.getByRole('region', { name: '建议差异', exact: true }).waitFor({ state: 'detached' })
-    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), before)
+    const sectionBody = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+    assert.ok(sectionBody.startsWith(before), 'a new section preserves every original manuscript byte')
+    assert.ok(sectionBody.includes(`## ${targetSection.title}`))
+    const acceptedLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+    const anchors = Object.values(acceptedLedger.claimAnchors).filter(row => row.status === 'current')
+    assert.equal(anchors.length, 1)
+    assert.deepEqual(anchors[0].claimIds, targetSection.claimIds)
+    assert.equal(anchors[0].documentHash, acceptedLedger.documents.paper.currentHash)
+    assert.match(sectionBody, /\[@sf_/)
   }
   const selectedLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
   const citeKey = Object.values(selectedLedger.sources)[0].citeKey
@@ -364,7 +376,7 @@ try {
   await page.locator('.sf-prose p').nth(1).getByText('限定范围', { exact: true }).waitFor()
   assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
   assert.match(await readFile(join(projectRoot, 'manuscript/references.bib'), 'utf8'), new RegExp(`@[^\\{]+\\{${citeKey},`))
-  const browserSelection = await page.evaluate(() => {
+  const captureSecond = () => page.evaluate(() => {
     const paragraphs = document.querySelectorAll('.sf-prose p')
     const second = paragraphs[1]
     const leaves = second.querySelectorAll('[data-sf-leaf]')
@@ -377,12 +389,26 @@ try {
     second.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
     return selected.toString()
   })
+  const browserSelection = await captureSecond()
   assert.equal(browserSelection, 'TEST_ONLY 限定范围 * & 😀 [1]。')
   const capture = page.getByRole('region', { name: '已捕获选区', exact: true })
   await capture.waitFor()
   assert.equal(await capture.locator('pre').innerText(), repeatedParagraph)
   const secondOffset = manualBody.lastIndexOf(repeatedParagraph)
   assert.match(await capture.innerText(), new RegExp(`\\[${secondOffset}, ${secondOffset + repeatedParagraph.length}\\)`))
+  await page.getByRole('group', { name: '段落关联论点', exact: true }).getByRole('checkbox').check()
+  await page.getByRole('button', { name: '确认保存段落论点关联', exact: true }).click()
+  await page.getByText('段落论点关联已明确保存，证据与论证审查需复查。', { exact: true }).waitFor()
+  const associatedLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  const associated = Object.values(associatedLedger.claimAnchors).find(row => row.status === 'current' && row.blockId === `p_${secondOffset}_${secondOffset + repeatedParagraph.length}`)
+  assert.ok(associated, 'actual operator UI creates an exact paragraph association')
+  assert.equal(associated.blockTextHash, digest(repeatedParagraph))
+  assert.deepEqual(associated.claimIds, [Object.values(associatedLedger.claims)[0].id])
+  assert.equal(Object.values(associatedLedger.claims)[0].status, 'partially-supported')
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+  await captureSecond()
+  await capture.waitFor()
+  assert.ok((await capture.innerText()).includes(associated.claimIds[0]), 'rendered selection displays its actual scoped claim association')
   if (liveModel) {
     await page.getByRole('textbox', { name: '改写生成指令', exact: true }).fill('这是 TEST_ONLY 功能验证。把当前第二段缩写为“TEST_ONLY 限定范围”，保留当前引用token和段末句号。不要添加任何事实或引用。')
     await page.getByRole('button', { name: '预览选区改写计划', exact: true }).click()
@@ -646,7 +672,8 @@ try {
     nativeUiManualSaveCitationProjection: true, nativeDomSecondParagraphSelection: true,
     nativeDomEntityUnicodeDecode: true, crossParagraphSelectionRejected: true, manuscriptColdRestore: true,
     nativeUiDeterministicReview: true, nativeUiWorkingDraftExportDownload: true, exportDoesNotMutateBody: true,
-    realProviderDraftReject: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
+    realProviderSectionCandidateAcceptWithClaimAnchors: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
+    nativeUiManualParagraphClaimAssociation: true, renderedSelectionDisplaysCurrentClaims: true,
     realProviderCancellation: liveModel, nativeUiRequirementConflictResolution: true, nativeUiProjectMemoryEdit: true,
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,

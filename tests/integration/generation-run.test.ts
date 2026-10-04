@@ -90,8 +90,8 @@ test('whole-document writer must return parsed evidence citations, not bare or p
   validateModelReplacement(whole, 'TEST_ONLY 有效引用 [@sf_TEST_ONLY]。')
 })
 
-test('unimplemented section scope cannot silently become a whole-document plan', async () => {
+test('a section and a rendered selection cannot be combined into an ambiguous scope', async () => {
   const { io, plan } = await setup()
-  await assert.rejects(prepareGeneration(io, { ...plan.input, sectionId: 'sec_TEST_ONLY' }, plan.snapshot.modelDescriptor), { code: 'SECTION_GENERATION_UNAVAILABLE' })
+  await assert.rejects(prepareGeneration(io, { ...plan.input, sectionId: 'sec_TEST_ONLY' }, plan.snapshot.modelDescriptor), { name: 'ZodError' })
   assert.equal((await snapshot(io)).document.text, plan.input.selection!.sourceText)
 })
