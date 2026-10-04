@@ -35,12 +35,12 @@ Proposal／差异接受／Review／导出，以及依赖它们的任何产品流
 | G0-02 Mode | ✅ 已实测通过（UI 选择器未验） |
 | G0-03 身份 | ⚠️ 部分通过（workspaceId／根路径／sessionIds 已取得） |
 | G0-04 UI | ❌ 未验证（需编写客户端半体 + 重启 + 截图） |
-| G0-05 设置 | ❌ **受阻**：宿主 profile 的 `node_modules` 存在悬空 junction，`schemastery` 等
-  无法导入，纯 JSON Schema 的 `Config` 不产生设置命名空间 |
+| G0-05 设置 | ⚠️ 机制已走通：schemastery `Config` 已被 loader 读取并物化默认值；
+  **设置页投影仍未出现**（`describe()` 为 0），最后一步待 desktop 重启后验证 |
 | G0-06 模型 | ✅ 已实测通过（真实模型调用 + 可取消） |
 | G0-07 文件 | ⚠️ 读／边界／订阅通过；**写被宿主沙箱默认拒绝**，需确定 `sandboxPolicy` 通路 |
-| G0-08 Skill 隔离 | ❌ 未验证 |
-| G0-09 会话恢复 | ❌ 未验证（原定落盘路径已被实测否定，需改用 `storage`/`storageDomain`） |
+| G0-08 Skill 隔离 | ✅ 已实测通过（A/B 两 scope 互不可见，全局 catalog 无夹具泄漏） |
+| G0-09 会话恢复 | ❌ 未通过：`ctx.fs` 写入被拒，`storageDomain.open()` 返回 `malformed-medium` |
 | G0-10 生命周期 | ⚠️ loader 行移除已验；`ctx.effect` 清理回调未验 |
 
 ## G0 验证记录

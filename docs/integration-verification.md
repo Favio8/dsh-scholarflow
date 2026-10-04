@@ -350,8 +350,8 @@ window.__ModuleLoader__.load({
 | 状态 | 结果 |
 |---|---|
 | 文档生成 | 已完成（含阻塞结论） |
-| 代码实现 | 已尝试最小 `Config`；**不可投影** |
-| 测试通过 | **否 —— 已定位阻塞原因** |
+| 代码实现 | 已完成：schemastery `Config`，loader 已识别；**设置页仍未投影** |
+| 测试通过 | **否 —— 已排除 3 个原因，剩 1 个待定** |
 
 ### 05.1 机制【已实测】
 
@@ -370,34 +370,54 @@ prepareDocument(): Promise<string>          // 返回 profile patch 路径
 其中 **`ns` 就是 profile loader 的 entry id**（实测样例为 `session-log-deepseek` 等，
 **不带 `include:` 前缀**）。
 
-### 05.2 实测结果
+### 05.2 实测结果与逐项排除
 
-| 观测 | 值 |
-|---|---|
-| `settings.describe()` 命名空间总数 | **19** |
-| 其中属于 ScholarFlow 的 | **0** |
-| 官方命名空间被投影出的 `schema` 形态 | `{"uid":3625,"refs":{"3624":{"type":"boolean","meta":{"default":true}},"3625":{"type":"object","meta":{"default":{}},"dict":{"enabled":3624}}}}` |
+`settings.describe()` 始终返回 **19** 个命名空间，其中属于本插件的始终 **0** 个。
+官方命名空间被投影出的 `schema` 是 **schemastery 的内部序列化形态**：
 
-该结构是 **schemastery** 的内部序列化形态（`uid`/`refs`/`dict`），不是纯 JSON Schema。
-本插件导出的纯 JSON Schema 形式 `Config` **没有产生任何命名空间**，也**没有报错**（被静默忽略）。
+```json
+{"uid":4058,"refs":{"4057":{"type":"boolean","meta":{"default":true}},
+ "4058":{"type":"object","meta":{"default":{}},"dict":{"enabled":4057}}}}
+```
 
-### 05.3 阻塞原因【已实测】
+按因果顺序逐项排除（每一步都单独实测）：
 
-`probe:module-resolution` 结果：`schemastery`、`zod`、`cordis`、`@deepseek-ai/dsh-tools`、
-`@deepseek-ai/dsh-client-ui-slots` **全部 `ERR_MODULE_NOT_FOUND`**。
+| # | 假设 | 实测结果 | 结论 |
+|---|---|---|---|
+| 1 | 需要 schema 库，且不可导入 | 初始 `schemastery`/`zod` 均 `ERR_MODULE_NOT_FOUND` | 是**原因之一**，但可修复 |
+| 2 | 依赖可在本包内安装解决 | `pnpm add zod` → `zod 4.6.5`；`pnpm add schemastery@^3.18.0` → `schemastery 3.18.0`；重跑后 `probe:module-resolution` 显示 **两者均 `resolved`** | ✅ 已解决。**先前失败是 `link:` 安装不装依赖的副作用，不是宿主协议限制** |
+| 3 | 纯 JSON Schema 不被接受 | 换成 zod、再换成 schemastery 后行为逐次重测 | ✅ 需要 **schemastery**（Cordis 原生），zod 不被投影 |
+| 4 | 入口壳没有转发 `Config` | `src/host/index.js` 只转发了 `name`/`inject`/`apply` | ✅ **本项目自身的 bug**，已修：壳必须转发**全部** loader 相关导出，否则能力静默丢失、无任何诊断 |
+| 5 | 需要显式页面策略 | `settings.configure({auto:true})` 调用成功（`settings-policy-registered`） | ✅ 已注册，但 `describe()` 仍为 0 —— 不是这个原因 |
+| 6 | **行必须来自 bundle／可寻址 entry** | 把插件行从 `--patch` 覆盖层移入 profile 自己的 `cordis.patch.yml` | ⏳ **仍为 0；待定** |
 
-原因：`$DSH_HOME/profiles/node_modules/@deepseek-ai/*` 是指向已删除的 npx 缓存目录的悬空 junction
-（`<USER_HOME>\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\...` 已不存在），
-宿主自身从 app.asar 内解析包，不经过 profile 的 `node_modules`。
+**第 4 项已由正面证据确认**：修好转发后，`apply` 收到了 schemastery 物化出来的默认值：
 
-→ **G0-05 在引入构建步骤（把 schemastery 打进插件产物）或修复 profile 依赖解析之前无法通过。**
-这是 M1「设置页」的**前置条件**，不是可忽略的细节。
+```json
+{"event":"apply","config":{"g0ProbeMarker":"","defaultProjectType":"course-paper"}}
+```
+
+→ **`Config` 确实被 loader 读取并生效**，所以问题不在 schema、不在 Config 本身，
+而在 **Settings 的投影条件**。`SettingsDescriptor` 带 `base?`/`user?`、
+`PluginInfo` 带 `readOnlyReason: 'management-required' | 'unaddressable'`，
+最可能的解释是：**只有 bundle 管理的（可寻址）entry 才会被投影为设置页**，
+而验证 profile 里本插件的行是手工 patch insert，属于 `unaddressable`。
+
+### 05.3 结论与下一步
+
+- **【已实测】** 插件声明 schemastery `Config` 是可行的，且默认值会被物化并传入 `apply`。
+- **【已实测】** `settings.configure({auto:true})` 可正常注册页面策略。
+- **【仍未知】** 设置页投影的准确前置条件。**决定性验证必须在 desktop profile 完成** ——
+  那里本插件是通过 `dsh.profile.bundles` 安装的 bundle（可寻址），且已带 `Config`；
+  但 desktop 宿主当前加载的是**旧缓存模块**（不含 `Config` 转发），需要一次重启才能生效。
+- 因此 G0-05 的状态是：**机制已走通到 `Config` 生效，最后一步（表单投影）待 desktop 重启后验证。**
 
 ### 05.4 尚未验证
 
+- **【仍未知】** desktop profile 中 `settings.describe()` 是否包含本插件命名空间，以及
+  `settings.update()` 是否把值写入 profile patch。
 - **【仍未知】** 远程（非 loopback）浏览器下设置页的写入能力差异（SPEC §6.4／R-03）。
-- **【仍未知】** `settings.section` 槽与 `autoGenerate` 自动表单的实际渲染效果。
-- **【仍未知】** `prepareDocument()` 返回的 profile patch 是否可被插件安全读写。
+- **【仍未知】** `settings.section` 槽与自动表单的实际渲染效果（`autoGenerate` 语义）。
 
 ---
 
@@ -515,9 +535,9 @@ host-plane 插件在无会话／权限上下文时，`ctx.fs` 写入被沙箱默
 
 | 状态 | 结果 |
 |---|---|
-| 文档生成 | 部分 |
-| 代码实现 | **未开始** |
-| 测试通过 | **否 —— 未验证** |
+| 文档生成 | 已完成 |
+| 代码实现 | 已完成：两个预设各挂一个私有 `skill-filesystem`，指向各自的 `TEST_ONLY` 夹具 |
+| 测试通过 | **是**（catalog 隔离）；注入文本差异**未验** |
 
 ### 08.1 已取得的机制线索【已实测】
 
@@ -542,12 +562,52 @@ host-plane 插件在无会话／权限上下文时，`ctx.fs` 写入被沙箱默
 不是本项目发明的补丁；且 `agentPresets.serviceFor(agent, name)` 的存在说明
 preset 组内服务是**按 preset 隔离**的。这对 D-10／SF-022 是有利证据。
 
-### 08.2 尚未验证（G0-08 的核心）
+### 08.2 实测结果（A/B 对照，**通过**）
 
-- **【仍未知】** A、B 两个项目的 `skills.snapshot()` 是否互不相同。
-- **【仍未知】** 普通 DSH 会话的 catalog 是否**不包含**本项目私有学术 Skill。
-- **【仍未知】** `systemPrompt.assemble()` 在三种上下文中的注入文本差异。
+`skills` 服务的活动契约**直接给出了隔离机制**（原文）：
+
+> 「A registration files into the layer of its calling context's scope: **host rows and
+> repository plugins land in the global layer, while a plugin mounted by an agent preset's
+> standing composition lands in that preset's layer.** A read merges the global layer with
+> the viewing scope's chain — the nearest layer's entry wins a duplicate name outright.」
+
+`registerProvider` 进一步确认：「a scoped context (an agent preset's standing mount) registers
+**for that scope alone**, an unscoped context registers globally.」
+
+**实验**：验证 profile 挂两个预设，各自带一个 `skill-filesystem` 行，
+分别指向 `%TEMP%\sf-g0-skills\skill-a` 与 `…\skill-b`（显式 `TEST_ONLY` 夹具，
+name 为 `sf-test-skill-a` / `sf-test-skill-b`）。用 `agentPresets.acquireScope(id)`
+取每个预设的 `scopeKey`，再分别读取 catalog：
+
+| 视图 | 观察到的技能 |
+|---|---|
+| **无 scope（全局）** | `["diagnose-windows-sandbox-acl"]` —— **两个夹具都不出现** |
+| `scope = scholarflow` | `["agently-mail","diagnose-windows-sandbox-acl","grill-me","sf-test-skill-a"]` |
+| `scope = scholarflow-b` | `["agently-mail","diagnose-windows-sandbox-acl","grill-me","sf-test-skill-b"]` |
+
+探针计算字段：
+
+- `globalLeakedFixture: false` → **没有全局发布**（PRD D-10／SF-022 的核心要求成立）
+- `crossScopeLeak: false` → **A 看不到 B 的夹具，B 也看不到 A 的**
+- `complete: true` → 三处都是完整目录，不是「发现未完成」的中间态
+- 两个预设的子行全部 `fiberState: 2 (ACTIVE)`（persona、skill-filesystem、tool-skill）
+
+**结论：**
+
+1. **Mode 私有 Skill catalog 是被官方认可的架构**，本项目不需要发明隔离补丁
+   （官方 `preset-cordis` 自己就这么挂）。
+2. **跨 Mode／跨项目的 catalog 隔离已实测成立。**
+3. 两个 scope 都多出 `agently-mail`、`grill-me`，而**无 scope 的读取反而更窄**：
+   读是「全局层 + 该 scope 的链」，用户级 provider 只在带 scope／cwd 的读取里参与。
+   → **不能用无 scope 读取的结果代表「普通会话能看到的全部」**，这是一个与直觉相反的细节。
+
+### 08.3 尚未验证
+
+- **【仍未知】** `systemPrompt.assemble()` 在三种上下文中的**注入文本**差异
+  （catalog 隔离已证明，提示词注入尚未逐字比对）。
 - **【仍未知】** 宿主的 `agent-instructions`（workspace 指令注入）在专属 Mode 下如何收窄。
+- **【仍未知】** 项目级（`<workspace>/.scholarflow/skills/`）与库级（`<DSH_HOME>`）在同一 scope
+  内的层级优先级实测。
 
 ---
 
@@ -555,29 +615,45 @@ preset 组内服务是**按 preset 隔离**的。这对 D-10／SF-022 是有利�
 
 | 状态 | 结果 |
 |---|---|
-| 文档生成 | 部分 |
-| 代码实现 | **未完成** |
-| 测试通过 | **否 —— 未验证；且原定实现路径已被实测否定** |
+| 文档生成 | 已完成（含失败结论） |
+| 代码实现 | 已完成两条路径的探针：raw fs 写入、`storageDomain` 域写入 |
+| 测试通过 | **否 —— 两条路径均未走通** |
 
-### 09.1 实测到的路径问题
+### 09.1 实测结果：两条路径都失败
 
-原计划（把绑定写入 `<DSH_HOME>/scholarflow/` 或项目目录）**已被 G0-07 的实测否定**：
-两处写入均被 `FS_SANDBOX_DENIED` 拒绝，故**不能**用 `ctx.fs` 实现持久化。
+| 路径 | 实测结果 |
+|---|---|
+| `ctx.fs.writeText` 直接落盘绑定文件（`<DSH_HOME>/scholarflow/`、工作区） | **`FS_SANDBOX_DENIED`**（见 G0-07.3） |
+| `storageDomain.open(spec)` + `table.put()` | **`error: "malformed-medium"`** |
 
-尚未验证的正式通路（需要下一轮实测）：
+`storageDomain` 路径的实测依据（活契约）：
 
-- `storage` / `storageDomain`：`storage.mount(form, facility)`、
-  `storageDomain.open(spec: DomainSpec): Promise<Domain<S>>`、`domain/changed` 事件
-  （「emitted once per write strictly after the backend acknowledged durability」）。
-- `sessionPersistence`（JSONL 会话日志）与 `workspaceRegistry`（durable registry）
-  —— 二者已被实测为**跨进程持久**：本次运行两个独立进程读到同一份 7 个工作区与同一份
-  `updatedAt`，证明工作区注册表不是内存 Map。
+- `open` 的文档明确会「reject a name that is already open (`already-open`)、解析 backend route、
+  要求其 `kv` facet（`facet-unsupported`）、**backend `version-mismatch`/`malformed-medium` pass through**」；
+- `DomainSpec = { name, version, layout?, compatibleVersions?, invalidRecords?, global?, tables }`，
+  且 `DomainTableSpec.valueSchema` 的类型是 **`ZodType<V>`**（所以此路径确实需要 zod，
+  已安装 `zod 4.6.5` 并可直接导入）；
+- 本插件用**最小** spec（1 个表、1 个 zod 对象 schema、`version: 1`、默认 `layout`）调用，
+  仍返回 `malformed-medium`。
 
-### 09.2 尚未验证
+→ **`malformed-medium` 的确切前置条件仍未知**：可能是后端需要先经
+`storage.mount(form, facility)` 声明路由、或 `layout: 'single'` 与默认后端不匹配、
+或本机 zod 主版本（4.x）与宿主期望的 v3 内部 API 不兼容。**没有一个是已证实的**，
+因此不写成结论，只记录现象与下一步要查的方向。
 
-- **【仍未知】** 用一个插件自有的 `DomainSpec` 持久化 `sessionId → workspaceId → projectId` 绑定，
-  并在**重启后**读回。
-- **【仍未知】** 损坏／schema 过新时的只读降级行为（SPEC §9.4、§27.5）。
+### 09.2 已确认的跨进程持久事实（非本项目自有状态）
+
+`workspaceRegistry` 已被实测为**真正的跨进程持久**：两次独立启动（不同 pid）读到
+完全相同的 7 个工作区、相同的 `id`/`createdAt`/`updatedAt`。
+这证明宿主的工作区注册表不是内存 Map，可作为 `sessionId → workspaceId` 绑定的**权威来源**；
+但**本项目自己的** `projectId` 绑定如何持久化仍未解决。
+
+### 09.3 尚未验证（下一步方向，按优先级）
+
+1. `storageDomain` 的 `malformed-medium` 根因：先试 `storage.mount(...)` 声明路由，
+   再试 `layout: 'per-record'`，再试 zod v3。
+2. `storage` hub 的 `mount(form, facility)` 与 `dsh-storage-json` 后端的关系。
+3. 损坏／schema 过新时的只读降级行为（SPEC §9.4、§27.5）。
 
 ---
 

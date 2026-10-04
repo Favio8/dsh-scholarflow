@@ -69,6 +69,13 @@ try {
 export const name = impl?.name ?? 'scholarflow'
 export const inject = impl?.inject ?? []
 
+/**
+ * EVERY loader-relevant export must be forwarded. Missing one is a silent
+ * capability loss rather than an error: a Config that never reaches the loader
+ * simply yields no settings namespace and no diagnostic.
+ */
+export const Config = impl?.Config
+
 export const apply =
   impl?.apply ??
   ((ctx) => {

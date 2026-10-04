@@ -28,35 +28,53 @@ export const name = 'scholarflow'
 export const inject = []
 
 /**
- * G0-05 EXPERIMENT: can a plugin declare a Settings-projectable Config without
- * importing a schema library?
+ * Schema library availability, measured at load time.
  *
- * Measured reason this is a question and not an assumption: `schemastery` and
- * `zod` are NOT resolvable from a linked plugin package
- * (ERR_MODULE_NOT_FOUND, see ADR-003), and `settings.describe()` keys forms by
- * profile loader entry id — so a plugin with no Config simply has no form.
- *
- * A plain JSON-Schema-shaped object is the only option left without a build
- * step, so it is tried empirically rather than assumed to work.
+ * MEASURED (ADR-003): a plugin installed with `link:` gets NO dependencies
+ * resolved, so `zod`/`schemastery` were initially unresolvable from this package
+ * (`ERR_MODULE_NOT_FOUND`). The host's own `DomainTableSpec.valueSchema` is typed
+ * `ZodType<V>`, so zod is the sanctioned schema library; it is now declared as a
+ * real dependency of this package and resolved through a dynamic import so the
+ * plugin still loads (with reduced capability) if it is ever missing.
  */
-export const Config = {
-  type: 'object',
-  title: 'ScholarFlow',
-  description: 'ScholarFlow 插件设置（G0 探针；真实设置项在 M1 定义）',
-  properties: {
-    g0ProbeMarker: {
-      type: 'string',
-      description: 'G0-05/G0-09 持久化探针标记（写入 profile patch，用于验证跨进程恢复）',
-    },
-    defaultProjectType: {
-      type: 'string',
-      enum: ['course-paper', 'literature-review', 'research-paper'],
-      default: 'course-paper',
-      description: '新建项目默认类型（占位，仅用于验证设置表单投影）',
-    },
-  },
-  additionalProperties: false,
+let zod = null
+try {
+  zod = await import('zod')
+} catch (error) {
+  record('zod-unavailable', { message: String(error?.code ?? error?.message ?? error) })
 }
+
+/**
+ * Cordis' own schema library. MEASURED: `settings.describe()` projects a shipped
+ * namespace's schema into schemastery's internal `{ uid, refs, dict }` form, and
+ * neither a plain JSON-Schema object nor a zod schema produced a namespace at
+ * all — silently, with no diagnostic. schemastery is what Cordis' `Config`
+ * expects. It is a CJS package, so the default export is unwrapped.
+ */
+let Schema = null
+try {
+  const mod = await import('schemastery')
+  Schema = mod?.default ?? mod
+} catch (error) {
+  record('schemastery-unavailable', { message: String(error?.code ?? error?.message ?? error) })
+}
+
+/**
+ * G0-05: a Config declared with the schema library Cordis actually projects.
+ * `settings.describe()` keys forms by profile loader entry id, and an entry
+ * without a projectable Config simply has no settings namespace.
+ */
+export const Config =
+  Schema && typeof Schema.object === 'function'
+    ? Schema.object({
+        g0ProbeMarker: Schema.string()
+          .default('')
+          .description('G0-05 持久化探针标记（写入 profile patch，用于验证跨进程恢复）'),
+        defaultProjectType: Schema.string()
+          .default('course-paper')
+          .description('新建项目默认类型（占位，真实设置项在 M1 定义）'),
+      })
+    : undefined
 
 const SKELETON_VERSION = '0.0.0-g0'
 
@@ -350,6 +368,152 @@ async function probePersistence(ctx) {
   }
 }
 
+/**
+ * Probe G0-08: is the skill catalog really isolated per agent-preset scope?
+ *
+ * MEASURED mechanism (host Service `skills`): "A registration files into the
+ * layer of its calling context's scope; host rows and repository plugins land in
+ * the global layer, while a plugin mounted by an agent preset's standing
+ * composition lands in that preset's layer." A read merges the global layer
+ * with the viewing scope's chain.
+ *
+ * The harness overlay mounts TWO presets, each with its own `skill-filesystem`
+ * row pointing at its own TEST_ONLY fixture directory. Isolation holds only if
+ * each scope sees exactly its own fixture and the unscoped read sees neither.
+ */
+async function probeSkillIsolation(ctx) {
+  const skills = service(ctx, 'skills')
+  const agentPresets = service(ctx, 'agentPresets')
+  if (!skills || !agentPresets) {
+    record('probe:skill-isolation', {
+      ok: false,
+      reason: `service unavailable: skills=${Boolean(skills)} agentPresets=${Boolean(agentPresets)}`,
+    })
+    return
+  }
+
+  const namesOf = (list) => (list ?? []).map((entry) => entry.name).sort()
+  const FIXTURE_A = 'sf-test-skill-a'
+  const FIXTURE_B = 'sf-test-skill-b'
+
+  let globalView = null
+  try {
+    const snapshot = await skills.snapshot({})
+    globalView = { names: namesOf(snapshot?.skills), complete: snapshot?.complete ?? null }
+  } catch (error) {
+    globalView = { error: String(error?.message ?? error) }
+  }
+
+  const scopes = {}
+  for (const id of ['scholarflow', 'scholarflow-b']) {
+    let lease = null
+    try {
+      lease = await agentPresets.acquireScope(id)
+      const snapshot = await skills.snapshot({ scope: lease?.key })
+      const scopedNames = namesOf(snapshot?.skills)
+      scopes[id] = {
+        scopeKeyKind: lease?.key === undefined ? 'undefined' : typeof lease.key,
+        names: scopedNames,
+        complete: snapshot?.complete ?? null,
+        sawFixtureA: scopedNames.includes(FIXTURE_A),
+        sawFixtureB: scopedNames.includes(FIXTURE_B),
+      }
+    } catch (error) {
+      scopes[id] = { error: String(error?.message ?? error) }
+    } finally {
+      try {
+        await lease?.[Symbol.asyncDispose]?.()
+      } catch {
+        /* lease release is best-effort */
+      }
+    }
+  }
+
+  const globalNames = globalView?.names ?? []
+  record('probe:skill-isolation', {
+    ok: true,
+    global: globalView,
+    scopes,
+    fixtures: [FIXTURE_A, FIXTURE_B],
+    globalLeakedFixture: globalNames.includes(FIXTURE_A) || globalNames.includes(FIXTURE_B),
+    crossScopeLeak: Boolean(scopes.scholarflow?.sawFixtureB) || Boolean(scopes['scholarflow-b']?.sawFixtureA),
+  })
+}
+
+/**
+ * Probe G0-09 (storage path): can the plugin persist its own state across a
+ * process restart through the HOST's own facility, rather than through a raw
+ * file write (which the sandbox denies) or an in-memory Map?
+ *
+ * `storageDomain.open(spec)` is the host-sanctioned route: "the CALLER owns the
+ * returned handle and closes it via Domain.close()". A second process reading
+ * the same table is real cross-process persistence evidence.
+ */
+async function probeStoragePersistence(ctx) {
+  const storageDomain = service(ctx, 'storageDomain')
+  if (!storageDomain) {
+    record('probe:storage-persistence', { ok: false, reason: 'storageDomain service unavailable' })
+    return
+  }
+  if (!zod) {
+    // DomainTableSpec.valueSchema is typed ZodType, so without a schema library
+    // no domain can be declared at all. Recorded, not worked around.
+    record('probe:storage-persistence', { ok: false, reason: 'zod unavailable: valueSchema is ZodType' })
+    return
+  }
+
+  const spec = {
+    name: 'scholarflow-g0-probe',
+    version: 1,
+    tables: {
+      bindings: {
+        valueSchema: zod.z.object({
+          sessionId: zod.z.string(),
+          workspaceId: zod.z.string(),
+          recordedAt: zod.z.string(),
+        }),
+      },
+    },
+  }
+
+  let domain = null
+  try {
+    domain = await storageDomain.open(spec)
+    const table = domain.table('bindings')
+    const prior = [...table.entries()].map(([key, value]) => ({ key, value }))
+
+    const key = process.env.SCHOLARFLOW_G0_INSTANCE || 'default'
+    const value = {
+      sessionId: `sess-${process.pid}`,
+      workspaceId: 'ws-g0-probe',
+      recordedAt: new Date().toISOString(),
+    }
+    await table.put(key, value)
+
+    record('probe:storage-persistence', {
+      ok: true,
+      domain: domain.name,
+      tableSize: table.size,
+      priorEntries: prior,
+      priorSessionIds: prior.map((entry) => entry.value?.sessionId ?? null),
+      currentSessionId: value.sessionId,
+      // A prior entry written by a DIFFERENT pid is the cross-process proof.
+      crossProcessEvidence: prior.some((entry) => entry.value?.sessionId !== `sess-${process.pid}`),
+    })
+  } catch (error) {
+    record('probe:storage-persistence', {
+      ok: false,
+      error: String(error?.code ?? error?.message ?? error),
+    })
+  } finally {
+    try {
+      await domain?.close()
+    } catch {
+      /* closing is idempotent; a failure here must not mask the result */
+    }
+  }
+}
+
 /** Probe G0-03 (partial): can the host report real workspace identity? */
 async function probeWorkspaceIdentity(ctx) {
   const workspaceRegistry = service(ctx, 'workspaceRegistry')
@@ -533,10 +697,10 @@ async function runProbes(ctx) {
     await probeWritePolicy(ctx)
     await probeSettings(ctx)
     await probePersistence(ctx)
+    await probeStoragePersistence(ctx)
   } catch (error) {
     record('probes-early-failed', { message: String(error?.message ?? error) })
   }
-
   // MEASURED: services the SPEC needs (workspaceRegistry, webServer, pluginManager,
   // credentials, ...) are NOT resolvable at apply time; they appear within ~2s.
   // Everything that depends on them must run after the composition settles.
@@ -546,6 +710,11 @@ async function runProbes(ctx) {
     await probeWorkspaceIdentity(ctx)
   } catch (error) {
     record('probe:workspace-failed', { message: String(error?.message ?? error) })
+  }
+  try {
+    await probeSkillIsolation(ctx)
+  } catch (error) {
+    record('probe:skill-isolation-failed', { message: String(error?.message ?? error) })
   }
   try {
     await probeModelStage(ctx)
@@ -796,6 +965,21 @@ export function apply(ctx, config) {
     record('effect-registered')
     return () => record('dispose')
   }, 'scholarflow: g0 lifecycle probe')
+
+  // G0-05: `settings.configure` registers this plugin instance's page policy.
+  // `describe()` was measured to omit our entry even with a valid schemastery
+  // Config, so the policy registration is tested explicitly rather than assumed.
+  const settingsService = service(ctx, 'settings')
+  if (settingsService && typeof settingsService.configure === 'function') {
+    try {
+      ctx.effect(() => settingsService.configure({ auto: true }), 'scholarflow: g0 settings page policy')
+      record('settings-policy-registered')
+    } catch (error) {
+      record('settings-policy-failed', { message: String(error?.message ?? error) })
+    }
+  } else {
+    record('settings-policy-skipped', { reason: 'settings service or configure() unavailable' })
+  }
 
   // Fire-and-forget: probing must never delay or block plugin activation.
   void runProbes(ctx)

@@ -44,7 +44,7 @@
 
 | 约束 | 内容 |
 |---|---|
-| **不得依赖裸标识符导入** | `schemastery`、`zod`、`cordis`、`@deepseek-ai/dsh-tools` 等在本机 profile 内**全部 `ERR_MODULE_NOT_FOUND`**（profile `node_modules` 存在悬空 junction）。宿主能力只能经 `ctx` 取得；第三方库必须打进插件产物。 |
+| **不得依赖裸标识符导入（但依赖可声明）** | 初始实测 `schemastery`、`zod`、`cordis`、`@deepseek-ai/dsh-tools` 全部 `ERR_MODULE_NOT_FOUND`。**根因已查明**：`link:` 安装不会安装被链接包的依赖，且 profile 的 `node_modules` 存在指向已删除 npx 缓存的悬空 junction。**在本包内 `pnpm add` 后两端均可导入**（实测 `zod 4.6.5`、`schemastery 3.18.0`，`probe:module-resolution` 返回 `resolved`）。宿主自身能力仍应经 `ctx` 取得。 |
 | **服务注册晚于 `apply`** | `apply` 时刻 20 个候选服务可用；约 2 s 后 **28 个可用**。晚到者含 `workspaceRegistry`、`workspaceController`、`workspaceFiles`、`sessionController`、`sessionSkillCatalog`、`webServer`、`credentials`、`pluginManager`。需用 `inject` 声明硬依赖，或在组合稳定后重读。 |
 | **卸载回调** | `ctx.on('dispose', fn)` **不触发**；使用 `ctx.effect(() => disposer)`（本机所有可工作插件的写法）。 |
 | **模块缓存** | loader 以解析后 URL 为模块键且不带查询串；`hmr` 配置为 `root: []`（不监听）。改动 host 代码需重启进程，或使用 ADR-002 的 mtime 版本化入口。 |
@@ -52,7 +52,9 @@
 | **`ctx.fs` 不做授权** | `fs.resolve` 会成功解析 `..` 越界、`C:\Windows\win.ini`、`CON`、同前缀兄弟目录；包含关系须用 `fs.contains`（实测行为正确）。 |
 | **`ctx.fs` 无 mkdir** | 目录创建只能经 `node:fs`；而 `node:fs` **不受 `ctx.fs` 沙箱约束**——沙箱不是操作系统级隔离。 |
 | **`fs.readBytes` 语义** | `maxBytes` 是**整文件大小上限**，不是单次切片长度（9.7 KB 文件传 64 → `FS_TOO_LARGE`）。 |
-| **设置命名空间** | `settings.describe()` 的 `ns` ＝ profile loader entry id；命名空间由插件的 `Config` schema 投影而来，实测形态为 **schemastery 内部结构**（`{uid, refs, dict}`），纯 JSON Schema 不产生命名空间。 |
+| **`Config` 需要 schemastery** | 纯 JSON Schema 与 zod schema 声明 `Config` 都**不产生**设置命名空间且无报错；换 schemastery 后 loader 立即读取并物化默认值（`apply` 收到 `{g0ProbeMarker:"", defaultProjectType:"course-paper"}`）。官方 schema 投影为 schemastery 内部 `{uid, refs, dict}` 形态。 |
+| **设置命名空间** | `settings.describe()` 的 `ns` ＝ profile loader entry id。声明 schemastery `Config` + `settings.configure({auto:true})` 之后，验证 profile 中**仍为 0 个命名空间**；待验证假设是「只有 bundle 管理／可寻址的 entry 才会被投影」。 |
+| **入口壳须转发全部导出** | `Config` 等 loader 识别的导出若未从入口模块转发，会**静默丢失**（无报错、无诊断）。 |
 | **Mode 注册** | 组合树中一行 `@deepseek-ai/dsh-agent-preset`，`config` 为 `PresetDefinition { id, name?, description?, order?, plugins[] }`；或 `ctx.agentPresets.register(definition)`。 |
 | **Mode 选择限制** | `select(agent, preset)` 仅限「before a session starts its first turn」；`recompose` 仅限 blank Agent。 |
 | **模型复用** | `ctx.llm.stream(GenerateOptions)` 支持 `signal: AbortSignal`；取消以终止 chunk `{type:'finish', reason:{kind:'aborted'}}` 可观测。实测路由 `deepseek-official` / `deepseek-flash`。 |
