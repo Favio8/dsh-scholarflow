@@ -342,19 +342,21 @@ ctx.layout.toggleSidebar(): void
 
 **客户端半体加载形状**（本机可工作插件 `injector-dist/lib/client.js`【已实测】）：
 
+> 2026-10-04 修正：此前手写示例遗漏了打包器创建 `module`／`exports` 的局部声明，
+> 且误用了 Slot 组件参数。下例按本机 `0.2.0-rc.2` 的实际协议修正；工厂直接返回导出对象。
+
 ```js
 window.__ModuleLoader__.load({
   id: '<package name>',
   factory: (require) => {
+    const { createElement } = require('react')
     const inject = ['slots']
     function apply(ctx) {
       ctx.effect(() => ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section', id: '<id>', order: 50, label: () => '…',
-        component: () => ({ render() { /* 自有 DOM */ return { dispose() {} } } }),
-      })), '<label>')
+      }, () => createElement('p', null, 'G0 占位页'))), '<label>')
     }
-    exports.apply = apply; exports.inject = inject
-    return module.exports
+    return { apply, inject }
   },
 })
 ```
@@ -405,26 +407,49 @@ href="plugins/??…,dsh-scholarflow/client.js,…&rev=aa1c2d240a40"
 3. 客户端半体进入浏览器启动图，**不需要构建工具** —— 手写
    `window.__ModuleLoader__.load({ id, factory })` 包装即可（形状取自本机可工作插件）。
 
-**这不等于 UI 已验证。** 模块被加载 ≠ 面板渲染正确、≠ 与原侧栏共存、≠ 截图通过。
-渲染、三栏共存与窄屏行为仍必须在**有浏览器的 desktop 表面**确认。
+**此处最初只验证了页面启动图。** 模块被加载 ≠ 面板渲染正确、≠ 与原侧栏共存、≠ 截图通过。
+2026-10-04 后续 Desktop 渲染与截图验证见 04.6；三栏共存与窄屏行为仍待确认。
 
 半体目前注册三处，每处单独 `try/catch` 以免一个错误假设拖垮整体：
 
 | 座位 | 注册 | 状态 |
 |---|---|---|
-| `main`（keyed） | `{ name:'main', key:'scholarflow', component }` | **推断形状**，未渲染验证 |
-| `sidebar.panellist` | `{ name:'sidebar.panellist', id, order, label, component }` | **推断形状**，未渲染验证 |
-| `settings.section` | `{ name:'settings.section', id, order, label, component }` | 形状有本机先例（G0-05 path B） |
+| `main`（keyed） | `register({ name:'main', key:'scholarflow' }, ReactComponent)` | 2026-10-04 已实测渲染，见 04.6 |
+| `sidebar.panellist` | `register({ name:'sidebar.panellist', id, order, label }, ReactComponent)` | 2026-10-04 已实测入口点击，见 04.6 |
+| `settings.section` | `register({ name:'settings.section', id, order, label }, ReactComponent)` | 2026-10-04 已实测占位页，保存未实现，见 04.6 |
 
 ### 04.5 尚未验证（阻塞项）
 
-- **【仍未知】** `ctx.slots.register` 对 keyed 座位的精确调用形状
-  （本机可工作客户端半体展示的是 list 座位：`register({ name, id, order, label, component })`；
-  keyed 座位应为 `{ name, key, component }`，属**推断**，需实测确认）。
-- **【仍未知】** `layout.selectPanel()` 接受的 `MainPanelId` 是否为闭合联合类型。
+- **【已实测】** 2026-10-04 确认 keyed/list 座位均用 `register(options, ReactComponent)`；
+  侧栏入口能够切到 `scholarflow` 自有 key。直接调用 `layout.selectPanel()` 的全部合法值仍未知。
 - **【仍未知】** 窄屏行为、切换 Tab 保留滚动与脏缓冲。
-- **阻塞：** 需要编写客户端半体 → 在 desktop profile 生效 → **需要用户重启 desktop 宿主** →
-  并按 SPEC 要求取**截图**。本会话没有浏览器／截图工具，截图须由用户配合。
+- **【仍未知】** 工作台与 Agent 三栏同时显示；普通宿主侧栏与插件入口已确认可用。
+
+### 04.6 Desktop 启动崩溃修复与渲染验证（2026-10-04）
+
+- **故障证据：** `crash-2026-10-04T11-26-51-919Z-web-boot.log` 报
+  `dsh-scholarflow: import failed: exports is not defined`；修复前在无 Node 全局变量的
+  `node:vm` 上执行客户端工厂，得到相同 `ReferenceError`。
+- **本机协议证据：** 发布包 `app.asar` 内
+  `dsh/node_modules/@deepseek-ai/dsh-client-modules/lib/client.js` 与官方客户端入口
+  明确由工厂返回导出对象；`dsh-client-ui-renderer/lib/client.js` 的
+  `_register(options, component)` 接收独立组件参数。打包后的官方客户端自行声明
+  `var module = { exports: {} }; var exports = module.exports;`，宿主不提供这些全局变量。
+- **实现修复：** `src/client/index.js:20–144` 工厂直接 `return { apply, inject }`，
+  经宿主 `require('react')` 种子取得 React，三处注册均传入第二个组件参数。
+  组件返回 React 元素，样式随自有组件挂载／卸载，不向宿主全局 DOM 插入残留样式。
+- **离线验证：** `node --test tests/contracts/client-boot.test.js tests/unit/binding.test.js tests/unit/path-containment.test.js`
+  → **36/36 通过**。新合同测试覆盖无 `module`／`exports` 的浏览器工厂、组件调用形状、
+  React 元素返回及三处注册的清理；修复前两项新增测试均失败。
+- **真实 Desktop 验证：** 本机 DSH **0.2.0-rc.2** 成功启动；点击侧栏 ScholarFlow 显示
+  `ScholarFlow 工作台` 和 `G0 骨架 · 非产品功能`；从「账号菜单 → 设置 → ScholarFlow」
+  显示 `ScholarFlow 设置`，占位输入保持禁用。两次页面检查均未观察到 renderer 异常。
+- **本地截图：** `.dsh-tmp/scholarflow-workspace.png`、`.dsh-tmp/scholarflow-settings.png`，
+  仅裁剪插件内容；属于忽略的本机验证产物，不提交。
+- **环境核验：** desktop profile 的 `package.json`、`cordis.patch.yml`、`cordis.yml`、
+  `pnpm-workspace.yaml` 修复前后 SHA-256 一致；保留原有 `link:` 安装与 bundle 启用状态。
+- **仍未验证：** 三栏同时显示、设置保存、窄屏和其他平台。此次恢复启动和占位页渲染
+  **不代表 G0 全部门禁或 V1 产品功能完成**。
 
 ---
 

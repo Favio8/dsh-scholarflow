@@ -35,7 +35,7 @@
 | 客户端半体声明 | `package.json` → `dsh.client`（`{ inject: [...client modules], platform: 'web' }`） |
 | patch 文件语法 | 顶层数组；`- insert: [{ id, name, config }]` 追加 loader 行 |
 | host 半体入口 | `exports['.']`（本项目 G0 为 `src/host/index.js`）；模块导出 `name` / `inject` / `apply(ctx, config)` |
-| client 半体入口 | `exports['./client']`；文件形状 `window.__ModuleLoader__.load({ id, factory })`，`factory` 内 `exports.inject` + `exports.apply(ctx)` |
+| client 半体入口 | `exports['./client']`；文件形状 `window.__ModuleLoader__.load({ id, factory })`；`factory(require)` 返回 `{ inject, apply }`，不依赖全局 `module`／`exports`；React 从 `require('react')` 宿主种子取得（2026-10-04 修正并实测） |
 | profile 组合顺序 | 各 bundle 的 patch 层 → profile `cordis.patch.yml` → `--patch` 覆盖层 |
 | 安装方式 | 本地绝对路径经 pnpm 生成 `link:` 依赖；**离线可完成** |
 | profile 生效方式 | `desktop` 为 **live profile**：安装／启用／停用返回 `application:"applied"`，**无需重启** |
@@ -69,6 +69,10 @@
 
 客户端服务：`slots.inject(key, cb)`、`slots.register`、`slots.registerFactory`、
 `layout.selectPanel/openRightbar/closeRightbar/toggleSidebar`。
+
+2026-10-04 启动修复验证：`slots.register(options, ReactComponent)` 的组件为第二个参数，
+返回 React 元素；不能把组件放在 options 内，也不能返回 `{ render, dispose }` 对象。
+工作台、侧栏入口与设置占位页已在 Desktop 真实渲染；设置保存与三栏共存仍未验证。
 
 ### 2.4 与 SPEC 假设不一致的实测项（需产品／设计确认）
 

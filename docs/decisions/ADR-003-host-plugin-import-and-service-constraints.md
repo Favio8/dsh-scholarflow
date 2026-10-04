@@ -55,10 +55,14 @@
    G0 探针改为在 `apply` 与 `+2s/+6s/+12s` 各读一次并**分别记录**。
 3. **客户端半体以零依赖、无 JSX 的形式交付：**
    打包形状为 `window.__ModuleLoader__.load({ id, factory })`，
-   `factory` 内 `exports.inject` / `exports.apply(ctx)`，
-   组件用 `React.createElement`（不引入构建期 JSX），
+   `factory(require)` 直接返回 `{ inject, apply }`，不依赖全局 `exports`／`module`；
+   组件用 `require('react')` 取得宿主种子并调用 `createElement`（不引入构建期 JSX），
    Client→Host 用 `host.call(...)`，样式用 `styles.insert(...)`（包自带、随运行清理，
    **不做全局 CSS 覆盖**）。
+   **2026-10-04 修正：** 旧描述省略了打包器创建的局部 `module`／`exports`，导致浏览器
+   导入失败；`slots.register(options, ReactComponent)` 必须以第二个参数传组件。
+   本次手写客户端样式随组件渲染与卸载，真实 Desktop 验证见
+   [`integration-verification.md` §04.6](../integration-verification.md#046-desktop-启动崩溃修复与渲染验证2026-10-04)。
 4. **设置页需要插件声明 `Config`。** 实测 `settings.describe()` 返回 19 个命名空间，
    命名空间即 **profile loader entry id**，而本项目插件因未声明 `Config` 而**不在其中**。
    由于 `schemastery` / `zod` 均不可导入，Config 的可用形式须在 G0-05 中实测确定
