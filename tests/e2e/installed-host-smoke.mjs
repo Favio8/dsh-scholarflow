@@ -224,11 +224,22 @@ try {
   const projectConfig = await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8')
   const projectLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
   assert.ok(projectConfig.includes(projectLedger.projectId))
+  const projectSkillRoot = join(projectRoot, '.scholarflow/skills/test-only/local-revision')
+  const projectInstructions = '\uFEFF---\r\nname: TEST_ONLY-project-local\r\ndescription: TEST_ONLY inert project resource\r\n---\r\nRetain uncertainty and citations.\r\n'
+  await mkdir(join(projectSkillRoot, 'scripts'), { recursive: true })
+  await writeFile(join(projectSkillRoot, 'SKILL.md'), projectInstructions)
+  await writeFile(join(projectSkillRoot, 'scholarflow.json'), JSON.stringify({ schemaVersion: 1, capabilities: ['selection-transform'], suggestedStages: ['revision'] }))
+  await writeFile(join(projectSkillRoot, 'scripts/no-run.js'), 'throw new Error("TEST_ONLY project script must never execute")\n')
+  await writeFile(join(projectSkillRoot, 'binary.bin'), new Uint8Array([0, 255, 13, 10]))
   const projectSkillsUi = page.getByRole('region', { name: '项目固定 Skill', exact: true })
+  await projectSkillsUi.getByRole('button', { name: '刷新固定 Skill 资源清单', exact: true }).click()
   const installedProjectChoices = page.getByRole('combobox', { name: '选择已安装固定 Skill 版本', exact: true })
   await installedProjectChoices.locator('option').filter({ hasText: installedSkill.metadata.qualifiedId }).waitFor({ state: 'attached' })
   const skillOption = await installedProjectChoices.locator('option').filter({ hasText: installedSkill.metadata.qualifiedId }).getAttribute('value')
   await installedProjectChoices.selectOption(skillOption)
+  await projectSkillsUi.getByRole('button', { name: '加入待确认启用清单', exact: true }).click()
+  const localProjectOption = await installedProjectChoices.locator('option').filter({ hasText: 'project:test-only:local-revision' }).getAttribute('value')
+  await installedProjectChoices.selectOption(localProjectOption)
   await projectSkillsUi.getByRole('button', { name: '加入待确认启用清单', exact: true }).click()
   const builtinOption = await installedProjectChoices.locator('option').filter({ hasText: 'builtin:selection-preserving-revision' }).getAttribute('value')
   await installedProjectChoices.selectOption(builtinOption)
@@ -241,7 +252,7 @@ try {
   await projectSkillsUi.getByRole('button', { name: '确认项目 Skill 绑定', exact: true }).click()
   await page.getByText('项目已保存 · ledger 版本 1', { exact: false }).waitFor()
   const boundLock = JSON.parse(await readFile(join(projectRoot, '.scholarflow/resources.lock.json'), 'utf8'))
-  assert.equal(boundLock.bindings.length, 2)
+  assert.equal(boundLock.bindings.length, 3)
   assert.equal(boundLock.bindings[0].digest, installedSkill.digest)
   await projectSkillsUi.getByRole('combobox', { name: 'Skill 调用阶段', exact: true }).selectOption('revision')
   await projectSkillsUi.getByRole('button', { name: '确认 Skill 调用阶段', exact: true }).click()
@@ -254,10 +265,23 @@ try {
   const skillTools = await rpc('scholarflow.v1/verifySkillScope', { request: { sessionId: second.value.sessionId, bindingId: boundLock.bindings[0].bindingId } })
   assert.equal(skillTools.ok, true, JSON.stringify(skillTools))
   assert.equal(skillTools.value.stage, 'revision')
-  assert.equal(skillTools.value.skills.length, 2)
+  assert.equal(skillTools.value.skills.length, 3)
   assert.equal(skillTools.value.readOk, true, JSON.stringify(skillTools.value))
   assert.equal(skillTools.value.contentHash, digest(originalSkill))
   assert.equal(skillTools.value.scriptDenied, true)
+  const projectBinding = boundLock.bindings.find(row => row.scope === 'project')
+  assert.equal(projectBinding.entryPath, '.scholarflow/skills/test-only/local-revision/SKILL.md')
+  const projectTool = await rpc('scholarflow.v1/verifySkillScope', { request: { sessionId: second.value.sessionId, bindingId: projectBinding.bindingId } })
+  assert.equal(projectTool.ok, true, JSON.stringify(projectTool))
+  assert.equal(projectTool.value.readOk, true)
+  assert.equal(projectTool.value.contentHash, digest(projectInstructions))
+  assert.equal(projectTool.value.scriptDenied, true)
+  await writeFile(join(projectSkillRoot, 'SKILL.md'), projectInstructions + 'TEST_ONLY later project resource change\r\n')
+  const changedProjectResource = await rpc('scholarflow.v1/verifySkillScope', { request: { sessionId: second.value.sessionId, bindingId: projectBinding.bindingId } })
+  assert.equal(changedProjectResource.ok, true)
+  assert.equal(changedProjectResource.value.readOk, false, 'fixed project bindings must not silently adopt external edits')
+  await writeFile(join(projectSkillRoot, 'SKILL.md'), projectInstructions)
+  assert.deepEqual(new Uint8Array(await readFile(join(projectSkillRoot, 'binary.bin'))), new Uint8Array([0, 255, 13, 10]))
   const referencedRetirement = await rpc('scholarflow.v1/skills.prepareRetirement', { request: { qualifiedId: installedSkill.metadata.qualifiedId, digest: installedSkill.digest } })
   assert.equal(referencedRetirement.value.ok, true, JSON.stringify(referencedRetirement))
   assert.equal(referencedRetirement.value.data.blocked, true)
@@ -430,10 +454,13 @@ try {
       const frozen = JSON.parse(await readFile(join(runRoot, 'snapshot.json'), 'utf8'))
       if (frozen.stage !== 'revision') continue
       const resources = JSON.parse(await readFile(join(runRoot, 'skills.json'), 'utf8')).resources
-      assert.equal(resources.length, 2)
+      assert.equal(resources.length, 3)
       assert.equal(resources[0].instructions, originalSkill)
       assert.equal(resources[0].digest, installedSkill.digest)
-      assert.equal(resources[1].qualifiedId, 'builtin:selection-preserving-revision')
+      const pinnedBuiltin = resources.find(row => row.qualifiedId === 'builtin:selection-preserving-revision')
+      const pinnedProject = resources.find(row => row.qualifiedId === 'project:test-only:local-revision')
+      assert.ok(pinnedBuiltin)
+      assert.equal(pinnedProject.instructions, projectInstructions)
       assert.deepEqual(frozen.skillDigests.map(row => row.digest), resources.map(row => row.digest))
       verifiedPinnedStage = true
     }
@@ -686,6 +713,7 @@ try {
     nativeUiPrivateSkillMultiCandidateImport: true, cancelledSkillPreviewDoesNotInstall: true,
     privateSkillOriginalBytesAndInertScriptsPreserved: true, globalSkillCatalogNotModified: true,
     privateSkillVersionsSurviveReadOnlyHostRestart: true,
+    nativeProjectStaticSkillBindingAndRead: true, changedProjectResourceDigestRejected: true,
     githubNetworkDisabledBeforeIO: true, realPublicGithubMultiSkillPreviewAndImport: liveSkills,
     nativeUiProjectSkillBindingCancelAndConfirm: true, boundAgentSkillReadStageAndScriptDenial: true,
     builtinSkillBindingAndCompatibleSelectionMenu: true,

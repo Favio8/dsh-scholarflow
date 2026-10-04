@@ -8,6 +8,10 @@ export interface FileEntry { path: string; type: 'file' | 'directory' | 'other';
 export interface FileStore {
   read(path: string): Promise<FileImage | undefined>
   readBytes(path: string, maxBytes: number): Promise<Uint8Array>
+  // Separate capability for fixed project Skill trees. The raw-material reader
+  // continues to deny all metadata and manuscript paths.
+  resourceStat?(path: string): Promise<FileEntry | undefined>
+  readResourceBytes?(path: string, maxBytes: number): Promise<Uint8Array>
   stat(path: string): Promise<FileEntry | undefined>
   list(path: string): Promise<FileEntry[]>
   write(path: string, text: string, expected: FileImage | undefined): Promise<FileImage>

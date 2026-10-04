@@ -8,6 +8,8 @@ import { readFile } from 'node:fs/promises'
 import { packageSkill } from '../../core/skills/package.ts'
 import type { SkillStage } from '../../core/skills/bindings.ts'
 import type { SkillMetadata } from '../../shared/skills.ts'
+import type { FileStore } from '../../core/store/files.ts'
+import { resolveProjectSkill } from '../../core/skills/project-resources.ts'
 
 const library = new PrivateSkillLibrary()
 const builtinDefinitions: { name: string; capabilities: SkillMetadata['capabilities']; stages: SkillStage[] }[] = [
@@ -30,7 +32,11 @@ export async function builtinSkills() {
   return versions
 }
 export const libraryEntry = (qualifiedId: string, hash: string) => `${digest(qualifiedId).slice(7)}/${hash.slice(7)}/files/SKILL.md`
-export async function readPrivateSkill(binding: ResourceBinding) {
+export async function readPrivateSkill(binding: ResourceBinding, io?: FileStore) {
+  if (binding.scope === 'project') {
+    invariant(io, 'SKILL_RESOURCE_UNAVAILABLE', '项目资源需要当前会话验证的工作区网关，不能从其他项目代取。')
+    return resolveProjectSkill(io, binding)
+  }
   if (binding.scope === 'builtin') {
     const bundle = await builtinResource(binding.qualifiedId)
     invariant(bundle.manifest.digest === binding.digest && bundle.manifest.origin.kind === 'builtin' && bundle.manifest.origin.asset === binding.entryPath,

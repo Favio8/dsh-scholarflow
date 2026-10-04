@@ -1,5 +1,6 @@
 import { join, relative, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { lstat } from 'node:fs/promises'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { relativePath } from '../../shared/schema.ts'
 import { sensitivePath } from '../../core/materials/materials.ts'
@@ -59,6 +60,47 @@ export class HostFileStore implements FileStore {
     invariant(before?.type === 'file', 'FILE_NOT_REGULAR', '需要普通资料文件。')
     const bytes = await this.ctx.fs.readBytes(target, this.signal, maxBytes)
     invariant(before.version === (await this.ctx.fs.stat(target, this.signal))?.version, 'STALE_MATERIAL_VERSION', '读取期间原始资料发生变化。')
+    return bytes
+  }
+  private async resourceTarget(path: string) {
+    this.signal.throwIfAborted()
+    relativePath.parse(path)
+    invariant(path === '.scholarflow/skills' || path.startsWith('.scholarflow/skills/'), 'SKILL_RESOURCE_PATH_INVALID', '资源读取仅限本项目的私有 Skill 子树。')
+    invariant(!sensitivePath(path), 'SKILL_RESOURCE_PATH_INVALID', '私有资源不能包含敏感路径。')
+    let parent = this.binding.canonicalRoot
+    // Read native inode/link metadata only: the installed SDK lstat contract
+    // omits nlink. Actual content IO still uses the Host service and byte cap.
+    for (const part of path.split('/')) {
+      this.signal.throwIfAborted()
+      parent = join(parent, part)
+      let info
+      try { info = await lstat(parent) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
+      invariant(!info.isSymbolicLink() && (info.isDirectory() || info.isFile() && info.nlink === 1), 'SKILL_SOURCE_LINK', '项目资源包含链接、硬链接或特殊文件，未读取目标。')
+    }
+    const target = await this.target(path)
+    const actual = this.ctx.fs.processPath(target), expected = join(this.binding.canonicalRoot, path)
+    invariant(process.platform === 'win32' ? actual.toLowerCase() === expected.toLowerCase() : actual === expected, 'SKILL_SOURCE_LINK', '项目资源真实位置与专属子树路径不同。')
+    return target
+  }
+  async resourceStat(path: string): Promise<FileEntry | undefined> {
+    if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
+    const target = await this.resourceTarget(path)
+    if (!target) return undefined
+    const row = await this.ctx.fs.stat(target, this.signal)
+    return row ? { path, type: row.type === 'file' || row.type === 'directory' ? row.type : 'other', size: row.size } : undefined
+  }
+  async readResourceBytes(path: string, maxBytes: number) {
+    if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
+    invariant(path.split('/').length >= 5 && path.startsWith('.scholarflow/skills/'), 'SKILL_RESOURCE_PATH_INVALID', '资源内容必须位于命名空间与具体 Skill 目录下，不能读取阶段控制文件。')
+    invariant(Number.isInteger(maxBytes) && maxBytes > 0 && maxBytes <= 20 * 1024 * 1024, 'CONTENT_TOO_LARGE', '资源读取最多 20 MiB。')
+    const target = await this.resourceTarget(path)
+    invariant(target, 'SKILL_RESOURCE_MISSING', '项目固定资源缺失。')
+    const before = await this.ctx.fs.stat(target, this.signal)
+    invariant(before?.type === 'file' && before.size <= maxBytes, 'SKILL_RESOURCE_UNAVAILABLE', '项目资源不是限额内的普通文件。')
+    const bytes = await this.ctx.fs.readBytes(target, this.signal, maxBytes)
+    const final = await this.resourceTarget(path)
+    invariant(final && before.version === (await this.ctx.fs.stat(final, this.signal))?.version && bytes.byteLength === before.size,
+      'SKILL_SOURCE_CHANGED', '读取期间项目固定资源改变，未返回内容。')
     return bytes
   }
   async stat(path: string): Promise<FileEntry | undefined> {

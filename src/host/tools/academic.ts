@@ -117,14 +117,14 @@ export function academicDefinitions(ctx: Host) {
       const allowed = locked.bindings.filter(binding => binding.enabledStages.includes(active.stage))
       if (args.action === 'list') {
         const skills = []
-        for (const binding of allowed) { const bundle = await readPrivateSkill(binding); skills.push({ bindingId: binding.bindingId, qualifiedId: binding.qualifiedId,
+        for (const binding of allowed) { const bundle = await readPrivateSkill(binding, io); skills.push({ bindingId: binding.bindingId, qualifiedId: binding.qualifiedId,
           digest: binding.digest, metadata: bundle.manifest.metadata, priority: skills.length + 1 }) }
         return { stage: active.stage, scope: 'current-project-and-stage', skills, limitations: ['只列出已启用项；安装不代表启用，禁用不抹去聊天历史。'] }
       }
       const binding = allowed.find(binding => binding.bindingId === args.bindingId)
       invariant(binding, 'SKILL_STAGE_DENIED', '此固定资源未在当前项目的调用阶段启用。')
       invariant(args.resourcePath === 'SKILL.md' || /^references\/.*\.(?:md|txt|json|yaml|yml)$/iu.test(args.resourcePath), 'SKILL_RESOURCE_PATH_INVALID', '只支持说明和静态文本参考；不能加载程序或可执行资源。')
-      const bundle = await readPrivateSkill(binding), file = bundle.files.find(file => file.relativePath === args.resourcePath)
+      const bundle = await readPrivateSkill(binding, io), file = bundle.files.find(file => file.relativePath === args.resourcePath)
       invariant(file && file.bytes.byteLength <= 65536, 'SKILL_RESOURCE_UNAVAILABLE', '所选固定文本资源不存在或超出 64 KiB。')
       const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(file.bytes)
       invariant(args.charOffset <= content.length && unicodeBoundary(content, args.charOffset), 'SKILL_RESOURCE_RANGE_INVALID', '说明文本范围无效。')
