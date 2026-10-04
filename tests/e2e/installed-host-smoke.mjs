@@ -592,6 +592,42 @@ try {
   await page.getByRole('button', { name: '确认保留所选要求并归档冲突原文', exact: true }).click()
   await page.getByRole('checkbox', { name: /^确认篇幅使用 sf-body-han-western-v1/ }).check()
   await page.getByRole('button', { name: `确认要求 ${teacher.id}`, exact: true }).click()
+  await page.getByRole('button', { name: `编辑要求 ${teacher.id}`, exact: true }).click()
+  await page.getByRole('textbox', { name: '要求描述', exact: true }).fill('TEST_ONLY 原课程正文不少于2000字；补充确认统计范围。')
+  await page.getByRole('textbox', { name: '要求修改删除理由', exact: true }).fill('TEST_ONLY 明确范围，保留老师定位与原文。')
+  const beforeRequirementEdit = await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')
+  await page.getByRole('button', { name: '预览保存要求修改', exact: true }).click()
+  await page.getByRole('button', { name: '取消要求变更预览', exact: true }).click()
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), beforeRequirementEdit)
+  await page.getByRole('button', { name: '预览保存要求修改', exact: true }).click()
+  await page.getByRole('button', { name: '确认要求变更', exact: true }).click()
+  await page.getByRole('button', { name: `确认要求 ${teacher.id}`, exact: true }).click()
+  await page.getByRole('region', { name: `写作要求 ${teacher.id}`, exact: true }).getByRole('heading', { name: 'length · confirmed', exact: true }).waitFor()
+  const editedTeacher = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).requirements[teacher.id]
+  assert.deepEqual(editedTeacher.origin, teacher.origin)
+  assert.equal(editedTeacher.confirmation, 'confirmed')
+  await page.getByRole('combobox', { name: '要求类别', exact: true }).selectOption('references')
+  await page.getByRole('combobox', { name: '约束方式', exact: true }).selectOption('ratio')
+  await page.getByRole('textbox', { name: '要求描述', exact: true }).fill('TEST_ONLY 临时近期引用比例，验证后明确删除。')
+  await page.getByRole('textbox', { name: '约束值', exact: true }).fill('60')
+  await page.getByRole('textbox', { name: '引用年份窗口起点', exact: true }).fill('2021')
+  await page.getByRole('textbox', { name: '引用年份窗口终点', exact: true }).fill('2026')
+  await page.getByRole('button', { name: '保存用户要求候选', exact: true }).click()
+  await page.getByRole('heading', { name: 'references · proposed', exact: true }).waitFor()
+  const ratioRequirement = Object.values(JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).requirements).find(row => row.kind === 'references')
+  await page.getByRole('button', { name: `确认要求 ${ratioRequirement.id}`, exact: true }).click()
+  await page.getByRole('region', { name: `写作要求 ${ratioRequirement.id}`, exact: true }).getByRole('heading', { name: 'references · confirmed', exact: true }).waitFor()
+  const ratioConfirmed = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).requirements[ratioRequirement.id]
+  assert.equal(ratioConfirmed.constraint.countingPolicyId, 'sf-cited-year-window-ratio-v1')
+  await page.getByRole('textbox', { name: '要求修改删除理由', exact: true }).fill('TEST_ONLY 仅为界面验证建立，不属于实际课程约束。')
+  await page.getByRole('button', { name: `预览删除要求 ${ratioRequirement.id}`, exact: true }).click()
+  await page.getByRole('button', { name: '确认要求变更', exact: true }).click()
+  await page.getByRole('button', { name: '读取要求变更历史', exact: true }).click()
+  await page.getByRole('region', { name: '要求变更历史', exact: true }).getByText('remove ·', { exact: false }).waitFor()
+  await page.getByRole('tab', { name: /^Outline ·/ }).click()
+  await page.getByRole('button', { name: '预览确认完整大纲', exact: true }).click()
+  await page.getByRole('button', { name: '确认保存完整大纲', exact: true }).click()
+  await page.getByRole('tab', { name: /^Overview ·/ }).click()
   await page.getByRole('combobox', { name: '项目指令文件', exact: true }).selectOption('.scholarflow/context/terminology.md')
   await page.getByRole('button', { name: '读取所选项目指令', exact: true }).click()
   const terminology = '# 已确认术语\n\nTEST_ONLY 原始资料：经用户选择且保持只读的文件。\n'
@@ -600,7 +636,10 @@ try {
   await page.getByRole('status').filter({ hasText: '项目指令已保存；相关检查需更新。' }).waitFor()
   assert.equal(await readFile(join(projectRoot, '.scholarflow/context/terminology.md'), 'utf8'), terminology)
   assert.equal(await readFile(join(projectRoot, 'TEST_ONLY 作业要求.txt'), 'utf8'), assignmentBytes)
-  assert.equal((await readdir(join(projectRoot, '.scholarflow/planning/requirements'))).length, 1)
+  const requirementArchive = await Promise.all((await readdir(join(projectRoot, '.scholarflow/planning/requirements'))).map(async file => JSON.parse(await readFile(join(projectRoot, '.scholarflow/planning/requirements', file), 'utf8'))))
+  assert.ok(requirementArchive.some(row => row.selectedId === teacher.id))
+  assert.ok(requirementArchive.some(row => row.action === 'edit' && row.previous.id === teacher.id))
+  assert.ok(requirementArchive.some(row => row.action === 'remove' && row.previous.id === ratioRequirement.id))
   await page.getByRole('tab', { name: /^Review ·/ }).click()
   await page.getByRole('button', { name: '运行确定性审查', exact: true }).click()
   await page.getByRole('list', { name: '审查检查结果', exact: true }).getByText('unknown · model-assisted', { exact: false }).first().waitFor()
@@ -778,6 +817,7 @@ try {
     nativeUiLegacyRunStorageMigrationKeepsAllBytes: true,
     realModelPauseAndCrossSessionResume: liveModel, cancelledRunActionPreviewLeavesStateUnchanged: liveModel,
     realProviderCancellation: liveModel, nativeUiRequirementConflictResolution: true, nativeUiProjectMemoryEdit: true,
+    nativeUiRequirementEditCancelConfirmHistoryAndRemove: true, nativeUiRecentRatioWindowConfirmed: true,
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,
     unsavedHostBufferColdRestartRestore: true,

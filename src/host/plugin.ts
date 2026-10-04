@@ -24,8 +24,8 @@ import { selectedModel, callStageModel } from './executor/model.ts'
 import { runReview, inspectReview, decideIssue } from '../core/review/review.ts'
 import { prepareDelivery, createDelivery, readDelivery, type DeliveryPlan } from '../core/export/delivery.ts'
 import { issueDecisionRequest, exportCreateRequest } from '../shared/review.ts'
-import { requirementUpsertRequest, requirementExtractRequest, requirementConfirmRequest, requirementResolveRequest, projectTextReadRequest, projectTextSaveRequest } from '../shared/requirements.ts'
-import { upsertRequirement, extractRequirements, confirmRequirement, resolveRequirementConflict } from '../core/requirements/requirements.ts'
+import { requirementUpsertRequest, requirementExtractRequest, requirementConfirmRequest, requirementResolveRequest, requirementRemoveRequest, projectTextReadRequest, projectTextSaveRequest } from '../shared/requirements.ts'
+import { upsertRequirement, extractRequirements, confirmRequirement, resolveRequirementConflict, removeRequirement, requirementHistory } from '../core/requirements/requirements.ts'
 import { bufferWriteRequest } from '../shared/editor-buffer.ts'
 import { readEditorBuffer, writeEditorBuffer } from '../core/editing/buffer.ts'
 import { searchPrepareRequest, onlineConfirmRequest, candidateDecisionRequest, lookupPrepareRequest, type ResearchProvider } from '../shared/online-research.ts'
@@ -760,7 +760,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async requirementsUpsert(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const input = requirementUpsertRequest.parse(request)
       const { io } = await resolveStore(this.ctx, input.context, signal)
-      return upsertRequirement(io, input.requirement, mutationRevision(input.context)) })
+      return upsertRequirement(io, input.requirement, mutationRevision(input.context), input.changeReason) })
   }
 
   @Remote('requirements.extract')
@@ -768,6 +768,19 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const input = requirementExtractRequest.parse(request)
       const { io } = await resolveStore(this.ctx, input.context, signal)
       return extractRequirements(io, input.materialId, mutationRevision(input.context)) })
+  }
+
+  @Remote('requirements.remove')
+  async requirementsRemove(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = requirementRemoveRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return removeRequirement(io, input.requirementId, input.reason, mutationRevision(input.context)) })
+  }
+
+  @Remote('requirements.history')
+  async requirementsHistory(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal); return requirementHistory(io) })
   }
 
   @Remote('requirements.confirm')

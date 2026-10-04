@@ -4,6 +4,7 @@ import { invariant } from '../../shared/errors.ts'
 import { reviewReportSchema, type ReviewReport } from '../../shared/review.ts'
 import { projectMarkdown, walk, textOf, wordStats } from '../editing/markdown.ts'
 import type { Ledger } from '../../shared/schema.ts'
+import { requirementCount } from '../requirements/counting.ts'
 
 type Issue = Ledger['reviewIssues'][string]
 const CURRENT = '.scholarflow/reviews/current.json'
@@ -78,19 +79,19 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
   for (const requirement of Object.values(ledger.requirements)) {
     let status: 'pass' | 'fail' | 'unknown' = 'unknown'
     const constraint = requirement.constraint
+    const counted = requirementCount(requirement, count, projection.citationOrder.map(key => Object.values(ledger.sources).find(source => source.citeKey === key)).filter(source => !!source))
     if (requirement.confirmation === 'confirmed' && constraint) {
-      let actual: number | undefined
-      if (requirement.kind === 'length' && constraint.countingPolicyId === 'sf-body-han-western-v1') actual = constraint.unit === 'zh-characters' ? count.chineseCharacters : constraint.unit === 'words' ? count.westernWords : undefined
-      if (requirement.kind === 'references' && constraint.unit === 'items') actual = projection.citationOrder.filter(key => Object.values(ledger.sources).some(source => source.citeKey === key)).length
+      const actual = counted.actual
       if (actual !== undefined && typeof constraint.value === 'number') {
         if (constraint.operator === 'min') status = actual >= constraint.value ? 'pass' : 'fail'
         if (constraint.operator === 'max') status = actual <= constraint.value ? 'pass' : 'fail'
         if (constraint.operator === 'equals') status = actual === constraint.value ? 'pass' : 'fail'
+        if (constraint.operator === 'ratio') status = actual >= constraint.value ? 'pass' : 'fail'
       }
       if (requirement.kind === 'section' && typeof constraint.value === 'string' && constraint.operator === 'contains') status = headings.includes(constraint.value.trim()) ? 'pass' : 'fail'
       if (requirement.kind === 'format' && constraint.operator === 'equals') status = constraint.value === 'markdown' ? 'pass' : 'fail'
     }
-    check(`requirement_${requirement.id}`, status, `要求 ${requirement.id}：${requirement.confirmation}；${status === 'unknown' ? '当前自动检查无法判定，需确认口径或人工审查' : '已按保存的约束检查'}。`, 'requirement', 'B1', { requirementIds: [requirement.id] })
+    check(`requirement_${requirement.id}`, status, `要求 ${requirement.id}：${requirement.confirmation}；${status === 'unknown' ? '当前自动检查无法判定，需确认口径或人工审查' : '已按保存的约束检查'}。${['length', 'references'].includes(requirement.kind) ? ` ${counted.detail}${counted.actual === undefined ? '' : ` 实际计数／比例：${Number(counted.actual.toFixed(4))}${constraint?.unit === 'percent' ? '%' : ''}。`}` : ''}`, 'requirement', 'B1', { requirementIds: [requirement.id] })
   }
   if (current.config.project.type === 'research-paper') {
     const results = Object.values(ledger.evidence).filter(evidence => evidence.kind === 'user-measurement' && evidence.validation === 'located' && evidence.measurement?.origin === 'user-supplied')
