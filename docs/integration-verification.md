@@ -626,7 +626,7 @@ host-plane 插件在无会话／权限上下文时，`ctx.fs` 写入被沙箱默
 |---|---|
 | 文档生成 | 已完成 |
 | 代码实现 | 已完成：两个预设各挂一个私有 `skill-filesystem`，指向各自的 `TEST_ONLY` 夹具 |
-| 测试通过 | **是**（catalog 隔离）；注入文本差异**未验** |
+| 测试通过 | **是**：catalog 隔离 ✅、**注入提示隔离 ✅** |
 
 ### 08.1 已取得的机制线索【已实测】
 
@@ -690,11 +690,32 @@ name 为 `sf-test-skill-a` / `sf-test-skill-b`）。用 `agentPresets.acquireSco
    读是「全局层 + 该 scope 的链」，用户级 provider 只在带 scope／cwd 的读取里参与。
    → **不能用无 scope 读取的结果代表「普通会话能看到的全部」**，这是一个与直觉相反的细节。
 
-### 08.3 尚未验证
+### 08.3 注入提示隔离【已实测，**通过**】
 
-- **【仍未知】** `systemPrompt.assemble()` 在三种上下文中的**注入文本**差异
-  （catalog 隔离已证明，提示词注入尚未逐字比对）。
-- **【仍未知】** 宿主的 `agent-instructions`（workspace 指令注入）在专属 Mode 下如何收窄。
+`systemPrompt.assemble({ scope })` 的实测对比（`promptsDiffer: true`）：
+
+| 视图 | section 名 | `mentionsScholarFlow` | persona 文本 |
+|---|---|---|---|
+| 无 scope（全局） | 7 个：`app:web-surface`、`deployment:persona-prefix`、`deployment:persona-suffix`、`harness:identity`、`harness:source`、`mcp-resource-servers`、`ui:deliverable-file-references` | **false** | 无 |
+| `scope = scholarflow` | **完全相同的 7 个名字** | **true** | `You are the ScholarFlow academic writing agent.` |
+
+- `sectionsOnlyInScope: []`、`sectionsOnlyInGlobal: []` —— **没有新增 section**；
+  差异发生在 `deployment:persona-*` 这些**同名 section 的内部文本**上。
+- 这与 `systemPrompt.section()` 的文档一致：「**a scoped section shadows a global section
+  with the same name**」。→ **Mode 的提示隔离是「同名遮蔽」而不是「额外追加」**，
+  M1 制定 Preset 时必须按这个语义设计，否则会与官方 section 冲突或被遮蔽。
+
+**G0-08 两半都已实测通过：catalog 隔离（08.2）+ 注入提示隔离（08.3）。**
+
+> 说明：08.2 的 A/B 夹具证据来自 Round 2 那一次运行（当时 overlay 挂了两个预设）。
+> 之后为排除 G0-05/G0-09 变量，验证 profile 的 overlay 被清空，仅保留本包 bundle 自带的
+> `preset-scholarflow`，因此最近几次运行里 sScholarFlow scope 不再看到 A/B 夹具 ——
+> 这是预期的，不是隔离失效。
+
+### 08.4 尚未验证
+
+- **【仍未知】** 宿主的 `agent-instructions`（workspace 指令注入）在专属 Mode 下如何收窄
+  （其中 `maxBytes` 等配置在官方预设里可见，未实测其作用域行为）。
 - **【仍未知】** 项目级（`<workspace>/.scholarflow/skills/`）与库级（`<DSH_HOME>`）在同一 scope
   内的层级优先级实测。
 
@@ -825,6 +846,84 @@ name 为 `sf-test-skill-a` / `sf-test-skill-b`）。用 `agentPresets.acquireSco
 - **【仍未知】** 停用后 `ctx.effect` 的 disposer 实际执行、无残留监听（需配合 `invariants` 或前后对比）。
 - **【仍未知】** `removeBundle`（真正卸载）的实际行为，以及卸载后用户数据是否仍完整。
 - **【仍未知】** 正在执行的任务在停用时的安全中断与状态保存（SPEC §27.1）。
+
+---
+
+## G0 总结论与进入 M1 的实施建议
+
+> 本节结论只覆盖**已实测**的部分；未实测项一律标「待验」或「待裁决」。
+> **文档生成 / 代码实现 / 测试通过 / 安装成功**四态仍逐项分列，不合并。
+
+### S1. 逐项状态（截至 2026-10-04）
+
+| 项 | 结论 | 证据位置 |
+|---|---|---|
+| G0-01 安装 | **通过** | 01.1／01.2 |
+| G0-02 Mode | **通过** | 02.2 |
+| G0-03 身份 | **部分**：workspaceId、canonical root、sessionIds 已取得；真实会话内的绑定链待验（需 desktop） | 03.1 |
+| G0-04 UI | **部分**：`main` 扩展点已确认、客户端半体已被服务并注入启动图；**渲染与三栏共存待验**（需 desktop + 截图） | 04.2／04.4 |
+| G0-05 设置 | **待裁决**：`Config` 已被 loader 读取并物化默认值，但设置投影始终为 0（8 个假设全否决）；自建设置页 + 自有持久化两条零件均已跑通 | 05.2／05.3 |
+| G0-06 模型 | **通过**（真实调用 + 可取消） | 06.1 |
+| G0-07 文件 | **部分**：读／包含关系／变更订阅通过；**写入在无会话上下文的 CLI 进程中被沙箱拒绝**，真实会话下的许可范围待验 | 07.2／07.3 |
+| G0-08 Skill 隔离 | **通过**（catalog + 注入提示两半） | 08.2／08.3 |
+| G0-09 会话恢复 | **通过**（`storageDomain` 跨进程读回） | 09.4 |
+| G0-10 生命周期 | **部分**：loader 行移除、AT-25 数据保全通过；`ctx.effect` 清理回调与 `removeBundle` 待验 | 10.1 |
+
+**判定：G0 未全部通过。** 5 项通过、5 项部分；无「未通过」项，但有 3 项明确依赖一次 desktop 进程重启。
+
+### S2. G0 已经可以支撑 M1 的结论（可作为设计输入）
+
+1. **Mode 用声明式 preset 行**（`@deepseek-ai/dsh-agent-preset` + `PresetDefinition`），
+   不自建 Mode 机制；全局默认不被改动（02.2）。
+2. **项目身份以宿主的 `workspaceRegistry` 为权威**（UUID + canonical path + sessionIds），
+   自加 `rootFingerprint`（03.1）。
+3. **项目自有持久化用 `ctx.storageDomain`**，域名只用字母/数字/下划线（09.4）。
+4. **Skill 隔离靠 preset 作用域**：把 `skill-filesystem` 挂在 preset 的 `plugins` 里即可
+   获得该 Mode 私有 catalog，全局不泄漏（08.2）。
+5. **提示词隔离是「同名 section 遮蔽」**，不是追加新 section（08.3）——直接影响
+   Preset 的 persona／instructions 写法。
+6. **模型阶段复用 `ctx.llm.stream` + `AbortSignal`**，取消以终止 chunk
+   `{type:'finish', reason:{kind:'aborted'}}` 可观测（06.1）。
+7. **客户端半体不需要构建工具**：手写 `window.__ModuleLoader__.load({ id, factory })`
+   即可被扫描、打包并提供（04.4）。
+8. **文件边界必须自建**：`fs.contains` 行为正确，`fs.resolve` **不做授权**（07.2）。
+
+### S3. 进入 M1 之前的**强制前置条件**
+
+| # | 前置条件 | 依据 |
+|---|---|---|
+| P1 | **锁定分发形态**：`link:` 安装**不会**安装本包依赖，用户以 `link:` 使用时依赖不会被装。必须在 README/M1 决定走 tarball／registry 还是内联打包 | ADR-004 |
+| P2 | **引入可重复的构建／校验步骤**（至少保证 `pnpm install` 被显式执行、lockfile 入库） | ADR-001、ADR-004 |
+| P3 | **FileGateway 自建 canonical-root 包含检查**，用 `fs.contains` 而非 `startsWith`；路径检查不能依赖宿主 | 07.2 |
+| P4 | **确定写权限通路**：`writeText` 的 `sandboxPolicy` 合法取值，或改走 `storageDomain`；在真实会话下先测一次工作区写入 | 07.3 |
+| P5 | **裁决 G0-05**：自建设置页是否满足 SPEC §11.1 的等价入口 | 05.3 |
+| P6 | **给 `src/core/` 建立零宿主依赖的离线测试基线**（SPEC ADR-002 红线） | 本仓库 AGENTS 规则五 |
+
+### S4. M1 实施顺序建议（对齐 SPEC §29 的 M1）
+
+1. `src/shared/` 运行时校验（zod 已是依赖）＋ `src/core/project`（纯领域层，可离线测）。
+2. `project.inspect / prepareInit / initialize` + 目录冲突规则（PRD §5.2），
+   **只新增 `manuscript/` 与 `.scholarflow/`**，先跑 AT-01/AT-02。
+3. FileGateway（读 + 受控写 + 版本号 + 变更订阅），先过 AT-03 的边界用例（中文路径、无 Git）。
+4. ledger 事务与恢复（SPEC §8.3／§8.4），配套 fault-injection。
+5. Profile（Writing Profile）与私有 Academic Skill 库（用 P3 的作用域机制）。
+6. Overview 页面（客户端半体骨架已在 G0-04 铺好，M1 直接扩展）。
+
+### S5. 仍需用户或设计方裁决的问题
+
+| # | 问题 | 影响 |
+|---|---|---|
+| Q1 | 自建 `settings.section` 页面 + 自有持久化是否满足 G0-05 的「本插件命名空间」 | 决定 M1 是否继续投入宿主 `Config` 投影 |
+| Q2 | `ctx.fs` 写工作区在**真实会话**下是否被允许（决定 `.scholarflow/` 与 `manuscript/` 的写入实现） | 决定 FileGateway 是走 fs 还是 storage |
+| Q3 | 学术 Skill 私有库放在 `<DSH_HOME>/scholarflow/` 需要写权限，与 Q2 同因 | 影响 PRD §12.1 的落点 |
+| Q4 | 分发形态（见 P1） | 影响安装说明与是否需要打包器 |
+
+### S6. 风险提示
+
+- **宿主处于预览阶段**（0.2.0-rc.2），本次所有协议事实都绑定该版本；升级后必须重跑 G0 相关项。
+- **profile 组合可能在会话间变化**：本项目实测到一次 desktop bundle 被移除（原因未定）。
+  M1 的启动自检应包含「本插件是否真的在组合里」，而不是只看依赖存在。
+- **`ctx.fs` 的沙箱不是 OS 级隔离**：`node:fs` 可绕过（07.4）。不得对外宣称强隔离。
 
 ---
 

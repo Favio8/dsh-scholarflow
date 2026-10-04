@@ -604,6 +604,79 @@ async function probeStorageVariants(ctx) {
   record('probe:storage-variants', { ok: true, hostOpenDomainSample, results })
 }
 
+/**
+ * Probe G0-08 (prompt half): is the assembled PROMPT different per preset scope,
+ * not just the skill catalog?
+ *
+ * `systemPrompt.assemble(context)` takes `{ scope }` and the registry documents:
+ * "Scoped sections and variables shadow globals" and "a scoped section shadows a
+ * global section with the same name". The ScholarFlow preset mounts its own
+ * persona row, so its scope must carry a section the global assembly does not.
+ */
+async function probePromptIsolation(ctx) {
+  const systemPrompt = service(ctx, 'systemPrompt')
+  const agentPresets = service(ctx, 'agentPresets')
+  if (!systemPrompt || !agentPresets) {
+    record('probe:prompt-isolation', {
+      ok: false,
+      reason: `service unavailable: systemPrompt=${Boolean(systemPrompt)} agentPresets=${Boolean(agentPresets)}`,
+    })
+    return
+  }
+
+  const summarize = (assembly) => ({
+    sectionNames: (assembly?.sections ?? []).map((entry) => entry.name).sort(),
+    contextNames: (assembly?.contexts ?? []).map((entry) => entry.name).sort(),
+    toolNames: (assembly?.tools ?? []).map((entry) => entry.name).sort(),
+    mentionsScholarFlow: (assembly?.sections ?? []).some((entry) =>
+      String(entry.text ?? '').includes('ScholarFlow'),
+    ),
+    personaText: (assembly?.sections ?? [])
+      .filter((entry) => String(entry.text ?? '').includes('ScholarFlow'))
+      .map((entry) => String(entry.text).replace(/\s+/g, ' ').slice(0, 120)),
+  })
+
+  let globalView = null
+  try {
+    globalView = summarize(await systemPrompt.assemble({}))
+  } catch (error) {
+    globalView = { error: String(error?.message ?? error) }
+  }
+
+  let scopedView = null
+  let lease = null
+  try {
+    lease = await agentPresets.acquireScope('scholarflow')
+    scopedView = summarize(await systemPrompt.assemble({ scope: lease?.key }))
+  } catch (error) {
+    scopedView = { error: String(error?.message ?? error) }
+  } finally {
+    try {
+      await lease?.[Symbol.asyncDispose]?.()
+    } catch {
+      /* lease release is best-effort */
+    }
+  }
+
+  const onlyInScope = (scopedView?.sectionNames ?? []).filter(
+    (name) => !(globalView?.sectionNames ?? []).includes(name),
+  )
+  const onlyInGlobal = (globalView?.sectionNames ?? []).filter(
+    (name) => !(scopedView?.sectionNames ?? []).includes(name),
+  )
+
+  record('probe:prompt-isolation', {
+    ok: true,
+    global: globalView,
+    scoped: scopedView,
+    sectionsOnlyInScope: onlyInScope,
+    sectionsOnlyInGlobal: onlyInGlobal,
+    promptsDiffer:
+      JSON.stringify(globalView?.sectionNames) !== JSON.stringify(scopedView?.sectionNames) ||
+      globalView?.mentionsScholarFlow !== scopedView?.mentionsScholarFlow,
+  })
+}
+
 /** Probe G0-03 (partial): can the host report real workspace identity? */
 async function probeWorkspaceIdentity(ctx) {
   const workspaceRegistry = service(ctx, 'workspaceRegistry')
@@ -806,6 +879,11 @@ async function runProbes(ctx) {
     await probeSkillIsolation(ctx)
   } catch (error) {
     record('probe:skill-isolation-failed', { message: String(error?.message ?? error) })
+  }
+  try {
+    await probePromptIsolation(ctx)
+  } catch (error) {
+    record('probe:prompt-isolation-failed', { message: String(error?.message ?? error) })
   }
   try {
     await probeModelStage(ctx)
