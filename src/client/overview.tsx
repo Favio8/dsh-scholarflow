@@ -48,6 +48,9 @@ export function Overview({ project, context, api, refresh, run, busy }: Props) {
     <button disabled={busy || (!!file && text !== file.text)} onClick={() => run(async () => { const result = await api('project.readText', { context: context(), path }); setFile(result); setText(result.text) })}>读取所选项目指令</button>
     {file && <><label>项目指令内容<textarea aria-label="项目指令内容" rows={8} disabled={busy} value={text} onChange={e => setText(e.target.value)} /></label>
       <button disabled={busy || text === file.text} onClick={() => run(async () => { await api('project.saveText', { context: context(), path: file.path, text, baseHash: file.contentHash }); setFile(undefined); setMessage('项目指令已保存；相关检查需更新。'); await refresh() })}>确认保存项目指令</button>
+      {file.path.includes('/context/') && <button disabled={busy || text !== file.text} onClick={() => run(async () => {
+        await api('project.saveText', { context: context(), path: file.path, text, baseHash: file.contentHash }); setFile(undefined); setMessage('已明确确认当前记忆纳入项目阶段上下文。'); await refresh()
+      })}>确认将当前文本纳入项目记忆</button>}
       <button disabled={busy} onClick={() => { if (text !== file.text && !window.confirm('放弃这份未保存的项目指令编辑？')) return; setFile(undefined); setText('') }}>关闭项目指令编辑</button></>}
     <p role="status">{message}</p>
   </section>

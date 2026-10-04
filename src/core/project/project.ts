@@ -3,6 +3,7 @@ import { configSchema, ledgerSchema, relativePath, projectType, type ProjectConf
 import { ScholarError, invariant } from '../../shared/errors.ts'
 import { digest, newId, json, type FileStore, type FileImage } from '../store/files.ts'
 import { commit, inspectRecovery, type Mutation } from '../store/transactions.ts'
+import { MEMORY_APPROVALS, memoryApprovalsSchema } from './memory.ts'
 
 export const CONFIG_PATH = '.scholarflow/project.yaml'
 export const LEDGER_PATH = '.scholarflow/data/ledger.json'
@@ -77,12 +78,15 @@ export async function prepareInit(io: FileStore, input: { title: string; type: s
   const files = [
     { path: CONFIG_PATH, text: stringify(config) },
     { path: config.paths.mainDocument, text: paper }, { path: config.paths.references, text: references },
-    { path: '.scholarflow/.gitignore', text: 'cache/\ntmp/\nlogs/\ntransactions/\nstate.json\n' },
+    { path: '.scholarflow/.gitignore', text: 'cache/\ntmp/\nlogs/\ntransactions/\nstate.json\ndrafts/editor-buffers/\n' },
     { path: '.scholarflow/profiles/writing.md', text: writingProfile },
     { path: '.scholarflow/profiles/review.md', text: '# 项目审查\n\n分别报告规则检查、模型判断和未执行项目。真实性与引用问题优先。\n' },
     { path: '.scholarflow/context/decisions.md', text: '# 已确认决定\n' },
     { path: '.scholarflow/context/terminology.md', text: '# 已确认术语\n' },
     { path: '.scholarflow/context/writing-memory.md', text: '# 已确认写作记忆\n' },
+    { path: MEMORY_APPROVALS, text: json({ schemaVersion: 1, projectId, entries: Object.fromEntries([
+      ['decisions', '# 已确认决定\n'], ['terminology', '# 已确认术语\n'], ['writing-memory', '# 已确认写作记忆\n']
+    ].map(([name, text]) => [`.scholarflow/context/${name}.md`, { contentHash: digest(text), source: 'initialization', confirmedAt: new Date().toISOString() }])) }) },
     { path: '.scholarflow/resources.lock.json', text: json({ schemaVersion: 1, projectId, skills: [], profiles: [{ ref: config.writing.preset, contentHash: digest(writingProfile), content: writingProfile }] }) },
     { path: `.scholarflow/drafts/${revision}/paper.md`, text: paper },
     { path: `.scholarflow/drafts/${revision}/manifest.json`, text: json({ schemaVersion: 1, revisionId: revision, documentId: 'paper', contentHash: digest(paper), referencesHash: digest(references), createdAt: new Date().toISOString() }) },
@@ -142,13 +146,23 @@ export function invalidateReviews(ledger: Ledger, categories?: string[]) {
   for (const issue of Object.values(ledger.reviewIssues)) if (!categories || categories.includes(issue.category)) issue.stale = true
 }
 
-export async function updateProjectText(io: FileStore, path: string, text: string, expectedHash: string, expectedRevision: number) {
+export async function updateProjectText(io: FileStore, path: string, text: string, expectedHash: string, expectedRevision: number, sourceSessionId?: string) {
   invariant(['.scholarflow/profiles/writing.md', '.scholarflow/profiles/review.md', '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md'].includes(path), 'PATH_OUTSIDE_ALLOWED_ROOT', '仅允许项目 Profile 和确认记忆。')
   invariant(Buffer.byteLength(text) <= 65536, 'CONTENT_TOO_LARGE', '项目指令最多 64 KiB。')
   return mutateLedger(io, expectedRevision, async ledger => {
     const file = await io.read(path)
     invariant(file && digest(file.text) === expectedHash, 'STALE_DOCUMENT_VERSION', '项目 Profile 或记忆已更新，请重新读取。')
-    invalidateReviews(ledger, path.includes('/profiles/') ? ['style'] : ['style', 'logic'])
-    return [{ path, before: file, after: text }]
+    invalidateReviews(ledger, path.endsWith('/review.md') ? undefined : path.includes('/profiles/') ? ['style'] : ['style', 'logic'])
+    const mutations: Mutation[] = [{ path, before: file, after: text }]
+    if (path.includes('/context/')) {
+      const previous = await io.read(MEMORY_APPROVALS)
+      const approvals = previous ? memoryApprovalsSchema.parse(JSON.parse(previous.text)) : { schemaVersion: 1 as const, projectId: ledger.projectId, entries: {} as MemoryEntries }
+      invariant(approvals.projectId === ledger.projectId, 'PROJECT_ID_CONFLICT', '确认记忆记录的项目身份不同。')
+      approvals.entries[path] = { contentHash: digest(text), source: 'user', ...(sourceSessionId && { sourceSessionId }), confirmedAt: new Date().toISOString() }
+      mutations.push({ path: MEMORY_APPROVALS, before: previous, after: json(memoryApprovalsSchema.parse(approvals)) })
+      if (path.endsWith('/decisions.md') && file.text !== text) ledger.outline.confirmation = 'draft'
+    }
+    return mutations
   })
 }
+type MemoryEntries = ReturnType<typeof memoryApprovalsSchema.parse>['entries']

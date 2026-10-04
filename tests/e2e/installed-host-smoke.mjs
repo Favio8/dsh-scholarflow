@@ -77,6 +77,14 @@ async function stop() {
     child.kill(); await exited
   }
 }
+async function reloadWorkbench() {
+  await page.reload()
+  await page.waitForTimeout(1200)
+  const later = page.getByRole('button', { name: '稍后配置', exact: true })
+  if (await later.isVisible()) await later.click()
+  await page.locator('button[aria-label="ScholarFlow"]').click({ timeout: 20000 })
+  await page.getByRole('tab', { name: /^Draft ·/ }).click()
+}
 try {
   let errors = await start('workspace-write')
   const diagnostics = await rpc('scholarflow.v1/diagnostics')
@@ -319,8 +327,22 @@ try {
   await page.getByRole('tab', { name: /^Draft ·/ }).click()
   assert.equal(await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).inputValue(), unsaved)
   assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+  await page.getByRole('status', { name: '编辑暂存状态', exact: true }).filter({ hasText: '未提交编辑已暂存到宿主' }).waitFor()
+  page.once('dialog', dialog => dialog.accept())
+  await reloadWorkbench()
+  assert.equal(await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).inputValue(), unsaved)
+  // Emulate a new browser page without its temporary local edit backup. The Host
+  // copy must still be offered explicitly and never auto-write the manuscript.
+  await page.evaluate(() => { for (const key of Object.keys(sessionStorage)) if (key.startsWith('sf-editor:')) sessionStorage.removeItem(key) })
+  page.once('dialog', dialog => dialog.accept())
+  await reloadWorkbench()
+  await page.getByRole('region', { name: '宿主未提交缓冲恢复', exact: true }).waitFor()
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+  await page.getByRole('button', { name: '恢复宿主未提交缓冲', exact: true }).click()
+  assert.equal(await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).inputValue(), unsaved)
   page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '显式采用服务端版本', exact: true }).click()
+  await page.getByRole('status', { name: '编辑暂存状态', exact: true }).filter({ hasText: '宿主暂存缓冲已清理' }).waitFor()
   await page.setViewportSize({ width: 700, height: 800 })
   assert.equal(await page.getByRole('tablist', { name: '论文工作区页面', exact: true }).isVisible(), true)
   const overflow = await page.locator('.sf-body').evaluate(element => element.scrollWidth > element.clientWidth + 2)
@@ -351,6 +373,9 @@ try {
   assert.equal(recoveredLedger.projectId, crashPlan.config.project.id)
   assert.equal(await readFile(join(recoveryRoot, '原始资料.txt'), 'utf8'), 'TEST_ONLY 原始资料保持只读\r\n')
   await page.locator('.sf-app').first().screenshot({ path: '.dsh-tmp/g0-three-columns.png' })
+  const staged = await rpc('scholarflow.v1/editor.bufferWrite', { request: { context: { requestId: 'req_TEST_ONLY_buffer', workspaceId: projectWorkspace.value.workspace.workspaceId,
+    sessionId: second.value.sessionId, projectId: projectLedger.projectId }, baseBufferHash: null, baseHash: delivered.documentHash, text: 'TEST_ONLY 第二会话的未提交缓冲。', state: 'dirty' } })
+  assert.equal(staged.value.ok, true, JSON.stringify(staged.value))
   assert.deepEqual(errors, [])
   await stop()
   errors = await start('read-only')
@@ -363,6 +388,10 @@ try {
   assert.equal(Object.values(cold.value.data.ledger.claims)[0].status, 'partially-supported')
   assert.equal(cold.value.data.ledger.outline.confirmation, 'confirmed')
   assert.equal(cold.value.data.document.text, manualBody)
+  const coldBuffer = await rpc('scholarflow.v1/editor.bufferRead', { request: { context: { requestId: 'req_TEST_ONLY_buffer_cold', workspaceId: projectWorkspace.value.workspace.workspaceId,
+    sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
+  assert.equal(coldBuffer.value.ok, true)
+  assert.equal(coldBuffer.value.data.buffer.text, 'TEST_ONLY 第二会话的未提交缓冲。')
   const readOnlySession = await rpc('session/create', { request: { workspaceId: workspace.value.workspace.workspaceId, agentPreset: 'scholarflow' } })
   assert.equal(readOnlySession.ok, true, JSON.stringify(readOnlySession))
   const denied = await rpc('scholarflow.v1/verifyGateway', { request: { sessionId: readOnlySession.value.sessionId } })
@@ -384,6 +413,8 @@ try {
     realProviderDraftReject: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
     realProviderCancellation: liveModel, nativeUiRequirementConflictResolution: true, nativeUiProjectMemoryEdit: true,
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
+    unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,
+    unsavedHostBufferColdRestartRestore: true,
     clientErrors: errors, desktopProfileTouched: false }, null, 2))
   console.log(`Real DSH ${liveModel ? 'model' : 'G0'} smoke passed; evidence: .dsh-tmp/${liveModel ? 'model' : 'g0'}-smoke.json`)
 } catch (error) {

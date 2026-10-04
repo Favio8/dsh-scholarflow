@@ -7,6 +7,7 @@ import { buildProposal, storeProposal } from '../editing/proposals.ts'
 import { validateSelection, projectMarkdown, citationKeys } from '../editing/markdown.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
 import { MAX_MATERIAL_BYTES, sensitivePath } from '../materials/materials.ts'
+import { approvedMemory } from '../project/memory.ts'
 
 export const modelOutputSchema = z.object({ replacementText: z.string().min(1).max(2 * 1024 * 1024).refine(text => !!text.trim()), limitations: z.array(z.string()).max(100) }).strict()
 export interface GenerationPlan { id: string; contentHash: string; snapshot: z.infer<typeof runSnapshotSchema>; input: z.infer<typeof generationRequest>;
@@ -57,12 +58,7 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
   }
   const profile = await io.read(current.config.writing.projectProfile)
   invariant(profile && Buffer.byteLength(profile.text) <= 65536, 'PROFILE_UNAVAILABLE', '项目文风缺失或超过 64 KiB。')
-  const memory: Record<string, string> = {}
-  if (current.config.writing.useApprovedProjectMemory) for (const name of ['decisions', 'terminology', 'writing-memory']) {
-    const file = await io.read(`.scholarflow/context/${name}.md`)
-    invariant(file && Buffer.byteLength(file.text) <= 65536, 'MEMORY_UNAVAILABLE', '项目确认记忆缺失或超过限额。')
-    memory[name] = file.text
-  }
+  const memory = current.config.writing.useApprovedProjectMemory ? await approvedMemory(io, current.ledger.projectId) : {}
   // Project-bound skills are added by the private resource resolver; fail closed
   // until each declared binding has a verified stage-scoped immutable snapshot.
   invariant(!current.config.skills.bindings.length, 'SKILL_BINDING_UNAVAILABLE', '当前项目启用的 Skill 尚未完成私有快照校验，不能忽略绑定后继续运行。')
@@ -90,6 +86,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
   const checkResources = async () => {
     const profile = await io.read(current.config.writing.projectProfile)
     invariant(profile && digest(profile.text) === plan.snapshot.profileHash, 'STALE_RESOURCE_VERSION', '确认期间项目文风发生变化。')
+    if (current.config.writing.useApprovedProjectMemory) await approvedMemory(io, current.ledger.projectId)
     for (const [name, text] of Object.entries(plan.context.approvedMemory as Record<string, string>)) invariant((await io.read(`.scholarflow/context/${name}.md`))?.text === text,
       'STALE_RESOURCE_VERSION', '确认期间项目记忆发生变化。')
     for (const [materialId, hash] of Object.entries(plan.snapshot.materialHashes)) invariant(digest(await io.readBytes(current.ledger.materials[materialId].projectRelativePath, MAX_MATERIAL_BYTES)) === hash,

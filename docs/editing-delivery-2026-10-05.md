@@ -105,3 +105,28 @@ readiness; private Skill resource locking; online research; requirements and
 full editable requirements/history and Profile/memory provenance; complete run
 recovery; durable unsaved-buffer restoration; approved image packaging;
 complete P0/AT matrix.
+
+## Memory and editor recovery follow-up
+
+`src/core/project/memory.ts` adds document-level approval metadata with hashes,
+source operation, optional authenticated session ID and confirmation time.
+The Markdown memory remains its sole content source. External byte changes
+require a visible confirmation before inclusion in model input. Changing core
+decisions makes the outline draft again; writing Profile, memory and review
+Profile hashes participate in review dependency checks. Per-entry memory
+parsing and suggestions remain follow-up work.
+
+`src/core/editing/buffer.ts` stores uncommitted buffers under
+`.scholarflow/drafts/editor-buffers/`, separately per Host session. Single-file
+atomic CAS protects against simultaneous pages; it does not increment ledger
+or write the manuscript. Browser session storage is only a temporary backup;
+the Host copy persists across process restart. Conflicting copies are compared
+before recovery, and saving a recovered stale base still refuses to overwrite
+newer manuscript content. Explicit discard clears the staging record.
+
+97 automated tests and the installed no-model smoke passed. Actual browser
+tests reload with a dirty editor, restore the page's pending buffer, remove
+the browser backup and explicitly recover from Host storage. Another session's
+dirty buffer is read after actual Host stop/restart. The manuscript remains
+unchanged through staging and recovery. Project instruction editor buffers and
+offline last-keystroke guarantees are not yet claimed complete.

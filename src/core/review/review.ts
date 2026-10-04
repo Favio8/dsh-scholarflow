@@ -17,10 +17,14 @@ export async function reviewInput(io: FileStore) {
     catch { materialHashes[material.id] = 'unavailable' }
   }
   const profile = await io.read('.scholarflow/profiles/review.md')
+  const contextHashes: Record<string, string> = {}
+  for (const path of [current.config.writing.projectProfile, '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md', '.scholarflow/context/approvals.json']) {
+    const image = await io.read(path); contextHashes[path] = image ? digest(image.text) : 'missing'
+  }
   const { requirements, materials, sources, evidence, claims, outline, claimAnchors } = current.ledger
   return { current, materialHashes, dependencyHash: digest(json({ configHash: current.configHash, documentHash: current.document.contentHash,
     revisionId: current.document.revisionId, requirements, materials, sources, evidence, claims, outline, claimAnchors,
-    materialHashes, reviewProfileHash: profile ? digest(profile.text) : 'missing' })) }
+    materialHashes, contextHashes, reviewProfileHash: profile ? digest(profile.text) : 'missing' })) }
 }
 
 export async function inspectReview(io: FileStore) {

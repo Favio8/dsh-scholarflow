@@ -26,6 +26,8 @@ import { prepareDelivery, createDelivery, readDelivery, type DeliveryPlan } from
 import { issueDecisionRequest, exportCreateRequest } from '../shared/review.ts'
 import { requirementUpsertRequest, requirementExtractRequest, requirementConfirmRequest, requirementResolveRequest, projectTextReadRequest, projectTextSaveRequest } from '../shared/requirements.ts'
 import { upsertRequirement, extractRequirements, confirmRequirement, resolveRequirementConflict } from '../core/requirements/requirements.ts'
+import { bufferWriteRequest } from '../shared/editor-buffer.ts'
+import { readEditorBuffer, writeEditorBuffer } from '../core/editing/buffer.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -219,6 +221,20 @@ export class ScholarFlowRemote extends TypertRemoteService {
       return saveManual(io, input.text, input.baseHash, revision) })
   }
 
+  @Remote('editor.bufferRead')
+  async editorBufferRead(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal)
+      return readEditorBuffer(io, context.sessionId) })
+  }
+
+  @Remote('editor.bufferWrite')
+  async editorBufferWrite(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context, ...input } = bufferWriteRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal)
+      return writeEditorBuffer(io, context.sessionId, input) })
+  }
+
   @Remote('review.run')
   async reviewRun(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
@@ -266,7 +282,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async projectSaveText(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const input = projectTextSaveRequest.parse(request)
       const { io } = await resolveStore(this.ctx, input.context, signal)
-      return updateProjectText(io, input.path, input.text, input.baseHash, mutationRevision(input.context)) })
+      return updateProjectText(io, input.path, input.text, input.baseHash, mutationRevision(input.context), input.context.sessionId) })
   }
 
   @Remote('review.inspect')
