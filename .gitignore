@@ -1,0 +1,61 @@
+# === ScholarFlow (DSH 插件) ===
+# 包管理器与依赖
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+npm-debug.log*
+yarn-error.log*
+
+# 构建产物（发布时再生成，不入库）
+dist/
+build/
+lib/
+out/
+*.tsbuildinfo
+.turbo/
+.cache/
+.eslintcache
+
+# 测试与覆盖率产物
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+blob-report/
+.vitest-cache/
+
+# 日志
+*.log
+logs/
+
+# 环境变量与密钥（.env.example 例外，需要入库）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets/
+credentials/
+
+# 编辑器与操作系统
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时文件与 DSH 本地运行产物
+*.tmp
+*.swp
+.dsh-local/
+.dsh-tmp/
+tmp/
+temp/
+
+# 说明：以下内容必须入库，不要加入忽略
+# pnpm-lock.yaml / package.json / tsconfig.json / cordis.patch.yml
+# tests/fixtures/ 与 examples/ 是验收资产，不是构建产物
