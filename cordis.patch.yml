@@ -1,0 +1,39 @@
+# dsh-scholarflow bundle layer.
+#
+# Declared by package.json -> "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }.
+# Applied after the official bundle layers, before the profile's own
+# cordis.patch.yml. Each list item is one Cordis patch entry; `insert` appends
+# loader rows to the profile tree.
+#
+# G0-01  host-plane row that proves install / enable / disable.
+# G0-02  the ScholarFlow Mode, declared exactly the way DSH's own presets are
+#        declared: a row of `@deepseek-ai/dsh-agent-preset` whose `config` is a
+#        PresetDefinition { id, name?, description?, order?, plugins[] }.
+#        Verified shape source (2026-10-04, DSH 0.2.0-rc.2):
+#          - host Service `agentPresets` -> referenced type `PresetDefinition`
+#          - composed tree of the official `preset-standard` row
+#        The registry's global default is NOT touched here: a preset is a
+#        per-session choice, and SPEC/PRD forbid changing other modes' defaults.
+
+- insert:
+    - id: scholarflow
+      name: dsh-scholarflow
+      config: {}
+
+- insert:
+    - id: preset-scholarflow
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: scholarflow
+        name: ScholarFlow
+        description: 学术项目工作区：以项目文件夹为中心、以可追溯证据为基础的论文写作会话。
+        order: 50
+        # G0-02 verifies registration, visibility and isolation only. The real
+        # ScholarFlow tool surface is not built yet, so the Mode declares no
+        # capability it cannot honestly back.
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: You are the ScholarFlow academic writing agent.
+              suffix: Stay inside the bound project folder; never fabricate sources or results.

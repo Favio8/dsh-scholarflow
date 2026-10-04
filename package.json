@@ -1,0 +1,30 @@
+{
+  "name": "dsh-scholarflow",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ScholarFlow - academic project workspace plugin for DeepSeek Harness (G0 integration skeleton).",
+  "type": "module",
+  "main": "./src/host/index.js",
+  "exports": {
+    ".": {
+      "default": "./src/host/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "cordis": ">=4.0.0-rc <5"
+  }
+}
