@@ -5,6 +5,7 @@ import { reviewReportSchema, type ReviewReport } from '../../shared/review.ts'
 import { projectMarkdown, walk, textOf, wordStats } from '../editing/markdown.ts'
 import type { Ledger } from '../../shared/schema.ts'
 import { requirementCount } from '../requirements/counting.ts'
+import type { Mutation } from '../store/transactions.ts'
 
 type Issue = Ledger['reviewIssues'][string]
 const CURRENT = '.scholarflow/reviews/current.json'
@@ -38,7 +39,25 @@ export async function inspectReview(io: FileStore) {
   const report = reviewReportSchema.parse(JSON.parse(file.text)), input = await reviewInput(io)
   invariant(report.projectId === input.current.ledger.projectId, 'PROJECT_ID_CONFLICT', '审查不属于当前项目。')
   return { report, stale: report.dependencyHash !== input.dependencyHash || input.current.document.externalChange,
-    issues: Object.values(input.current.ledger.reviewIssues).filter(issue => issue.reviewId === report.id) }
+    issues: Object.values(input.current.ledger.reviewIssues).filter(issue => issue.reviewId === report.id),
+    manualEligible: manualEligibleChecks(report, input) }
+}
+
+export function manualEligibleChecks(report: ReviewReport, input: Awaited<ReturnType<typeof reviewInput>>) {
+  const ledger = input.current.ledger
+  return report.checks.filter(check => {
+    if (['argument_assessment', 'style_assessment'].includes(check.id) && ['model-assisted', 'manual'].includes(check.method)) return true
+    if (check.id.startsWith('requirement_')) {
+      const requirement = ledger.requirements[check.id.slice('requirement_'.length)]
+      return (check.status === 'unknown' || check.method === 'manual') && requirement?.confirmation === 'confirmed' && requirement.verificationMethod !== 'deterministic'
+    }
+    if (check.id === 'own_research_results' && check.status === 'unknown') return Object.values(ledger.evidence).some(evidence => {
+      const source = ledger.sources[evidence.sourceId]
+      return evidence.kind === 'user-measurement' && evidence.validation === 'located' && evidence.measurement?.origin === 'user-supplied' &&
+        source?.kind === 'user-result' && source.contentHash === evidence.sourceContentHash && source.materialId && input.materialHashes[source.materialId] === evidence.sourceContentHash
+    })
+    return false
+  }).map(check => check.id)
 }
 
 export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): ReviewReport {
@@ -108,13 +127,23 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
 export async function runReview(io: FileStore, expectedRevision: number) {
   const input = await reviewInput(io)
   invariant(!input.current.document.externalChange, 'STALE_DOCUMENT_VERSION', '请先显式采用或保存外部改稿，再审查。')
-  const report = evaluateReview(input), text = json(report)
+  const report = evaluateReview(input)
+  return storeReview(io, report, expectedRevision)
+}
+
+export async function storeReview(io: FileStore, report: ReviewReport, expectedRevision: number, completedCheckIds: string[] = [], extra: Mutation[] = []) {
+  report = reviewReportSchema.parse(report)
+  const text = json(report)
   const result = await mutateLedger(io, expectedRevision, async ledger => {
-    invariant((await reviewInput(io)).dependencyHash === report.dependencyHash, 'REVIEW_INPUT_CHANGED', '审查期间稿件、资料或要求发生变化，请重新审查。')
+    const input = await reviewInput(io)
+    invariant(ledger.projectId === report.projectId && input.dependencyHash === report.dependencyHash && input.current.document.contentHash === report.documentHash && !input.current.document.externalChange,
+      'REVIEW_INPUT_CHANGED', '审查期间稿件、资料或要求发生变化，请重新审查。')
     const detected = new Set(report.issues.map(issue => issue.id)), passed = new Set(report.checks.filter(check => check.status === 'pass').map(check => `issue_${digest(check.id).slice(7, 31)}`))
     for (const old of Object.values(ledger.reviewIssues)) {
       if (detected.has(old.id)) continue
-      if (old.checkMethod === 'deterministic' && passed.has(old.id)) { old.state = 'resolved'; old.stale = false; old.resolutionReason = '对应规则在本次同版本复查通过。'; old.reviewId = report.id; old.documentHash = report.documentHash }
+      if (passed.has(old.id) && (old.checkMethod === 'deterministic' || completedCheckIds.some(key => `issue_${digest(key).slice(7, 31)}` === old.id))) {
+        old.state = 'resolved'; old.stale = false; old.resolutionReason = old.checkMethod === 'deterministic' ? '对应规则在本次同版本复查通过。' : '对应检查在本次同版本明确复核通过，依据保存在不可变审查记录。'; old.reviewId = report.id; old.documentHash = report.documentHash
+      }
       else if (old.state !== 'resolved') old.stale = true
     }
     for (const issue of report.issues) {
@@ -123,7 +152,7 @@ export async function runReview(io: FileStore, expectedRevision: number) {
     }
     const pointer = await io.read(CURRENT)
     return [{ path: `.scholarflow/reviews/${report.id}/report.json`, before: undefined, after: text },
-      { path: CURRENT, before: pointer, after: json({ reviewId: report.id, reportHash: digest(text) }) }]
+      { path: CURRENT, before: pointer, after: json({ reviewId: report.id, reportHash: digest(text) }) }, ...extra]
   })
   return { ...result, report, stale: false }
 }

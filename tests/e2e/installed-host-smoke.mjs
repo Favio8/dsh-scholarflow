@@ -704,6 +704,27 @@ try {
   await page.getByRole('tab', { name: /^Review ·/ }).click()
   await page.getByRole('button', { name: '运行确定性审查', exact: true }).click()
   await page.getByRole('list', { name: '审查检查结果', exact: true }).getByText('unknown · model-assisted', { exact: false }).first().waitFor()
+  const beforeManualReview = await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')
+  const manualReviewUi = page.getByRole('region', { name: '人工同版本复核', exact: true })
+  await manualReviewUi.getByRole('combobox', { name: '人工复核检查', exact: true }).locator('option[value="style_assessment"]').waitFor({ state: 'attached' })
+  await manualReviewUi.getByRole('combobox', { name: '人工复核检查', exact: true }).selectOption('style_assessment')
+  await manualReviewUi.getByRole('combobox', { name: '人工复核结果', exact: true }).selectOption('pass')
+  await manualReviewUi.getByRole('textbox', { name: '人工复核依据', exact: true }).fill('TEST_ONLY 已检查当前短段落的表达、限定范围与重复结构；这只复核文风，不提升引用身份和论点支持。')
+  await manualReviewUi.getByRole('button', { name: '预览人工复核结果', exact: true }).click()
+  await manualReviewUi.getByRole('button', { name: '取消人工复核预览', exact: true }).click()
+  await manualReviewUi.getByRole('dialog', { name: '人工复核确认', exact: true }).waitFor({ state: 'detached' })
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), beforeManualReview)
+  await manualReviewUi.getByRole('button', { name: '预览人工复核结果', exact: true }).click()
+  await manualReviewUi.getByRole('button', { name: '确认保存人工复核', exact: true }).click()
+  await page.getByRole('list', { name: '审查检查结果', exact: true }).getByText('pass · manual · 人工复核 style_assessment', { exact: false }).waitFor()
+  const manualRecords = await readdir(join(projectRoot, '.scholarflow/reviews/manual'))
+  assert.equal(manualRecords.length, 1)
+  const actualManual = JSON.parse(await readFile(join(projectRoot, '.scholarflow/reviews/manual', manualRecords[0]), 'utf8'))
+  assert.equal(actualManual.assessments[0].checkId, 'style_assessment'); assert.equal(actualManual.assessments[0].status, 'pass')
+  const manualLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  assert.equal(manualLedger.reviewIssues[`issue_${digest('style_assessment').slice(7, 31)}`].state, 'resolved')
+  assert.equal(manualLedger.reviewIssues[`issue_${digest('argument_assessment').slice(7, 31)}`].state, 'open')
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
   const savedBeforeExport = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
   await page.getByRole('tab', { name: /^Export ·/ }).click()
   await page.getByRole('button', { name: '预检当前版本导出', exact: true }).click()
@@ -878,6 +899,7 @@ try {
     nativeUiManualSaveCitationProjection: true, nativeDomSecondParagraphSelection: true,
     nativeDomEntityUnicodeDecode: true, crossParagraphSelectionRejected: true, manuscriptColdRestore: true,
     nativeUiDeterministicReview: true, nativeUiWorkingDraftExportDownload: true, exportDoesNotMutateBody: true,
+    nativeUiManualReviewPreviewCancelConfirmAndVersionedHistory: true,
     realProviderSectionCandidateAcceptWithClaimAnchors: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
     nativeUiManualParagraphClaimAssociation: true, renderedSelectionDisplaysCurrentClaims: true,
     nativeUiLegacyRunStorageMigrationKeepsAllBytes: true,

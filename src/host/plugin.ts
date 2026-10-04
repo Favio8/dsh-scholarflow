@@ -50,6 +50,7 @@ import { newProjectDefaultsSchema, resolveInitDefaults } from '../shared/project
 import { profileImportRequest, profileReadRequest, profileCopyRequest, profileConfirmRequest, profileCopyConfirmRequest, writingProfileSchema, type WritingProfile } from '../shared/profiles.ts'
 import { builtinProfiles, profileDigest, verifyProfile, profileText, prepareProfileCopy, applyProfileCopy, projectProfile, type ProfileCopyPlan } from '../core/project/profiles.ts'
 import { PrivateProfileLibrary } from './profiles/library.ts'
+import { prepareManualReview, submitManualReview, type ManualReviewPlan } from '../core/review/manual.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -82,6 +83,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private profileLibrary = new PrivateProfileLibrary()
   private profilePlans = new Map<string, { profile: WritingProfile; hash: string; peerId: string; expires: number }>()
   private profileCopyPlans = new Map<string, { plan: ProfileCopyPlan; context: RequestContext; peerId: string; expires: number }>()
+  private manualReviewPlans = new Map<string, { plan: ManualReviewPlan; context: RequestContext; peerId: string; expires: number }>()
   private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
   private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
   private skillPlans = new Map<string, { resource: { kind: 'local'; bundle: SkillBundle } | { kind: 'github'; preview: GithubSkillPreview }; hash: string; peerId: string; expires: number }>()
@@ -98,7 +100,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
       timer.unref()
-      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear(); this.runActionPlans.clear(); this.profilePlans.clear(); this.profileCopyPlans.clear() }
+      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear(); this.runActionPlans.clear(); this.profilePlans.clear(); this.profileCopyPlans.clear(); this.manualReviewPlans.clear() }
     }, 'scholarflow: expire operator skill previews')
   }
 
@@ -261,6 +263,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   }
 
   private pruneSkills() {
+    for (const [key, row] of this.manualReviewPlans) if (row.expires < Date.now()) this.manualReviewPlans.delete(key)
     for (const [key, row] of this.profilePlans) if (row.expires < Date.now()) this.profilePlans.delete(key)
     for (const [key, row] of this.profileCopyPlans) if (row.expires < Date.now()) this.profileCopyPlans.delete(key)
     for (const [key, row] of this.runActionPlans) if (row.expires < Date.now()) this.runActionPlans.delete(key)
@@ -847,6 +850,37 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
       const revision = mutationRevision(context), { io } = await resolveStore(this.ctx, context, signal)
       return runReview(io, revision) })
+  }
+
+  @Remote('review.prepareManual')
+  async reviewPrepareManual(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), { context } = inspectRequest.passthrough().parse(request)
+      mutationRevision(context); this.pruneSkills(); invariant(this.manualReviewPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有人工复核预览。')
+      const { io } = await resolveStore(this.ctx, context, signal), plan = await prepareManualReview(io, request)
+      this.manualReviewPlans.set(plan.id, { plan, context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, reviewId: plan.parentReport.id, documentHash: plan.parentReport.documentHash,
+        assessments: plan.request.assessments, risks: ['人工结果只覆盖同版稿件的所列检查，保留依据和原审查记录；未知项不自动通过。', '不得以人工确认绕过缺失实验、过期材料、引用不存在或其他确定性阻塞；正文、证据支持关系与来源核验状态不改变。'] }
+    })
+  }
+
+  @Remote('review.submitManual')
+  async reviewSubmitManual(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = profileCopyConfirmRequest.parse(request), row = this.manualReviewPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '人工复核需确认当前用户的有效预览。')
+      invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.context.projectId,
+        'SESSION_BINDING_CHANGED', '人工复核项目或会话改变。')
+      const { io } = await resolveStore(this.ctx, row.context, signal), result = await submitManualReview(io, row.plan, row.context.sessionId)
+      this.manualReviewPlans.delete(input.planId); return { ...result, ...await inspectReview(io) }
+    })
+  }
+
+  @Remote('review.dismissManual')
+  async reviewDismissManual(request: unknown) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), { planId } = z.object({ planId: z.string() }).strict().parse(request)
+      invariant(this.manualReviewPlans.get(planId)?.peerId === peerId, 'INVALID_APPROVAL', '人工复核预览不属于当前用户。')
+      this.manualReviewPlans.delete(planId); return { dismissed: true }
+    })
   }
 
   @Remote('requirements.upsert')
