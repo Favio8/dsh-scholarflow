@@ -3,6 +3,11 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { applicationResult, inspectProject, inspectRequest, prepareInitRequest, initializeRequest, resolveStore, type StoredInitPlan } from './bridge/project-api.ts'
+import { prepareInit, initialize } from '../core/project/project.ts'
+import { recover } from '../core/store/transactions.ts'
+import { newId } from '../core/store/files.ts'
+import { invariant } from '../shared/errors.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -17,7 +22,78 @@ export const Config = Schema.object({
 const sessionRequest = z.object({ sessionId: z.string().min(1).max(200) }).strict()
 
 export class ScholarFlowRemote extends TypertRemoteService {
+  private initPlans = new Map<string, StoredInitPlan>()
+  private recoveryPlans = new Map<string, { context: StoredInitPlan['context']; peerId: string; hash: string; expires: number }>()
   constructor(ctx: Host) { super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' }) }
+
+  @Remote('project.inspect')
+  async projectInspect(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator()
+      const result = await inspectProject(this.ctx, request, signal)
+      if ('recovery' in result && result.recovery) {
+        for (const [key, plan] of this.recoveryPlans) if (plan.expires < Date.now()) this.recoveryPlans.delete(key)
+        invariant(this.recoveryPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有恢复计划。')
+        const planId = newId('recovery')
+        this.recoveryPlans.set(planId, { context: inspectRequest.parse(request).context, peerId, hash: result.recovery.planHash, expires: Date.now() + 600000 })
+        return { ...result, recovery: { ...result.recovery, planId } }
+      }
+      return result
+    })
+  }
+
+  @Remote('project.recover')
+  async projectRecover(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator()
+      const parsed = initializeRequest.parse(request)
+      const plan = this.recoveryPlans.get(parsed.planId)
+      invariant(plan && plan.peerId === peerId && plan.hash === parsed.planHash && plan.expires > Date.now(), 'INVALID_APPROVAL', '请重新检查并确认宿主生成的恢复计划。')
+      invariant(parsed.context.workspaceId === plan.context.workspaceId && parsed.context.sessionId === plan.context.sessionId, 'SESSION_BINDING_CHANGED', '恢复确认的会话或工作区发生变化。')
+      const { io, manuscriptDir } = await resolveStore(this.ctx, plan.context, signal)
+      await io.lock(() => recover(io, manuscriptDir, plan.hash))
+      this.recoveryPlans.delete(parsed.planId)
+      return inspectProject(this.ctx, { context: plan.context }, signal)
+    })
+  }
+
+  @Remote('project.prepareInit')
+  async projectPrepareInit(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator()
+      const { context, input } = prepareInitRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal, input.manuscriptDir)
+      const plan = await prepareInit(io, input)
+      for (const [id, row] of this.initPlans) if (row.expires < Date.now()) this.initPlans.delete(id)
+      invariant(this.initPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有初始化计划。')
+      this.initPlans.set(plan.id, { plan, context, peerId, expires: Date.now() + 10 * 60 * 1000 })
+      return { planId: plan.id, planHash: plan.contentHash, project: plan.config.project,
+        files: plan.files.map(file => ({ relativePath: file.path, sizeBytes: Buffer.byteLength(file.text) })), risks: plan.risks }
+    })
+  }
+
+  @Remote('project.initialize')
+  async projectInitialize(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator()
+      const parsed = initializeRequest.parse(request)
+      const stored = this.initPlans.get(parsed.planId)
+      invariant(stored && stored.expires > Date.now() && stored.peerId === peerId && stored.plan.contentHash === parsed.planHash,
+        'INVALID_APPROVAL', '确认必须绑定当前宿主生成的未过期计划。')
+      invariant(parsed.context.workspaceId === stored.context.workspaceId && parsed.context.sessionId === stored.context.sessionId,
+        'SESSION_BINDING_CHANGED', '初始化确认不属于计划的工作区和会话。')
+      const { io } = await resolveStore(this.ctx, stored.context, signal, stored.plan.config.paths.manuscriptDir)
+      const projectId = await initialize(io, stored.plan)
+      this.initPlans.delete(parsed.planId)
+      return inspectProject(this.ctx, { context: { ...stored.context, projectId } }, signal)
+    })
+  }
+
+  private requireOperator(): string {
+    const ctx = this.ctx as Host
+    invariant(ctx.invocation?.peer && ctx.invocation.peer === ctx.connection.operator, 'INVALID_APPROVAL', '此操作需要宿主已认证的用户界面调用。')
+    return ctx.invocation.peer.id
+  }
 
   @Remote
   diagnostics() {

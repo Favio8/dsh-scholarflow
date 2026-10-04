@@ -70,7 +70,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm build && node --test tests/unit/*.test.* tests/contracts/*.test.*",
+    "test": "pnpm build && node --test tests/unit/*.test.* tests/contracts/*.test.* tests/integration/*.test.* tests/fault-injection/*.test.*",
     "prepack": "pnpm build"
   }
 }

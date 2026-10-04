@@ -7,8 +7,10 @@ DeepSeek Harness 学术项目工作区插件。当前版本 **0.1.0-dev**，尚�
 ScholarFlow 的预设限制继承工具并安装同步守卫，普通 Mode 的工具保持可用。
 生产启动不再自动调用模型执行 G0 探针。
 
-项目初始化、ledger/事务、资料与证据、检索生成、选区建议、Review、私有 Skill 库与
-三格式导出仍在开发。此页面不会将集成验证当成完整产品交付。
+已实现初始化预览／取消／确认、输出碰撞检查、项目 ledger、短期写锁、版本校验、
+事务恢复确认和外部改稿检测。配置缺省值只作用于读取，未知键显示警告，不覆盖用户 YAML。
+资料与证据、检索生成、选区建议、Review、私有 Skill 库与三格式导出仍在开发。
+此页面不会将集成验证当成完整产品交付。
 
 ## 开发与验证
 
@@ -30,6 +32,7 @@ node tests/e2e/installed-host-smoke.mjs
 - 产品基线：../docs/ScholarFlow_PRD_v1.0.md
 - 实现合同：../docs/ScholarFlow_Design_SPEC_v1.0.md
 - 最新真实宿主验证：[G0 installed Host](docs/g0-installed-host-2026-10-04.md)
+- 项目持久化验证：[M1 project store](docs/m1-project-store-2026-10-04.md)
 - 历史验证：[integration-verification](docs/integration-verification.md)
 - 版本范围：[compatibility](docs/compatibility.md)
 

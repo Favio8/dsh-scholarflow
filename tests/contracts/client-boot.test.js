@@ -27,7 +27,7 @@ function loadClient() {
 test('browser factory materializes without Node module or exports globals', () => {
   const { plugin } = loadClient()
   assert.equal(typeof plugin.apply, 'function')
-  assert.deepEqual(Array.from(plugin.inject), ['slots', 'connection', 'sessions', 'workspaces'])
+  assert.deepEqual(Array.from(plugin.inject), ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'layout'])
 })
 
 test('slot registrations use the DSH options/component contract and React output', () => {
@@ -53,6 +53,7 @@ test('slot registrations use the DSH options/component contract and React output
         assert.equal('component' in options, false)
         const html = renderToStaticMarkup(React.createElement(component, {
           renderSlot: () => null, renderFactorySlot: () => null, useSession: () => undefined,
+          useWorkspaces: () => ({ items: [] }).items,
         }))
         assert.equal(typeof html, 'string')
         const cell = { options, disposed: false }
@@ -65,6 +66,7 @@ test('slot registrations use the DSH options/component contract and React output
   assert.deepEqual(cells.map(({ options }) => [options.name, options.key ?? options.id]), [
     ['main', 'scholarflow'],
     ['scholarflow.agent', undefined],
+    ['scholarflow.project', undefined],
     ['sidebar.panellist', 'scholarflow'],
     ['settings.section', 'scholarflow-settings'],
   ])
