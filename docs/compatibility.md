@@ -39,6 +39,8 @@
 | profile 组合顺序 | 各 bundle 的 patch 层 → profile `cordis.patch.yml` → `--patch` 覆盖层 |
 | 安装方式 | 本地绝对路径经 pnpm 生成 `link:` 依赖；**离线可完成** |
 | profile 生效方式 | `desktop` 为 **live profile**：安装／启用／停用返回 `application:"applied"`，**无需重启** |
+| profile 组合归属 | **`desktop` 由 Electron 应用独占管理**：`dsh desktop --dump-config` 被拒绝（`error: profile "desktop" is managed exclusively by the Electron application`）。因此 desktop 的组合树无法用 CLI 转储，只能经 `plugin_manager` 或应用内界面观察。 |
+| **bundle 选择须实测** | `dsh.profile.bundles` 可能在会话期间变化（本项目实测到过一次不明原因的移除）。任何依赖 desktop 生效的结论，执行前必须先读一次 profile 组合。 |
 
 ### 2.2 运行期约束
 

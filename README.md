@@ -46,7 +46,7 @@ G0 验证探针外没有其他行为。
 | G0-07 文件 | ⚠️ 读／边界／订阅通过；**写被宿主沙箱默认拒绝**，需确定 `sandboxPolicy` 通路 |
 | G0-08 Skill 隔离 | ✅ 已实测通过（A/B 两 scope 互不可见，全局 catalog 无夹具泄漏） |
 | G0-09 会话恢复 | ❌ 未通过：`ctx.fs` 写入被拒，`storageDomain.open()` 返回 `malformed-medium` |
-| G0-10 生命周期 | ⚠️ loader 行移除已验；`ctx.effect` 清理回调未验 |
+| G0-10 生命周期 | ⚠️ loader 行移除 ✅、**AT-25 停用/启用后用户数据逐字节未变 ✅**；`ctx.effect` 清理回调与卸载未验 |
 
 ## G0 验证记录
 

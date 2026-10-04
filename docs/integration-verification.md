@@ -748,20 +748,33 @@ name 为 `sf-test-skill-a` / `sf-test-skill-b`）。用 `agentPresets.acquireSco
 |---|---|
 | 文档生成 | 部分 |
 | 代码实现 | 已用 `ctx.effect` 注册清理；**dispose 触发本身未验** |
-| 测试通过 | **部分**（loader 行移除已验；清理回调未验） |
+| 测试通过 | **部分**：loader 行移除 ✅、**AT-25 停用不删数据 ✅**；清理回调与卸载未验 |
 
 ### 10.1 已实测
 
 - `set_bundle(enabled=false)` → `application:"applied"`，且 `Config.listConfigs` 中该行消失
   （`total: 0`）→ **loader 行确实被移除**。
+- **AT-25（发布阻断级）已实测通过：停用再启用后用户数据逐字节未变。**
+  在 desktop profile 上执行 `set_bundle(false)` → `set_bundle(true)`，
+  对用户测试工作区 `C:\Users\19949\Desktop\科技论文写作` 做**递归 SHA-256 全量比对**：
+  禁用前与恢复后 **16 项全部一致**（含 `.workbuddy/` 7 个文件、`作业要求/` 3 张图片、
+  1 个 1.5 MB PDF、2 个 Markdown），无新增、无删除、无修改。
+  插件自有目录 `<DSH_HOME>/scholarflow`、`<DSH_HOME>/scholarflow-g0` 也未被删除。
 - `ctx.on('dispose', fn)` **不触发**；`ctx.effect(() => disposer)` 是本机所有可工作插件采用的写法
   → 本项目已改用 `ctx.effect`，但**其 disposer 是否在停用时执行尚未观察到**（受 ESM 缓存限制，
   需先让新代码在一次干净进程中生效，再在 desktop 停用）。
+- **【过程教训，已实测】bundle 选择状态必须验证，不能假设。**
+  本轮开始时发现 desktop profile 的 `dsh.profile.bundles` **已不含** `dsh-scholarflow`
+  （即插件实际未被加载），而依赖 `link:` 仍在。`set_bundle(false)` 因此返回 `changed:false`。
+  已用 `set_bundle(true)` 恢复（`package.json` mtime 19:05:35）。
+  **未确定**它是何时、因何被移除的；已排除两项：本 profile 下两笔第三方安装失败日志
+  （`EricWang1358/dsh-web-studyhub` 的 flashcard 包）创建于 **2026-10-03**，早于本次会话。
+  → 后续任何依赖 desktop 生效的结论，动手前都要先读一次 profile 组合。
 
 ### 10.2 尚未验证
 
-- **【仍未知】** 停用后 disposer 实际执行、无残留监听（需配合 `invariants` 或前后对比）。
-- **【仍未知】** 停用后**不删除用户数据**（AT-25）；`removeBundle` 的实际行为。
+- **【仍未知】** 停用后 `ctx.effect` 的 disposer 实际执行、无残留监听（需配合 `invariants` 或前后对比）。
+- **【仍未知】** `removeBundle`（真正卸载）的实际行为，以及卸载后用户数据是否仍完整。
 - **【仍未知】** 正在执行的任务在停用时的安全中断与状态保存（SPEC §27.1）。
 
 ---
@@ -773,6 +786,8 @@ name 为 `sf-test-skill-a` / `sf-test-skill-b`）。用 `agentPresets.acquireSco
 | desktop profile 组合新增 `dsh-scholarflow` bundle | **保留**（G0-01 验收对象）；安装前已备份 4 个控制文件并记录 SHA-256；回滚脚本见 `scripts/rollback-profile.ps1` |
 | 新建 profile `scholarflow-g0`（由随包 `web` 模板创建） | 保留作为宿主平面验证夹具；可删除且不影响其他 profile |
 | `<DSH_HOME>/scholarflow-g0/lifecycle.jsonl` 等验证日志 | 保留（本项目自有诊断文件，不含用户材料内容） |
+| `<DSH_HOME>/scholarflow/`（空目录） | 由探针的 `mkdirSync` 创建（写入随后被沙箱拒绝）。这是 SPEC §16.1 规划的插件私有库父目录，保留为空目录；**G0 结束时复核一次内容** |
+| desktop profile 的 bundle 选择曾被移除后恢复 | 已用 `set_bundle(true)` 恢复并按 SHA-256 复核用户数据未受影响；原因未确定，已记入 10.1 |
 | `%TEMP%\scholarflow-g0-fs\` 与 `%TEMP%\g0-*.jsonl` | 保留为临时验证产物 |
 | 用户工作区中探测用空目录 `.scholarflow-g0-probe` | **已删除并核验**，工作区恢复原状（7 项，无新增／修改） |
 | `<DSH_HOME>/scholarflow/`（探测用空目录） | **已删除并核验** |
