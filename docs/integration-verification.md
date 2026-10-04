@@ -476,11 +476,22 @@ prepareDocument(): Promise<string>          // 返回 profile patch 路径
   | 缺 `settings.configure({auto:true})` | 调用成功注册策略，投影仍为 0 |
   | 行非 bundle 安装 | 已按真实 bundle 安装，投影仍为 0 |
   | 行 `config` 为空对象 | 改为**非空** `config`（`g0ProbeMarker: from-bundle-patch`），`apply` 收到该值，**投影仍为 0** |
+  | 模块用 top-level `await` 求值（入口 mtime 壳 + 动态 schema 导入），可能与已发布插件不同 | 改为**纯静态导入、零 TLA** 的入口后重跑：`ownCount` 仍为 **0**，`apply` 仍收到默认值 |
 
 - **【已实测的关键对照】本机可工作的第三方插件 `@dsh-external/dsh-super-injector` 根本没有声明
   `Config`**，它是自己在 `settings.section` 槽里注册了一个**自有设置页**，并通过自己的 HTTP 路由
   （`ctx.webServer.register`）持久化。这说明**「Config → 自动设置页」并不是第三方插件实际走的路**，
   至少不是唯一可用的路。
+- **【已实测】已排除 8 个假设，均无法解释投影为 0**，因此：
+  - **不再继续黑盒猜测**；这一条转为 M1 的已知开放问题（附完整已排除清单）。
+  - **需要产品／设计裁决**：SPEC §2.2 的 G0-05 措辞是「设置页能显示并保存**本插件命名空间**」，
+    而 §11.1 又明确允许「若目标 DSH 版本提供的是插件专属配置页而不是独立 Settings section，
+    可使用等价的官方页面入口，但必须可从设置／插件配置直达，不能退化成只能改 YAML」。
+    本机可工作的第三方插件正是走后者。→ **「自有 `settings.section` 页面 + 自有
+    `storageDomain` 持久化」是否满足 G0-05，需要用户确认，不由实现者自行认定。**
+    可用的两块证据都已具备：设置页已注册（04.4），持久化已实测跨进程可用（09.4）。
+
+  **因此属主裁决前，G0-05 记为「机制部分走通、投影未出现、待裁决」。**
 - **因此 G0-05 的实际结论分两半：**
   1. **可用的实现路径已确认（path B）**：插件在 `settings.section` 注册自有页面（`settings.section`
      是本机第三方插件实测使用的座位），设置项自己负责持久化。SPEC §11.1 明确允许这种做法

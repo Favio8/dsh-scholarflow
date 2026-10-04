@@ -20,6 +20,9 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+// Static on purpose: see the TLA note below.
+import { z } from 'zod'
+import Schema from 'schemastery'
 
 /** Plugin name used by loader diagnostics. */
 export const name = 'scholarflow'
@@ -28,36 +31,20 @@ export const name = 'scholarflow'
 export const inject = []
 
 /**
- * Schema library availability, measured at load time.
+ * G0-05 EXPERIMENT: this module deliberately contains NO top-level `await`.
  *
- * MEASURED (ADR-003): a plugin installed with `link:` gets NO dependencies
- * resolved, so `zod`/`schemastery` were initially unresolvable from this package
- * (`ERR_MODULE_NOT_FOUND`). The host's own `DomainTableSpec.valueSchema` is typed
- * `ZodType<V>`, so zod is the sanctioned schema library; it is now declared as a
- * real dependency of this package and resolved through a dynamic import so the
- * plugin still loads (with reduced capability) if it is ever missing.
+ * Rationale: `settings.describe()` kept omitting our entry even though the
+ * loader confirmed it materialized our Config defaults and passed them to
+ * `apply`. The remaining untested difference between our module and every
+ * shipped plugin is that ours evaluated asynchronously (top-level await in the
+ * entry shell + dynamic schema imports), which could make an export snapshot
+ * happen before `Config` was observable. These imports were dynamic with
+ * top-level await; they are static now so module evaluation is synchronous.
+ *
+ * Both packages are declared dependencies (ADR-004). A missing dependency now
+ * fails the plugin loudly instead of silently degrading its capability.
  */
-let zod = null
-try {
-  zod = await import('zod')
-} catch (error) {
-  record('zod-unavailable', { message: String(error?.code ?? error?.message ?? error) })
-}
-
-/**
- * Cordis' own schema library. MEASURED: `settings.describe()` projects a shipped
- * namespace's schema into schemastery's internal `{ uid, refs, dict }` form, and
- * neither a plain JSON-Schema object nor a zod schema produced a namespace at
- * all — silently, with no diagnostic. schemastery is what Cordis' `Config`
- * expects. It is a CJS package, so the default export is unwrapped.
- */
-let Schema = null
-try {
-  const mod = await import('schemastery')
-  Schema = mod?.default ?? mod
-} catch (error) {
-  record('schemastery-unavailable', { message: String(error?.code ?? error?.message ?? error) })
-}
+const zod = { z }
 
 /**
  * G0-05: a Config declared with the schema library Cordis actually projects.
