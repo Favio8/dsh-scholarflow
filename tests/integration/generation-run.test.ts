@@ -37,7 +37,7 @@ test('finite stage performs one structured-format repair, persists a proposal, a
   assert.equal(result.run.usedModelCalls, 2)
   assert.equal((await snapshot(io)).document.text, original)
   assert.equal((await snapshot(io)).ledger.proposalStates[result.proposal.id].state, 'pending')
-  assert.ok((await io.read(`.scholarflow/runs/${plan.snapshot.runId}/snapshot.json`))!.text.includes('TEST_ONLY-provider'))
+  assert.ok((await io.read(`.scholarflow/runs/${plan.snapshot.runId}/input.json`))!.text.includes('TEST_ONLY-provider'))
 })
 
 test('invalid structured output fails after one repair without guessing an executable patch', async () => {
@@ -45,7 +45,7 @@ test('invalid structured output fails after one repair without guessing an execu
   let calls = 0
   await assert.rejects(executeGeneration(io, plan, owner, new AbortController().signal, async () => { calls++; return '```json\nnot executable\n```' }, () => true), { code: 'MODEL_OUTPUT_INVALID' })
   assert.equal(calls, 2); assert.equal((await snapshot(io)).document.text, original)
-  assert.equal(JSON.parse((await io.read(`.scholarflow/runs/${plan.snapshot.runId}/state.json`))!.text).status, 'failed')
+  assert.equal(JSON.parse((await io.read(`.scholarflow/runs/${plan.snapshot.runId}/run.json`))!.text).status, 'failed')
 })
 
 test('AT-24: only one modifying pipeline per project may execute', async () => {
@@ -64,7 +64,7 @@ test('cancellation persists a terminal checkpoint and leaves the manuscript unch
     cancel.abort('user-cancel'); request.signal.throwIfAborted(); return ''
   }, () => true), { code: 'CANCELLED' })
   assert.equal((await snapshot(io)).document.text, original)
-  assert.equal(JSON.parse((await io.read(`.scholarflow/runs/${plan.snapshot.runId}/state.json`))!.text).status, 'cancelled')
+  assert.equal(JSON.parse((await io.read(`.scholarflow/runs/${plan.snapshot.runId}/run.json`))!.text).status, 'cancelled')
 })
 
 test('external Profile edits invalidate an approved plan before any model call', async () => {
@@ -94,4 +94,16 @@ test('a section and a rendered selection cannot be combined into an ambiguous sc
   const { io, plan } = await setup()
   await assert.rejects(prepareGeneration(io, { ...plan.input, sectionId: 'sec_TEST_ONLY' }, plan.snapshot.modelDescriptor), { name: 'ZodError' })
   assert.equal((await snapshot(io)).document.text, plan.input.selection!.sourceText)
+})
+
+test('external run-state edits cannot be overwritten by a refreshed persistence preimage', async () => {
+  const { io, plan } = await setup(), original = (await snapshot(io)).document.text
+  const path = `.scholarflow/runs/${plan.snapshot.runId}/run.json`
+  await assert.rejects(executeGeneration(io, plan, owner, new AbortController().signal, async () => {
+    const state = JSON.parse((await io.read(path))!.text)
+    io.externalEdit(path, JSON.stringify({ ...state, status: 'paused', errorCode: 'TEST_ONLY_EXTERNAL' }))
+    return 'TEST_ONLY invalid output to trigger the next checkpoint'
+  }, () => true), { code: 'RUN_STATE_CHANGED' })
+  assert.equal(JSON.parse((await io.read(path))!.text).errorCode, 'TEST_ONLY_EXTERNAL')
+  assert.equal((await snapshot(io)).document.text, original)
 })

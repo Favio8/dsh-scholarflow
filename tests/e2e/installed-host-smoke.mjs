@@ -433,6 +433,29 @@ try {
   await captureSecond()
   await capture.waitFor()
   assert.ok((await capture.innerText()).includes(associated.claimIds[0]), 'rendered selection displays its actual scoped claim association')
+  const legacyRunId = 'run_TEST_ONLY_legacy_storage', legacyRoot = join(projectRoot, '.scholarflow/runs', legacyRunId), legacyTime = new Date().toISOString()
+  // TEST_ONLY synthetic storage fixture, explicitly not a provider execution.
+  const legacyState = JSON.stringify({ schemaVersion: 1, runId: legacyRunId, projectId: projectLedger.projectId, sessionId: second.value.sessionId,
+    status: 'failed', usedModelCalls: 0, owner: { pid: 1234, bootInstance: 'TEST_ONLY-storage-fixture' }, startedAt: legacyTime, updatedAt: legacyTime, errorCode: 'TEST_ONLY' })
+  const legacyInput = JSON.stringify({ schemaVersion: 1, runId: legacyRunId, projectId: projectLedger.projectId, sessionId: second.value.sessionId, stage: 'revision',
+    configHash: digest(await readFile(join(projectRoot, '.scholarflow/project.yaml'))), ledgerRevision: associatedLedger.revision,
+    documentHash: associatedLedger.documents.paper.currentHash, outlineVersion: associatedLedger.outline.version, materialHashes: {}, sourceHashes: {}, profileHash: digest('TEST_ONLY'),
+    skillDigests: [], modelDescriptor: { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' }, budget: { maxModelCalls: 1, maxSearchQueries: 0, maxCandidateSources: 1, maxDurationMinutes: 1 }, networkScope: 'local-only', createdAt: legacyTime })
+  await mkdir(legacyRoot, { recursive: true })
+  await writeFile(join(legacyRoot, 'state.json'), legacyState); await writeFile(join(legacyRoot, 'snapshot.json'), legacyInput)
+  await page.getByRole('button', { name: '刷新写作运行历史', exact: true }).click()
+  await page.getByRole('button', { name: `预览迁移旧运行记录 ${legacyRunId}`, exact: true }).click()
+  await page.getByRole('dialog', { name: '运行存储迁移确认', exact: true }).waitFor()
+  await page.getByRole('button', { name: '取消运行存储迁移', exact: true }).click()
+  await assert.rejects(stat(join(legacyRoot, 'run.json')), { code: 'ENOENT' })
+  await page.getByRole('button', { name: `预览迁移旧运行记录 ${legacyRunId}`, exact: true }).click()
+  await page.getByRole('button', { name: '确认迁移旧运行存储', exact: true }).click()
+  await page.getByRole('dialog', { name: '运行存储迁移确认', exact: true }).waitFor({ state: 'detached' })
+  assert.equal(await readFile(join(legacyRoot, 'run.json'), 'utf8'), legacyState)
+  assert.equal(await readFile(join(legacyRoot, 'input.json'), 'utf8'), legacyInput)
+  assert.equal(await readFile(join(legacyRoot, 'state.json'), 'utf8'), legacyState)
+  assert.equal(await readFile(join(legacyRoot, 'snapshot.json'), 'utf8'), legacyInput)
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
   if (liveModel) {
     await page.getByRole('textbox', { name: '改写生成指令', exact: true }).fill('这是 TEST_ONLY 功能验证。把当前第二段缩写为“TEST_ONLY 限定范围”，保留当前引用token和段末句号。不要添加任何事实或引用。')
     await page.getByRole('button', { name: '预览选区改写计划', exact: true }).click()
@@ -451,8 +474,8 @@ try {
     let verifiedPinnedStage = false
     for (const entry of runDirectories) {
       const runRoot = join(projectRoot, '.scholarflow/runs', entry.name)
-      const frozen = JSON.parse(await readFile(join(runRoot, 'snapshot.json'), 'utf8'))
-      if (frozen.stage !== 'revision') continue
+      const frozen = JSON.parse(await readFile(join(runRoot, 'input.json'), 'utf8'))
+      if (frozen.stage !== 'revision' || frozen.modelDescriptor.providerId !== 'deepseek-official') continue
       const resources = JSON.parse(await readFile(join(runRoot, 'skills.json'), 'utf8')).resources
       assert.equal(resources.length, 3)
       assert.equal(resources[0].instructions, originalSkill)
@@ -491,7 +514,7 @@ try {
     await page.waitForTimeout(500)
     await running.getByRole('button', { name: '取消当前生成', exact: true }).click()
     await running.waitFor({ state: 'detached', timeout: 30000 })
-    const cancelled = JSON.parse(await readFile(join(projectRoot, `.scholarflow/runs/${runId}/state.json`), 'utf8'))
+    const cancelled = JSON.parse(await readFile(join(projectRoot, `.scholarflow/runs/${runId}/run.json`), 'utf8'))
     assert.equal(cancelled.status, 'cancelled')
     assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), beforeCancel)
   }
@@ -701,6 +724,7 @@ try {
     nativeUiDeterministicReview: true, nativeUiWorkingDraftExportDownload: true, exportDoesNotMutateBody: true,
     realProviderSectionCandidateAcceptWithClaimAnchors: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
     nativeUiManualParagraphClaimAssociation: true, renderedSelectionDisplaysCurrentClaims: true,
+    nativeUiLegacyRunStorageMigrationKeepsAllBytes: true,
     realProviderCancellation: liveModel, nativeUiRequirementConflictResolution: true, nativeUiProjectMemoryEdit: true,
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,

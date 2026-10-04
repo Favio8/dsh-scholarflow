@@ -28,10 +28,16 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
   const [proposal, setProposal] = useState<any>()
   const [activeRun, setActiveRun] = useState('')
   const [progress, setProgress] = useState<any>()
+  const [history, setHistory] = useState<any>(), [historySequence, setHistorySequence] = useState(0), [migrationPlan, setMigrationPlan] = useState<any>()
   const [skills, setSkills] = useState<any[]>([]), [skillBindingId, setSkillBindingId] = useState('')
   const [bufferReady, setBufferReady] = useState(false), [bufferMessage, setBufferMessage] = useState('正在读取宿主暂存缓冲…'), [recoverable, setRecoverable] = useState<any>()
   const bufferHash = useRef<string | null>(null), hostDirty = useRef(false), persistence = useRef(Promise.resolve()), persistenceBlocked = useRef(false)
   const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    let live = true
+    api('runs.list', { context: context() }).then(result => live && setHistory(result)).catch(error => live && setMessage(error.message))
+    return () => { live = false }
+  }, [project.ledger.revision, historySequence])
   const dirty = text !== project.document.text || baseHash !== project.document.contentHash
   const projection = useMemo(() => projectMarkdown(project.document.text), [project.document.contentHash])
   const statistics = useMemo(() => wordStats(project.document.text), [project.document.contentHash])
@@ -200,6 +206,15 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
       <button disabled={busy} onClick={() => setPlan(undefined)}>取消生成计划</button></section>}
     {activeRun && <section aria-label="当前生成运行"><p role="status">运行 {activeRun} · {progress?.status ?? '准备开始'} · 已调用模型 {progress?.usedModelCalls ?? 0} 次</p>
       <button onClick={() => api('runs.cancel', { context: context(), runId: activeRun }).then(() => setMessage('已请求取消，等待阶段保存检查点。')).catch(e => setMessage(e.message))}>取消当前生成</button></section>}
+    <section aria-label="写作运行历史"><h4>写作运行历史</h4><button disabled={busy} onClick={() => setHistorySequence(value => value + 1)}>刷新写作运行历史</button>
+      {history?.diagnostics.map((warning: string, index: number) => <p role="alert" key={index}>{warning}</p>)}
+      {history?.runs.map((row: any) => <p key={row.runId}>{row.runId} · {row.status} · 已调用模型 {row.usedModelCalls} 次{row.errorCode ? ` · ${row.errorCode}` : ''}
+        {row.legacyStorage && <button disabled={busy} onClick={() => run(async () => setMigrationPlan(await api('runs.prepareMigration', { context: context(), runId: row.runId })))}>预览迁移旧运行记录 {row.runId}</button>}</p>)}
+      {history && !history.runs.length && <p>本项目暂无写作运行记录。</p>}</section>
+    {migrationPlan && <section role="dialog" aria-label="运行存储迁移确认"><h4>确认迁移旧运行存储</h4><p>{migrationPlan.runId}</p>
+      {migrationPlan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
+      <button disabled={busy} onClick={() => run(async () => { await api('runs.migrate', { context: context(), planId: migrationPlan.planId, planHash: migrationPlan.planHash }); setMigrationPlan(undefined); setHistorySequence(value => value + 1) })}>确认迁移旧运行存储</button>
+      <button disabled={busy} onClick={() => run(async () => { await api('runs.dismissMigration', { planId: migrationPlan.planId }); setMigrationPlan(undefined) })}>取消运行存储迁移</button></section>}
     {(Object.values(project.ledger.proposalStates) as any[]).filter(state => state.state === 'pending').map(state => <button key={state.proposalId} disabled={busy} onClick={() => run(async () => setProposal(await api('edits.read', { context: context(), proposalId: state.proposalId })))}>查看待审阅建议 {state.proposalId}</button>)}
     {proposal && <section aria-label="建议差异"><h4>待审阅差异 · {proposal.proposal.id}</h4><p>范围：{proposal.proposal.scope}。接受会使旧审查过期。</p>
       {proposal.proposal.edits.map((edit: any, index: number) => <div key={index}><p>源码 [{edit.startUtf16}, {edit.endUtf16})</p><b>− 原文</b><pre>{edit.expectedText}</pre><b>+ 新文</b><pre>{edit.replacementText}</pre></div>)}

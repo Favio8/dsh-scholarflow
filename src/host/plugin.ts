@@ -44,6 +44,7 @@ import { knownSkillReferences } from './skills/references.ts'
 import { anchorUpsertRequest } from '../shared/editing.ts'
 import { upsertAnchor } from '../core/editing/anchors.ts'
 import { listProjectSkills, projectSkillEntry } from '../core/skills/project-resources.ts'
+import { readRun, inspectRuns, prepareRunMigration, migrateRun } from '../core/pipeline/run-store.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -79,6 +80,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private preparingSkill = false
   private bindingPlans = new Map<string, { plan: BindingPlan; context: RequestContext; peerId: string; expires: number }>()
   private retirementPlans = new Map<string, { qualifiedId: string; digest: string; observationHash: string; hash: string; peerId: string; expires: number }>()
+  private runMigrationPlans = new Map<string, { plan: Awaited<ReturnType<typeof prepareRunMigration>>; context: RequestContext; peerId: string; expires: number }>()
   constructor(ctx: Host) {
     super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
     this.researchProvider = crossrefProvider(ctx.web)
@@ -87,7 +89,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
       timer.unref()
-      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear() }
+      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear() }
     }, 'scholarflow: expire operator skill previews')
   }
 
@@ -166,6 +168,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   }
 
   private pruneSkills() {
+    for (const [key, row] of this.runMigrationPlans) if (row.expires < Date.now()) this.runMigrationPlans.delete(key)
     for (const [key, row] of this.skillSources) if (row.expires < Date.now()) this.skillSources.delete(key)
     for (const [key, row] of this.githubSources) if (row.expires < Date.now()) this.githubSources.delete(key)
     for (const [key, row] of this.skillPlans) if (row.expires < Date.now()) this.skillPlans.delete(key)
@@ -563,9 +566,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
           'SESSION_BINDING_CHANGED', '取消操作不属于当前会话运行。')
         active.controller.abort('user-cancel'); return { runId: input.runId, cancellationRequested: true }
       }
-      const file = await io.read(`.scholarflow/runs/${input.runId}/state.json`)
-      invariant(file, 'RUN_NOT_FOUND', '运行不存在。')
-      return { run: runStateSchema.parse(JSON.parse(file.text)), cancellationRequested: false }
+      const stored = await readRun(io, input.runId, input.context.projectId!)
+      return { run: stored.run, legacyStorage: stored.legacy, cancellationRequested: false }
     })
   }
 
@@ -573,9 +575,53 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async runsInspect(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => {
       this.requireOperator(); const input = runControlRequest.parse(request), { io } = await resolveStore(this.ctx, input.context, signal)
-      const file = await io.read(`.scholarflow/runs/${input.runId}/state.json`)
-      invariant(file, 'RUN_NOT_FOUND', '运行尚未登记或不存在。')
-      return { run: runStateSchema.parse(JSON.parse(file.text)) }
+      const stored = await readRun(io, input.runId, input.context.projectId!)
+      return { run: stored.run, legacyStorage: stored.legacy }
+    })
+  }
+
+  @Remote('runs.list')
+  async runsList(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const { context } = inspectRequest.parse(request), { io } = await resolveStore(this.ctx, context, signal)
+      return inspectRuns(io)
+    })
+  }
+
+  @Remote('runs.prepareMigration')
+  async runsPrepareMigration(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = runControlRequest.parse(request)
+      mutationRevision(input.context); this.pruneSkills()
+      invariant(this.runMigrationPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请完成已有运行迁移预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), plan = await prepareRunMigration(io, input.runId)
+      this.runMigrationPlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, runId: plan.runId, stateHash: plan.stateHash, inputHash: plan.inputHash,
+        risks: ['复制当前已结束／暂停／中断运行的状态与输入到 SPEC 约定的 run.json 和 input.json，保留完整旧记录及迁移历史。',
+          '不会调用模型、重放建议或修改主稿；迁移存储不代表已经恢复执行。'] }
+    })
+  }
+
+  @Remote('runs.migrate')
+  async runsMigrate(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = onlineConfirmRequest.parse(request), row = this.runMigrationPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请重新预览并确认当前运行存储迁移。')
+      invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.plan.projectId,
+        'SESSION_BINDING_CHANGED', '迁移确认不属于当前项目和会话。')
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      signal.throwIfAborted(); this.runMigrationPlans.delete(input.planId)
+      return migrateRun(io, row.plan)
+    })
+  }
+
+  @Remote('runs.dismissMigration')
+  async runsDismissMigration(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ planId: z.string().min(1).max(200) }).strict().parse(request)
+      signal.throwIfAborted()
+      if (this.runMigrationPlans.get(input.planId)?.peerId === peerId) this.runMigrationPlans.delete(input.planId)
+      return { dismissed: true }
     })
   }
 

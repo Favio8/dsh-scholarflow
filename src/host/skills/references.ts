@@ -56,7 +56,7 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
     for (const row of rows) {
       if (row.type !== 'directory') continue
       invariant(/^run_[\w]+$/u.test(row.name) && ++checkedRuns <= 1000, 'SKILL_REFERENCE_SCAN_LIMIT', '项目包含未知运行目录或总量过多，未卸载。')
-      const text = await read(`.scholarflow/runs/${row.name}/snapshot.json`)
+      const text = await read(`.scholarflow/runs/${row.name}/input.json`) ?? await read(`.scholarflow/runs/${row.name}/snapshot.json`)
       invariant(text, 'SKILL_REFERENCES_UNAVAILABLE', '一个历史运行缺少快照，引用状态未知，未卸载。')
       const run = runSnapshotSchema.parse(JSON.parse(text))
       invariant(run.projectId === config.project.id && run.runId === row.name, 'SKILL_REFERENCES_UNAVAILABLE', '历史运行快照的身份不同，未卸载。')
