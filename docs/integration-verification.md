@@ -693,16 +693,16 @@ name 为 `sf-test-skill-a` / `sf-test-skill-b`）。用 `agentPresets.acquireSco
 
 | 状态 | 结果 |
 |---|---|
-| 文档生成 | 已完成（含失败结论） |
-| 代码实现 | 已完成两条路径的探针：raw fs 写入、`storageDomain` 域写入 |
-| 测试通过 | **否 —— 两条路径均未走通** |
+| 文档生成 | 已完成 |
+| 代码实现 | 已完成：`storageDomain` 域写入 + 跨进程读回探针 |
+| 测试通过 | **是（storage 路径）**；文件直写路径仍被沙箱拒绝 |
 
-### 09.1 实测结果：两条路径都失败
+### 09.1 实测结果
 
 | 路径 | 实测结果 |
 |---|---|
-| `ctx.fs.writeText` 直接落盘绑定文件（`<DSH_HOME>/scholarflow/`、工作区） | **`FS_SANDBOX_DENIED`**（见 G0-07.3） |
-| `storageDomain.open(spec)` + `table.put()` | **`error: "malformed-medium"`** |
+| `ctx.fs.writeText` 直接落盘绑定文件（`<DSH_HOME>/scholarflow/`、工作区） | **`FS_SANDBOX_DENIED`**（见 G0-07.3）——该路径被否决 |
+| `storageDomain.open(spec)` + `table.put()` | 初测 `malformed-medium`；**根因已查明并解决，见 09.4** |
 
 `storageDomain` 路径的实测依据（活契约）：
 
@@ -710,35 +710,73 @@ name 为 `sf-test-skill-a` / `sf-test-skill-b`）。用 `agentPresets.acquireSco
   要求其 `kv` facet（`facet-unsupported`）、**backend `version-mismatch`/`malformed-medium` pass through**」；
 - `DomainSpec = { name, version, layout?, compatibleVersions?, invalidRecords?, global?, tables }`，
   且 `DomainTableSpec.valueSchema` 的类型是 **`ZodType<V>`**（所以此路径确实需要 zod，
-  已安装 `zod 4.6.5` 并可直接导入）；
-- 本插件用**最小** spec（1 个表、1 个 zod 对象 schema、`version: 1`、默认 `layout`）调用，
-  仍返回 `malformed-medium`。
+  已安装 `zod 4.6.5` 并可直接导入）。
 
-→ **`malformed-medium` 的确切前置条件仍未知**，且已进一步缩小：
+初测失败的排查过程（保留作为证据链）：
 
-- **未生成任何介质文件**：在 `<DSH_HOME>` 与验证 profile 下按域名搜索，**找不到**
-  名为 `scholarflow*` 的存储文件；`<DSH_HOME>/storages` 下只有宿主自有的
-  `workspace.json` 与 `session_projcache`。→ 因此**不是**「已有介质损坏」，而是后端在
-  **打开/投影 unit 阶段**就判定失败。
-- 尝试把本机 zod 从 4.6.5 换到 3.25.0 以排除主版本偏差，但 **zod v3 在该安装方式下
-  反而无法解析**（`probe:module-resolution` 返回 `zod: failed: ERR_MODULE_NOT_FOUND`），
-  所以该假设**未能验证**；随后已恢复 zod 4.6.5（可解析）。
-- 因此 `storageDomain` 路径需要新的调查角度（例如先经 `storage.mount(form, facility)`
-  声明路由，或改 `layout`），**本轮不写成结论**。
+- **未生成任何介质文件** → 排除「已有介质损坏」，指向 unit 投影阶段失败；
+- 曾把 zod 从 4.6.5 换到 3.25.0 以排除主版本偏差，但 **zod v3 在该安装方式下反而无法解析**
+  （`ERR_MODULE_NOT_FOUND`），该假设**未能验证**，随后恢复 zod 4.6.5；
+- 最终用 8 个变体分离出真正原因：**域名含连字符**（见 09.4）。
 
-### 09.2 已确认的跨进程持久事实（非本项目自有状态）
+### 09.2 已确认的跨进程持久事实（宿主自有状态）
 
 `workspaceRegistry` 已被实测为**真正的跨进程持久**：两次独立启动（不同 pid）读到
 完全相同的 7 个工作区、相同的 `id`/`createdAt`/`updatedAt`。
-这证明宿主的工作区注册表不是内存 Map，可作为 `sessionId → workspaceId` 绑定的**权威来源**；
-但**本项目自己的** `projectId` 绑定如何持久化仍未解决。
+这证明宿主的工作区注册表不是内存 Map，可作为 `sessionId → workspaceId` 绑定的**权威来源**。
 
-### 09.3 尚未验证（下一步方向，按优先级）
+### 09.3 尚未验证
 
-1. `storageDomain` 的 `malformed-medium` 根因：先试 `storage.mount(...)` 声明路由，
-   再试 `layout: 'per-record'`，再试 zod v3。
-2. `storage` hub 的 `mount(form, facility)` 与 `dsh-storage-json` 后端的关系。
-3. 损坏／schema 过新时的只读降级行为（SPEC §9.4、§27.5）。
+- **【仍未知】** `storage` hub 的 `mount(form, facility)` 与 `dsh-storage-json` 后端的关系
+  （直接 `open` 已够用，因此该方向优先级降低）。
+- **【仍未知】** 损坏／schema 过新时的只读降级行为（SPEC §9.4／§27.5；`invalidRecords:
+  'backup-and-skip'` 存在于契约中但未实测）。
+
+---
+
+### 09.4 已解决：`storageDomain` 路径**通过**（本轮新增）
+
+原先的 `malformed-medium` **是本项目自己写错了 spec**，不是宿主缺陷。用 8 个受控变体逐一分离变量后得到：
+
+| 变体 | 域名 | `layout` | 结果 |
+|---|---|---|---|
+| plain-single | `scholarflowprobe` | 默认 | ✅ 打开，写入并读回 |
+| per-record | `scholarflow-g0-probe` | `per-record` | ❌ `malformed-medium` |
+| with-compatible-versions | `sfprobe2` | 默认 | ✅ |
+| with-global | `sfprobe3` | 默认 | ✅ |
+| **per-record-valid-name** | `sfprobe4` | `per-record` | ✅ **打开** |
+| **single-hyphen-name** | `sf-probe-5` | 默认 | ❌ **`malformed-medium`** |
+| single-underscore-name | `sf_probe6` | 默认 | ✅ |
+| single-single-name | `sfprobe7` | `single` | ✅ |
+
+**结论（已实测）：真正被拒绝的是「域名里的连字符」。**
+
+- `sf-probe-5` 失败而 `sf_probe6`（下划线）成功、`scholarflowprobe` 成功 →
+  域名需使用**字母／数字／下划线**这类允许字符集；
+- `layout: 'per-record'` **不是**原因 —— 换成合法域名后 `per-record` 正常打开（`sfprobe4`）；
+- 4 个变体建出的介质位于 `<DSH_HOME>/storages/`：`single` 为 `<name>.json` 文件，
+  `per-record` 为 `<name>` 目录，与 `storage-json` 的 `root: dshHomePath('storages')` 一致。
+
+**跨进程持久化（G0-09 的核心要求）已实测通过** —— 两次独立进程：
+
+| 启动 | pid | 观察 |
+|---|---|---|
+| bootOne | 34192 | `tableSize: 1`、`priorEntries: []`、`crossProcessEvidence: false` |
+| **bootTwo** | **11068** | `tableSize: 2`、**`priorEntries` 含 bootOne 写入的 `sessionId: "sess-34192"`**、**`crossProcessEvidence: true`** |
+
+→ **绑定的持久化不依赖内存 Map**：后一个进程读回了前一个进程写入的记录。
+本项目自有的 `projectId` 类绑定可以采用 `storageDomain`（`DomainSpec` + `zod` 表 schema），
+约束是**域名只用允许字符集**（建议 `scholarflow_projects` 这类命名）。
+
+**探针副产物已清理**：`<DSH_HOME>/storages/` 下 7 个探针介质（含 `per-record` 目录）
+已逐个核对绝对路径后删除；官方 `workspace.json`、`session_projcache.json` 保持原样未动。
+
+### 09.5 尚未验证
+
+- **【仍未知】** 损坏／schema 过新时的只读降级行为（SPEC §9.4、§27.5）——`invalidRecords: 'backup-and-skip'`
+  已存在于 `DomainSpec` 契约中，未实测。
+- **【仍未知】** 绑定记录与「当前会话/工作区」的一致性校验（SPEC §5.2：服务端每次写请求重新验证
+  `sessionId → workspaceId → projectId`）。
 
 ---
 

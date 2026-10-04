@@ -50,7 +50,8 @@
 | **服务注册晚于 `apply`** | `apply` 时刻 20 个候选服务可用；约 2 s 后 **28 个可用**。晚到者含 `workspaceRegistry`、`workspaceController`、`workspaceFiles`、`sessionController`、`sessionSkillCatalog`、`webServer`、`credentials`、`pluginManager`。需用 `inject` 声明硬依赖，或在组合稳定后重读。 |
 | **卸载回调** | `ctx.on('dispose', fn)` **不触发**；使用 `ctx.effect(() => disposer)`（本机所有可工作插件的写法）。 |
 | **模块缓存** | loader 以解析后 URL 为模块键且不带查询串；`hmr` 配置为 `root: []`（不监听）。改动 host 代码需重启进程，或使用 ADR-002 的 mtime 版本化入口。 |
-| **`ctx.fs` 写入沙箱** | 写 `DSH_HOME` 与**工作区**均返回 `FS_SANDBOX_DENIED`；仅 OS 临时目录实测可写。`writeText`/`editText` 有 `sandboxPolicy` 参数，尚待确定合法取值。 |
+| **插件自有持久化** | 推荐 `ctx.storageDomain.open(DomainSpec)`；`DomainTableSpec.valueSchema` 需 **zod**（已装 v4）。实测跨进程持久成功。**约束：域名不得含连字符** —— `sf-probe-5` 返回 `malformed-medium`，而 `sf_probe6`／`scholarflowprobe`／`sfprobe4` 均正常。`layout` 默认 `single`（介质为 `<DSH_HOME>/storages/<name>.json`），`per-record` 为同名目录，两者都可用。 |
+| **`ctx.fs` 写入沙箱** | 写 `DSH_HOME` 与**工作区**均返回 `FS_SANDBOX_DENIED`；仅 OS 临时目录实测可写。`writeText`/`editText` 有 `sandboxPolicy` 参数，尚待确定合法取值。**注：该结论来自无会话/权限上下文的 CLI 验证进程**；desktop 真实会话下的许可范围尚未测。 |
 | **`ctx.fs` 不做授权** | `fs.resolve` 会成功解析 `..` 越界、`C:\Windows\win.ini`、`CON`、同前缀兄弟目录；包含关系须用 `fs.contains`（实测行为正确）。 |
 | **`ctx.fs` 无 mkdir** | 目录创建只能经 `node:fs`；而 `node:fs` **不受 `ctx.fs` 沙箱约束**——沙箱不是操作系统级隔离。 |
 | **`fs.readBytes` 语义** | `maxBytes` 是**整文件大小上限**，不是单次切片长度（9.7 KB 文件传 64 → `FS_TOO_LARGE`）。 |

@@ -463,7 +463,11 @@ async function probeStoragePersistence(ctx) {
   }
 
   const spec = {
-    name: 'scholarflow-g0-probe',
+    // MEASURED: a hyphenated domain name is rejected with `malformed-medium`
+    // (`sf-probe-5` failed, `sf_probe6` succeeded), so the name uses the
+    // accepted character set. `layout` is NOT the cause: `per-record` opened
+    // fine once the name was valid.
+    name: 'scholarflow_probe',
     version: 1,
     tables: {
       bindings: {
@@ -512,6 +516,105 @@ async function probeStoragePersistence(ctx) {
       /* closing is idempotent; a failure here must not mask the result */
     }
   }
+}
+
+/**
+ * Probe G0-09 variants: narrow WHY `storageDomain.open` reports malformed-medium.
+ *
+ * MEASURED context: `@deepseek-ai/dsh-storage-json` is configured with
+ * `root: dshHomePath('storages')`, that directory EXISTS, and it already holds
+ * official domains (`workspace.json`, `session_projcache.json`). No medium file
+ * for our domain name was ever created, so the failure happens during unit
+ * projection rather than from a corrupt medium.
+ *
+ * Each variant is opened and closed independently; `get()` is the read-only
+ * diagnostic surface, so host-owned domains are only observed, never opened.
+ */
+async function probeStorageVariants(ctx) {
+  const storageDomain = service(ctx, 'storageDomain')
+  if (!storageDomain || !zod) {
+    record('probe:storage-variants', { ok: false, reason: 'storageDomain or zod unavailable' })
+    return
+  }
+
+  let hostOpenDomainSample = null
+  try {
+    hostOpenDomainSample =
+      typeof storageDomain.get === 'function' && storageDomain.get('workspace') ? 'workspace' : null
+  } catch (error) {
+    hostOpenDomainSample = `get-failed: ${String(error?.message ?? error)}`
+  }
+
+  const schema = zod.z.object({ a: zod.z.string() })
+  const variants = [
+    { label: 'plain-single', spec: { name: 'scholarflowprobe', version: 1, tables: { t: { valueSchema: schema } } } },
+    {
+      label: 'per-record',
+      spec: { name: 'scholarflow-g0-probe', version: 1, layout: 'per-record', tables: { t: { valueSchema: schema } } },
+    },
+    {
+      label: 'with-compatible-versions',
+      spec: { name: 'sfprobe2', version: 1, compatibleVersions: [1], tables: { t: { valueSchema: schema } } },
+    },
+    {
+      label: 'with-global',
+      spec: {
+        name: 'sfprobe3',
+        version: 1,
+        global: { schema: zod.z.object({ marker: zod.z.string() }), initial: { marker: 'init' } },
+        tables: { t: { valueSchema: schema } },
+      },
+    },
+    // Separate name-shape from layout: the earlier failing spec had a hyphenated
+    // name AND the default layout, so these two isolate each variable.
+    {
+      label: 'per-record-valid-name',
+      spec: { name: 'sfprobe4', version: 1, layout: 'per-record', tables: { t: { valueSchema: schema } } },
+    },
+    {
+      label: 'single-hyphen-name',
+      spec: { name: 'sf-probe-5', version: 1, tables: { t: { valueSchema: schema } } },
+    },
+    {
+      label: 'single-underscore-name',
+      spec: { name: 'sf_probe6', version: 1, tables: { t: { valueSchema: schema } } },
+    },
+    {
+      label: 'single-single-name',
+      spec: { name: 'sfprobe7', version: 1, layout: 'single', tables: { t: { valueSchema: schema } } },
+    },
+  ]
+
+  const results = {}
+  for (const variant of variants) {
+    let domain = null
+    try {
+      domain = await storageDomain.open(variant.spec)
+      let writeBack = null
+      try {
+        await domain.table('t').put('probe', { a: 'v' })
+        writeBack = domain.table('t').get('probe') ?? null
+      } catch (error) {
+        writeBack = `put-failed: ${String(error?.code ?? error?.message ?? error)}`
+      }
+      results[variant.label] = {
+        opened: true,
+        domainName: domain.name,
+        size: domain.table('t').size,
+        writeBack,
+      }
+    } catch (error) {
+      results[variant.label] = { opened: false, error: String(error?.code ?? error?.message ?? error) }
+    } finally {
+      try {
+        await domain?.close()
+      } catch {
+        /* idempotent */
+      }
+    }
+  }
+
+  record('probe:storage-variants', { ok: true, hostOpenDomainSample, results })
 }
 
 /** Probe G0-03 (partial): can the host report real workspace identity? */
@@ -698,6 +801,7 @@ async function runProbes(ctx) {
     await probeSettings(ctx)
     await probePersistence(ctx)
     await probeStoragePersistence(ctx)
+    await probeStorageVariants(ctx)
   } catch (error) {
     record('probes-early-failed', { message: String(error?.message ?? error) })
   }
