@@ -272,7 +272,7 @@ export interface PresetDefinition {
 |---|---|
 | 文档生成 | 部分（本节记录已取得的契约） |
 | 代码实现 | **未开始**（客户端半体尚未编写） |
-| 测试通过 | **否 —— 未验证** |
+| 测试通过 | **否 —— 未实现**；扩展点契约已确认可用 |
 
 ### 04.1 已取得的契约【已实测】
 
@@ -334,14 +334,39 @@ window.__ModuleLoader__.load({
 工作台进 `main`（新 key）＋ 侧栏入口进 `sidebar.panellist`，Agent 面板复用宿主既有的
 `sidebar.chat.conversation`／右侧栏，不去动 `sidebar` 本身。
 
-### 04.2 尚未验证（阻塞项）
+### 04.2 `main` 座位的实测细节（**扩展点已确认可用**）
 
-- **【仍未知】** `main` 的 keyed 座位是否允许第三方插件新增 key，以及侧栏入口 id 与 `main` key
-  的对应机制（需实测）。
-- **【仍未知】** `MainPanelId` 是否为闭合联合类型（若是，可能需要宿主支持的等效路径）。
+对活座位 `main` 做精确探测（`client.Slots.listSubTree(root="main")`）【已实测】：
+
+| 观测 | 值 |
+|---|---|
+| `kind` | `keyed`（keyed 座位） |
+| 注册形参 | `{ key: string, required: true }`，说明：「Your cell key: the entry renders where the owner dispatches this exact key. **Registering an already-occupied key replaces that occupant.**」 |
+| `keyDomain` | `open: any string the owner dispatches (no compile-time key set)` |
+| **当前占用者** | `plugins`、`conversation`、`schedules`（`active: true`） |
+| 座位说明 | 「Central panel selected by sidebar entry id. The reserved `conversation` key hosts the Conversation; **other keys receive no Session binding.**」 |
+| 组件可用 props | `useResource`、`useWorkspaces`、`usePanelInfo`、`useSessions`、`useSessionStatus`、`useSessionRetainInfo`（React hooks） |
+| `replaceRisk` | `shadows-shipped-ui`（替换已占用的 key 会遮蔽官方 UI） |
+
+**结论：**
+
+1. **第三方插件可以新增 `main` key。** 证据不是类型定义，而是**已有两个非 `conversation`
+   的占用者（`plugins`、`schedules`）**，且 keyDomain 明确开放。
+2. 因此 PRD §8.2 的「原侧栏 | 工作台 | Agent 面板」三栏在**扩展点层面成立**：
+   ScholarFlow 工作台取一个自己的 `main` key，Agent 面板继续用官方 `conversation`，
+   `sidebar` 完全不动。
+3. **注意：非 `conversation` 的 key 不获得 Session 绑定** —— 工作台需要自己经
+   `useSessions`/`host.call` 取得当前会话，这一点要在 M1 设计里明确。
+
+### 04.3 尚未验证（阻塞项）
+
+- **【仍未知】** `ctx.slots.register` 对 keyed 座位的精确调用形状
+  （本机可工作客户端半体展示的是 list 座位：`register({ name, id, order, label, component })`；
+  keyed 座位应为 `{ name, key, component }`，属**推断**，需实测确认）。
+- **【仍未知】** `layout.selectPanel()` 接受的 `MainPanelId` 是否为闭合联合类型。
 - **【仍未知】** 窄屏行为、切换 Tab 保留滚动与脏缓冲。
-- **阻塞：** 需要编写客户端半体 → 在 desktop profile 生效 → **需要重启 desktop 宿主** →
-  并按 SPEC 要求取**截图**。截图需由用户配合（本会话无浏览器／截图工具）。
+- **阻塞：** 需要编写客户端半体 → 在 desktop profile 生效 → **需要用户重启 desktop 宿主** →
+  并按 SPEC 要求取**截图**。本会话没有浏览器／截图工具，截图须由用户配合。
 
 ---
 
