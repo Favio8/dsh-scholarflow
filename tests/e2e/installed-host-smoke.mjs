@@ -124,6 +124,32 @@ try {
   const mismatch = await rpc('scholarflow.v1/project.inspect', { request: { context: { requestId: 'req_TEST_ONLY_mismatch', workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId, projectId: projectLedger.projectId } } })
   assert.equal(mismatch.value.ok, false)
   assert.equal(mismatch.value.error.code, 'SESSION_BINDING_CHANGED')
+  await page.getByRole('button', { name: '列出可选资料', exact: true }).click()
+  await page.getByRole('combobox', { name: '选择本地资料', exact: true }).selectOption('原始材料.txt')
+  await page.getByRole('combobox', { name: '资料角色', exact: true }).selectOption('notes')
+  await page.getByRole('button', { name: '确认登记所选资料', exact: true }).click()
+  await page.getByRole('combobox', { name: '已登记资料', exact: true }).getByRole('option').filter({ hasText: 'registered' }).waitFor({ state: 'attached' })
+  await page.getByRole('button', { name: '解析所选资料', exact: true }).click()
+  await page.getByRole('blockquote', { name: '定位原文', exact: true }).getByText('TEST_ONLY raw source: never overwrite this file.').waitFor()
+  await page.getByRole('textbox', { name: '来源标题', exact: true }).fill('TEST_ONLY 原始资料来源')
+  await page.getByRole('button', { name: '登记该资料的来源', exact: true }).click()
+  await page.getByRole('combobox', { name: '来源', exact: true }).getByRole('option').filter({ hasText: 'unverified' }).waitFor({ state: 'attached' })
+  await page.getByRole('button', { name: '确认当前定位原文为证据', exact: true }).click()
+  await page.getByRole('combobox', { name: '关联证据', exact: true }).getByRole('option').filter({ hasText: 'located' }).waitFor({ state: 'attached' })
+  await page.getByRole('textbox', { name: '论点', exact: true }).fill('TEST_ONLY 此文件给出原始资料不可覆盖的限定要求。')
+  await page.getByRole('textbox', { name: '论点适用范围', exact: true }).fill('仅限当前测试文件')
+  await page.getByRole('combobox', { name: '证据关系', exact: true }).selectOption('partial')
+  await page.getByRole('textbox', { name: '证据关系理由', exact: true }).fill('TEST_ONLY 原文限定 this file，没有支持跨项目的一般结论。')
+  await page.getByRole('button', { name: '确认保存论点', exact: true }).click()
+  await page.getByRole('listitem').filter({ hasText: 'partially-supported' }).waitFor()
+  await page.getByRole('textbox', { name: '研究问题', exact: true }).fill('TEST_ONLY 当前资料支持什么？')
+  await page.getByRole('textbox', { name: '中心论点', exact: true }).fill('TEST_ONLY 保留原始资料并说明支持范围。')
+  await page.getByRole('textbox', { name: '章节标题', exact: true }).fill('TEST_ONLY 证据与范围')
+  await page.getByRole('textbox', { name: '章节目的', exact: true }).fill('TEST_ONLY 展示有定位的证据。')
+  await page.getByRole('group', { name: '本章节使用的论点', exact: true }).getByRole('checkbox').check()
+  await page.getByRole('button', { name: '确认大纲并添加章节', exact: true }).click()
+  await page.getByRole('heading', { name: '论文大纲 · 已确认', exact: true }).waitFor()
+  assert.equal(await readFile(join(projectRoot, '原始材料.txt'), 'utf8'), 'TEST_ONLY raw source: never overwrite this file.\r\n')
   // Reproduce an interrupted initialization using a TEST_ONLY durable journal,
   // then recover through the actual authenticated UI and sandboxed Host writer.
   const recoveryRoot = resolve(`.dsh-tmp/M1 中断恢复 TEST_ONLY ${Date.now()}`)
@@ -157,6 +183,9 @@ try {
   const cold = await rpc('scholarflow.v1/project.inspect', { request: { context: { requestId: 'req_TEST_ONLY_cold', workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
   assert.equal(cold.value.ok, true, JSON.stringify(cold.value))
   assert.equal(cold.value.data.ledger.projectId, projectLedger.projectId)
+  assert.equal(Object.keys(cold.value.data.ledger.evidence).length, 1)
+  assert.equal(Object.values(cold.value.data.ledger.claims)[0].status, 'partially-supported')
+  assert.equal(cold.value.data.ledger.outline.confirmation, 'confirmed')
   const readOnlySession = await rpc('session/create', { request: { workspaceId: workspace.value.workspace.workspaceId, agentPreset: 'scholarflow' } })
   assert.equal(readOnlySession.ok, true, JSON.stringify(readOnlySession))
   const denied = await rpc('scholarflow.v1/verifyGateway', { request: { sessionId: readOnlySession.value.sessionId } })
@@ -171,6 +200,7 @@ try {
     nativeUiInitPreviewCancel: true, nativeUiInitConfirm: true, originalSourceBytesPreserved: true,
     twoSessionProjectRestore: true, coldProjectBindingRestore: true, mismatchedBindingRejected: true,
     nativeUiInterruptedInitRecovery: true,
+    nativeUiMaterialParseEvidenceClaimOutline: true, evidenceChainColdRestore: true,
     clientErrors: errors, desktopProfileTouched: false }, null, 2))
   console.log('Real DSH G0 smoke passed; evidence: .dsh-tmp/g0-smoke.json')
 } catch (error) {

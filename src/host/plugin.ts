@@ -8,6 +8,13 @@ import { prepareInit, initialize } from '../core/project/project.ts'
 import { recover } from '../core/store/transactions.ts'
 import { newId } from '../core/store/files.ts'
 import { invariant } from '../shared/errors.ts'
+import { scanRequest, registerMaterialRequest, parseMaterialRequest, readMaterialRequest } from '../shared/materials.ts'
+import { registerSourceRequest, confirmEvidenceRequest, upsertClaimRequest, confirmOutlineRequest } from '../shared/research.ts'
+import { scanMaterials, registerMaterial, readParsed } from '../core/materials/materials.ts'
+import { parseRegisteredMaterial } from '../core/materials/parse.ts'
+import { parseMaterialBytes } from './parsers/parse.ts'
+import { registerSource, confirmEvidence, upsertClaim, confirmOutline } from '../core/evidence/evidence.ts'
+import type { RequestContext } from '../shared/schema.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -20,6 +27,10 @@ export const Config = Schema.object({
   maxModelCalls: Schema.number().min(1).max(40).default(40).volatile(),
 })
 const sessionRequest = z.object({ sessionId: z.string().min(1).max(200) }).strict()
+const mutationRevision = (context: RequestContext) => {
+  invariant(context.projectId && context.expectedLedgerRevision !== undefined, 'INVALID_REQUEST', '项目变更需要项目身份和预期 ledger 版本。')
+  return context.expectedLedgerRevision
+}
 
 export class ScholarFlowRemote extends TypertRemoteService {
   private initPlans = new Map<string, StoredInitPlan>()
@@ -93,6 +104,62 @@ export class ScholarFlowRemote extends TypertRemoteService {
     const ctx = this.ctx as Host
     invariant(ctx.invocation?.peer && ctx.invocation.peer === ctx.connection.operator, 'INVALID_APPROVAL', '此操作需要宿主已认证的用户界面调用。')
     return ctx.invocation.peer.id
+  }
+
+  @Remote('materials.scan')
+  async materialsScan(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = scanRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return scanMaterials(io, input.directory, input.cursor, input.limit) })
+  }
+
+  @Remote('materials.register')
+  async materialsRegister(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = registerMaterialRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return registerMaterial(io, input, revision) })
+  }
+
+  @Remote('materials.parse')
+  async materialsParse(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = parseMaterialRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return parseRegisteredMaterial(io, input.materialId, revision, signal, (bytes, mediaType) => parseMaterialBytes(bytes, mediaType, signal, input.range)) })
+  }
+
+  @Remote('materials.read')
+  async materialsRead(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = readMaterialRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return readParsed(io, input.materialId) })
+  }
+
+  @Remote('sources.register')
+  async sourcesRegister(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = registerSourceRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return registerSource(io, input.source, revision) })
+  }
+
+  @Remote('evidence.confirm')
+  async evidenceConfirm(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context, ...input } = confirmEvidenceRequest.parse(request)
+      const revision = mutationRevision(context), { io } = await resolveStore(this.ctx, context, signal)
+      return confirmEvidence(io, input, revision) })
+  }
+
+  @Remote('claims.upsert')
+  async claimsUpsert(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = upsertClaimRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return upsertClaim(io, input.claim, revision) })
+  }
+
+  @Remote('outline.confirm')
+  async outlineConfirm(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = confirmOutlineRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return confirmOutline(io, input.outline, revision, input.expectedOutlineVersion) })
   }
 
   @Remote

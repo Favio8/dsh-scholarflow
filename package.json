@@ -5,6 +5,7 @@
   "description": "ScholarFlow academic project workspace for DeepSeek Harness",
   "type": "module",
   "main": "./dist/host.js",
+  "imports": { "#scholarflow-parser": "./dist/parser-worker.js" },
   "exports": {
     ".": {
       "default": "./dist/host.js"
@@ -45,6 +46,7 @@
     "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.2",
     "@deepseek-ai/dsh-typert-protocol": "0.2.0-rc.2",
     "@deepseek-ai/schemastery": "3.18.4",
+    "jszip": "3.10.1",
     "mammoth": "^1.13.0",
     "pdfjs-dist": "^6.3.289",
     "rehype-sanitize": "^6.0.0",

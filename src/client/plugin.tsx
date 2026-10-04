@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { Research, OutlineEditor } from './research.tsx'
 
 type Host = any
 const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-app button,.sf-app select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
@@ -44,6 +45,7 @@ export function apply(ctx: Host) {
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
     const context = () => ({ requestId: `req_${crypto.randomUUID()}`, workspaceId: workspace?.workspaceId, sessionId: props.sessionId,
+      ...(project?.ledger && { expectedLedgerRevision: project.ledger.revision }),
       ...(project?.binding?.projectId && project.binding.workspaceId === workspace?.workspaceId && project.binding.sessionId === props.sessionId
         ? { projectId: project.binding.projectId } : {}) })
     useEffect(() => {
@@ -92,7 +94,9 @@ export function apply(ctx: Host) {
       {project?.initialized && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId && <><h3>{project.config.project.title}</h3><p>项目已保存 · ledger 版本 {project.ledger.revision} · {project.document.externalChange ? '检测到外部稿件修改' : '主稿版本一致'}</p>
         {!!project.configWarnings?.length && <p role="alert">以下配置键未生效，原文件已保留：{project.configWarnings.join('、')}</p>}
         <p>当前绑定：{project.binding.projectId}。同一工作区的多个 ScholarFlow 会话读取同一份项目数据。</p>
-        <p>下一步：登记已选择的资料，建立可定位证据和论点。</p></>}
+        <Research key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
+        <OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={async () => setProject(await api('project.inspect', { context: context() }))} run={act} busy={busy} />
+      </>}
     </section>
   }
   function Settings() {

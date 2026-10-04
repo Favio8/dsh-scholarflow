@@ -2,6 +2,7 @@ import { join, relative, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { relativePath } from '../../shared/schema.ts'
+import { sensitivePath } from '../../core/materials/materials.ts'
 import { ScholarError, invariant } from '../../shared/errors.ts'
 import { type FileStore, type FileImage, type FileEntry, json } from '../../core/store/files.ts'
 
@@ -51,7 +52,14 @@ export class HostFileStore implements FileStore {
     return { text, version: after.version }
   }
   async readBytes(path: string, maxBytes: number) {
-    return this.ctx.fs.readBytes(await this.target(path), this.signal, maxBytes)
+    const target = await this.target(path)
+    const canonical = relative(this.binding.canonicalRoot, this.ctx.fs.processPath(target)).split(sep).join('/')
+    invariant(!sensitivePath(canonical) && !canonical.startsWith('.scholarflow/') && !canonical.startsWith(this.binding.manuscriptDir + '/'), 'MATERIAL_ACCESS_DENIED', '资料链接不能指向凭据、项目元数据或输出稿件。')
+    const before = await this.ctx.fs.stat(target, this.signal)
+    invariant(before?.type === 'file', 'FILE_NOT_REGULAR', '需要普通资料文件。')
+    const bytes = await this.ctx.fs.readBytes(target, this.signal, maxBytes)
+    invariant(before.version === (await this.ctx.fs.stat(target, this.signal))?.version, 'STALE_MATERIAL_VERSION', '读取期间原始资料发生变化。')
+    return bytes
   }
   async stat(path: string): Promise<FileEntry | undefined> {
     if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
