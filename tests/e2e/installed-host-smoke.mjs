@@ -224,11 +224,40 @@ try {
   const projectConfig = await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8')
   const projectLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
   assert.ok(projectConfig.includes(projectLedger.projectId))
+  const projectSkillsUi = page.getByRole('region', { name: '项目固定 Skill', exact: true })
+  const installedProjectChoices = page.getByRole('combobox', { name: '选择已安装固定 Skill 版本', exact: true })
+  await installedProjectChoices.locator('option').filter({ hasText: installedSkill.metadata.qualifiedId }).waitFor({ state: 'attached' })
+  const skillOption = await installedProjectChoices.locator('option').filter({ hasText: installedSkill.metadata.qualifiedId }).getAttribute('value')
+  await installedProjectChoices.selectOption(skillOption)
+  await projectSkillsUi.getByRole('button', { name: '加入待确认启用清单', exact: true }).click()
+  const builtinOption = await installedProjectChoices.locator('option').filter({ hasText: 'builtin:selection-preserving-revision' }).getAttribute('value')
+  await installedProjectChoices.selectOption(builtinOption)
+  await projectSkillsUi.getByRole('button', { name: '加入待确认启用清单', exact: true }).click()
+  await projectSkillsUi.getByRole('button', { name: '预览本项目 Skill 绑定', exact: true }).click()
+  await page.getByRole('dialog', { name: '项目 Skill 绑定确认' }).waitFor()
+  await projectSkillsUi.getByRole('button', { name: '取消项目 Skill 绑定', exact: true }).click()
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8'), projectConfig)
+  await projectSkillsUi.getByRole('button', { name: '预览本项目 Skill 绑定', exact: true }).click()
+  await projectSkillsUi.getByRole('button', { name: '确认项目 Skill 绑定', exact: true }).click()
+  await page.getByText('项目已保存 · ledger 版本 1', { exact: false }).waitFor()
+  const boundLock = JSON.parse(await readFile(join(projectRoot, '.scholarflow/resources.lock.json'), 'utf8'))
+  assert.equal(boundLock.bindings.length, 2)
+  assert.equal(boundLock.bindings[0].digest, installedSkill.digest)
+  await projectSkillsUi.getByRole('combobox', { name: 'Skill 调用阶段', exact: true }).selectOption('revision')
+  await projectSkillsUi.getByRole('button', { name: '确认 Skill 调用阶段', exact: true }).click()
+  await page.getByText('项目已保存 · ledger 版本 2', { exact: false }).waitFor()
   const second = await rpc('session/create', { request: { workspaceId: projectWorkspace.value.workspace.workspaceId, agentPreset: 'scholarflow' } })
   const secondInspect = await rpc('scholarflow.v1/project.inspect', { request: { context: { requestId: 'req_TEST_ONLY', workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
   assert.equal(secondInspect.ok, true)
   assert.equal(secondInspect.value.ok, true, JSON.stringify(secondInspect.value))
   assert.equal(secondInspect.value.data.ledger.projectId, projectLedger.projectId)
+  const skillTools = await rpc('scholarflow.v1/verifySkillScope', { request: { sessionId: second.value.sessionId, bindingId: boundLock.bindings[0].bindingId } })
+  assert.equal(skillTools.ok, true, JSON.stringify(skillTools))
+  assert.equal(skillTools.value.stage, 'revision')
+  assert.equal(skillTools.value.skills.length, 2)
+  assert.equal(skillTools.value.readOk, true, JSON.stringify(skillTools.value))
+  assert.equal(skillTools.value.contentHash, digest(originalSkill))
+  assert.equal(skillTools.value.scriptDenied, true)
   const academic = await rpc('scholarflow.v1/verifyAcademicTools', { request: { sessionId: second.value.sessionId } })
   assert.equal(academic.ok, true, JSON.stringify(academic))
   assert.equal(academic.value.projectId, projectLedger.projectId)
@@ -277,6 +306,11 @@ try {
   await page.getByRole('heading', { name: '论文大纲 · 已确认', exact: true }).waitFor()
   assert.equal(await readFile(join(projectRoot, '原始材料.txt'), 'utf8'), 'TEST_ONLY raw source: never overwrite this file.\r\n')
   await page.getByRole('tab', { name: /^Draft ·/ }).click()
+  const selectionSkills = page.getByRole('combobox', { name: '已启用的选区 Skill', exact: true })
+  await selectionSkills.waitFor()
+  assert.equal(await selectionSkills.locator('option').count(), 2, 'only compatible selection-transform Skill appears beside the default action')
+  assert.match(await selectionSkills.innerText(), /selection-preserving-revision/u)
+  assert.doesNotMatch(await selectionSkills.innerText(), /TEST_ONLY-private-static/u)
   if (liveModel) {
     const before = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
     await page.getByRole('textbox', { name: '改写生成指令', exact: true }).fill('这是 TEST_ONLY 功能验证。根据已确认的单章节大纲写一段短文（不超过120个汉字），保留唯一已登记来源引用及限定范围。不要编造实验。')
@@ -335,6 +369,21 @@ try {
     assert.equal(accepted.slice(0, secondOffset), manualBody.slice(0, secondOffset))
     assert.ok(accepted.slice(secondOffset).includes(`[@${citeKey}]`))
     assert.notEqual(accepted, manualBody)
+    const runDirectories = (await readdir(join(projectRoot, '.scholarflow/runs'), { withFileTypes: true })).filter(entry => entry.isDirectory())
+    let verifiedPinnedStage = false
+    for (const entry of runDirectories) {
+      const runRoot = join(projectRoot, '.scholarflow/runs', entry.name)
+      const frozen = JSON.parse(await readFile(join(runRoot, 'snapshot.json'), 'utf8'))
+      if (frozen.stage !== 'revision') continue
+      const resources = JSON.parse(await readFile(join(runRoot, 'skills.json'), 'utf8')).resources
+      assert.equal(resources.length, 2)
+      assert.equal(resources[0].instructions, originalSkill)
+      assert.equal(resources[0].digest, installedSkill.digest)
+      assert.equal(resources[1].qualifiedId, 'builtin:selection-preserving-revision')
+      assert.deepEqual(frozen.skillDigests.map(row => row.digest), resources.map(row => row.digest))
+      verifiedPinnedStage = true
+    }
+    assert.equal(verifiedPinnedStage, true, 'real model stage must checkpoint its actual fixed Skill instructions')
     // Restore the fixture via actual explicit manual save for the remaining checks.
     await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).fill(manualBody)
     await page.getByRole('button', { name: '保存手工稿', exact: true }).click()
@@ -583,6 +632,9 @@ try {
     privateSkillOriginalBytesAndInertScriptsPreserved: true, globalSkillCatalogNotModified: true,
     privateSkillVersionsSurviveReadOnlyHostRestart: true,
     githubNetworkDisabledBeforeIO: true, realPublicGithubMultiSkillPreviewAndImport: liveSkills,
+    nativeUiProjectSkillBindingCancelAndConfirm: true, boundAgentSkillReadStageAndScriptDenial: true,
+    builtinSkillBindingAndCompatibleSelectionMenu: true,
+    realModelStageWithFixedSkillInstructions: liveModel,
     clientErrors: errors, desktopProfileTouched: false }, null, 2))
   console.log(`Real DSH ${evidenceName} smoke passed; evidence: .dsh-tmp/${evidenceName}-smoke.json`)
 } catch (error) {

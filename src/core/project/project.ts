@@ -87,7 +87,7 @@ export async function prepareInit(io: FileStore, input: { title: string; type: s
     { path: MEMORY_APPROVALS, text: json({ schemaVersion: 1, projectId, entries: Object.fromEntries([
       ['decisions', '# 已确认决定\n'], ['terminology', '# 已确认术语\n'], ['writing-memory', '# 已确认写作记忆\n']
     ].map(([name, text]) => [`.scholarflow/context/${name}.md`, { contentHash: digest(text), source: 'initialization', confirmedAt: new Date().toISOString() }])) }) },
-    { path: '.scholarflow/resources.lock.json', text: json({ schemaVersion: 1, projectId, skills: [], profiles: [{ ref: config.writing.preset, contentHash: digest(writingProfile), content: writingProfile }] }) },
+    { path: '.scholarflow/resources.lock.json', text: json({ schemaVersion: 1, projectId, bindings: [], resolvedAt: new Date().toISOString() }) },
     { path: `.scholarflow/drafts/${revision}/paper.md`, text: paper },
     { path: `.scholarflow/drafts/${revision}/manifest.json`, text: json({ schemaVersion: 1, revisionId: revision, documentId: 'paper', contentHash: digest(paper), referencesHash: digest(references), createdAt: new Date().toISOString() }) },
     { path: LEDGER_PATH, text: json(ledgerSchema.parse(ledger)) },

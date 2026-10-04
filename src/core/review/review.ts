@@ -18,7 +18,7 @@ export async function reviewInput(io: FileStore) {
   }
   const profile = await io.read('.scholarflow/profiles/review.md')
   const contextHashes: Record<string, string> = {}
-  for (const path of [current.config.writing.projectProfile, '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md', '.scholarflow/context/approvals.json']) {
+  for (const path of [current.config.writing.projectProfile, '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md', '.scholarflow/context/approvals.json', '.scholarflow/resources.lock.json']) {
     const image = await io.read(path); contextHashes[path] = image ? digest(image.text) : 'missing'
   }
   const { requirements, materials, sources, evidence, claims, outline, claimAnchors } = current.ledger

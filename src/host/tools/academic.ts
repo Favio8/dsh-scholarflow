@@ -1,5 +1,8 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { z } from 'zod'
+import { currentSkillStage, readBindings } from '../../core/skills/bindings.ts'
+import { readPrivateSkill } from '../skills/reader.ts'
+import { relativePath } from '../../shared/schema.ts'
 import { resolveStore, applicationResult } from '../bridge/project-api.ts'
 import { snapshot } from '../../core/project/project.ts'
 import { readParsed } from '../../core/materials/materials.ts'
@@ -47,7 +50,7 @@ export function academicDefinitions(ctx: Host) {
       if (args.action === 'memory') return { memory: await approvedMemory(io, current.ledger.projectId), scope: 'current-project-only' }
       return { project: current.config.project, ledgerRevision: current.ledger.revision, documentHash: current.document.contentHash, revisionId: current.document.revisionId,
         externalChange: current.document.externalChange, outlineConfirmation: current.ledger.outline.confirmation, budget: current.config.workflow.budget,
-        capabilities: { localMaterials: true, guardedProposals: true, deterministicReview: true, onlineResearch: 'operator-confirmed-Crossref-metadata', privateSkillImport: false },
+        capabilities: { localMaterials: true, guardedProposals: true, deterministicReview: true, onlineResearch: 'operator-confirmed-Crossref-metadata', privateSkillImport: 'operator-only-Settings', stageScopedSkills: true },
         nextStep: '在工作台确认要求、证据和大纲；正文候选和改写通过 Draft 的可见计划发起，主稿只由用户明确接受建议后改变。' }
     }),
     make('scholar_materials', ['list', 'read'], '列出已登记资料，分块读取实际解析内容；不会扫描未选资料或读取凭据。',
@@ -107,10 +110,28 @@ export function academicDefinitions(ctx: Host) {
       const current = await snapshot(io), result = await runReview(io, current.ledger.revision)
       return { report: result.report, ledgerRevision: result.revision, nextStep: '未知项不是通过；用户可在 Review 查看问题。正文修复仍需建议和显式接受。' }
     }),
-    make('scholar_skill', ['list'], '仅查看本项目 Skill 绑定与限制；不读取普通 DSH Skill 根、不安装库、不执行脚本。', {}, simple(['list']), async (_args, io) => {
-      const current = await snapshot(io)
-      return { bindings: current.config.skills.bindings, resolvedSkills: [], capability: 'private-resource-resolver-not-yet-available',
-        limitation: '启用但未解析的 Skill 会阻塞生成；不会忽略绑定，也不会从全局普通目录借用其他技能。' }
+    make('scholar_skill', ['list', 'read'], '只列出本项目当前 Skill 调用阶段允许的固定版本，按需读取说明或静态文本参考。不读取普通目录、不安装库、不执行脚本；真实性与权限规则始终优先。',
+      { bindingId: { type: 'string' }, resourcePath: { type: 'string' }, charOffset: { type: 'integer' } },
+      z.object({ action: actions(['list', 'read']), bindingId: id.optional(), resourcePath: relativePath.default('SKILL.md'), charOffset: offset }).strict(), async (args, io) => {
+      const current = await snapshot(io), locked = await readBindings(io, current.config), active = await currentSkillStage(io)
+      const allowed = locked.bindings.filter(binding => binding.enabledStages.includes(active.stage))
+      if (args.action === 'list') {
+        const skills = []
+        for (const binding of allowed) { const bundle = await readPrivateSkill(binding); skills.push({ bindingId: binding.bindingId, qualifiedId: binding.qualifiedId,
+          digest: binding.digest, metadata: bundle.manifest.metadata, priority: skills.length + 1 }) }
+        return { stage: active.stage, scope: 'current-project-and-stage', skills, limitations: ['只列出已启用项；安装不代表启用，禁用不抹去聊天历史。'] }
+      }
+      const binding = allowed.find(binding => binding.bindingId === args.bindingId)
+      invariant(binding, 'SKILL_STAGE_DENIED', '此固定资源未在当前项目的调用阶段启用。')
+      invariant(args.resourcePath === 'SKILL.md' || /^references\/.*\.(?:md|txt|json|yaml|yml)$/iu.test(args.resourcePath), 'SKILL_RESOURCE_PATH_INVALID', '只支持说明和静态文本参考；不能加载程序或可执行资源。')
+      const bundle = await readPrivateSkill(binding), file = bundle.files.find(file => file.relativePath === args.resourcePath)
+      invariant(file && file.bytes.byteLength <= 65536, 'SKILL_RESOURCE_UNAVAILABLE', '所选固定文本资源不存在或超出 64 KiB。')
+      const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(file.bytes)
+      invariant(args.charOffset <= content.length && unicodeBoundary(content, args.charOffset), 'SKILL_RESOURCE_RANGE_INVALID', '说明文本范围无效。')
+      let end = Math.min(content.length, args.charOffset + 12000); if (!unicodeBoundary(content, end)) end--
+      return { bindingId: binding.bindingId, qualifiedId: binding.qualifiedId, digest: binding.digest, resourcePath: args.resourcePath, stage: active.stage,
+        content: content.slice(args.charOffset, end), charOffset: args.charOffset, nextCharOffset: end < content.length ? end : null, executionPolicy: 'instructions-only',
+        priority: allowed.indexOf(binding) + 1, warnings: bundle.manifest.metadata.warnings }
     }),
     make('scholar_export', ['preflight'], '预检当前稿件三种已支持的导出格式；不创建交付、上传、投稿或发布。用户在 Export 重新预检并确认后才能交付。', {}, simple(['preflight']), async (_args, io) => {
       const plan = await prepareDelivery(io)

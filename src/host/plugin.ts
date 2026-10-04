@@ -36,6 +36,10 @@ import { LocalSkillSource } from './skills/local.ts'
 import { skillOptions, type SkillBundle } from '../shared/skills.ts'
 import { hash } from '../shared/schema.ts'
 import { githubLocation, githubSkills, type GithubDiscovery, type GithubSkillPreview } from './skills/github.ts'
+import { prepareBindings, applyBindings, readBindings, currentSkillStage, selectSkillStage, type BindingPlan } from '../core/skills/bindings.ts'
+import { readPrivateSkill, libraryEntry, builtinSkills } from './skills/reader.ts'
+import { stage } from '../shared/schema.ts'
+import type { ResourceBinding } from '../shared/skills.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -69,6 +73,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private skillPlans = new Map<string, { resource: { kind: 'local'; bundle: SkillBundle } | { kind: 'github'; preview: GithubSkillPreview }; hash: string; peerId: string; expires: number }>()
   private githubProvider: ReturnType<typeof githubSkills>
   private preparingSkill = false
+  private bindingPlans = new Map<string, { plan: BindingPlan; context: RequestContext; peerId: string; expires: number }>()
   constructor(ctx: Host) {
     super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
     this.researchProvider = crossrefProvider(ctx.web)
@@ -77,7 +82,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
       timer.unref()
-      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear() }
+      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear() }
     }, 'scholarflow: expire operator skill previews')
   }
 
@@ -159,6 +164,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     for (const [key, row] of this.skillSources) if (row.expires < Date.now()) this.skillSources.delete(key)
     for (const [key, row] of this.githubSources) if (row.expires < Date.now()) this.githubSources.delete(key)
     for (const [key, row] of this.skillPlans) if (row.expires < Date.now()) this.skillPlans.delete(key)
+    for (const [key, row] of this.bindingPlans) if (row.expires < Date.now()) this.bindingPlans.delete(key)
   }
 
   @Remote('skills.library')
@@ -169,6 +175,77 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const picker = (this.ctx as Host).get('directoryPicker')?.capability()
       return { ...catalog, pickerKind: picker?.kind ?? 'unavailable', location: '<DSH_HOME>/scholarflow/skills',
         executionPolicy: 'instructions-only' }
+    })
+  }
+
+  @Remote('skills.project')
+  async skillsProject(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = inspectRequest.parse(request), { io } = await resolveStore(this.ctx, input.context, signal)
+      const current = await snapshot(io), locked = await readBindings(io, current.config), stage = await currentSkillStage(io)
+      const resources = []
+      for (const binding of locked.bindings) {
+        try { const bundle = await readPrivateSkill(binding); resources.push({ binding, metadata: bundle.manifest.metadata, available: true }) }
+        catch { resources.push({ binding, available: false, warning: '固定资源缺失或改变；需要重新导入原版本，未改用最新版本。' }) }
+      }
+      const installed = await this.skillLibrary.list()
+      return { resources, legacyMigration: locked.legacyMigration, stage, installed: { ...installed,
+        versions: [...await builtinSkills(), ...installed.versions.map(manifest => ({ ...manifest, scope: 'library' }))] } }
+    })
+  }
+
+  @Remote('skills.prepareBindings')
+  async skillsPrepareBindings(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.pruneSkills()
+      const input = z.object({ context: inspectRequest.shape.context, selections: z.array(z.object({ qualifiedId: z.string().max(1000), digest: hash, scope: z.enum(['library', 'builtin']).default('library'),
+        enabledStages: z.array(stage).min(1).max(7) }).strict()).max(30) }).strict().parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      invariant(this.bindingPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请完成已有项目绑定预览。')
+      const bindings: ResourceBinding[] = [], metadata = []
+      for (const selection of input.selections) {
+        const asset = selection.scope === 'builtin' ? (await builtinSkills()).find(row => row.metadata.qualifiedId === selection.qualifiedId && row.digest === selection.digest) : undefined
+        invariant(selection.scope !== 'builtin' || asset?.origin.kind === 'builtin', 'SKILL_RESOURCE_MISSING', '所选内置版本不存在。')
+        const entryPath = asset?.origin.kind === 'builtin' ? asset.origin.asset : libraryEntry(selection.qualifiedId, selection.digest)
+        const bundle = await readPrivateSkill({ bindingId: 'binding_preview', qualifiedId: selection.qualifiedId, digest: selection.digest, scope: selection.scope,
+          entryPath, enabledStages: selection.enabledStages })
+        const binding: ResourceBinding = { bindingId: newId('binding'), qualifiedId: selection.qualifiedId, digest: selection.digest, scope: selection.scope,
+          entryPath, enabledStages: selection.enabledStages,
+          ...(bundle.manifest.origin.kind === 'github' && { origin: { repository: bundle.manifest.origin.repository, commit: bundle.manifest.origin.commit,
+            subpath: bundle.manifest.origin.subpath, ...(bundle.manifest.origin.license && { license: bundle.manifest.origin.license }) } }) }
+        bindings.push(binding); metadata.push(bundle.manifest.metadata)
+      }
+      const plan = await prepareBindings(io, bindings, readPrivateSkill)
+      invariant(plan.ledgerRevision === revision && plan.projectId === input.context.projectId, 'STALE_LEDGER_REVISION', '项目版本或身份已变化，请刷新后重新预览。')
+      this.bindingPlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, bindings: plan.bindings, metadata, legacyMigration: plan.legacyMigration,
+        risks: ['仅启用所列固定版本和阶段；显示的第一项优先。真实性和权限规则始终优先于 Skill。本次清单替换当前项目的启用清单，未列项将禁用。',
+          '变更会使相关审查需更新、使尚未开始的旧生成计划失效；库更新不会自动更新项目绑定。',
+          '既有聊天历史中的说明仍保留。完全更换行为上下文时，请创建绑定同一项目的新 ScholarFlow 会话。',
+          ...(plan.legacyMigration ? ['此项目使用旧资源锁。本次确认会保留原配置和完整原锁到资源历史，再迁移为当前固定绑定格式。'] : [])] }
+    })
+  }
+
+  @Remote('skills.applyBindings')
+  async skillsApplyBindings(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = onlineConfirmRequest.parse(request), row = this.bindingPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请重新预览并确认项目绑定。')
+      invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.plan.projectId,
+        'SESSION_BINDING_CHANGED', '绑定确认不属于当前项目会话。')
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      for (const binding of row.plan.bindings) await readPrivateSkill(binding)
+      signal.throwIfAborted(); this.bindingPlans.delete(input.planId)
+      return applyBindings(io, row.plan)
+    })
+  }
+
+  @Remote('skills.selectStage')
+  async skillsSelectStage(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = z.object({ context: inspectRequest.shape.context, stage }).strict().parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return selectSkillStage(io, input.stage, mutationRevision(input.context))
     })
   }
 
@@ -279,6 +356,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       if (input.sourceId && this.skillSources.get(input.sourceId)?.peerId === peerId) this.skillSources.delete(input.sourceId)
       if (input.sourceId && this.githubSources.get(input.sourceId)?.peerId === peerId) this.githubSources.delete(input.sourceId)
       if (input.planId && this.skillPlans.get(input.planId)?.peerId === peerId) this.skillPlans.delete(input.planId)
+      if (input.planId && this.bindingPlans.get(input.planId)?.peerId === peerId) this.bindingPlans.delete(input.planId)
       return { dismissed: true }
     })
   }
@@ -381,15 +459,15 @@ export class ScholarFlowRemote extends TypertRemoteService {
       mutationRevision(input.context)
       const { io } = await resolveStore(this.ctx, input.context, signal)
       const model = await selectedModel(this.ctx, input.context.sessionId, signal)
-      const plan = await prepareGeneration(io, input, { providerId: model.selected.provider, modelId: model.selected.model })
+      const plan = await prepareGeneration(io, input, { providerId: model.selected.provider, modelId: model.selected.model }, readPrivateSkill)
       invariant(plan.inputBytes + 6096 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '选定范围超过模型上下文预算；请缩小章节和证据范围，未截掉关键证据继续生成。')
       for (const [key, row] of this.generationPlans) if (row.expires < Date.now()) this.generationPlans.delete(key)
       invariant(this.generationPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有生成计划。')
       this.generationPlans.set(plan.id, { plan, selected: model.selected, peerId, expires: Date.now() + 600000 })
       return { planId: plan.id, planHash: plan.contentHash, runId: plan.snapshot.runId, model: plan.snapshot.modelDescriptor, stage: plan.snapshot.stage,
-        inputBytes: plan.inputBytes, evidenceIds: plan.evidenceIds, budget: plan.snapshot.budget,
+        inputBytes: plan.inputBytes, evidenceIds: plan.evidenceIds, budget: plan.snapshot.budget, skillDigests: plan.snapshot.skillDigests,
         scope: input.selection ? input.selection.sourceRange : { startUtf16: 0, endUtf16: (await snapshot(io)).document.text.length },
-        sourceText: input.selection?.sourceText, risks: ['将选定证据、当前稿件范围、项目文风和确认记忆发送给所列宿主模型提供方；本地资料模式不等于模型离线处理。',
+        sourceText: input.selection?.sourceText, risks: ['将选定证据、当前稿件范围、项目文风、确认记忆和当前阶段固定 Skill 说明／文本参考发送给所列宿主模型提供方；本地资料模式不等于模型离线处理。',
           '生成结果为待审阅建议，接受前不会改写主稿。宿主会话日志保留模型请求以供追溯；项目诊断日志不另存完整 Prompt。'] }
     })
   }
@@ -718,6 +796,21 @@ export class ScholarFlowRemote extends TypertRemoteService {
       shellDenied: shell.isError,
       scopedPolicy: prompt.sections.length === 1 && prompt.sections[0].name === 'scholarflow:policy',
       promptTools: prompt.tools.map((tool: Host) => tool.name) }
+  }
+
+  @Remote
+  async verifySkillScope(request: unknown, signal: AbortSignal) {
+    this.requireOperator()
+    invariant(process.env.SCHOLARFLOW_G0_VERIFY === '1', 'UNSUPPORTED_DSH_CAPABILITY', '此接口仅供隔离 G0 验证。')
+    const ctx = this.ctx as Host, input = z.object({ sessionId: z.string(), bindingId: z.string() }).strict().parse(request)
+    const resolved = await ctx.sessionController.resolveAgent(input.sessionId)
+    if (resolved.error) throw resolved.error
+    const call = (args: unknown) => ctx.tools.execute({ callId: newId('call'), name: 'scholar_skill', arguments: args, agent: resolved.agent, signal })
+    const list = await call({ action: 'list' }), read = await call({ action: 'read', bindingId: input.bindingId })
+    const script = await call({ action: 'read', bindingId: input.bindingId, resourcePath: 'scripts/no-run.js' })
+    return { stage: list.value?.data?.stage, skills: list.value?.data?.skills, readOk: !read.isError && read.value?.ok === true,
+      readError: read.value?.error?.code, contentHash: read.value?.data?.content ? digest(read.value.data.content) : undefined,
+      scriptDenied: script.value?.ok === false }
   }
 
   @Remote

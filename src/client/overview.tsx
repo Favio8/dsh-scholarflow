@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { projectTextPaths } from '../shared/requirements.ts'
+import { ProjectSkills } from './project-skills.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 export function Overview({ project, context, api, refresh, run, busy }: Props) {
@@ -53,5 +54,6 @@ export function Overview({ project, context, api, refresh, run, busy }: Props) {
       })}>确认将当前文本纳入项目记忆</button>}
       <button disabled={busy} onClick={() => { if (text !== file.text && !window.confirm('放弃这份未保存的项目指令编辑？')) return; setFile(undefined); setText('') }}>关闭项目指令编辑</button></>}
     <p role="status">{message}</p>
+    <ProjectSkills project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} />
   </section>
 }

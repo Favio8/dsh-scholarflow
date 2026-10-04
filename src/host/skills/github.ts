@@ -113,6 +113,7 @@ export function githubSkills(web: HostWeb) {
       const prefix = candidate ? `${candidate}/` : ''
       const entries = discovery.tree.filter(entry => !prefix || entry.path.startsWith(prefix))
       const files: GithubFile[] = []
+      const names = new Set<string>()
       let totalBytes = 0
       for (const entry of entries) {
         const path = entry.path.slice(prefix.length)
@@ -121,6 +122,9 @@ export function githubSkills(web: HostWeb) {
         if (entry.type === 'tree' && entry.mode === '040000') continue
         invariant(entry.type === 'blob' && (entry.mode === '100644' || entry.mode === '100755') && entry.size !== undefined,
           'SKILL_SOURCE_LINK', 'Skill 含链接、子模块或特殊文件，未下载其目标。')
+        const folded = path.normalize('NFC').toLowerCase()
+        invariant(!names.has(folded), 'SKILL_PATH_INVALID', 'Skill 文件路径在 Windows 上重名，未下载。')
+        names.add(folded)
         totalBytes += entry.size
         invariant(totalBytes <= MAX_SKILL_BYTES && files.length < MAX_SKILL_FILES, 'SKILL_PACKAGE_TOO_LARGE', '单个 Skill 最多 200 个文件、20 MiB。')
         files.push({ relativePath: path, sizeBytes: entry.size, sha: entry.sha })

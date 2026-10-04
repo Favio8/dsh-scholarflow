@@ -49,5 +49,37 @@ import and a real public `openai/skills` multi-candidate import passed through t
 installed Host settings UI. The isolated DSH_HOME global-catalog sentinel and
 source bytes remain unchanged; private versions survive a read-only Host restart.
 Evidence: `.dsh-tmp/skills-smoke.json` (ignored; no auth token or credentials).
-Stage bindings, run snapshots and safe version removal are separate follow-up work;
-this import verification alone is not full AT-17/18 or V1 acceptance.
+This import verification alone is not full AT-17/18 or V1 acceptance.
+
+## Stage binding follow-up — 2026-10-05
+
+Overview explicitly previews and confirms fixed versions, enabled stages and
+priority order. Install remains separate. Library updates add immutable versions;
+projects are not silently migrated. Changing bindings invalidates pending plans
+and dependent review. The exact SPEC resource-lock shape is used for new projects.
+Legacy empty locks remain readable; explicit migration archives their complete
+original bytes and YAML before editing only the owned binding key. Unsupported
+or inconsistent locks fail closed.
+
+The writer resolves the actual stage's fixed resources before approval, copies
+instruction strings and bounded UTF-8 references into its plan, and checkpoints
+these values in `runs/<runId>/skills.json`. It uses those bytes after approval;
+later library changes do not replace them. Run snapshots record the digests and
+resource-lock hash. Core receives a reader callback and does not import Host APIs.
+Four built-in instruction-only resources are packaged as assets; enabling them is
+explicit. Missing or changed fixed assets fail instead of selecting latest.
+
+`scholar_skill` lists and reads only this project's operator-selected conversation
+stage, with no caller-selected root or project. It rejects program/resource-script
+reads. Writer stages choose their own fixed stage independently of that conversation
+setting. Selection actions expose only enabled compatible selection-transform
+resources. Ordinary modes retain their own catalog and tools. Disable does not
+erase instructions already present in conversation history.
+
+125 automated cases and typecheck pass at this checkpoint. Native DSH proves
+binding preview cancellation, confirmation, stage-scoped Agent reads, script-read
+denial, built-in binding and the selection menu. Real DeepSeek model execution
+with the new bindings also passed draft rejection, citation-preserving repeated
+paragraph rewrite/acceptance and cancellation. Actual resources are retained in
+the isolated test run directories. These checks do not certify all other V1 work.
+Project-local resource resolution and reference-aware safe version removal remain.

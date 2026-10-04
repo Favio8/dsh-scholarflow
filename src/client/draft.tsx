@@ -25,12 +25,23 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
   const [proposal, setProposal] = useState<any>()
   const [activeRun, setActiveRun] = useState('')
   const [progress, setProgress] = useState<any>()
+  const [skills, setSkills] = useState<any[]>([]), [skillBindingId, setSkillBindingId] = useState('')
   const [bufferReady, setBufferReady] = useState(false), [bufferMessage, setBufferMessage] = useState('正在读取宿主暂存缓冲…'), [recoverable, setRecoverable] = useState<any>()
   const bufferHash = useRef<string | null>(null), hostDirty = useRef(false), persistence = useRef(Promise.resolve()), persistenceBlocked = useRef(false)
   const root = useRef<HTMLDivElement>(null)
   const dirty = text !== project.document.text || baseHash !== project.document.contentHash
   const projection = useMemo(() => projectMarkdown(project.document.text), [project.document.contentHash])
   const statistics = useMemo(() => wordStats(project.document.text), [project.document.contentHash])
+  useEffect(() => {
+    let live = true
+    api('skills.project', { context: context() }).then(result => {
+      if (!live) return
+      const available = result.resources.filter((row: any) => row.available && row.binding.enabledStages.includes('revision')
+        && row.metadata.compatibility === 'compatible' && row.metadata.capabilities.includes('selection-transform'))
+      setSkills(available); setSkillBindingId(previous => available.some((row: any) => row.binding.bindingId === previous) ? previous : '')
+    }).catch(() => live && setSkills([]))
+    return () => { live = false }
+  }, [project.ledger.revision])
   useEffect(() => {
     if (!buffers.has(bufferKey)) { setText(project.document.text); setBaseHash(project.document.contentHash) }
     setSelection(undefined); setPlan(undefined)
@@ -89,7 +100,7 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
   }
   const prepare = (whole: boolean) => run(async () => {
     if (!whole && !selection) throw new Error('请先选择已保存的渲染正文。')
-    setPlan(await api('writing.prepare', { context: context(), instruction, ...(!whole && { selection }) }))
+    setPlan(await api('writing.prepare', { context: context(), instruction, ...(!whole && { selection, ...(skillBindingId && { skillBindingId }) }) }))
   })
   return <section aria-label="正文编辑"><h3>正文编辑</h3>
     <p>Markdown 是主稿事实源。手工编辑与模型建议均校验当前版本；主稿不会被旧缓冲自动覆盖。</p>
@@ -121,11 +132,14 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
     <h4>已保存主稿预览</h4><div ref={root} onMouseUp={capture} onKeyUp={capture}><MarkdownView projection={projection} /></div>
     {selection && <section aria-label="已捕获选区"><h4>实际改写范围 [{selection.sourceRange.startUtf16}, {selection.sourceRange.endUtf16})</h4><pre>{selection.sourceText}</pre><p>引用：{selection.citationKeys.join('、') || '无'} · 段落 {selection.blockIds.join('、')}</p></section>}
     <label>改写／生成指令<textarea aria-label="改写生成指令" value={instruction} onChange={e => setInstruction(e.target.value)} /></label>
+    {!!skills.length && <label>已启用的选区 Skill<select aria-label="已启用的选区 Skill" value={skillBindingId} onChange={e => setSkillBindingId(e.target.value)}><option value="">使用修订阶段的默认启用顺序</option>
+      {skills.map(row => <option key={row.binding.bindingId} value={row.binding.bindingId}>{row.metadata.displayName} · {row.binding.digest.slice(7, 19)}</option>)}</select></label>}
     <button disabled={busy || dirty || !selection || !instruction.trim()} onClick={() => prepare(false)}>预览选区改写计划</button>
     <button disabled={busy || dirty || !instruction.trim()} onClick={() => prepare(true)}>预览全文生成计划</button>
     {plan && <section role="dialog" aria-modal="false" aria-label="模型生成确认"><h4>确认宿主模型调用</h4>
       <p>{plan.model.providerId} / {plan.model.modelId} · 输入约 {plan.inputBytes} bytes · 源码范围 [{plan.scope.startUtf16}, {plan.scope.endUtf16})</p>
       <p>模型调用预算 {plan.budget.maxModelCalls}；运行时限 {plan.budget.maxDurationMinutes} 分钟；仅生成待审阅建议。</p>
+      <p>本次固定 Skill：{plan.skillDigests?.map((row: any) => `${row.qualifiedId} · ${row.digest}`).join('；') || '无'}</p>
       {plan.sourceText && <pre>{plan.sourceText}</pre>}{plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy} onClick={() => run(async () => {
         const confirmedPlan = plan

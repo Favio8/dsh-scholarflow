@@ -8,6 +8,7 @@ import { validateSelection, projectMarkdown, citationKeys } from '../editing/mar
 import { commit, inspectRecovery } from '../store/transactions.ts'
 import { MAX_MATERIAL_BYTES, sensitivePath } from '../materials/materials.ts'
 import { approvedMemory } from '../project/memory.ts'
+import { resolveStageSkills, RESOURCE_LOCK, type SkillReader } from '../skills/bindings.ts'
 
 export const modelOutputSchema = z.object({ replacementText: z.string().min(1).max(2 * 1024 * 1024).refine(text => !!text.trim()), limitations: z.array(z.string()).max(100) }).strict()
 export interface GenerationPlan { id: string; contentHash: string; snapshot: z.infer<typeof runSnapshotSchema>; input: z.infer<typeof generationRequest>;
@@ -25,7 +26,7 @@ export function validateModelReplacement(plan: GenerationPlan, replacementText: 
   else invariant(sources.some(source => keys.includes(source.citeKey)), 'MODEL_CITATION_INVALID', '事实性全文缺少已登记证据来源的有效引用 token。')
 }
 
-export async function prepareGeneration(io: FileStore, input: z.infer<typeof generationRequest>, model: { providerId: string; modelId: string }): Promise<GenerationPlan> {
+export async function prepareGeneration(io: FileStore, input: z.infer<typeof generationRequest>, model: { providerId: string; modelId: string }, skillReader?: SkillReader): Promise<GenerationPlan> {
   input = generationRequest.parse(input)
   invariant(!input.sectionId, 'SECTION_GENERATION_UNAVAILABLE', '当前仅支持全文候选和明确单段选区；章节生成尚未完成范围校验，禁止将章节候选替换整篇稿件。')
   const current = await snapshot(io)
@@ -59,11 +60,12 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
   const profile = await io.read(current.config.writing.projectProfile)
   invariant(profile && Buffer.byteLength(profile.text) <= 65536, 'PROFILE_UNAVAILABLE', '项目文风缺失或超过 64 KiB。')
   const memory = current.config.writing.useApprovedProjectMemory ? await approvedMemory(io, current.ledger.projectId) : {}
-  // Project-bound skills are added by the private resource resolver; fail closed
-  // until each declared binding has a verified stage-scoped immutable snapshot.
-  invariant(!current.config.skills.bindings.length, 'SKILL_BINDING_UNAVAILABLE', '当前项目启用的 Skill 尚未完成私有快照校验，不能忽略绑定后继续运行。')
+  invariant(!input.skillBindingId || input.selection, 'SKILL_SELECTION_UNAVAILABLE', '明确选择 Skill 的动作需要有效正文选区。')
+  const skills = await resolveStageSkills(io, input.selection ? 'revision' : 'drafting', skillReader, input.skillBindingId)
   const context = { project: current.config.project, requirements: Object.values(current.ledger.requirements), outline: { ...current.ledger.outline, sections },
     claims, evidence, sources: [...new Set(evidence.map(item => item.sourceId))].map(id => current.ledger.sources[id]), projectProfile: profile.text, approvedMemory: memory,
+    academicSkills: skills.resources,
+    skillPolicy: '仅把锁定 Skill 用作此阶段的说明参考；priority 数字越小越优先。冲突与真实性／权限约束冲突时先保留硬约束，不运行任何脚本或要求安装。',
     manuscript: input.selection ? { sourceText: input.selection.sourceText, prefixContext: input.selection.prefixContext, suffixContext: input.selection.suffixContext } : current.document.text,
     expectedScope: input.selection ? '只替换给出的选区，保留引用 token' : '基于已确认大纲生成全文候选；不直接写主稿',
     citationContract: { syntax: '[@citeKey]', tokens: [...new Set(evidence.map(item => current.ledger.sources[item.sourceId].citeKey))].map(key => `[@${key}]`), preserveSelectionKeys: input.selection?.citationKeys ?? [] },
@@ -71,7 +73,8 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
   const runId = newId('run')
   const plan = { id: newId('plan'), snapshot: runSnapshotSchema.parse({ schemaVersion: 1, runId, projectId: current.config.project.id, sessionId: input.context.sessionId,
     stage: input.selection ? 'revision' : 'drafting', configHash: current.configHash, ledgerRevision: current.ledger.revision, documentHash: current.document.contentHash,
-    outlineVersion: current.ledger.outline.version, materialHashes, sourceHashes, profileHash: digest(profile.text), skillDigests: [], modelDescriptor: model,
+    outlineVersion: current.ledger.outline.version, materialHashes, sourceHashes, profileHash: digest(profile.text),
+    skillDigests: skills.resources.map(resource => ({ qualifiedId: resource.qualifiedId, digest: resource.digest })), resourceLockHash: skills.resourceLockHash, modelDescriptor: model,
     budget: current.config.workflow.budget, networkScope: 'local-only', createdAt: new Date().toISOString() }), input, context, evidenceIds,
     inputBytes: Buffer.byteLength(SYSTEM + input.instruction + json(context)), ledgerHash: current.ledgerHash }
   return { ...plan, contentHash: digest(json(plan)) }
@@ -84,6 +87,8 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
   invariant(digest(json(body)) === contentHash, 'INVALID_APPROVAL', '生成计划内容已改变。')
   const current = await snapshot(io)
   const checkResources = async () => {
+    if (plan.snapshot.resourceLockHash) invariant(digest((await io.read(RESOURCE_LOCK))?.text ?? '') === plan.snapshot.resourceLockHash,
+      'STALE_RESOURCE_VERSION', '确认期间项目 Skill 资源锁发生变化。')
     const profile = await io.read(current.config.writing.projectProfile)
     invariant(profile && digest(profile.text) === plan.snapshot.profileHash, 'STALE_RESOURCE_VERSION', '确认期间项目文风发生变化。')
     if (current.config.writing.useApprovedProjectMemory) await approvedMemory(io, current.ledger.projectId)
@@ -114,6 +119,8 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
         '该项目有未结束运行；请先检查或明确恢复，不能启动第二条修改流程。')
     }
     await commit(io, [{ path: `.scholarflow/runs/${state.runId}/snapshot.json`, before: undefined, after: json(plan.snapshot) },
+      { path: `.scholarflow/runs/${state.runId}/skills.json`, before: undefined, after: json({ schemaVersion: 1, projectId: state.projectId,
+        resourceLockHash: plan.snapshot.resourceLockHash, resources: plan.context.academicSkills ?? [] }) },
       { path: statePath(state.runId), before: undefined, after: json(state) }, { path: ACTIVE, before: active, after: json(state) }])
   })
   const budgetSignal = AbortSignal.any([signal, AbortSignal.timeout(Math.min(plan.snapshot.budget.maxDurationMinutes * 60000, 30 * 60000))])
