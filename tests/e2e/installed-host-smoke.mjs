@@ -10,7 +10,7 @@ import { prepareInit } from '../../src/core/project/project.ts'
 import { commit } from '../../src/core/store/transactions.ts'
 import { homedir } from 'node:os'
 import { digest } from '../../src/core/store/files.ts'
-import { stringify } from 'yaml'
+import { stringify, parse as parseYaml } from 'yaml'
 import { academicToolNames } from '../../src/host/tools/academic.ts'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
@@ -21,7 +21,7 @@ const liveResearch = process.argv.includes('--live-research')
 const liveSkills = process.argv.includes('--live-skills')
 const credentialPath = join(homedir(), '.dsh/.credentials.yaml')
 const credentialHash = liveModel ? digest(await readFile(credentialPath)) : undefined
-const testHome = resolve(liveModel ? '.dsh-tmp/model-home' : '.dsh-tmp/g0-home')
+const testHome = resolve(liveModel ? '.dsh-tmp/model-home' : '.dsh-tmp/g0-home', String(Date.now()))
 const profile = join(testHome, 'profiles/scholarflow-g0')
 await mkdir(join(profile, 'node_modules'), { recursive: true })
 await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'scholarflow-g0-TEST_ONLY', private: true,
@@ -991,6 +991,40 @@ try {
   const denied = await rpc('scholarflow.v1/verifyGateway', { request: { sessionId: readOnlySession.value.sessionId } })
   assert.equal(denied.ok, false)
   assert.match(denied.error.message, /read-only/)
+  // TEST_ONLY recovered project: unknown schemas must stay opaque in the UI,
+  // with original-byte downloads and mutation denial before any file write.
+  await page.locator('.sf-project').getByRole('combobox', { name: 'DSH 工作区', exact: true }).selectOption(recoveryWorkspace.value.workspace.workspaceId)
+  await page.getByRole('button', { name: '新建 ScholarFlow 会话', exact: true }).click()
+  await page.getByText('项目已保存', { exact: false }).waitFor()
+  const futureSessionId = await page.locator('.sf-project').getAttribute('data-sf-session-id')
+  const futureContext = { requestId: 'req_TEST_ONLY_future', workspaceId: recoveryWorkspace.value.workspace.workspaceId, sessionId: futureSessionId, projectId: crashPlan.config.project.id, expectedLedgerRevision: 0 }
+  for (const path of ['.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json', '.scholarflow/project.yaml']) {
+    const originalVersion = await readFile(join(recoveryRoot, path), 'utf8')
+    const futureData = path.endsWith('.yaml') ? parseYaml(originalVersion) : JSON.parse(originalVersion)
+    futureData.schemaVersion = 99; futureData.futureOnly = { test: 'TEST_ONLY preserve unknown record' }
+    const futureBytes = path.endsWith('.yaml') ? stringify(futureData) : JSON.stringify(futureData, null, 2) + '\n'
+    await writeFile(join(recoveryRoot, path), futureBytes)
+    await page.getByRole('button', { name: '刷新项目状态', exact: true }).click()
+    const readonlyUi = page.getByRole('region', { name: '不兼容项目只读查看', exact: true })
+    await readonlyUi.waitFor()
+    assert.equal(await page.getByRole('tablist', { name: '论文工作区页面', exact: true }).count(), 0)
+    await readonlyUi.locator('summary').filter({ hasText: `${path} · 原始文件` }).click()
+    await readonlyUi.getByText(digest(futureBytes), { exact: true }).waitFor()
+    const originalDownload = page.waitForEvent('download')
+    await readonlyUi.getByRole('button', { name: `下载原始文件 ${path}`, exact: true }).click()
+    const file = await originalDownload
+    assert.equal(digest(await readFile(await file.path())), digest(futureBytes))
+    const futureDenied = await rpc('scholarflow.v1/document.saveManual', { request: { context: futureContext, text: 'TEST_ONLY forbidden overwrite', baseHash: recoveredLedger.documents.paper.currentHash } })
+    assert.equal(futureDenied.value.ok, false); assert.equal(futureDenied.value.error.code, 'PROJECT_SCHEMA_TOO_NEW')
+    assert.equal(await readFile(join(recoveryRoot, path), 'utf8'), futureBytes)
+    assert.equal(await readFile(join(recoveryRoot, '写作成果/paper.md'), 'utf8'), crashPlan.files.find(row => row.path === '写作成果/paper.md').text)
+    assert.equal(await readFile(join(recoveryRoot, '原始资料.txt'), 'utf8'), 'TEST_ONLY 原始资料保持只读\r\n')
+  }
+  const futureOriginalUi = page.getByRole('region', { name: '不兼容项目只读查看', exact: true })
+  await futureOriginalUi.locator('summary').filter({ hasText: '写作成果/paper.md · 原始文件' }).click()
+  const originalManuscriptDownload = page.waitForEvent('download')
+  await futureOriginalUi.getByRole('button', { name: '下载原始文件 写作成果/paper.md', exact: true }).click()
+  assert.equal(digest(await readFile(await (await originalManuscriptDownload).path())), recoveredLedger.documents.paper.currentHash)
   const reset = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: originalType, ...originalDefaults }, expectedRevision: restored.value.settings[0].revision })
   assert.equal(reset.ok, true)
   assert.deepEqual(errors, [])
@@ -1003,6 +1037,7 @@ try {
     nativeUiPrivateProfileImportCancelVersionExportAndProjectCopy: true, oldProfileBytesAndProjectCopyPreservedAcrossRestart: true,
     twoSessionProjectRestore: true, coldProjectBindingRestore: true, mismatchedBindingRejected: true,
     nativeUiInterruptedInitRecovery: true,
+    nativeFutureSchemasReadonlyOriginalDownloadsAndMutationDenial: true,
     nativeUiMaterialParseEvidenceClaimOutline: true, evidenceChainColdRestore: true,
     nativeUiOutlineEditReorderDraftCancelDeleteAndConfirm: true,
     nativeUiManualSaveCitationProjection: true, nativeDomSecondParagraphSelection: true,

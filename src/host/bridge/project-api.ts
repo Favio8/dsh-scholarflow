@@ -6,13 +6,14 @@ import { snapshot, parseConfig, CONFIG_PATH, type InitPlan } from '../../core/pr
 import { readTransactionJournals, inspectRecovery } from '../../core/store/transactions.ts'
 import { HostFileStore } from '../gateway/file-store.ts'
 import { initInputSchema } from '../../shared/project-defaults.ts'
+import { readonlyEnvelope, inspectCompatibility, schemaVersionOf } from '../../core/project/compatibility.ts'
 type Host = any
 export const inspectRequest = z.object({ context: requestContext }).strict()
 export const prepareInitRequest = z.object({ context: requestContext, input: initInputSchema }).strict()
 export const initializeRequest = z.object({ context: requestContext, planId: z.string(), planHash: hash }).strict()
 export interface StoredInitPlan { plan: InitPlan; context: RequestContext; peerId: string; expires: number }
 
-export async function resolveStore(ctx: Host, context: RequestContext, signal: AbortSignal, output?: string) {
+export async function resolveStore(ctx: Host, context: RequestContext, signal: AbortSignal, output?: string, readonlyFuture = false) {
   signal.throwIfAborted()
   const workspace = ctx.workspaceRegistry.get(context.workspaceId)
   invariant(workspace, 'SESSION_BINDING_CHANGED', '宿主工作区不存在，请重新选择。')
@@ -44,7 +45,14 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
     }
   }
   if (stat) {
-    const config = parseConfig(await ctx.fs.readText(configTarget, signal))
+    const configText = await ctx.fs.readText(configTarget, signal)
+    let config
+    try { config = parseConfig(configText) }
+    catch (error) {
+      if (!readonlyFuture || !(error instanceof ScholarError) || error.code !== 'PROJECT_SCHEMA_TOO_NEW') throw error
+      const original = readonlyEnvelope(configText)
+      config = { project: original.project, paths: { manuscriptDir: original.paths?.manuscriptDir ?? 'manuscript' } }
+    }
     projectId = config.project.id; manuscriptDir = config.paths.manuscriptDir
     invariant(!context.projectId || context.projectId === projectId, 'PROJECT_ID_CONFLICT', '请求项目与当前会话项目不同。')
     // Detect copies among Host registrations, without traversing raw material trees.
@@ -73,10 +81,19 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
       invariant(ctx.fs.contains(rootNow, file), 'PATH_OUTSIDE_ALLOWED_ROOT', '配置链接发生变化。')
       const currentConfig = parseConfig(await ctx.fs.readText(file, signal))
       invariant(currentConfig.project.id === projectId && currentConfig.paths.manuscriptDir === manuscriptDir, 'SESSION_BINDING_CHANGED', '项目身份或输出范围已改变。')
+      if (!readonlyFuture) for (const path of ['.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json']) {
+        const headerTarget = await ctx.fs.resolve(`${root}/${path}`, { signal })
+        invariant(ctx.fs.contains(rootNow, headerTarget), 'PATH_OUTSIDE_ALLOWED_ROOT', '项目版本记录链接发生变化。')
+        if (await ctx.fs.stat(headerTarget, signal)) invariant((schemaVersionOf(await ctx.fs.readText(headerTarget, signal)) ?? 1) <= 1,
+          'PROJECT_SCHEMA_TOO_NEW', '提交前项目记录或资源锁升级，当前插件已停止写入。')
+      }
       await checkCopies(projectId)
     }
   }
-  return { io: new HostFileStore(ctx, { canonicalRoot: root, manuscriptDir, sessionId: context.sessionId, revalidate }, signal), binding, manuscriptDir }
+  const io = new HostFileStore(ctx, { canonicalRoot: root, manuscriptDir, sessionId: context.sessionId, revalidate }, signal)
+  if (!readonlyFuture && projectId) for (const path of ['.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json'])
+    invariant((schemaVersionOf((await io.read(path))?.text) ?? 1) <= 1, 'PROJECT_SCHEMA_TOO_NEW', '项目记录或资源锁版本过新；请只读查看原文件，当前操作已停止。')
+  return { io, binding, manuscriptDir }
 }
 
 export async function applicationResult<T>(operation: () => Promise<T>) {
@@ -92,7 +109,9 @@ export async function applicationResult<T>(operation: () => Promise<T>) {
 
 export async function inspectProject(ctx: Host, request: unknown, signal: AbortSignal) {
   const { context } = inspectRequest.parse(request)
-  const { io, binding, manuscriptDir } = await resolveStore(ctx, context, signal)
+  const { io, binding, manuscriptDir } = await resolveStore(ctx, context, signal, undefined, true)
+  const compatibility = await inspectCompatibility(io)
+  if (compatibility) return { binding, initialized: false, metadataExists: true, readonly: compatibility }
   const recovery = await inspectRecovery(io, manuscriptDir)
   if (recovery.pending.length) return { binding, initialized: false, metadataExists: true, recovery: {
     planHash: recovery.contentHash, transactions: recovery.pending.map(row => ({ id: row.txn.id, createdAt: row.txn.createdAt,

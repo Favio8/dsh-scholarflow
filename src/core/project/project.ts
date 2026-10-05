@@ -120,6 +120,12 @@ export async function snapshot(io: FileStore) {
   const ledgerFile = await io.read(LEDGER_PATH)
   if (!ledgerFile) throw new ScholarError('PROJECT_LEDGER_INVALID', '缺少 ledger，禁止自动创建空数据覆盖。')
   const ledger = parseLedger(ledgerFile.text)
+  const resourceLock = await io.read('.scholarflow/resources.lock.json')
+  if (resourceLock) {
+    let resourceVersion: unknown
+    try { resourceVersion = JSON.parse(resourceLock.text)?.schemaVersion } catch { /* Resource-specific readers reject malformed locks. */ }
+    invariant(!(typeof resourceVersion === 'number' && resourceVersion > 1), 'PROJECT_SCHEMA_TOO_NEW', '资源锁版本过新，当前项目只读。')
+  }
   invariant(ledger.projectId === config.project.id, 'PROJECT_ID_CONFLICT', '配置与 ledger 项目身份不同。')
   invariant(ledger.documents.paper, 'DOCUMENT_NOT_FOUND', '项目没有主稿记录，禁止推测或重建覆盖。')
   const documentFile = await io.read(config.paths.mainDocument)
