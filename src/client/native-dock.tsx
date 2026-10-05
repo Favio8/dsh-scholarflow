@@ -6,20 +6,30 @@ export const CHAT_ID = 'dsh-scholarflow/chat'
 export function openExistingChat(ctx: any, options?: any) {
   const sessionId = ctx.sidebarRight.mounted.getSnapshot()
   const tab = ctx.sidebarRight.openTabs.getSnapshot().find((tab: any) => tab.sessionId === sessionId && tab.kind === CHAT_KIND)
-  if (tab) ctx.sidebarRight.focus(tab.tabId)
+  if (tab) { ctx.sidebarRight.focus(tab.tabId); if (!ctx.sidebarRight.isExpanded()) ctx.sidebarRight.toggleExpanded() }
   else ctx.sidebarRight.openTab(CHAT_KIND, options)
 }
 
 // Only explicitly opened ScholarFlow surfaces shadow the reserved Conversation
 // cell. panelInfo remains null, so the native rightbar keeps its current Session.
 export function createWorkbenchNavigation(ctx: any, Workspace: React.ComponentType<any>) {
-  const enabled = new Set<string>(), pendingChat = new Set<string>(), listeners = new Set<() => void>()
+  const listeners = new Set<() => void>()
+  let enabledSession: string | undefined
+  let chatRequest: { sessionId: string; afterOpen?: () => void } | undefined
   let shadow: (() => void) | undefined
   let snapshot = { sessionId: undefined as string | undefined, active: false }
   const source = { getSnapshot: () => snapshot, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } } }
+  const revealChat = () => {
+    if (!chatRequest || !snapshot.active || snapshot.sessionId !== chatRequest.sessionId || ctx.sidebarRight.mounted.getSnapshot() !== chatRequest.sessionId) return
+    const request = chatRequest; chatRequest = undefined
+    openExistingChat(ctx)
+    if (request.afterOpen) window.requestAnimationFrame(request.afterOpen)
+  }
   const sync = () => {
     const sessionId = ctx.uiSession.adapter.current.getSnapshot().key
-    const selected = !!sessionId && enabled.has(sessionId)
+    if (enabledSession !== sessionId || ctx.layout.panelInfo.getSnapshot().activePanelId !== null) enabledSession = undefined
+    const selected = !!sessionId && enabledSession === sessionId
+    if (!selected) chatRequest = undefined
     if (selected && !shadow) shadow = ctx.slots.register({ name: 'main', key: 'conversation', priority: -50 }, Workspace)
     else if (!selected && shadow) { shadow(); shadow = undefined }
     const active = selected && ctx.layout.panelInfo.getSnapshot().activePanelId === null
@@ -30,24 +40,24 @@ export function createWorkbenchNavigation(ctx: any, Workspace: React.ComponentTy
   ctx.effect(() => {
     const disposeSlot = ctx.slots.inject('main', () => { sync(); return () => { shadow?.(); shadow = undefined } })
     const disposeCurrent = ctx.uiSession.adapter.current.subscribe(sync), disposePanel = ctx.layout.panelInfo.subscribe(sync)
-    return () => { disposeCurrent(); disposePanel(); disposeSlot(); listeners.clear() }
+    // rc.2 publishes a fresh selection for EVERY native navigation, including
+    // startSession reusing the same blank Session. Catalog refreshes are separate.
+    const disposeNavigation = ctx.uiWorkspace.selection.subscribe(() => { enabledSession = undefined; sync() })
+    const disposeMounted = ctx.sidebarRight.mounted.subscribe(revealChat)
+    return () => { disposeMounted(); disposeNavigation(); disposeCurrent(); disposePanel(); disposeSlot(); listeners.clear() }
   }, 'scholarflow: scoped native Conversation surface')
   return {
     source,
     open(sessionId = ctx.uiSession.adapter.current.getSnapshot().key) {
       if (!sessionId) { ctx.layout.selectPanel('scholarflow'); return }
-      const alreadyActive = snapshot.active && snapshot.sessionId === sessionId
-      enabled.add(sessionId); pendingChat.add(sessionId); sync(); ctx.layout.selectPanel(null)
-      if (alreadyActive) { pendingChat.delete(sessionId); openExistingChat(ctx) }
+      ctx.layout.selectPanel(null); enabledSession = sessionId; sync()
     },
     ordinary() {
-      const sessionId = ctx.uiSession.adapter.current.getSnapshot().key
-      enabled.delete(sessionId); pendingChat.delete(sessionId); sync(); ctx.layout.selectPanel(null)
+      enabledSession = undefined; sync(); ctx.layout.selectPanel(null)
     },
-    revealChat(sessionId: string) {
-      if (pendingChat.has(sessionId) && ctx.sidebarRight.mounted.getSnapshot() === sessionId) {
-        pendingChat.delete(sessionId); openExistingChat(ctx)
-      }
+    openChat(sessionId: string, afterOpen?: () => void) {
+      if (!snapshot.active || snapshot.sessionId !== sessionId) return
+      chatRequest = { sessionId, afterOpen }; revealChat()
     },
   }
 }

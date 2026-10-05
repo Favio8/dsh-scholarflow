@@ -1,0 +1,15 @@
+# Scoped ScholarFlow chat and selection actions
+
+Date: 2026-10-06. Requirement: parent `docs/ui-refinement-2026-10-05.md`, UI-07-A–E, user-approved diagnosis and interaction proposal.
+
+The paper surface previously remembered enabled Session IDs and scheduled chat opening on every workbench entry. The global rightbar type registration also exposed AI Chat to ordinary conversations. A native new-session action can reuse a blank Session ID, so ID comparison alone left the paper surface in place.
+
+Workbench entry now preserves rightbar presentation. An explicitly entered current Session owns the paper surface; native navigation retracts it, including a fresh selection publication for the same blank Session ID. The chat type and guide are registered only while that surface is active. Retraction closes only ScholarFlow tabs through the native `closeIn` action; shared native composer drafts and paper buffers remain owned by their existing stores. Explicit side-chat actions, including the chat's new-session button, request opening after the correct native Session surface mounts.
+
+Source and preview selections show a small floating toolbar outside the document flow. The source textarea uses a temporary typography mirror to measure selection coordinates. Preview selection uses the native Range rectangle. Pointer selection is retained while choosing an action; outside pointer interaction, scroll, resize, Escape and paper/tool navigation dismiss the toolbar. Details are shown only on request.
+
+Adding a selection first obtains the existing Host-validated saved-document snapshot, then inserts a native atomic reference through the scoped `slash/input-insert-reference` event and the insertion revision captured before the RPC. The reference label is compact; native Backspace, selection, undo, draft restoration and submit own its lifecycle. Its owner codec serializes the immutable selection as a readable quotation with concise version, range and citation information when the user submits through DSH; raw JSON is not displayed in the input or sent transcript. The reference carries its snapshot rather than depending on an ephemeral JavaScript map; clipboard text contains a readable quotation. No second composer, model loop, automatic send or automatic paper edit is introduced.
+
+Interface evidence: installed DeepSeek Harness 0.2.0-rc.2 `app.asar`, `@deepseek-ai/dsh-client-ui-workspace/lib/client.js` (`replaceMain`, `selection`), `dsh-client-store/lib/index.js` (`createSnapshotStore.set`), `dsh-client-ui-sidebar-right/lib/client.js` (`register`, `closeIn`), `dsh-client-ui-input-trigger/lib/client.js` (`registerSource`, scoped insertion and owner codec), and `dsh-client-ui-conversation/lib/client.js` (reference event consumer and `conversation.input.for`). This evidence is source inspection, not runtime verification.
+
+Per the user's instruction, no tests or automated UI acceptance were added or run. Delivery includes a build and Git synchronization; runtime behavior remains untested.

@@ -9,7 +9,8 @@ import { ManuscriptImport } from './manuscript-import.tsx'
 import { scratchKey, readScratch, writeScratch, ScratchQueue } from './scratch-backup.ts'
 import type { DraftController, PaperView } from './paper-workspace.tsx'
 import type { ExportFormat } from '../shared/presentation.ts'
-import { setSelectionCard } from './selection-card.tsx'
+import { SelectionDetails, type SelectionContext } from './selection-card.tsx'
+import { SelectionMenu, sourceSelectionRect } from './selection-menu.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
@@ -18,9 +19,10 @@ function readLocalBuffer(key: string) {
     return readScratch(window.localStorage, key, 8 * 1024 * 1024)
   } catch { /* Host temporary buffer remains available when browser storage fails. */ }
 }
-export function Draft({ project, context, api, refresh, run, busy, issueLocation, view = 'split', format = 'markdown', tool, onController, onTool, onReturnEditor }: Props & {
-  issueLocation?: any; view?: PaperView; format?: ExportFormat; tool?: 'Changes' | 'History';
+export function Draft({ project, context, api, refresh, run, busy, issueLocation, view = 'split', format = 'markdown', tool, visible = true, onController, onTool, onReturnEditor, onAttachSelection, captureChatInsertion }: Props & {
+  issueLocation?: any; view?: PaperView; format?: ExportFormat; tool?: 'Changes' | 'History'; visible?: boolean;
   onController?: (value: DraftController) => void; onTool?: () => void; onReturnEditor?: () => void
+  onAttachSelection?: (card: SelectionContext, ask: boolean, insertion: any) => void; captureChatInsertion?: () => any
 }) {
   const projectId = project.binding.projectId
   const bufferKey = scratchKey(project.binding, 'paper')
@@ -29,6 +31,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const [text, setText] = useState(cached?.text ?? project.document.text)
   const [baseHash, setBaseHash] = useState(cached?.baseHash ?? project.document.contentHash)
   const [selection, setSelection] = useState<SelectionPayload>()
+  const [selectionAnchor, setSelectionAnchor] = useState<DOMRect>(), [selectionDetail, setSelectionDetail] = useState<SelectionContext>()
+  const selecting = useRef(false), selectionRequest = useRef(0)
   const [message, setMessage] = useState('')
   const [instruction, setInstruction] = useState('改善表达，保留事实、适用范围和引用。')
   const [sectionId, setSectionId] = useState('')
@@ -66,6 +70,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     return () => { live = false }
   }, [project.ledger.revision, historySequence])
   const dirty = text !== project.document.text || baseHash !== project.document.contentHash
+  useEffect(() => { setSelectionAnchor(undefined); setSelectionDetail(undefined); selectionRequest.current++ }, [view, tool, visible, project.document.contentHash])
+  useEffect(() => () => { selectionRequest.current++ }, [])
   const projection = useMemo(() => projectMarkdown(project.document.text), [project.document.contentHash])
   useEffect(() => {
     let live = true
@@ -118,13 +124,15 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const capture = () => {
     if (dirty) { setMessage('先保存或处理手工编辑缓冲，再选择已保存正文改写。'); return }
     try {
-      if (!window.getSelection()?.toString()) return
+      if (!window.getSelection()?.toString()) { setSelectionAnchor(undefined); return }
       const payload = captureSelection(root.current!, projection, project.document, projectId)
       payload.claimIds = [...new Set((Object.values(project.ledger.claimAnchors) as any[]).filter(anchor => anchor.status === 'current' && anchor.documentId === 'paper' &&
         anchor.documentHash === project.document.contentHash && payload.blockIds.includes(anchor.blockId)).flatMap(anchor => anchor.claimIds))] as string[]
       setAnchorClaimIds(payload.claimIds); setAnchorId('')
-      setSelection(payload); setMessage('已捕获源码范围；预览会显示实际修改内容。')
-    } catch (error) { setSelection(undefined); setMessage((error as Error).message) }
+      setSelection(payload)
+      const range = window.getSelection()!.getRangeAt(0)
+      setSelectionAnchor(range.getClientRects()[0] ?? range.getBoundingClientRect())
+    } catch (error) { setSelection(undefined); setSelectionAnchor(undefined); setMessage((error as Error).message) }
   }
   const prepare = (whole: boolean) => run(async () => {
     if (!whole && !selection) throw new Error('请先选择已保存的渲染正文。')
@@ -140,11 +148,18 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   useEffect(() => {
     onController?.({ dirty, canSave: dirty && !busy && !saving && baseHash === project.document.contentHash && !project.document.externalChange, save })
   }, [text, baseHash, project.document.contentHash, project.ledger.revision, busy, saving])
-  const attachSelection = () => run(async () => {
+  const selectionAction = (action: 'add' | 'ask' | 'details') => run(async () => {
+    if (!selection) return
+    const request = ++selectionRequest.current
+    const insertion = action !== 'details' ? captureChatInsertion?.() : undefined
     const captured = context(), result = await api('editor.selectionContext', { context: captured, selection })
-    setSelectionCard({ context: captured, selection: structuredClone(selection), snapshot: result.snapshot, binding: result.binding })
-    setMessage('已附加选区到当前聊天。')
+    if (request !== selectionRequest.current) return
+    const card = { context: captured, selection: structuredClone(selection), snapshot: result.snapshot, binding: result.binding }
+    if (action === 'details') setSelectionDetail(card)
+    else { onAttachSelection?.(card, action === 'ask', insertion); setMessage('已添加选文引用，由你发送。') }
+    setSelectionAnchor(undefined)
   })
+  const attachSelection = () => selectionAction('add')
   const selectSource = (area: HTMLTextAreaElement) => {
     const offset = (index: number) => {
       const prefix = area.value.slice(0, index)
@@ -152,7 +167,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     }
     const from = offset(area.selectionStart), to = offset(area.selectionEnd)
     setCursor(from)
-    if (from === to || dirty) { setSelection(undefined); return }
+    if (from === to || dirty) { setSelection(undefined); setSelectionAnchor(undefined); return }
     try {
       const selected = validateRange(projection, from, to)
       const claimIds = [...new Set((Object.values(project.ledger.claimAnchors) as any[]).filter(anchor => anchor.status === 'current' &&
@@ -162,28 +177,33 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         prefixContext: text.slice(Math.max(0, from - 200), from), suffixContext: text.slice(to, to + 200), citationKeys: selected.citationKeys,
         claimIds, scope: 'inline', capturedAt: new Date().toISOString() })
       setAnchorClaimIds(claimIds); setAnchorId('')
-    } catch (error) { setSelection(undefined); setMessage((error as Error).message) }
+      if (!selecting.current) setSelectionAnchor(sourceSelectionRect(area))
+    } catch (error) { setSelection(undefined); setSelectionAnchor(undefined); setMessage((error as Error).message) }
   }
   const headings = livePreview.projection?.tree.children?.filter(node => node.type === 'heading') ?? []
   const currentHeading = [...headings].reverse().find(node => (node.position?.start.offset ?? 0) <= cursor)
   const statistics = livePreview.statistics
   return <section className="sf-draft" aria-label="正文编辑">
+    {selection && selectionAnchor && !dirty && !tool && visible && <SelectionMenu anchor={selectionAnchor} busy={busy}
+      onAdd={attachSelection} onDetails={() => selectionAction('details')} onAsk={() => selectionAction('ask')} onClose={() => setSelectionAnchor(undefined)} />}
+    {selectionDetail && <SelectionDetails card={selectionDetail} onClose={() => setSelectionDetail(undefined)} onTool={onTool} />}
     <div className="sf-editor-surface" hidden={!!tool}>
       {(recoverable || baseHash !== project.document.contentHash || project.document.externalChange) && <div className="sf-editor-notice" role="status">
         {recoverable ? '有暂存编辑可恢复' : '正文版本发生变化，当前编辑已保留'}<button onClick={onTool}>查看与处理</button>
       </div>}
-      {selection && !dirty && <div className="sf-editor-notice"><span>选区已就绪</span><button disabled={busy} onClick={attachSelection}>附加到聊天</button><button onClick={onTool}>修改建议</button></div>}
       <div className="sf-editor-grid" data-view={view}>
         <div className="sf-source-pane" hidden={view === 'preview'}><div className="sf-pane-caption"><span>{project.config.paths.mainDocument.split('/').at(-1)} · Markdown</span>
           <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>{saving ? '保存中…' : '保存'}</button></div>
           <div className="sf-source-editor"><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
             <textarea className="sf-source-input" aria-label="Markdown 手工编辑" wrap="off" spellCheck={false} disabled={busy || saving} value={text}
-              onScroll={e => { if (gutter.current) gutter.current.style.transform = `translateY(${-e.currentTarget.scrollTop}px)` }}
+              onScroll={e => { setSelectionAnchor(undefined); if (gutter.current) gutter.current.style.transform = `translateY(${-e.currentTarget.scrollTop}px)` }}
+              onMouseDown={() => { selecting.current = true; setSelectionAnchor(undefined) }}
+              onMouseUp={e => { selecting.current = false; selectSource(e.currentTarget) }}
               onSelect={e => selectSource(e.currentTarget)}
               onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (dirty && !busy && !saving && baseHash === project.document.contentHash) run(save) } }}
               onChange={e => {
                 const edited = project.document.lineEnding === 'crlf' ? e.target.value.replace(/\r\n|\r|\n/g, '\r\n') : e.target.value
-                setText(edited); setSelection(undefined); setMessage('')
+                setText(edited); setSelection(undefined); setSelectionAnchor(undefined); selectionRequest.current++; setMessage('')
                 if (edited === project.document.text && baseHash === project.document.contentHash) remember()
                 else remember({ text: edited, baseHash })
               }} />

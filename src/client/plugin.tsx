@@ -7,7 +7,7 @@ import { AcademicSkills } from './academic-skills.tsx'
 import { WritingProfiles } from './writing-profiles.tsx'
 import { ReadonlyProject } from './readonly-project.tsx'
 import { ProjectIdentity } from './project-identity.tsx'
-import { SelectionCard, clearSelectionCard, invalidateSelectionCard } from './selection-card.tsx'
+import { createSelectionReferences, SelectionReferenceDetails, SELECTION_CSS, type SelectionContext } from './selection-card.tsx'
 import { useConfirmationFocus } from './confirmation-focus.ts'
 import { CAPTION_CSS, CHAT_CSS, WorkbenchIcon } from './workbench-chrome.tsx'
 import { PAPER_CSS, MATH_CSS, ProjectSettings, TYPE_LABELS, FORMAT_LABELS, type PaperView, type DraftController } from './paper-workspace.tsx'
@@ -18,7 +18,7 @@ type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export', 'Settings', 'Changes', 'History'] as const
 const TAB_LABELS = ['概览', '资料与研究', '大纲', '正文', '审查', '导出', '项目设置', '修改建议', '运行历史']
 const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-body button:not(.sf-native-tools *),.sf-body select:not(.sf-native-tools *),.sf-header button,.sf-settings button,.sf-settings select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
-export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'layout', 'sidebarRight', 'sidebarRightTabs']
+export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'layout', 'sidebarRight', 'sidebarRightTabs', 'inputTriggers', 'conversation']
 const LAYOUT_CSS = `.sf-agent-resize{width:8px;flex-shrink:0;cursor:col-resize;touch-action:none;background:#8881}.sf-agent-resize:focus-visible{outline:2px solid currentColor;outline-offset:-2px}.sf-app[data-sf-narrow=true] .sf-agent{height:100%;min-height:0;flex:1}.sf-header{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.sf-header button{margin-left:auto}`
 const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:6px;padding:8px;resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid #8884;padding:12px 0;margin:12px 0}.sf-tabs button[aria-selected=true]{background:#8882;border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:2px solid currentColor;outline-offset:2px}`
 
@@ -34,6 +34,7 @@ export function apply(ctx: Host) {
     return result.data
   }
   const navigation = createWorkbenchNavigation(ctx, WorkspaceSurface)
+  const selectionReferences = createSelectionReferences(ctx)
   const nativeHeader = createNativeHeader(ctx)
   function WorkspaceSurface(props: Host) { return props.renderFactorySlot('scholarflow.workspace', {}) }
   function LegacyWorkspace(props: Host) {
@@ -56,8 +57,10 @@ export function apply(ctx: Host) {
         <button onClick={() => navigation.open(props.sessionId)}>{scope.active ? '转到当前 AI Chat' : '打开 ScholarFlow 工作台'}</button></section>}</>
   }
   function ChatGuide(props: Host) {
+    const scope = useSyncExternalStore(navigation.source.subscribe, navigation.source.getSnapshot, navigation.source.getSnapshot)
+    if (!scope.active || scope.sessionId !== props.sessionId) return null
     return <><style>{NATIVE_DOCK_CSS}</style><button className="sf-chat-guide" data-sidebar-right-guide-entry={CHAT_KIND}
-      onClick={() => { if (navigation.source.getSnapshot().active) openExistingChat(ctx, { replaceTab: true }); else navigation.open() }}><WorkbenchIcon kind="chat" /><span>{props.title}{props.description && <small>{props.description}</small>}</span></button></>
+      onClick={() => openExistingChat(ctx, { replaceTab: true })}><WorkbenchIcon kind="chat" /><span>{props.title}{props.description && <small>{props.description}</small>}</span></button></>
   }
   function Agent(props: Host) {
     const session = props.useSession((s: Host) => s)
@@ -72,6 +75,7 @@ export function apply(ctx: Host) {
         await ctx.sessions.refresh()
         await ctx.uiWorkspace.openSession(created.value.sessionId)
         navigation.open(created.value.sessionId)
+        navigation.openChat(created.value.sessionId)
       } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
     }
     return <><header className="sf-chat-toolbar"><WorkbenchIcon kind="chat" /><strong>AI 助手</strong><div className="sf-chat-actions">
@@ -80,7 +84,6 @@ export function apply(ctx: Host) {
     </div></header>
       <div className="sf-chat-scope"><span title={workspace?.title}>{workspace?.title ?? '未选择工作区'}</span><span className="sf-chat-mode">ScholarFlow</span></div>
       {error && <p role="alert" className="sf-chat-error">{error}</p>}
-      <SelectionCard sessionId={props.sessionId} inputActions={props.inputActions} api={api} />
       <div className="sf-chat-content">{session?.blank && <section className="sf-chat-empty" aria-label="聊天建议">
         <WorkbenchIcon kind="chat" /><h3>一起完善这篇论文</h3><p>描述你的研究主题，或选中正文后继续讨论。</p>
         {['帮我梳理研究思路', '帮我核查论文引用', '帮我润色选中的段落'].map(prompt => <button key={prompt} onClick={() => props.inputActions.setDraft(prompt)}>{prompt} <span aria-hidden="true">↗</span></button>)}
@@ -108,10 +111,8 @@ export function apply(ctx: Host) {
       title="打开 ScholarFlow 工作台" onClick={() => navigation.open()}><WorkbenchIcon />ScholarFlow</button></div></>
   }
   function Workspace(props: Host) {
-    const readMounted = () => ctx.sidebarRight.mounted.getSnapshot()
-    const mounted = useSyncExternalStore(listener => ctx.sidebarRight.mounted.subscribe(listener), readMounted, readMounted)
-    useEffect(() => { if (props.sessionId && mounted === props.sessionId) navigation.revealChat(props.sessionId) }, [props.sessionId, mounted])
-    return <div className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS}</style>
+    return <div className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS}</style>
+      <SelectionReferenceDetails sessionId={props.sessionId} />
       <main className="sf-body">{props.renderSlot('scholarflow.project', {
         renderNativeTools: (extra: React.ReactNode) => <NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} extra={extra} />,
       })}</main></div>
@@ -145,12 +146,15 @@ export function apply(ctx: Host) {
       ...(project?.ledger && { expectedLedgerRevision: project.ledger.revision }),
       ...(project?.binding?.projectId && project.binding.workspaceId === workspace?.workspaceId && project.binding.sessionId === props.sessionId
         ? { projectId: project.binding.projectId } : {}) })
-    useEffect(() => {
-      if (!props.sessionId) return
-      if (project?.initialized) invalidateSelectionCard(project.binding, project.document)
-      else clearSelectionCard(props.sessionId)
-    }, [bindingKey, project?.initialized, project?.binding?.projectId, project?.document?.contentHash, project?.document?.revisionId])
-    useEffect(() => () => { if (props.sessionId) clearSelectionCard(props.sessionId) }, [props.sessionId])
+    const attachSelection = (card: SelectionContext, ask: boolean, insertion: Host) => {
+      const scope = navigation.source.getSnapshot()
+      if (!scope.active || scope.sessionId !== card.binding.sessionId || card.binding.sessionId !== props.sessionId ||
+        card.binding.workspaceId !== workspace?.workspaceId) throw new Error('当前工作区或会话已切换，请重新选择正文。')
+      selectionReferences.attach(card, insertion)
+      if (ask) navigation.openChat(props.sessionId, () => {
+        if (navigation.source.getSnapshot().active && navigation.source.getSnapshot().sessionId === props.sessionId) selectionReferences.focus(props.sessionId)
+      })
+    }
     const publish = (value: Host) => {
       if (`${value.binding.workspaceId}:${value.binding.sessionId}` !== liveBinding.current) return
       readSequence.current++ // Invalidate reads started before a committed mutation.
@@ -256,7 +260,8 @@ export function apply(ctx: Host) {
           <div id="sf-panel-Outline" role="tabpanel" aria-label="大纲" hidden={tab !== 'Outline'}><OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
           <div id="sf-panel-Draft" role="tabpanel" aria-label={draftTool ? TAB_LABELS[TABS.indexOf(draftTool)] : '正文'} hidden={tab !== 'Draft' && !draftTool}>
             <Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} issueLocation={issueLocation}
-              view={view} format={format} tool={draftTool} onController={setEditor} onTool={() => setTab('Changes')} onReturnEditor={() => { setView('split'); setTab('Draft') }} />
+              view={view} format={format} tool={draftTool} visible={tab === 'Draft'} onController={setEditor} captureChatInsertion={() => props.inputActions.captureInsertion()}
+              onAttachSelection={attachSelection} onTool={() => setTab('Changes')} onReturnEditor={() => { setView('split'); setTab('Draft') }} />
           </div>
           <div id="sf-panel-Settings" role="tabpanel" aria-label="项目设置" hidden={tab !== 'Settings'}><ProjectSettings key={project.binding.projectId} project={project} diagnostics={() => call('diagnostics')} api={api} context={context} refresh={refresh} run={act} busy={busy} /></div>
           <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} mode={tab} format={format} exportTrigger={exportTrigger}
@@ -294,8 +299,28 @@ export function apply(ctx: Host) {
   ctx.effect(() => ctx.slots.registerFactory({ name: 'scholarflow.workspace', scope: 'session-maybe', children: { 'scholarflow.project': { kind: 'single', scope: 'session-maybe' } } }, Workspace), 'scholarflow: project surface')
   ctx.effect(() => ctx.slots.inject('scholarflow.project', () => ctx.slots.register({ name: 'scholarflow.project' }, Project)), 'scholarflow: project')
   ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'scholarflow' }, LegacyWorkspace)), 'scholarflow: workspace entry')
-  ctx.effect(() => ctx.sidebarRightTabs.register({ id: CHAT_ID, kind: CHAT_KIND, title: () => 'AI Chat', keepMounted: true,
-    guide: [{ id: 'chat', order: 40, title: () => 'AI Chat', description: () => '继续当前 ScholarFlow 会话', icon: () => <WorkbenchIcon kind="chat" /> }] }), 'scholarflow: existing chat dock type')
+  // A persisted legacy panel is not an explicit click in this app lifetime.
+  if (ctx.layout.panelInfo.getSnapshot().activePanelId === 'scholarflow') ctx.layout.selectPanel(null)
+  ctx.effect(() => {
+    let disposeType: (() => void) | undefined, reconciling = false
+    const sync = () => {
+      if (reconciling) return
+      reconciling = true
+      try {
+        const scope = navigation.source.getSnapshot()
+        // Retract only our tabs, leaving native tools and their layout intact.
+        for (const tab of ctx.sidebarRight.openTabs.getSnapshot()) {
+          if (tab.kind === CHAT_KIND && (!scope.active || tab.sessionId !== scope.sessionId)) ctx.sidebarRight.closeIn(tab.sessionId, tab.tabId)
+        }
+        if (scope.active && !disposeType) disposeType = ctx.sidebarRightTabs.register({ id: CHAT_ID, kind: CHAT_KIND, title: () => 'AI Chat', keepMounted: true,
+          guide: [{ id: 'chat', order: 40, title: () => 'AI Chat', description: () => '继续当前 ScholarFlow 会话', icon: () => <WorkbenchIcon kind="chat" /> }] })
+        else if (!scope.active && disposeType) { disposeType(); disposeType = undefined }
+      } finally { reconciling = false }
+    }
+    const disposeScope = navigation.source.subscribe(sync), disposeTabs = ctx.sidebarRight.openTabs.subscribe(sync)
+    sync()
+    return () => { disposeScope(); disposeTabs(); disposeType?.() }
+  }, 'scholarflow: mode-scoped chat dock type')
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: CHAT_ID }, DockChat)), 'scholarflow: existing chat dock body')
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({ name: 'sidebar.right.pane.tab.title', key: CHAT_ID }, () => <WorkbenchIcon kind="chat" />)), 'scholarflow: chat dock title')
   ctx.effect(() => ctx.slots.inject('sidebar.right.tab.guide.entry', () => ctx.slots.register({ name: 'sidebar.right.tab.guide.entry', key: CHAT_ID }, ChatGuide)), 'scholarflow: existing chat guide entry')
