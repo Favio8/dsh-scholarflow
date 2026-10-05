@@ -1179,6 +1179,17 @@ Unicode／CRLF 文本。浏览器配置、存储或 origin 改变的限制见
 字段均为 true；此运行不启用真实 Crossref 或 GitHub 检索，相应 false
 字段表示未在这次运行执行，并非把模拟结果计作在线验证。
 
+2026-10-05 选区上下文补充：305/305 独立测试和类型检查通过。真实安装
+宿主在独立 TEST_ONLY home 验证可移除选区卡、Tab 保留、稿件修订失效、
+当前会话原生输入能力、保留已有输入和明确插入。延迟只读复核 RPC 后在
+真实原生输入框修改文本，旧插入因 native draftRev 不匹配而拒绝；再次
+明确插入成功，快照包含第二重复 Unicode 段的源码、坐标与实际关联论点。
+全过程没有发送或模型调用，正文和 ledger 字节保持一致。证据字段：
+`nativeSelectionContextCardVersionInvalidationTabRetentionRemoveAndCasInsertionWithoutSending`。
+延迟 RPC 竞争用例在测试脚本中另有同名明确断言；对应布尔字段为
+`nativeSelectionContextDelayedReadonlyRpcRefusesChangedHostInputAndAllowsExplicitRetry`。
+用户可在宿主输入中删除或撤销已插入文本，再自行发送；不冒充原生附件 chip。
+
 | 副作用 | 处置 |
 |---|---|
 | desktop profile 组合新增 `dsh-scholarflow` bundle | **保留**（G0-01 验收对象）；安装前已备份 4 个控制文件并记录 SHA-256；回滚脚本见 `scripts/rollback-profile.ps1` |

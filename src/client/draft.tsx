@@ -7,6 +7,7 @@ import { ProposalRevision } from './proposal-revision.tsx'
 import { DraftSequence } from './draft-sequence.tsx'
 import { ManuscriptImport } from './manuscript-import.tsx'
 import { scratchKey, readScratch, writeScratch, ScratchQueue } from './scratch-backup.ts'
+import { setSelectionCard } from './selection-card.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
@@ -193,6 +194,11 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     <label>改写／生成指令<textarea aria-label="改写生成指令" value={instruction} onChange={e => setInstruction(e.target.value)} /></label>
     {!!skills.length && <label>已启用的选区 Skill<select aria-label="已启用的选区 Skill" value={skillBindingId} onChange={e => setSkillBindingId(e.target.value)}><option value="">使用修订阶段的默认启用顺序</option>
       {skills.map(row => <option key={row.binding.bindingId} value={row.binding.bindingId}>{row.metadata.displayName} · {row.binding.digest.slice(7, 19)}</option>)}</select></label>}
+    <button disabled={busy || dirty || !selection} onClick={() => run(async () => {
+      const captured = context(), result = await api('editor.selectionContext', { context: captured, selection })
+      setSelectionCard({ context: captured, selection: structuredClone(selection), snapshot: result.snapshot, binding: result.binding })
+      setMessage('已附加当前已保存选区到会话侧卡片；尚未插入输入或发送。')
+    })}>附加选区到当前会话</button>
     <button disabled={busy || dirty || !selection || !instruction.trim()} onClick={() => prepare(false)}>预览选区改写计划</button>
     <label>按大纲生成章节<select aria-label="按大纲生成章节" value={sectionId} onChange={e => setSectionId(e.target.value)}><option value="">选择已确认的大纲章节</option>
       {project.ledger.outline.sections.map((section: any) => <option key={section.id} value={section.id}>{section.title}</option>)}</select></label>

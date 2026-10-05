@@ -40,6 +40,8 @@ import { bufferWriteRequest } from '../shared/editor-buffer.ts'
 import { projectTextBufferReadRequest, projectTextBufferWriteRequest } from '../shared/project-text-buffer.ts'
 import { readProjectTextBuffer, writeProjectTextBuffer } from '../core/editing/project-text-buffer.ts'
 import { readEditorBuffer, writeEditorBuffer } from '../core/editing/buffer.ts'
+import { selectionContext } from '../core/editing/selection-context.ts'
+import { selectionContextRequest } from '../shared/editing.ts'
 import { searchPrepareRequest, onlineConfirmRequest, candidateDecisionRequest, lookupPrepareRequest, type ResearchProvider } from '../shared/online-research.ts'
 import { crossrefProvider } from './providers/crossref.ts'
 import { prepareSearch, executeSearch, listSearches, readSearch, decideCandidate, prepareLookup, executeLookup, type SearchPlan, type LookupPlan } from '../core/research/online.ts'
@@ -1331,6 +1333,13 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
       const { io } = await resolveStore(this.ctx, context, signal)
       return readEditorBuffer(io, context.sessionId) })
+  }
+
+  @Remote('editor.selectionContext')
+  async editorSelectionContext(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context, selection } = selectionContextRequest.parse(request)
+      const { io, binding } = await resolveStore(this.ctx, context, signal)
+      return { binding, snapshot: await selectionContext(io, selection) } })
   }
 
   @Remote('editor.bufferWrite')

@@ -21,4 +21,5 @@ export const proposalSchema = z.object({ schemaVersion: z.literal(1), id, projec
   checks: z.array(z.object({ id: z.string(), status: z.enum(['pass', 'fail', 'unknown']), detail: z.string() }).strict()), createdAt: z.string() }).strict()
   .refine(value => !value.reviewIssue || value.scope === 'selection' && value.selection?.scope === 'paragraph' && !value.section, 'Issue fixes require a complete paragraph selection')
 export type SelectionPayload = z.infer<typeof selectionSchema>
+export const selectionContextRequest = z.object({ context: requestContext, selection: selectionSchema }).strict()
 export type EditProposal = z.infer<typeof proposalSchema>

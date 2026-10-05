@@ -7,6 +7,7 @@ import { AcademicSkills } from './academic-skills.tsx'
 import { WritingProfiles } from './writing-profiles.tsx'
 import { ReadonlyProject } from './readonly-project.tsx'
 import { ProjectIdentity } from './project-identity.tsx'
+import { SelectionCard, clearSelectionCard, invalidateSelectionCard } from './selection-card.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export'] as const
@@ -28,9 +29,9 @@ export function apply(ctx: Host) {
   }
   function Agent(props: Host) {
     const session = props.useSession((s: Host) => s)
-    return <>{props.renderFactorySlot('conversation.content', {
+    return <><SelectionCard sessionId={props.sessionId} inputActions={props.inputActions} api={api} /><div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>{props.renderFactorySlot('conversation.content', {
       variant: 'main', phase: session?.blank ? 'hero' : 'active', hero: !!session?.blank,
-    })}</>
+    })}</div></>
   }
   function Workspace(props: Host) {
     const [info, setInfo] = useState<Host>()
@@ -67,6 +68,12 @@ export function apply(ctx: Host) {
       ...(project?.ledger && { expectedLedgerRevision: project.ledger.revision }),
       ...(project?.binding?.projectId && project.binding.workspaceId === workspace?.workspaceId && project.binding.sessionId === props.sessionId
         ? { projectId: project.binding.projectId } : {}) })
+    useEffect(() => {
+      if (!props.sessionId) return
+      if (project?.initialized) invalidateSelectionCard(project.binding, project.document)
+      else clearSelectionCard(props.sessionId)
+    }, [bindingKey, project?.initialized, project?.binding?.projectId, project?.document?.contentHash, project?.document?.revisionId])
+    useEffect(() => () => { if (props.sessionId) clearSelectionCard(props.sessionId) }, [props.sessionId])
     const publish = (value: Host) => {
       if (`${value.binding.workspaceId}:${value.binding.sessionId}` !== liveBinding.current) return
       readSequence.current++ // Invalidate reads started before a committed mutation.
