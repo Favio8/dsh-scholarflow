@@ -169,6 +169,20 @@ export function invalidateReviews(ledger: Ledger, categories?: string[]) {
   for (const issue of Object.values(ledger.reviewIssues)) if (!categories || categories.includes(issue.category)) issue.stale = true
 }
 
+export async function updatePresentation(io: FileStore, expectedRevision: number, baseConfigHash: string,
+  input: { title: string; type: ProjectConfig['project']['type']; language: ProjectConfig['project']['language'] }) {
+  return mutateLedger(io, expectedRevision, async ledger => {
+    const file = await io.read(CONFIG_PATH)
+    invariant(file && digest(file.text) === baseConfigHash, 'STALE_DOCUMENT_VERSION', '项目设置已改变，请重新打开设置。')
+    const document = parseDocument(file.text, { uniqueKeys: true })
+    for (const key of ['title', 'type', 'language'] as const) document.setIn(['project', key], input[key])
+    const text = document.toString()
+    parseConfig(text)
+    invalidateReviews(ledger)
+    return [{ path: CONFIG_PATH, before: file, after: text }]
+  })
+}
+
 export async function updateProjectText(io: FileStore, path: string, text: string, expectedHash: string, expectedRevision: number, sourceSessionId?: string, changeReason?: string) {
   invariant(['.scholarflow/profiles/writing.md', '.scholarflow/profiles/review.md', '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md'].includes(path), 'PATH_OUTSIDE_ALLOWED_ROOT', '仅允许项目 Profile 和确认记忆。')
   invariant(Buffer.byteLength(text) <= 65536, 'CONTENT_TOO_LARGE', '项目指令最多 64 KiB。')

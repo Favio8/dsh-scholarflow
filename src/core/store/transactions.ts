@@ -5,29 +5,42 @@ import { digest, newId, json, type FileStore, type FileImage } from './files.ts'
 
 const imageSchema = z.object({ text: z.string(), hash }).strict().nullable()
 const transactionSchema = z.object({ schemaVersion: z.literal(1), id, state: z.enum(['prepared', 'committed']), createdAt: z.string(),
-  changes: z.array(z.object({ path: relativePath, before: imageSchema, after: imageSchema }).strict()).min(1),
+  changes: z.array(z.object({ path: relativePath, before: imageSchema, after: imageSchema, encoding: z.literal('base64').optional() }).strict()).min(1),
 }).strict()
 type Transaction = z.infer<typeof transactionSchema>
-export interface Mutation { path: string; before: FileImage | undefined; after: string }
+export interface Mutation { path: string; before: FileImage | undefined; after: string; encoding?: 'base64' }
+
+const imageHash = (text: string, encoding?: 'base64') => digest(encoding ? Buffer.from(text, 'base64') : text)
+async function readImage(io: FileStore, change: Pick<Mutation, 'path' | 'encoding'>): Promise<FileImage | undefined> {
+  if (!change.encoding) return io.read(change.path)
+  invariant(io.readExportBytes, 'BINARY_EXPORT_UNAVAILABLE', '当前文件适配器无法读取二进制交付。')
+  const image = await io.readExportBytes(change.path)
+  return image && { text: Buffer.from(image.bytes).toString('base64'), version: image.version }
+}
+async function writeImage(io: FileStore, change: Pick<Mutation, 'path' | 'encoding'>, text: string, before: FileImage | undefined) {
+  if (!change.encoding) return io.write(change.path, text, before)
+  invariant(!before && io.createExportBytes, 'BINARY_EXPORT_UNAVAILABLE', '二进制交付只允许创建新文件。')
+  return io.createExportBytes(change.path, Buffer.from(text, 'base64'))
+}
 
 // Callers hold the FileStore lock. No network / model call is performed here.
 export async function commit(io: FileStore, mutations: Mutation[], fault?: (point: string) => void) {
   invariant(new Set(mutations.map(m => m.path)).size === mutations.length, 'INVALID_MUTATION', 'Duplicate transaction target')
   for (const m of mutations) {
     relativePath.parse(m.path)
-    const current = await io.read(m.path)
+    const current = await readImage(io, m)
     invariant(current?.text === m.before?.text && current?.version === m.before?.version,
       'STALE_DOCUMENT_VERSION', '提交前文件已改变；保留外部改动。')
   }
   const txn: Transaction = { schemaVersion: 1, id: newId('txn'), state: 'prepared', createdAt: new Date().toISOString(),
-    changes: mutations.map(m => ({ path: m.path, before: m.before ? { text: m.before.text, hash: digest(m.before.text) } : null,
-      after: { text: m.after, hash: digest(m.after) } })) }
+    changes: mutations.map(m => ({ path: m.path, before: m.before ? { text: m.before.text, hash: imageHash(m.before.text, m.encoding) } : null,
+      after: { text: m.after, hash: imageHash(m.after, m.encoding) }, ...(m.encoding && { encoding: m.encoding }) })) }
   const path = `.scholarflow/transactions/${txn.id}/manifest.json`
   const journal = await io.write(path, json(transactionSchema.parse(txn)), undefined)
   fault?.('journal-published')
   for (let i = 0; i < mutations.length; i++) {
     const mutation = mutations[i]
-    await io.write(mutation.path, mutation.after, mutation.before)
+    await writeImage(io, mutation, mutation.after, mutation.before)
     fault?.(`target-${i}-published`)
   }
   await io.write(path, json({ ...txn, state: 'committed' }), journal)
@@ -53,8 +66,9 @@ export async function readTransactionJournals(io: FileStore) {
       'RECOVERY_CONFLICT', '事务身份或目标索引不一致。')
     if (txn.state === 'committed') continue
     for (const change of txn.changes) {
-      invariant(change.before === null || digest(change.before.text) === change.before.hash, 'RECOVERY_CONFLICT', '旧稿快照校验失败。')
-      invariant(change.after !== null && digest(change.after.text) === change.after.hash, 'RECOVERY_CONFLICT', '新稿快照校验失败。')
+      invariant(change.before === null || imageHash(change.before.text, change.encoding) === change.before.hash, 'RECOVERY_CONFLICT', '旧稿快照校验失败。')
+      invariant(change.after !== null && imageHash(change.after.text, change.encoding) === change.after.hash, 'RECOVERY_CONFLICT', '新稿快照校验失败。')
+      invariant(!change.encoding || change.before === null, 'RECOVERY_CONFLICT', '二进制交付事务不能替换已有文件。')
     }
     rows.push({ path, journal, txn })
   }
@@ -72,10 +86,10 @@ export async function inspectRecovery(io: FileStore, output = 'manuscript') {
       invariant(!targets.has(change.path), 'RECOVERY_CONFLICT', '多个未完成事务涉及相同文件，禁止推测提交顺序。')
       targets.add(change.path)
     }
-    const images = await Promise.all(txn.changes.map(change => io.read(change.path)))
+    const images = await Promise.all(txn.changes.map(change => readImage(io, change)))
     for (let i = 0; i < txn.changes.length; i++) {
       const change = txn.changes[i]
-      const currentHash = images[i] ? digest(images[i]!.text) : null
+      const currentHash = images[i] ? imageHash(images[i]!.text, change.encoding) : null
       invariant(currentHash === change.before?.hash || currentHash === change.after!.hash || (currentHash === null && change.before === null),
         'RECOVERY_CONFLICT', '检测到事务以外的修改；原稿、事务快照均已保留。')
     }
@@ -94,8 +108,8 @@ export async function recover(io: FileStore, output = 'manuscript', expectedHash
   for (const { path, journal, txn, images } of plan.pending) {
     for (let i = 0; i < txn.changes.length; i++) {
       const change = txn.changes[i]
-      if (images[i] && digest(images[i]!.text) === change.after!.hash) continue
-      await io.write(change.path, change.after!.text, images[i])
+      if (images[i] && imageHash(images[i]!.text, change.encoding) === change.after!.hash) continue
+      await writeImage(io, change, change.after!.text, images[i])
     }
     await io.write(path, json({ ...txn, state: 'committed' }), journal)
     recovered.push(txn.id)

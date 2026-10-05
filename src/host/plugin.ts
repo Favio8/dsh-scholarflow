@@ -4,7 +4,8 @@ import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { applicationResult, inspectProject, inspectRequest, prepareInitRequest, initializeRequest, resolveStore, type StoredInitPlan } from './bridge/project-api.ts'
-import { prepareInit, initialize, snapshot, updateProjectText } from '../core/project/project.ts'
+import { prepareInit, initialize, snapshot, updateProjectText, updatePresentation } from '../core/project/project.ts'
+import { exportPreflightRequest, projectPresentationRequest } from '../shared/presentation.ts'
 import { verifiedMemoryProjection, memoryHistory } from '../core/project/memory-entries.ts'
 import { prepareProjectCopy, applyProjectCopy, copyPlanTransition, pendingCopyTransition, verifiedIdentityLineage, type ProjectCopyPlan } from '../core/project/identity.ts'
 import { recover } from '../core/store/transactions.ts'
@@ -1712,6 +1713,15 @@ export class ScholarFlowRemote extends TypertRemoteService {
       return updateProjectText(io, input.path, input.text, input.baseHash, mutationRevision(input.context), input.context.sessionId, input.changeReason) })
   }
 
+  @Remote('project.updatePresentation')
+  async projectUpdatePresentation(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const { context, baseConfigHash, ...input } = projectPresentationRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal)
+      return updatePresentation(io, mutationRevision(context), baseConfigHash, input)
+    })
+  }
+
   @Remote('review.inspect')
   async reviewInspect(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
@@ -1729,14 +1739,14 @@ export class ScholarFlowRemote extends TypertRemoteService {
   @Remote('export.preflight')
   async exportPreflight(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => {
-      const peerId = this.requireOperator(), { context } = inspectRequest.parse(request), { io } = await resolveStore(this.ctx, context, signal)
-      const plan = await prepareDelivery(io)
+      const peerId = this.requireOperator(), { context, format } = exportPreflightRequest.parse(request), { io } = await resolveStore(this.ctx, context, signal)
+      const plan = await prepareDelivery(io, format)
       for (const [key, row] of this.exportPlans) if (row.expires < Date.now()) this.exportPlans.delete(key)
       invariant(this.exportPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有导出计划。')
       this.exportPlans.set(plan.id, { plan, context, peerId, expires: Date.now() + 600000 })
       return { planId: plan.id, planHash: plan.planHash, documentHash: plan.documentHash, revisionId: plan.revisionId,
         reviewState: plan.reviewState, reviewedAllowed: plan.reviewedAllowed, sourceIds: plan.sourceIds, unresolvedIssueIds: plan.unresolvedIssueIds,
-        formats: plan.formats, limitations: plan.limitations }
+        format: plan.format, formats: plan.formats, formatNotes: plan.formatNotes, limitations: plan.limitations }
     })
   }
 

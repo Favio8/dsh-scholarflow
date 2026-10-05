@@ -169,6 +169,51 @@ export class HostFileStore implements FileStore {
     return entries.map((entry: Host) => ({ path: path ? `${path}/${entry.name}` : entry.name,
       type: ['file', 'directory'].includes(entry.type) ? entry.type : 'other', size: entry.size ?? 0 }))
   }
+  private exportPath(path: string) {
+    relativePath.parse(path)
+    invariant(path.startsWith(this.binding.manuscriptDir + '/exports/') && /\/delivery_[\w]+\/paper\.docx$/.test(path),
+      'PATH_OUTSIDE_ALLOWED_ROOT', '二进制交付仅允许独立交付目录中的 Word 文件。')
+  }
+  async readExportBytes(path: string) {
+    this.exportPath(path)
+    if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
+    const target = await this.target(path), before = await this.ctx.fs.stat(target, this.signal)
+    if (!before) return undefined
+    invariant(before.type === 'file' && before.size <= 32 * 1024 * 1024, 'CONTENT_TOO_LARGE', 'Word 交付不是限额内的普通文件。')
+    const bytes = await this.ctx.fs.readBytes(target, this.signal, 32 * 1024 * 1024)
+    invariant(before.version === (await this.ctx.fs.stat(target, this.signal))?.version, 'DELIVERY_CHANGED', '读取期间交付改变。')
+    return { bytes: new Uint8Array(bytes), version: before.version as string }
+  }
+  async createExportBytes(path: string, bytes: Uint8Array) {
+    this.exportPath(path)
+    invariant(this.insideLock && !this.binding.readOnly, 'PROJECT_READONLY', 'Word 交付只能在项目写锁内创建。')
+    invariant(bytes.byteLength <= 32 * 1024 * 1024, 'CONTENT_TOO_LARGE', 'Word 交付超过 32 MiB。')
+    const authorize = async () => {
+      await this.binding.revalidate(); this.signal.throwIfAborted()
+      const resolved = await this.ctx.sessionController.resolveAgent(this.binding.sessionId)
+      if (resolved.error) throw resolved.error
+      const policy = this.ctx.sandboxPolicy.resolve({ session: resolved.agent.session })
+      invariant(policy.mode !== 'read-only', 'FS_SANDBOX_DENIED', '只读会话无法创建交付。')
+      invariant(policy.workspaceRoot === this.binding.canonicalRoot || policy.mode === 'danger-full-access', 'PATH_OUTSIDE_ALLOWED_ROOT', '当前会话的输出权限与绑定工作区不同。')
+      invariant(typeof this.ctx.fs.checkedTarget === 'function', 'BINARY_EXPORT_UNAVAILABLE', '当前宿主缺少已授权的二进制创建能力。')
+      const target = await this.target(path, true)
+      const checked = await this.ctx.fs.checkedTarget(target, policy)
+      return this.ctx.fs.processPath(checked) as string
+    }
+    await authorize()
+    let parent = this.binding.canonicalRoot
+    for (const part of path.split('/').slice(0, -1)) {
+      parent = join(parent, part); await authorize()
+      await mkdir(parent, { recursive: false }).catch(error => { if (error.code !== 'EEXIST') throw error })
+      const info = await lstat(parent)
+      invariant(info.isDirectory() && !info.isSymbolicLink(), 'PATH_OUTSIDE_ALLOWED_ROOT', '交付父目录不是普通目录。')
+    }
+    const absolute = await authorize(), file = await open(absolute, 'wx', 0o600)
+    try { await file.writeFile(bytes); await file.sync() } finally { await file.close() }
+    const image = await this.readExportBytes(path)
+    invariant(image && digest(image.bytes) === digest(bytes), 'DELIVERY_CHANGED', 'Word 交付字节不一致。')
+    return { version: image.version }
+  }
   async write(path: string, text: string, expected: FileImage | undefined): Promise<FileImage> {
     invariant(!this.binding.readOnly, 'PROJECT_READONLY', '诊断读取通道不允许写入。')
     await this.binding.revalidate()

@@ -10,12 +10,14 @@ import { ProjectIdentity } from './project-identity.tsx'
 import { SelectionCard, clearSelectionCard, invalidateSelectionCard } from './selection-card.tsx'
 import { useConfirmationFocus } from './confirmation-focus.ts'
 import { CAPTION_CSS, CHAT_CSS, WorkbenchIcon } from './workbench-chrome.tsx'
+import { PAPER_CSS, MATH_CSS, ProjectSettings, TYPE_LABELS, FORMAT_LABELS, type PaperView, type DraftController } from './paper-workspace.tsx'
+import type { ExportFormat } from '../shared/presentation.ts'
 import { CHAT_ID, CHAT_KIND, NATIVE_DOCK_CSS, NativeTools, createNativeHeader, createWorkbenchNavigation, openExistingChat } from './native-dock.tsx'
 
 type Host = any
-const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export'] as const
-const TAB_LABELS = ['概览', '资料与研究', '大纲', '正文', '审查', '导出']
-const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-body button,.sf-body select,.sf-header button,.sf-settings button,.sf-settings select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
+const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export', 'Settings', 'Changes', 'History'] as const
+const TAB_LABELS = ['概览', '资料与研究', '大纲', '正文', '审查', '导出', '项目设置', '修改建议', '运行历史']
+const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-body button:not(.sf-native-tools *),.sf-body select:not(.sf-native-tools *),.sf-header button,.sf-settings button,.sf-settings select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
 export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'layout', 'sidebarRight', 'sidebarRightTabs']
 const LAYOUT_CSS = `.sf-agent-resize{width:8px;flex-shrink:0;cursor:col-resize;touch-action:none;background:#8881}.sf-agent-resize:focus-visible{outline:2px solid currentColor;outline-offset:-2px}.sf-app[data-sf-narrow=true] .sf-agent{height:100%;min-height:0;flex:1}.sf-header{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.sf-header button{margin-left:auto}`
 const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:6px;padding:8px;resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid #8884;padding:12px 0;margin:12px 0}.sf-tabs button[aria-selected=true]{background:#8882;border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:2px solid currentColor;outline-offset:2px}`
@@ -106,20 +108,15 @@ export function apply(ctx: Host) {
       title="打开 ScholarFlow 工作台" onClick={() => navigation.open()}><WorkbenchIcon />ScholarFlow</button></div></>
   }
   function Workspace(props: Host) {
-    const [info, setInfo] = useState<Host>()
-    const [error, setError] = useState('')
-    useEffect(() => { let live = true; call('diagnostics').then(v => live && setInfo(v)).catch(e => live && setError(e.message)); return () => { live = false } }, [])
     const readMounted = () => ctx.sidebarRight.mounted.getSnapshot()
     const mounted = useSyncExternalStore(listener => ctx.sidebarRight.mounted.subscribe(listener), readMounted, readMounted)
     useEffect(() => { if (props.sessionId && mounted === props.sessionId) navigation.revealChat(props.sessionId) }, [props.sessionId, mounted])
-    return <div className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS}</style>
-      <header className="sf-native-header"><span className="sf-workspace-title"><b>ScholarFlow</b> · 学术写作工作台</span><NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} /></header>
-      <main className="sf-body"><h2>论文工作台</h2>
-        {error && <p role="alert" className="sf-error">{error}</p>}
-        {info && <p role="status">已连接 Host · 协议 v{info.protocol} · {info.settings.length ? '设置可持久化' : '设置能力不足'}</p>}
-        {props.renderSlot('scholarflow.project', {})}
-      </main></div>
+    return <div className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS}</style>
+      <main className="sf-body">{props.renderSlot('scholarflow.project', {
+        renderNativeTools: (extra: React.ReactNode) => <NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} extra={extra} />,
+      })}</main></div>
   }
+
   function Project(props: Host) {
     const confirmationRoot = useRef<HTMLElement>(null)
     useConfirmationFocus(confirmationRoot)
@@ -136,8 +133,10 @@ export function apply(ctx: Host) {
     const [plan, setPlan] = useState<Host>()
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
-    const [tab, setTab] = useState<(typeof TABS)[number]>('Overview')
+    const [tab, setTab] = useState<(typeof TABS)[number]>('Draft')
     const [issueLocation, setIssueLocation] = useState<Host>()
+    const [view, setView] = useState<PaperView>('split'), [format, setFormat] = useState<ExportFormat>('markdown')
+    const [editor, setEditor] = useState<DraftController>(), [exportPrompt, setExportPrompt] = useState(false), [exportTrigger, setExportTrigger] = useState(0)
     const bindingKey = `${workspace?.workspaceId ?? ''}:${props.sessionId ?? ''}`
     const liveBinding = useRef(bindingKey), readSequence = useRef(0)
     const latest = useRef({ busy, project })
@@ -169,7 +168,7 @@ export function apply(ctx: Host) {
     const refreshRef = useRef(refresh); refreshRef.current = refresh
     useEffect(() => {
       let live = true
-      setPlan(undefined); setProject(undefined); setError(''); setTab('Overview'); setIssueLocation(undefined)
+      setPlan(undefined); setProject(undefined); setError(''); setTab('Draft'); setView('split'); setFormat('markdown'); setExportPrompt(false); setExportTrigger(0); setEditor(undefined); setIssueLocation(undefined)
       defaultsScope.current = ''; setTitle(''); setOutput('manuscript')
       if (workspace && props.sessionId) refresh().catch(e => live && setError(e.message))
       return () => { live = false }
@@ -198,18 +197,32 @@ export function apply(ctx: Host) {
       await ctx.uiWorkspace.openSession(sessionId)
       navigation.open(sessionId)
     })
-    return <section ref={confirmationRoot} className="sf-project" aria-label="ScholarFlow 项目" data-sf-session-id={props.sessionId} aria-busy={busy}>
-      <label>DSH 工作区 <select aria-label="DSH 工作区" value={selectedWorkspace || workspace?.workspaceId || ''} onChange={e => setSelectedWorkspace(e.target.value)}><option value="">请选择</option>
-        {workspaces.map((item: Host) => <option key={item.workspaceId} value={item.workspaceId}>{item.title}</option>)}</select></label>
-      <button disabled={busy} onClick={startSession}>新建 ScholarFlow 会话</button>
-      <button disabled={busy || !workspace || !props.sessionId} onClick={() => act(refresh)}>刷新项目状态</button>
-      {error && <p role="alert" className="sf-error">{error}</p>}
+    const ready = !!project?.initialized && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId
+    const draftTool = tab === 'Changes' || tab === 'History' ? tab : undefined
+    const startExport = () => { setExportPrompt(false); setTab('Export'); setExportTrigger(value => value + 1) }
+    const requestExport = (selected: ExportFormat) => { setFormat(selected); if (editor?.dirty) setExportPrompt(true); else startExport() }
+    const closeMenu = (element: HTMLElement) => element.closest('details')?.removeAttribute('open')
+    return <section ref={confirmationRoot} className="sf-project sf-paper-project" aria-label="ScholarFlow 项目" data-sf-session-id={props.sessionId} aria-busy={busy}>
+      <header className="sf-paper-header"><strong className="sf-paper-title" title={ready ? project.config.project.title : 'ScholarFlow'}>{ready ? project.config.project.title : 'ScholarFlow'}</strong>
+        {ready && <><button className="sf-type-chip" title="项目设置" onClick={() => setTab('Settings')}>{TYPE_LABELS[project.config.project.type]} ▾</button>
+          <select aria-label="排版与导出格式" title="排版与导出格式" value={format} onChange={e => setFormat(e.target.value as ExportFormat)}>
+            {Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></>}
+        {props.renderNativeTools?.(ready && <details className="sf-paper-menu sf-paper-export"><summary>导出 ▾</summary><div className="sf-paper-menu-popover">
+          {Object.entries(FORMAT_LABELS).map(([value, label]) => <button key={value} disabled={busy} onClick={e => { closeMenu(e.currentTarget); requestExport(value as ExportFormat) }}>导出 {label}</button>)}
+          <button onClick={e => { closeMenu(e.currentTarget); setTab('Export') }}>交付历史</button>
+        </div></details>)}
+      </header>
+      {error && <p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}
+      <div className="sf-create-scroll" hidden={ready}><div className="sf-create-card"><h3>开始一篇论文</h3><p>{workspace?.title ?? '选择工作区，然后创建 ScholarFlow 会话。'}</p>
+      {!workspace && <label>DSH 工作区 <select aria-label="DSH 工作区" value={selectedWorkspace} onChange={e => setSelectedWorkspace(e.target.value)}><option value="">请选择</option>
+        {workspaces.map((item: Host) => <option key={item.workspaceId} value={item.workspaceId}>{item.title}</option>)}</select></label>}
+      {!project && <button disabled={busy} onClick={startSession}>新建 ScholarFlow 会话</button>}
       {!project && <p>选择 DSH 工作区并创建专属会话，切换 Mode 本身不会创建论文目录。</p>}
       {project?.readonly && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId && <ReadonlyProject value={project.readonly} />}
       {project?.identityConflict && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId &&
         <ProjectIdentity key={`copy_${project.binding.projectId}`} project={project} workspaceTitle={workspace.title} workspaces={workspaces} context={context} api={api} publish={publish} run={act} busy={busy} />}
       {project && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId && !project.initialized && !project.readonly && <>
-        <p>当前工作区：{workspace.title} · 尚未初始化</p>
+
         {project.recovery ? <section aria-label="事务恢复确认"><h3>检测到未完成的项目事务</h3>
           <p>恢复只会完成已记录的提交。若文件出现外部修改，保留当前稿件并停止恢复。</p>
           {project.recovery.transactions.map((txn: Host) => <div key={txn.id}><p>{txn.id}</p><ul>{txn.files.map((file: Host) => <li key={file.relativePath}>{file.relativePath} · {file.status === 'published' ? '已写入' : '待恢复'}</li>)}</ul></div>)}
@@ -218,9 +231,9 @@ export function apply(ctx: Host) {
           <label>项目标题 <input aria-label="项目标题" value={title} onChange={e => setTitle(e.target.value)} maxLength={300} /></label>
           <label>论文类型 <select aria-label="论文类型" value={type} onChange={e => setType(e.target.value)}><option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></label>
           <label>论文语言 <select aria-label="论文语言" value={language} onChange={e => setLanguage(e.target.value)}><option value="zh-CN">中文</option><option value="en">英文</option></select></label>
-          <label>每次运行模型调用上限 <input aria-label="每次运行模型调用上限" type="number" min={1} max={40} step={1} value={maxModelCalls} onChange={e => setMaxModelCalls(Number(e.target.value))} /></label>
-          <label>论文输出目录 <input aria-label="论文输出目录" value={output} onChange={e => setOutput(e.target.value)} /></label>
-          <button disabled={busy || !title.trim() || !Number.isInteger(maxModelCalls) || maxModelCalls < 1 || maxModelCalls > 40} onClick={() => act(async () => setPlan(await api('project.prepareInit', { context: context(), input: { title: title.trim(), type, language, maxModelCalls, manuscriptDir: output } })))}>预览初始化计划</button>
+          <details><summary>高级设置</summary><label>每次运行模型调用上限 <input aria-label="每次运行模型调用上限" type="number" min={1} max={40} step={1} value={maxModelCalls} onChange={e => setMaxModelCalls(Number(e.target.value))} /></label>
+          <label>论文输出目录 <input aria-label="论文输出目录" value={output} onChange={e => setOutput(e.target.value)} /></label></details>
+          <button disabled={busy || !title.trim() || !Number.isInteger(maxModelCalls) || maxModelCalls < 1 || maxModelCalls > 40} onClick={() => act(async () => setPlan(await api('project.prepareInit', { context: context(), input: { title: title.trim(), type, language, maxModelCalls, manuscriptDir: output } })))} className="sf-primary">创建论文项目</button>
         </>}
       </>}
       {plan && <section role="dialog" aria-modal="false" aria-label="初始化确认"><h3>确认创建专属项目文件</h3>
@@ -229,19 +242,32 @@ export function apply(ctx: Host) {
         {plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
         <button disabled={busy} onClick={() => act(async () => { publish(await api('project.initialize', { context: context(), planId: plan.planId, planHash: plan.planHash })); setPlan(undefined) })}>确认初始化</button>
         <button disabled={busy} onClick={() => setPlan(undefined)}>取消</button></section>}
-      {project?.initialized && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId && <><h3>{project.config.project.title}</h3><p>项目已保存 · ledger 版本 {project.ledger.revision} · {project.document.externalChange ? '检测到外部稿件修改' : '主稿版本一致'}</p>
-        {!!project.configWarnings?.length && <p role="alert">以下配置键未生效，原文件已保留：{project.configWarnings.join('、')}</p>}
-        <p>当前绑定：{project.binding.projectId}。同一工作区的多个 ScholarFlow 会话读取同一份项目数据。</p>
-        <nav className="sf-tabs" role="tablist" aria-label="论文工作区页面">{TABS.map((name, index) => <button key={name} id={`sf-tab-${name}`} role="tab" aria-controls={`sf-panel-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)} onKeyDown={e => {
-          const next = e.key === 'ArrowRight' ? (index + 1) % TABS.length : e.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1
-          if (next < 0) return; e.preventDefault(); setTab(TABS[next]); e.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`#sf-tab-${TABS[next]}`)?.focus()
-        }}>{name} · {TAB_LABELS[index]}</button>)}</nav>
-        <div id="sf-panel-Overview" role="tabpanel" aria-labelledby="sf-tab-Overview" hidden={tab !== 'Overview'}><Overview key={`overview_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} navigate={page => { if (TABS.includes(page as typeof tab)) setTab(page as typeof tab) }} /></div>
-        <div id="sf-panel-Research" role="tabpanel" aria-labelledby="sf-tab-Research" hidden={tab !== 'Research'}><Research key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
-        <div id="sf-panel-Outline" role="tabpanel" aria-labelledby="sf-tab-Outline" hidden={tab !== 'Outline'}><OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
-        <div id="sf-panel-Draft" role="tabpanel" aria-labelledby="sf-tab-Draft" hidden={tab !== 'Draft'}><Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} issueLocation={issueLocation} /></div>
-        <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} mode={tab} onLocate={location => { setIssueLocation({ ...location, request: crypto.randomUUID() }); setTab('Draft') }} />
+      </div></div>
+      {ready && <>
+        <div className="sf-paper-toolbar"><nav className="sf-paper-views" aria-label="正文视图">
+          {(['edit', 'preview', 'split'] as const).map((name, index) => <button key={name} aria-pressed={tab === 'Draft' && view === name} onClick={() => { setTab('Draft'); setView(name) }}>{['编辑', '预览', '分屏'][index]}</button>)}
+        </nav><details className="sf-paper-menu"><summary>论文工具 ▾</summary><div className="sf-paper-menu-popover">
+          {TABS.filter(name => !['Draft', 'Export'].includes(name)).map(name => <button key={name} onClick={e => { closeMenu(e.currentTarget); setTab(name) }}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
+        </div></details></div>
+        {tab !== 'Draft' && <div className="sf-tool-back"><button onClick={() => setTab('Draft')}>← 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
+        <div className="sf-paper-content">
+          <div id="sf-panel-Overview" role="tabpanel" aria-label="概览" hidden={tab !== 'Overview'}><Overview key={`overview_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} navigate={page => { if (TABS.includes(page as typeof tab)) setTab(page as typeof tab) }} /></div>
+          <div id="sf-panel-Research" role="tabpanel" aria-label="资料与研究" hidden={tab !== 'Research'}><Research key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
+          <div id="sf-panel-Outline" role="tabpanel" aria-label="大纲" hidden={tab !== 'Outline'}><OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
+          <div id="sf-panel-Draft" role="tabpanel" aria-label={draftTool ? TAB_LABELS[TABS.indexOf(draftTool)] : '正文'} hidden={tab !== 'Draft' && !draftTool}>
+            <Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} issueLocation={issueLocation}
+              view={view} format={format} tool={draftTool} onController={setEditor} onTool={() => setTab('Changes')} onReturnEditor={() => { setView('split'); setTab('Draft') }} />
+          </div>
+          <div id="sf-panel-Settings" role="tabpanel" aria-label="项目设置" hidden={tab !== 'Settings'}><ProjectSettings key={project.binding.projectId} project={project} diagnostics={() => call('diagnostics')} api={api} context={context} refresh={refresh} run={act} busy={busy} /></div>
+          <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} mode={tab} format={format} exportTrigger={exportTrigger}
+            onLocate={location => { setIssueLocation({ ...location, request: crypto.randomUUID() }); setView('split'); setTab('Draft') }} />
+        </div>
       </>}
+      {ready && exportPrompt && <div className="sf-export-choice"><section role="dialog" aria-modal="true" aria-label="选择导出正文版本"><h3>正文还有未保存的编辑</h3><p>选择本次 {FORMAT_LABELS[format]} 导出使用的版本。</p>
+        <button className="sf-primary" disabled={busy || !editor?.canSave} onClick={() => act(async () => { await editor!.save(); startExport() })}>保存并导出</button>
+        <button disabled={busy} onClick={startExport}>导出已保存版本</button><button disabled={busy} onClick={() => setExportPrompt(false)}>取消</button>
+      </section></div>}
+
     </section>
   }
   function Settings() {

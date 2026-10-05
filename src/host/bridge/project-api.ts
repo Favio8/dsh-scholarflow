@@ -175,7 +175,7 @@ export async function inspectProject(ctx: Host, request: unknown, signal: AbortS
       ...(identityCopies.length && { identityConflict: { projectId: binding.projectId, workspaceId: binding.workspaceId, copies: identityCopies } }),
       ...(recovery?.pending.length && { recovery: { planHash: recovery.contentHash, copyIdentity: true,
         transactions: recovery.pending.map(row => ({ id: row.txn.id, createdAt: row.txn.createdAt,
-          files: row.txn.changes.map((change, i) => ({ relativePath: change.path, status: row.images[i] && digest(row.images[i]!.text) === change.after?.hash ? 'published' : 'pending' })) })) } }),
+          files: row.txn.changes.map((change, i) => ({ relativePath: change.path, status: row.images[i] && digest(change.encoding ? Buffer.from(row.images[i]!.text, 'base64') : row.images[i]!.text) === change.after?.hash ? 'published' : 'pending' })) })) } }),
       readonly: await inspectDamagedProject(io, bindingDiagnostic) }
   }
   try {
@@ -184,7 +184,7 @@ export async function inspectProject(ctx: Host, request: unknown, signal: AbortS
     const recovery = await inspectRecovery(io, manuscriptDir)
     if (recovery.pending.length) return { binding, initialized: false, metadataExists: true, recovery: {
       planHash: recovery.contentHash, transactions: recovery.pending.map(row => ({ id: row.txn.id, createdAt: row.txn.createdAt,
-        files: row.txn.changes.map((change, i) => ({ relativePath: change.path, status: row.images[i] && digest(row.images[i]!.text) === change.after?.hash ? 'published' : 'pending' })) })),
+        files: row.txn.changes.map((change, i) => ({ relativePath: change.path, status: row.images[i] && digest(change.encoding ? Buffer.from(row.images[i]!.text, 'base64') : row.images[i]!.text) === change.after?.hash ? 'published' : 'pending' })) })),
     } }
     if (!await io.stat(CONFIG_PATH)) return { binding, initialized: false, metadataExists: !!await io.stat('.scholarflow') }
     const current = await snapshot(io)

@@ -15,6 +15,9 @@ export interface FileStore {
   // Create-only fixed resource publication under the project writer lock.
   // A failed or interrupted copy remains unbound; this never replaces bytes.
   createResourceBytes?(path: string, bytes: Uint8Array): Promise<void>
+  // Binary delivery artifacts are create-only and confined to exports/.
+  readExportBytes?(path: string): Promise<{ bytes: Uint8Array; version: string } | undefined>
+  createExportBytes?(path: string, bytes: Uint8Array): Promise<{ version: string }>
   stat(path: string): Promise<FileEntry | undefined>
   list(path: string): Promise<FileEntry[]>
   write(path: string, text: string, expected: FileImage | undefined): Promise<FileImage>

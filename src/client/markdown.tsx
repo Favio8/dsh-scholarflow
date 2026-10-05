@@ -1,4 +1,5 @@
 import React from 'react'
+import katex from 'katex'
 import { type AstNode, type Projection, mapLeafPoint, validateRange } from '../core/editing/markdown.ts'
 import type { SelectionPayload } from '../shared/editing.ts'
 
@@ -17,8 +18,11 @@ export function MarkdownView({ projection }: { projection: Projection }) {
     if (node.type === 'list') return node.ordered ? <ol key={key}>{children}</ol> : <ul key={key}>{children}</ul>
     if (node.type === 'listItem') return <li key={key}>{children}</li>
     if (node.type === 'link') return /^(https?:|mailto:)/i.test(node.url ?? '') ? <a key={key} href={node.url} target="_blank" rel="noopener noreferrer">{children}</a> : <span key={key}>{children}</span>
-    if (node.type === 'inlineCode' || node.type === 'inlineMath') return <code key={key} data-sf-protected="true">{node.value}</code>
-    if (node.type === 'code' || node.type === 'math') return <pre key={key} data-sf-protected="true"><code>{node.value}</code></pre>
+    if (node.type === 'inlineMath' || node.type === 'math') return <span key={key} data-sf-protected="true" dangerouslySetInnerHTML={{ __html: katex.renderToString(node.value ?? '', {
+      displayMode: node.type === 'math', throwOnError: false, trust: false, maxExpand: 1000, maxSize: 20,
+    }) }} />
+    if (node.type === 'inlineCode') return <code key={key} data-sf-protected="true">{node.value}</code>
+    if (node.type === 'code') return <pre key={key} data-sf-protected="true"><code>{node.value}</code></pre>
     if (node.type === 'html') return <span key={key} data-sf-protected="true">{node.value}</span>
     if (node.type === 'image') return <span key={key} data-sf-protected="true">[图片：{node.alt || '未命名'}；未加载外部地址]</span>
     if (node.type === 'break') return <br key={key} data-sf-protected="true" />

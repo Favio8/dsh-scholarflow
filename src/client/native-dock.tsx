@@ -103,10 +103,12 @@ export function createNativeHeader(ctx: any) {
   return source
 }
 
-export function NativeTools({ source, sessionId, renderFactorySlot }: { source: ReturnType<typeof createNativeHeader>; sessionId?: string; renderFactorySlot: any }) {
+export function NativeTools({ source, sessionId, renderFactorySlot, extra }: { source: ReturnType<typeof createNativeHeader>; sessionId?: string; renderFactorySlot: any; extra?: React.ReactNode }) {
   const factories = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
   return <nav className="sf-native-tools" aria-label="工作台工具">
-    {sessionId && factories.map(name => <React.Fragment key={name}>{renderFactorySlot(name, {})}</React.Fragment>)}
+    {sessionId && factories.filter(name => name !== 'scholarflow.native-panel-toggle').map(name => <React.Fragment key={name}>{renderFactorySlot(name, {})}</React.Fragment>)}
+    {extra}
+    {sessionId && factories.includes('scholarflow.native-panel-toggle') && renderFactorySlot('scholarflow.native-panel-toggle', {})}
   </nav>
 }
 

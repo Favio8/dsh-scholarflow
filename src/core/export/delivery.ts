@@ -6,8 +6,10 @@ import { projectMarkdown } from '../editing/markdown.ts'
 import { validateArtifactPrivacy, validateExportUrl, validateManuscriptPublication } from './public-artifacts.ts'
 import { deliverySchema, type Ledger } from '../../shared/schema.ts'
 import { invariant } from '../../shared/errors.ts'
+import { latexDocument, wordDocument } from './formats.ts'
+import type { ExportFormat } from '../../shared/presentation.ts'
 
-export async function prepareDelivery(io: FileStore) {
+export async function prepareDelivery(io: FileStore, format: ExportFormat = 'markdown') {
   const current = await snapshot(io), review = await inspectReview(io), input = await reviewInput(io)
   invariant(!current.document.externalChange, 'STALE_DOCUMENT_VERSION', '请先显式采用或保存外部稿件改动，再导出。')
   const projection = projectMarkdown(current.document.text)
@@ -17,6 +19,7 @@ export async function prepareDelivery(io: FileStore) {
     return source.id
   })
   validateManuscriptPublication(current.document.text, projection.tree)
+  if (format === 'docx') validateArtifactPrivacy(current.config.project.title)
   for (const sourceId of sourceIds) {
     const source = current.ledger.sources[sourceId], url = source.identifiers.url
     validateArtifactPrivacy([source.title, source.venue, ...source.authors.flatMap(author => [author.literal, author.family, author.given]),
@@ -33,7 +36,10 @@ export async function prepareDelivery(io: FileStore) {
     ledgerRevision: current.ledger.revision, ledgerHash: current.ledgerHash, configHash: current.configHash, dependencyHash: input.dependencyHash,
     reviewId: review.report?.id, reviewState, sourceIds, unresolvedIssueIds: issues.filter(issue => issue.state !== 'resolved').map(issue => issue.id),
     reviewedAllowed: reviewed, limitations: review.report?.limitations ?? ['当前稿件尚未执行审查；只能导出工作草稿。'],
-    formats: ['markdown', 'bibtex', 'quality-report'] }
+    format, formats: [...(format === 'markdown' ? [] : [format]), 'markdown', 'bibtex', 'quality-report'],
+    formatNotes: format === 'docx' ? ['Word 公式保留 TeX 表达式；预览排版与 Word 实际分页可能不同。']
+      : format === 'latex' ? ['LaTeX 为完整源码，中文使用 ctex；下载包含 references.bib。'] : [] }
+  invariant(format !== 'docx' || io.createExportBytes && io.readExportBytes, 'BINARY_EXPORT_UNAVAILABLE', '当前宿主不能保存 Word 交付。')
   return { ...plan, planHash: digest(json(plan)) }
 }
 export type DeliveryPlan = Awaited<ReturnType<typeof prepareDelivery>>
@@ -47,7 +53,7 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
   invariant(deliveryType === 'working-draft' || plan.reviewedAllowed, 'REVIEW_NOT_READY', '当前检查有阻塞、未知或过期项，只能显式导出工作草稿。')
   let manifest!: Ledger['deliveries'][string]
   const result = await mutateLedger(io, expectedRevision, async (ledger, config) => {
-    const fresh = await prepareDelivery(io)
+    const fresh = await prepareDelivery(io, plan.format ?? 'markdown')
     invariant(fresh.ledgerHash === plan.ledgerHash && fresh.configHash === plan.configHash && fresh.documentHash === plan.documentHash &&
       fresh.dependencyHash === plan.dependencyHash && fresh.reviewId === plan.reviewId && fresh.reviewState === plan.reviewState,
       'EXPORT_PLAN_STALE', '导出确认期间稿件、审查、资料或项目数据改变，请重新预检。')
@@ -64,15 +70,17 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
       '## 限制与建议下一步', '', ...plan.limitations.map(item => `- ${reportText(item)}`), '- 处理未关闭问题和未知检查，接受修改后按新版本重新审查。',
       '- 本报告不提供课程成绩、接收概率或学术真实性保证。', '' ].join('\n')
     const root = `${config.paths.manuscriptDir}/exports/${deliveryId}`
-    const files = [{ relativePath: 'paper.md', text: current.document.text }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger) }, { relativePath: 'quality-report.md', text: report }]
-    for (const file of files) validateArtifactPrivacy(file.text)
+    const files: Array<{ relativePath: string; text: string; encoding?: 'base64' }> = [{ relativePath: 'paper.md', text: current.document.text }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger) }, { relativePath: 'quality-report.md', text: report }]
+    if (plan.format === 'latex') files.unshift({ relativePath: 'paper.tex', text: latexDocument(current.document.text, config) })
+    if (plan.format === 'docx') files.unshift({ relativePath: 'paper.docx', text: Buffer.from(await wordDocument(current.document.text, config, ledger)).toString('base64'), encoding: 'base64' })
+    for (const file of files) if (!file.encoding) validateArtifactPrivacy(file.text)
     manifest = deliverySchema.parse({ id: deliveryId, projectId: ledger.projectId, documentId: 'paper', documentHash: plan.documentHash,
       revisionId: plan.revisionId, ledgerRevision: plan.ledgerRevision, ...(plan.reviewId && { reviewId: plan.reviewId }), reviewState,
       unresolvedIssueIds: plan.unresolvedIssueIds, sourceIds: plan.sourceIds,
-      files: files.map(file => ({ relativePath: file.relativePath, hash: digest(file.text), sizeBytes: Buffer.byteLength(file.text) })), createdAt: new Date().toISOString() })
+      files: files.map(file => { const bytes = file.encoding ? Buffer.from(file.text, 'base64') : Buffer.from(file.text); return { relativePath: file.relativePath, hash: digest(bytes), sizeBytes: bytes.byteLength } }), createdAt: new Date().toISOString() })
     invariant(!await io.stat(root), 'OUTPUT_PATH_CONFLICT', '交付快照目录已存在，禁止覆盖。')
     ledger.deliveries[deliveryId] = manifest
-    return [...files.map(file => ({ path: `${root}/${file.relativePath}`, before: undefined, after: file.text })),
+    return [...files.map(file => ({ path: `${root}/${file.relativePath}`, before: undefined, after: file.text, ...(file.encoding && { encoding: file.encoding }) })),
       { path: `${root}/manifest.json`, before: undefined, after: json(manifest) }]
   })
   return { revision: result.revision, manifest }
@@ -83,9 +91,16 @@ export async function readDelivery(io: FileStore, deliveryId: string) {
   invariant(manifest && manifest.projectId === current.ledger.projectId, 'DELIVERY_NOT_FOUND', '交付不存在或不属于当前项目。')
   const files = []
   for (const file of manifest.files) {
+    if (file.relativePath === 'paper.docx') {
+      invariant(io.readExportBytes, 'BINARY_EXPORT_UNAVAILABLE', '当前宿主无法读取 Word 交付。')
+      const image = await io.readExportBytes(`${current.config.paths.manuscriptDir}/exports/${deliveryId}/${file.relativePath}`)
+      invariant(image && digest(image.bytes) === file.hash && image.bytes.byteLength === file.sizeBytes, 'DELIVERY_CHANGED', 'Word 交付快照缺失或已修改。')
+      files.push({ ...file, encoding: 'base64' as const, base64: Buffer.from(image.bytes).toString('base64'), mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+      continue
+    }
     const image = await io.read(`${current.config.paths.manuscriptDir}/exports/${deliveryId}/${file.relativePath}`)
     invariant(image && digest(image.text) === file.hash && Buffer.byteLength(image.text) === file.sizeBytes, 'DELIVERY_CHANGED', '交付快照缺失或被修改；保留原文件并停止下载。')
-    files.push({ ...file, text: image.text })
+    files.push({ ...file, text: image.text, encoding: 'utf8' as const, mediaType: file.relativePath.endsWith('.tex') ? 'application/x-tex;charset=utf-8' : 'text/plain;charset=utf-8' })
   }
   return { manifest, files }
 }

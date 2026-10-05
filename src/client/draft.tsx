@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { projectMarkdown, wordStats, textOf } from '../core/editing/markdown.ts'
+import { projectMarkdown, wordStats, textOf, validateRange } from '../core/editing/markdown.ts'
 import { sectionTarget } from '../core/editing/sections.ts'
 import { MarkdownView, captureSelection } from './markdown.tsx'
 import type { SelectionPayload } from '../shared/editing.ts'
@@ -7,6 +7,8 @@ import { ProposalRevision } from './proposal-revision.tsx'
 import { DraftSequence } from './draft-sequence.tsx'
 import { ManuscriptImport } from './manuscript-import.tsx'
 import { scratchKey, readScratch, writeScratch, ScratchQueue } from './scratch-backup.ts'
+import type { DraftController, PaperView } from './paper-workspace.tsx'
+import type { ExportFormat } from '../shared/presentation.ts'
 import { setSelectionCard } from './selection-card.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
@@ -16,7 +18,10 @@ function readLocalBuffer(key: string) {
     return readScratch(window.localStorage, key, 8 * 1024 * 1024)
   } catch { /* Host temporary buffer remains available when browser storage fails. */ }
 }
-export function Draft({ project, context, api, refresh, run, busy, issueLocation }: Props & { issueLocation?: any }) {
+export function Draft({ project, context, api, refresh, run, busy, issueLocation, view = 'split', format = 'markdown', tool, onController, onTool, onReturnEditor }: Props & {
+  issueLocation?: any; view?: PaperView; format?: ExportFormat; tool?: 'Changes' | 'History';
+  onController?: (value: DraftController) => void; onTool?: () => void; onReturnEditor?: () => void
+}) {
   const projectId = project.binding.projectId
   const bufferKey = scratchKey(project.binding, 'paper')
   const cached = buffers.get(bufferKey) ?? readLocalBuffer(bufferKey)
@@ -44,7 +49,12 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     const latest = buffers.get(bufferKey)
     if (!latest || (latest.text === edit.text && latest.baseHash === edit.baseHash)) setBufferMessage(edit.state === 'dirty' ? '未提交编辑已暂存到宿主；主稿尚未改变。' : '宿主暂存缓冲已清理；主稿版本保持一致。')
   }, error => { persistenceBlocked.current = true; setBufferMessage(`暂存未完成，保留本页面和浏览器备份：${(error as Error).message}`) })
-  const root = useRef<HTMLDivElement>(null)
+  const root = useRef<HTMLDivElement>(null), gutter = useRef<HTMLDivElement>(null)
+  const [saving, setSaving] = useState(false), [cursor, setCursor] = useState(0)
+  const livePreview = useMemo(() => {
+    try { return { projection: projectMarkdown(text), statistics: wordStats(text), error: '' } }
+    catch (error) { return { projection: undefined, statistics: undefined, error: (error as Error).message } }
+  }, [text])
   useEffect(() => {
     if (!issueLocation || issueLocation.projectId !== projectId || issueLocation.documentHash !== project.document.contentHash) return
     const block = root.current?.querySelector<HTMLElement>(`[data-sf-block="${CSS.escape(issueLocation.location.blockId)}"]`)
@@ -57,7 +67,6 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   }, [project.ledger.revision, historySequence])
   const dirty = text !== project.document.text || baseHash !== project.document.contentHash
   const projection = useMemo(() => projectMarkdown(project.document.text), [project.document.contentHash])
-  const statistics = useMemo(() => wordStats(project.document.text), [project.document.contentHash])
   useEffect(() => {
     let live = true
     api('skills.project', { context: context() }).then(result => {
@@ -121,20 +130,83 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     if (!whole && !selection) throw new Error('请先选择已保存的渲染正文。')
     setPlan(await api('writing.prepare', { context: context(), instruction, ...(!whole && { selection, ...(skillBindingId && { skillBindingId }) }) }))
   })
-  return <section aria-label="正文编辑"><h3>正文编辑</h3>
-    <p>Markdown 是主稿事实源。手工编辑与模型建议均校验当前版本；主稿不会被旧缓冲自动覆盖。</p>
-    <ManuscriptImport project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} dirty={dirty || !!recoverable} />
-    <label>Markdown 手工编辑<textarea aria-label="Markdown 手工编辑" rows={10} disabled={busy} value={text} onChange={e => {
-      const edited = project.document.lineEnding === 'crlf' ? e.target.value.replace(/\r\n|\r|\n/g, '\r\n') : e.target.value
-      setText(edited)
-      if (edited === project.document.text && baseHash === project.document.contentHash) remember()
-      else remember({ text: edited, baseHash })
-    }} /></label>
-    {baseHash !== project.document.contentHash && <p role="alert">服务端稿件版本已改变，当前未保存缓冲已保留。请复制比较后显式采用当前版本。</p>}
-    <button disabled={busy || !dirty || baseHash !== project.document.contentHash} onClick={() => run(async () => {
+  const save = async () => {
+    setSaving(true)
+    try {
       const result = await api('document.saveManual', { context: context(), text, baseHash })
-      remember(); setBaseHash(result.documentHash); setMessage('手工稿已保存，审查需按新版本重跑。'); await refresh()
-    })}>保存手工稿</button>
+      remember(); setBaseHash(result.documentHash); setMessage('正文已保存。'); await refresh()
+    } finally { setSaving(false) }
+  }
+  useEffect(() => {
+    onController?.({ dirty, canSave: dirty && !busy && !saving && baseHash === project.document.contentHash && !project.document.externalChange, save })
+  }, [text, baseHash, project.document.contentHash, project.ledger.revision, busy, saving])
+  const attachSelection = () => run(async () => {
+    const captured = context(), result = await api('editor.selectionContext', { context: captured, selection })
+    setSelectionCard({ context: captured, selection: structuredClone(selection), snapshot: result.snapshot, binding: result.binding })
+    setMessage('已附加选区到当前聊天。')
+  })
+  const selectSource = (area: HTMLTextAreaElement) => {
+    const offset = (index: number) => {
+      const prefix = area.value.slice(0, index)
+      return project.document.lineEnding === 'crlf' ? prefix.replace(/\n/g, '\r\n').length : prefix.length
+    }
+    const from = offset(area.selectionStart), to = offset(area.selectionEnd)
+    setCursor(from)
+    if (from === to || dirty) { setSelection(undefined); return }
+    try {
+      const selected = validateRange(projection, from, to)
+      const claimIds = [...new Set((Object.values(project.ledger.claimAnchors) as any[]).filter(anchor => anchor.status === 'current' &&
+        anchor.documentHash === project.document.contentHash && anchor.blockId === selected.block.id).flatMap(anchor => anchor.claimIds))] as string[]
+      setSelection({ projectId, documentId: 'paper', documentHash: project.document.contentHash, revisionId: project.document.revisionId,
+        blockIds: [selected.block.id], sourceRange: { startUtf16: from, endUtf16: to }, sourceText: text.slice(from, to), renderedText: selected.renderedText,
+        prefixContext: text.slice(Math.max(0, from - 200), from), suffixContext: text.slice(to, to + 200), citationKeys: selected.citationKeys,
+        claimIds, scope: 'inline', capturedAt: new Date().toISOString() })
+      setAnchorClaimIds(claimIds); setAnchorId('')
+    } catch (error) { setSelection(undefined); setMessage((error as Error).message) }
+  }
+  const headings = livePreview.projection?.tree.children?.filter(node => node.type === 'heading') ?? []
+  const currentHeading = [...headings].reverse().find(node => (node.position?.start.offset ?? 0) <= cursor)
+  const statistics = livePreview.statistics
+  return <section className="sf-draft" aria-label="正文编辑">
+    <div className="sf-editor-surface" hidden={!!tool}>
+      {(recoverable || baseHash !== project.document.contentHash || project.document.externalChange) && <div className="sf-editor-notice" role="status">
+        {recoverable ? '有暂存编辑可恢复' : '正文版本发生变化，当前编辑已保留'}<button onClick={onTool}>查看与处理</button>
+      </div>}
+      {selection && !dirty && <div className="sf-editor-notice"><span>选区已就绪</span><button disabled={busy} onClick={attachSelection}>附加到聊天</button><button onClick={onTool}>修改建议</button></div>}
+      <div className="sf-editor-grid" data-view={view}>
+        <div className="sf-source-pane" hidden={view === 'preview'}><div className="sf-pane-caption"><span>{project.config.paths.mainDocument.split('/').at(-1)} · Markdown</span>
+          <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>{saving ? '保存中…' : '保存'}</button></div>
+          <div className="sf-source-editor"><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
+            <textarea className="sf-source-input" aria-label="Markdown 手工编辑" wrap="off" spellCheck={false} disabled={busy || saving} value={text}
+              onScroll={e => { if (gutter.current) gutter.current.style.transform = `translateY(${-e.currentTarget.scrollTop}px)` }}
+              onSelect={e => selectSource(e.currentTarget)}
+              onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (dirty && !busy && !saving && baseHash === project.document.contentHash) run(save) } }}
+              onChange={e => {
+                const edited = project.document.lineEnding === 'crlf' ? e.target.value.replace(/\r\n|\r|\n/g, '\r\n') : e.target.value
+                setText(edited); setSelection(undefined); setMessage('')
+                if (edited === project.document.text && baseHash === project.document.contentHash) remember()
+                else remember({ text: edited, baseHash })
+              }} />
+          </div>
+        </div>
+        <div className="sf-preview-pane" hidden={view === 'edit'}><div className="sf-pane-caption"><span>论文预览</span><span>{format === 'latex' ? 'LaTeX 排版' : format === 'docx' ? 'Word 排版' : 'Markdown'} · 实时</span></div>
+          <div className="sf-paper-scroll"><div className="sf-paper-page" data-format={format} ref={root} onMouseUp={capture} onKeyUp={capture}>
+            {livePreview.projection ? <MarkdownView projection={livePreview.projection} /> : <p role="alert">{livePreview.error}</p>}
+            {!!livePreview.projection?.citationOrder.length && <section className="sf-paper-references"><h3>参考文献</h3><ol>{livePreview.projection.citationOrder.map(key => {
+              const source = (Object.values(project.ledger.sources) as any[]).find(row => row.citeKey === key)
+              return <li key={key}>{source ? [source.authors.map((author: any) => author.literal ?? [author.given, author.family].filter(Boolean).join(' ')).join(', '), source.title, source.year, source.venue].filter(Boolean).join('. ') : `待登记引用：${key}`}</li>
+            })}</ol></section>}
+          </div></div>
+        </div>
+      </div>
+      <footer className="sf-draft-status"><span role="status" title={message || bufferMessage}>{saving ? '保存中…' : dirty ? '未保存 · 编辑已在本页保留' : project.document.externalChange ? '外部正文已改变' : <><span className="sf-saved-dot">●</span>已保存</>}{message && ` · ${message}`}</span>
+        <span>{statistics ? `${statistics?.chineseCharacters ?? 0} 汉字 · ${statistics?.westernWords ?? 0} 词` : '字数暂不可用'}{currentHeading && ` · ${textOf(currentHeading)}`}</span></footer>
+    </div>
+    <div className="sf-draft-tools" hidden={!tool}>
+    <div hidden={tool !== 'Changes'}><h3>修改建议与正文管理</h3>
+    <ManuscriptImport project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} dirty={dirty || !!recoverable} />
+    {baseHash !== project.document.contentHash && <p role="alert">服务端稿件版本已改变，当前未保存缓冲已保留。请复制比较后显式采用当前版本。</p>}
+    <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>保存手工稿</button>
     <button disabled={busy} onClick={() => { if ((dirty || recoverable) && !window.confirm('放弃当前未保存缓冲并采用服务端稿件？')) return; remember(); setRecoverable(undefined); setText(project.document.text); setBaseHash(project.document.contentHash); setMessage('已采用当前服务端稿件。') }}>显式采用服务端版本</button>
     <button disabled={busy || project.document.initialPlaceholder || dirty} onClick={() => run(async () => {
       await api('document.undo', { context: context(), revisionId: project.document.revisionId, baseHash: project.document.contentHash }); remember(); await refresh()
@@ -150,10 +222,10 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       persistence.current!.reset()
       persistenceBlocked.current = false; setBufferReady(true); setRecoverable(result.buffer?.state === 'dirty' ? result.buffer : undefined); setBufferMessage('已重读宿主缓冲，请比较保留的本页面编辑与宿主副本。')
     })}>重读冲突暂存缓冲</button>
-    <p>{statistics.chineseCharacters} 汉字 · {statistics.westernWords} 西文词元。{statistics.detail}</p>
+    <p>{statistics?.chineseCharacters ?? 0} 汉字 · {statistics?.westernWords ?? 0} 西文词元。{statistics?.detail}</p>
     <nav aria-label="正文标题导航">{projection.tree.children?.filter(node => node.type === 'heading').map(node => <button key={node.position!.start.offset} onClick={() => {
       const heading = root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${node.position!.start.offset}"]`)
-      heading?.scrollIntoView({ block: 'nearest' }); heading?.focus()
+      onReturnEditor?.(); window.requestAnimationFrame(() => { heading?.scrollIntoView({ block: 'nearest' }); heading?.focus() })
     }}>{textOf(node) || '无文字标题'}</button>)}</nav>
     <section aria-label="章节正文状态"><h4>大纲与已保存正文</h4><p>以下状态仅说明正文是否已保存；有正文不等于已完成研究或通过审查。</p>
       {project.ledger.outline.sections.map((section: any) => {
@@ -167,7 +239,6 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         } catch (error) { status = (error as Error).message }
         return <p key={section.id}>{section.title}：{status}</p>
       })}</section>
-    <h4>已保存主稿预览</h4><div ref={root} onMouseUp={capture} onKeyUp={capture}><MarkdownView projection={projection} /></div>
     {selection && <section aria-label="已捕获选区"><h4>实际改写范围 [{selection.sourceRange.startUtf16}, {selection.sourceRange.endUtf16})</h4><pre>{selection.sourceText}</pre><p>引用：{selection.citationKeys.join('、') || '无'} · 段落 {selection.blockIds.join('、')} · 论点：{selection.claimIds.join('、') || '尚无当前关联'}</p></section>}
     {selection && <section aria-label="确认段落论点关联"><h4>关联整段与论点</h4><p>关联针对选区所在的完整段落；它不会修改正文或自动提升论点支持状态。</p>
       <pre>{(() => { const block = projection.blocks.find(row => row.id === selection.blockIds[0]); return block && project.document.text.slice(block.start, block.end) })()}</pre>
@@ -194,11 +265,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     <label>改写／生成指令<textarea aria-label="改写生成指令" value={instruction} onChange={e => setInstruction(e.target.value)} /></label>
     {!!skills.length && <label>已启用的选区 Skill<select aria-label="已启用的选区 Skill" value={skillBindingId} onChange={e => setSkillBindingId(e.target.value)}><option value="">使用修订阶段的默认启用顺序</option>
       {skills.map(row => <option key={row.binding.bindingId} value={row.binding.bindingId}>{row.metadata.displayName} · {row.binding.digest.slice(7, 19)}</option>)}</select></label>}
-    <button disabled={busy || dirty || !selection} onClick={() => run(async () => {
-      const captured = context(), result = await api('editor.selectionContext', { context: captured, selection })
-      setSelectionCard({ context: captured, selection: structuredClone(selection), snapshot: result.snapshot, binding: result.binding })
-      setMessage('已附加当前已保存选区到会话侧卡片；尚未插入输入或发送。')
-    })}>附加选区到当前会话</button>
+    <button disabled={busy || dirty || !selection} onClick={attachSelection}>附加选区到当前会话</button>
     <button disabled={busy || dirty || !selection || !instruction.trim()} onClick={() => prepare(false)}>预览选区改写计划</button>
     <label>按大纲生成章节<select aria-label="按大纲生成章节" value={sectionId} onChange={e => setSectionId(e.target.value)}><option value="">选择已确认的大纲章节</option>
       {project.ledger.outline.sections.map((section: any) => <option key={section.id} value={section.id}>{section.title}</option>)}</select></label>
@@ -225,7 +292,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       {!!progress?.checkpoint?.transientRetries && <p>临时错误重试 {progress.checkpoint.transientRetries} / 2{progress.checkpoint.retryNotBefore ? `；等待到 ${new Date(progress.checkpoint.retryNotBefore).toLocaleTimeString()}` : ''}</p>}
       <button onClick={() => api('runs.pause', { context: context(), runId: activeRun }).then(() => setMessage('已请求暂停：当前调用结束后保存检查点，不再调度新工作。')).catch(e => setMessage(e.message))}>暂停当前生成</button>
       <button onClick={() => api('runs.cancel', { context: context(), runId: activeRun }).then(() => setMessage('已请求取消，等待阶段保存检查点。')).catch(e => setMessage(e.message))}>取消当前生成</button></section>}
-    <section aria-label="写作运行历史"><h4>写作运行历史</h4><button disabled={busy} onClick={() => setHistorySequence(value => value + 1)}>刷新写作运行历史</button>
+    </div><div hidden={tool !== 'History'}><section aria-label="写作运行历史"><h4>写作运行历史</h4><button disabled={busy} onClick={() => setHistorySequence(value => value + 1)}>刷新写作运行历史</button>
       {history?.diagnostics.map((warning: string, index: number) => <p role="alert" key={index}>{warning}</p>)}
       {history?.runs.map((row: any) => <p key={row.runId}>{row.runId} · {row.status} · 已调用模型 {row.usedModelCalls} 次{row.errorCode ? ` · ${row.errorCode}` : ''}
         {row.parentRunId && <span> · 重试来源 {row.parentRunId}</span>}
@@ -258,7 +325,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       {migrationPlan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy} onClick={() => run(async () => { await api('runs.migrate', { context: context(), planId: migrationPlan.planId, planHash: migrationPlan.planHash }); setMigrationPlan(undefined); setHistorySequence(value => value + 1) })}>确认迁移旧运行存储</button>
       <button disabled={busy} onClick={() => run(async () => { await api('runs.dismissMigration', { planId: migrationPlan.planId }); setMigrationPlan(undefined) })}>取消运行存储迁移</button></section>}
-    {(Object.values(project.ledger.proposalStates) as any[]).filter(state => state.state === 'pending').map(state => <button key={state.proposalId} disabled={busy} onClick={() => run(async () => setProposal(await api('edits.read', { context: context(), proposalId: state.proposalId })))}>查看待审阅建议 {state.proposalId}</button>)}
+    </div><div hidden={tool !== 'Changes'}>{(Object.values(project.ledger.proposalStates) as any[]).filter(state => state.state === 'pending').map(state => <button key={state.proposalId} disabled={busy} onClick={() => run(async () => setProposal(await api('edits.read', { context: context(), proposalId: state.proposalId })))}>查看待审阅建议 {state.proposalId}</button>)}
     {proposal && <section aria-label="建议差异"><h4>待审阅差异 · {proposal.proposal.id}</h4><p>范围：{proposal.proposal.scope}。接受会使旧审查过期。</p>
       {proposal.proposal.edits.map((edit: any, index: number) => <div key={index}><p>源码 [{edit.startUtf16}, {edit.endUtf16})</p><b>− 原文</b><pre>{edit.expectedText}</pre><b>+ 新文</b><pre>{edit.replacementText}</pre></div>)}
       <p>引用新增：{proposal.proposal.citationChanges.added.join('、') || '无'}；删除：{proposal.proposal.citationChanges.removed.join('、') || '无'}。</p>
@@ -272,6 +339,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         onRevised={async image => { setProposal(image); await refresh(); setMessage('编辑后的候选已校验并保存，原建议保留，主稿未改变。') }} />
       <button disabled={busy || dirty} onClick={() => run(async () => { await api('edits.apply', { context: context(), proposalId: proposal.proposal.id, proposalHash: proposal.proposalHash }); remember(); setProposal(undefined); await refresh() })}>接受此条建议</button>
       <button disabled={busy} onClick={() => run(async () => { await api('edits.reject', { context: context(), proposalId: proposal.proposal.id }); setProposal(undefined); await refresh() })}>拒绝此条建议</button></section>}
-    <p role="status">{message}</p>
+    <p role="status">{message}</p></div>
+    </div>
   </section>
 }
