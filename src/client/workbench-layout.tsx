@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { WorkbenchIcon } from './workbench-chrome.tsx'
 
 const KEY = 'sf-workbench-layout:v1'
 function preferences() {
@@ -10,7 +11,7 @@ function preferences() {
 }
 // UI preferences only: manuscript, Session input and project facts stay in their
 // existing owners. Hiding the panel never unmounts the Host conversation scope.
-export function WorkbenchLayout({ header, children, agent }: { header: ReactNode; children: ReactNode; agent: ReactNode }) {
+export function WorkbenchLayout({ header, children, agent }: { header: ReactNode; children: ReactNode; agent: (close: () => void) => ReactNode }) {
   const [prefs, setPrefs] = useState(preferences), [narrow, setNarrow] = useState(false), [mobileOpen, setMobileOpen] = useState(false)
   const [maxWidth, setMaxWidth] = useState(700), shell = useRef<HTMLDivElement>(null), pane = useRef<HTMLElement>(null), toggle = useRef<HTMLButtonElement>(null)
   const paneId = useId(), open = narrow ? mobileOpen : !prefs.collapsed
@@ -30,9 +31,9 @@ export function WorkbenchLayout({ header, children, agent }: { header: ReactNode
     toggle.current?.focus()
   }
   return <div ref={shell} className="sf-app" data-sf-narrow={narrow ? 'true' : 'false'}>
-    <header className="sf-header">{header} <button ref={toggle} aria-controls={paneId} aria-expanded={open} onClick={() => {
+    <header className="sf-header">{header} <button ref={toggle} className="sf-chat-icon" aria-label={open ? '收起当前会话面板' : '展开当前会话面板'} title={open ? '收起当前会话面板' : '展开当前会话面板'} aria-controls={paneId} aria-expanded={open} onClick={() => {
       if (narrow) setMobileOpen(!mobileOpen); else setPrefs(previous => ({ ...previous, collapsed: !previous.collapsed }))
-    }}>{open ? '收起当前会话面板' : '展开当前会话面板'}</button></header>
+    }}><WorkbenchIcon kind="panel" /></button></header>
     <div className="sf-columns" data-agent-open={open ? 'true' : 'false'}>
       <main className="sf-body" hidden={narrow && open}>{children}</main>
       <div role="separator" aria-label="调整当前会话面板宽度" aria-orientation="vertical" aria-valuemin={280} aria-valuemax={maxWidth}
@@ -48,7 +49,7 @@ export function WorkbenchLayout({ header, children, agent }: { header: ReactNode
       <aside ref={pane} id={paneId} className="sf-agent" aria-label="DSH 当前会话" hidden={!open}
         style={{ width: narrow ? '100%' : Math.min(prefs.width, maxWidth), minWidth: narrow ? 0 : 280 }}
         onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); hide() } }}>
-        {narrow && <button onClick={hide}>返回论文工作台</button>}{agent}
+        {narrow && <button onClick={hide}>返回论文工作台</button>}{agent(hide)}
       </aside>
     </div>
   </div>

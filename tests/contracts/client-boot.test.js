@@ -9,14 +9,14 @@ const source = readFileSync(new URL('../../dist/client.js', import.meta.url), 'u
 
 // Browser globals deliberately have no CommonJS module/exports. DSH supplies
 // only require to the registered factory, then uses its return value.
-function loadClient() {
+function loadClient(platform) {
   let handoff
   const errors = []
   runInNewContext(source, {
     // micromark's browser entity decoder creates its DOM helper during import.
     // This contract checks factory/Slot boot only; actual decoding/selection is
     // exercised in real Chromium, rather than emulated by this VM stub.
-    document: { createElement(tag) { assert.equal(tag, 'i'); return { get textContent() { throw new Error('Entity decoding requires the real Chromium test') } } } },
+    document: { documentElement: { dataset: { platform } }, createElement(tag) { assert.equal(tag, 'i'); return { get textContent() { throw new Error('Entity decoding requires the real Chromium test') } } } },
     window: { __ModuleLoader__: { load(value) { handoff = value } } },
     console: { log() {}, error(...args) { errors.push(args) } },
   }, { filename: 'dist/client.js' })
@@ -34,8 +34,8 @@ test('browser factory materializes without Node module or exports globals', () =
   assert.deepEqual(Array.from(plugin.inject), ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'layout'])
 })
 
-test('slot registrations use the DSH options/component contract and React output', () => {
-  const { plugin, errors } = loadClient()
+for (const platform of [undefined, 'win32']) test(`slot registrations use the DSH options/component contract (${platform ?? 'web'})`, () => {
+  const { plugin, errors } = loadClient(platform)
   const cells = []
   const disposers = []
   plugin.apply({
@@ -58,6 +58,7 @@ test('slot registrations use the DSH options/component contract and React output
         const html = renderToStaticMarkup(React.createElement(component, {
           renderSlot: () => null, renderFactorySlot: () => null, useSession: () => undefined,
           useWorkspaces: () => ({ items: [] }).items,
+          usePanelInfo: () => false,
         }))
         assert.equal(typeof html, 'string')
         const cell = { options, disposed: false }
@@ -71,7 +72,7 @@ test('slot registrations use the DSH options/component contract and React output
     ['main', 'scholarflow'],
     ['scholarflow.agent', undefined],
     ['scholarflow.project', undefined],
-    ['sidebar.panellist', 'scholarflow'],
+    platform === 'win32' ? ['shell.overlay', 'scholarflow-caption'] : ['sidebar.panellist', 'scholarflow'],
     ['settings.section', 'scholarflow-settings'],
   ])
   for (const dispose of disposers.reverse()) dispose()

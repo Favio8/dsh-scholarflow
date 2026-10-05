@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { Research, OutlineEditor } from './research.tsx'
 import { Draft } from './draft.tsx'
 import { ReviewExport } from './review-export.tsx'
@@ -10,11 +10,12 @@ import { ProjectIdentity } from './project-identity.tsx'
 import { SelectionCard, clearSelectionCard, invalidateSelectionCard } from './selection-card.tsx'
 import { WorkbenchLayout } from './workbench-layout.tsx'
 import { useConfirmationFocus } from './confirmation-focus.ts'
+import { CAPTION_CSS, CHAT_CSS, WorkbenchIcon } from './workbench-chrome.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export'] as const
 const TAB_LABELS = ['概览', '资料与研究', '大纲', '正文', '审查', '导出']
-const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-app button,.sf-app select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
+const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-body button,.sf-body select,.sf-header button,.sf-settings button,.sf-settings select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
 export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'layout']
 const LAYOUT_CSS = `.sf-agent-resize{width:8px;flex-shrink:0;cursor:col-resize;touch-action:none;background:#8881}.sf-agent-resize:focus-visible{outline:2px solid currentColor;outline-offset:-2px}.sf-app[data-sf-narrow=true] .sf-agent{height:100%;min-height:0;flex:1}.sf-header{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.sf-header button{margin-left:auto}`
 const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:6px;padding:8px;resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid #8884;padding:12px 0;margin:12px 0}.sf-tabs button[aria-selected=true]{background:#8882;border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:2px solid currentColor;outline-offset:2px}`
@@ -32,16 +33,56 @@ export function apply(ctx: Host) {
   }
   function Agent(props: Host) {
     const session = props.useSession((s: Host) => s)
-    return <><SelectionCard sessionId={props.sessionId} inputActions={props.inputActions} api={api} /><div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>{props.renderFactorySlot('conversation.content', {
-      variant: 'main', phase: session?.blank ? 'hero' : 'active', hero: !!session?.blank,
+    const workspaces = props.useWorkspaces((s: Host) => s.items)
+    const workspace = workspaces.find((item: Host) => item.sessionIds.includes(props.sessionId))
+    const [busy, setBusy] = useState(false), [error, setError] = useState('')
+    const newSession = async () => {
+      setBusy(true); setError('')
+      try {
+        const created = await ctx.connection.rpc.call('/api', 'session/create', { args: { request: { workspaceId: workspace.workspaceId, agentPreset: 'scholarflow' } } })
+        if (!created.ok) throw new Error(created.error.message)
+        await ctx.sessions.refresh()
+        ctx.uiWorkspace.openSession(created.value.sessionId)
+        ctx.layout.selectPanel('scholarflow')
+      } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+    }
+    return <><header className="sf-chat-toolbar"><WorkbenchIcon kind="chat" /><strong>AI 助手</strong><div className="sf-chat-actions">
+      <button className="sf-chat-icon" aria-label="新建 ScholarFlow 聊天" title="新建 ScholarFlow 聊天" disabled={busy || !workspace} onClick={newSession}><WorkbenchIcon kind="plus" /></button>
+      <button className="sf-chat-icon" aria-label="关闭聊天面板" title="关闭聊天面板" onClick={props.onClose}><WorkbenchIcon kind="close" /></button>
+    </div></header>
+      <div className="sf-chat-scope"><span title={workspace?.title}>{workspace?.title ?? '未选择工作区'}</span><span className="sf-chat-mode">ScholarFlow</span></div>
+      {error && <p role="alert" className="sf-chat-error">{error}</p>}
+      <SelectionCard sessionId={props.sessionId} inputActions={props.inputActions} api={api} />
+      <div className="sf-chat-content">{session?.blank && <section className="sf-chat-empty" aria-label="聊天建议">
+        <WorkbenchIcon kind="chat" /><h3>一起完善这篇论文</h3><p>描述你的研究主题，或选中正文后继续讨论。</p>
+        {['帮我梳理研究思路', '帮我核查论文引用', '帮我润色选中的段落'].map(prompt => <button key={prompt} onClick={() => props.inputActions.setDraft(prompt)}>{prompt} <span aria-hidden="true">↗</span></button>)}
+      </section>}{props.renderFactorySlot('conversation.content', {
+      variant: 'embedded', phase: 'active', hero: false,
     })}</div></>
+  }
+  function CaptionEntry(props: Host) {
+    const active = props.usePanelInfo((info: Host) => info.activePanelId === 'scholarflow')
+    const entry = useRef<HTMLDivElement>(null)
+    useLayoutEffect(() => {
+      const menu = document.querySelector<HTMLElement>('[data-windows-menu]')
+      if (!menu || !entry.current) return
+      const position = () => entry.current?.style.setProperty('--sf-caption-left', `${menu.getBoundingClientRect().right + 4}px`)
+      position()
+      const size = new ResizeObserver(position), offset = new MutationObserver(position)
+      size.observe(menu)
+      offset.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'data-fullscreen'] })
+      window.addEventListener('resize', position)
+      return () => { size.disconnect(); offset.disconnect(); window.removeEventListener('resize', position) }
+    }, [])
+    return <><style>{CAPTION_CSS}</style><div ref={entry} className="sf-caption-entry"><button aria-label="ScholarFlow" aria-pressed={active}
+      title="打开 ScholarFlow 工作台" onClick={() => ctx.layout.selectPanel('scholarflow')}><WorkbenchIcon />ScholarFlow</button></div></>
   }
   function Workspace(props: Host) {
     const [info, setInfo] = useState<Host>()
     const [error, setError] = useState('')
     useEffect(() => { let live = true; call('diagnostics').then(v => live && setInfo(v)).catch(e => live && setError(e.message)); return () => { live = false } }, [])
-    return <WorkbenchLayout header={<><style>{CSS + EXTRA_CSS + LAYOUT_CSS}</style><b>ScholarFlow</b> · 学术写作工作台</>}
-      agent={props.renderSlot('scholarflow.agent', {})}><h2>论文工作台</h2>
+    return <WorkbenchLayout header={<><style>{CSS + EXTRA_CSS + LAYOUT_CSS + CHAT_CSS}</style><b>ScholarFlow</b> · 学术写作工作台</>}
+      agent={onClose => props.renderSlot('scholarflow.agent', { onClose })}><h2>论文工作台</h2>
         {error && <p role="alert" className="sf-error">{error}</p>}
         {info && <p role="status">已连接 Host · 协议 v{info.protocol} · {info.settings.length ? '设置可持久化' : '设置能力不足'}</p>}
         {props.renderSlot('scholarflow.project', {})}
@@ -197,6 +238,10 @@ export function apply(ctx: Host) {
     yield ctx.slots.register({ name: 'scholarflow.agent' }, Agent)
     yield ctx.slots.register({ name: 'scholarflow.project' }, Project)
   }), 'scholarflow: workspace and host conversation')
-  ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: 'scholarflow', order: 50, label: () => 'ScholarFlow' }, () => <span>ScholarFlow</span>)), 'scholarflow: navigation')
+  if (document.documentElement.dataset.platform === 'win32') {
+    ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'scholarflow-caption', order: 50 }, CaptionEntry)), 'scholarflow: caption navigation')
+  } else {
+    ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: 'scholarflow', order: 50, label: () => 'ScholarFlow' }, WorkbenchIcon)), 'scholarflow: navigation')
+  }
   ctx.effect(() => ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'scholarflow-settings', order: 50, label: () => 'ScholarFlow' }, Settings)), 'scholarflow: settings')
 }
