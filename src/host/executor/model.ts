@@ -19,7 +19,9 @@ export async function selectedModel(ctx: Host, sessionId: string, signal: AbortS
 export async function callStageModel(ctx: Host, session: Host, selected: { provider: string; model: string; reasoningEffort?: string }, call: ModelCall) {
   const messages = [createSystemMessage(call.system), createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text',
     text: JSON.stringify({ instruction: call.instruction, ...(call.repair && { formatRepair: call.repair }), researchData: call.context }) }] })]
-  const request = { ...selected, sessionId: session.id, maxTokens: 4096, temperature: 0.3, messages }
+  const maxTokens = call.maxTokens ?? 4096
+  invariant(Number.isInteger(maxTokens) && maxTokens >= 1 && maxTokens <= 32768, 'MODEL_OUTPUT_BUDGET_INVALID', '阶段输出预算不合法，未发送模型请求。')
+  const request = { ...selected, sessionId: session.id, maxTokens, temperature: 0.3, messages }
   // The SDK requires every model-visible input to be reconstructable from the
   // owning session log. No raw prompt is duplicated into project diagnostic logs.
   session.append('scholarflow/stage-model-request', { runId: call.runId, request })
@@ -35,6 +37,7 @@ export async function callStageModel(ctx: Host, session: Host, selected: { provi
   session.append('scholarflow/stage-model-result', { runId: call.runId, text, finish: finish?.kind ?? 'missing', ...(usage && { usage }) })
   await ctx.sessions.flush(session)
   if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '宿主模型调用已取消。')
+  if (finish?.kind === 'max-tokens') throw new ScholarError('MODEL_OUTPUT_LIMIT_REACHED', '模型消耗了本次输出预算但未完整返回结果；已保留计费次数，请预览新的运行。')
   if (finish?.kind === 'error') {
     const code = /^[A-Z_]{1,64}$/.test(finish.failure?.code ?? '') ? finish.failure.code : 'MODEL_CALL_FAILED'
     const facts: Record<string, number> = {}, failure = finish.failure

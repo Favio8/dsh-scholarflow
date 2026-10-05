@@ -131,7 +131,7 @@ export async function runReview(io: FileStore, expectedRevision: number) {
   return storeReview(io, report, expectedRevision)
 }
 
-export async function storeReview(io: FileStore, report: ReviewReport, expectedRevision: number, completedCheckIds: string[] = [], extra: Mutation[] = []) {
+export async function storeReview(io: FileStore, report: ReviewReport, expectedRevision: number, completedCheckIds: string[] = [], extra: Mutation[] = [], resolvedModelIssueIds: string[] = []) {
   report = reviewReportSchema.parse(report)
   const text = json(report)
   const result = await mutateLedger(io, expectedRevision, async ledger => {
@@ -141,7 +141,7 @@ export async function storeReview(io: FileStore, report: ReviewReport, expectedR
     const detected = new Set(report.issues.map(issue => issue.id)), passed = new Set(report.checks.filter(check => check.status === 'pass').map(check => `issue_${digest(check.id).slice(7, 31)}`))
     for (const old of Object.values(ledger.reviewIssues)) {
       if (detected.has(old.id)) continue
-      if (passed.has(old.id) && (old.checkMethod === 'deterministic' || completedCheckIds.some(key => `issue_${digest(key).slice(7, 31)}` === old.id))) {
+      if (passed.has(old.id) && (old.checkMethod === 'deterministic' || completedCheckIds.some(key => `issue_${digest(key).slice(7, 31)}` === old.id)) || old.checkMethod === 'model-assisted' && resolvedModelIssueIds.includes(old.id)) {
         old.state = 'resolved'; old.stale = false; old.resolutionReason = old.checkMethod === 'deterministic' ? '对应规则在本次同版本复查通过。' : '对应检查在本次同版本明确复核通过，依据保存在不可变审查记录。'; old.reviewId = report.id; old.documentHash = report.documentHash
       }
       else if (old.state !== 'resolved') old.stale = true

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { ModelReview } from './model-review.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 export function ReviewExport({ project, context, api, refresh, run, busy, mode }: Props & { mode: string }) {
@@ -17,6 +18,7 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode }
       <button disabled={busy || project.document.externalChange} onClick={() => run(async () => {
         const result = await api('review.run', { context: context() }); setReview(result); await refresh()
       })}>运行确定性审查</button>
+      <ModelReview project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} onReview={setReview} />
       {review?.report ? <><p role="status">审查 {review.report.id} · {review.stale ? '已过期，需按当前版本重跑' : '对应当前版本'}</p>
         <ul aria-label="审查检查结果">{review.report.checks.map((check: any) => <li key={check.id}>{check.status} · {check.method} · {check.detail}</li>)}</ul>
         {review.report.limitations.map((limit: string) => <p key={limit}>{limit}</p>)}</> : <p>当前尚无审查快照。</p>}
@@ -40,6 +42,8 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode }
       </section>}
       {issues.map(issue => <section key={issue.id} aria-label={`审查问题 ${issue.id}`}><h4>{issue.severity} · {issue.title}</h4>
         <p>{issue.checkMethod} · {issue.state} · {issue.stale ? '需更新' : '当前'} · {issue.explanation}</p>
+        {issue.location && <blockquote>位置：{issue.location.sourceRange.startUtf16}–{issue.location.sourceRange.endUtf16}<br />{issue.location.quote}</blockquote>}
+        {issue.suggestedFix && <p>修订建议：{issue.suggestedFix}</p>}
         {issue.resolutionReason && <p>处理理由：{issue.resolutionReason}</p>}
         {issue.state !== 'resolved' && <><label>处理理由<input aria-label={`处理理由 ${issue.id}`} value={reasons[issue.id] ?? ''} onChange={e => setReasons({ ...reasons, [issue.id]: e.target.value })} maxLength={2000} /></label>
           {(['accepted-risk', 'dismissed'] as const).map(state => <button key={state} disabled={busy || !(reasons[issue.id] ?? '').trim()} onClick={() => run(async () => {

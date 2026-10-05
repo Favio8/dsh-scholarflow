@@ -16,3 +16,17 @@ test('stage adapter retains only validated retry facts and does not retry or exp
   })
   assert.equal(calls, 1, 'Core owns the bounded retry policy, not the single-call Host adapter')
 })
+
+test('stage adapter sends only the frozen output budget and fails a truncated reasoning response without automatic retries', async () => {
+  let calls = 0, logged: any, flushed = false
+  const session = { id: 'ses_TEST_ONLY', append: (type: string, data: any) => { if (type === 'scholarflow/stage-model-request') logged = data.request } }
+  const ctx = { sessions: { flush: async () => { flushed = true; return true } }, llm: { async *stream(request: any) {
+    assert.equal(flushed, true); assert.equal(request.maxTokens, 16384); assert.equal(logged.maxTokens, 16384); calls++
+    yield { type: 'finish', reason: { kind: 'max-tokens' } }
+  } } }
+  const call = { system: 'TEST_ONLY', instruction: 'TEST_ONLY', context: {}, runId: 'run_TEST_ONLY', signal: new AbortController().signal, maxTokens: 16384 }
+  await assert.rejects(callStageModel(ctx, session, { provider: 'TEST_ONLY', model: 'TEST_ONLY' }, call), { code: 'MODEL_OUTPUT_LIMIT_REACHED' })
+  assert.equal(calls, 1)
+  await assert.rejects(callStageModel(ctx, session, { provider: 'TEST_ONLY', model: 'TEST_ONLY' }, { ...call, maxTokens: 32769 }), { code: 'MODEL_OUTPUT_BUDGET_INVALID' })
+  assert.equal(calls, 1)
+})

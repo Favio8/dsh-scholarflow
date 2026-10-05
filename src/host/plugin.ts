@@ -51,6 +51,9 @@ import { profileImportRequest, profileReadRequest, profileCopyRequest, profileCo
 import { builtinProfiles, profileDigest, verifyProfile, profileText, prepareProfileCopy, applyProfileCopy, projectProfile, type ProfileCopyPlan } from '../core/project/profiles.ts'
 import { PrivateProfileLibrary } from './profiles/library.ts'
 import { prepareManualReview, submitManualReview, type ManualReviewPlan } from '../core/review/manual.ts'
+import { prepareModelReview, type ModelReviewPlan } from '../core/review/model.ts'
+import { executeModelReview, readModelReviewCheckpoint, prepareModelReviewAction, linkModelReviewRetry, type ModelReviewAction } from '../core/review/model-run.ts'
+import { modelReviewRequest } from '../shared/review.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -84,6 +87,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private profilePlans = new Map<string, { profile: WritingProfile; hash: string; peerId: string; expires: number }>()
   private profileCopyPlans = new Map<string, { plan: ProfileCopyPlan; context: RequestContext; peerId: string; expires: number }>()
   private manualReviewPlans = new Map<string, { plan: ManualReviewPlan; context: RequestContext; peerId: string; expires: number }>()
+  private modelReviewPlans = new Map<string, { plan: ModelReviewPlan; peerId: string; expires: number; selected: { provider: string; model: string; reasoningEffort?: string } }>()
+  private modelReviewActions = new Map<string, { action: ModelReviewAction; plan: ModelReviewPlan; context: RequestContext; peerId: string; expires: number; selected?: { provider: string; model: string; reasoningEffort?: string } }>()
   private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
   private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
   private skillPlans = new Map<string, { resource: { kind: 'local'; bundle: SkillBundle } | { kind: 'github'; preview: GithubSkillPreview }; hash: string; peerId: string; expires: number }>()
@@ -100,7 +105,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
       timer.unref()
-      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear(); this.runActionPlans.clear(); this.profilePlans.clear(); this.profileCopyPlans.clear(); this.manualReviewPlans.clear() }
+      return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear(); this.runActionPlans.clear(); this.profilePlans.clear(); this.profileCopyPlans.clear(); this.manualReviewPlans.clear(); this.modelReviewPlans.clear(); this.modelReviewActions.clear() }
     }, 'scholarflow: expire operator skill previews')
   }
 
@@ -263,6 +268,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
   }
 
   private pruneSkills() {
+    for (const [key, row] of this.modelReviewPlans) if (row.expires < Date.now()) this.modelReviewPlans.delete(key)
+    for (const [key, row] of this.modelReviewActions) if (row.expires < Date.now()) this.modelReviewActions.delete(key)
     for (const [key, row] of this.manualReviewPlans) if (row.expires < Date.now()) this.manualReviewPlans.delete(key)
     for (const [key, row] of this.profilePlans) if (row.expires < Date.now()) this.profilePlans.delete(key)
     for (const [key, row] of this.profileCopyPlans) if (row.expires < Date.now()) this.profileCopyPlans.delete(key)
@@ -773,7 +780,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => {
       this.requireOperator(); const input = runControlRequest.parse(request), { io } = await resolveStore(this.ctx, input.context, signal)
       const stored = await readRun(io, input.runId, input.context.projectId!)
-      const progress = stored.run.checkpointHash ? (await readGenerationCheckpoint(io, stored.run)).checkpoint : undefined
+      const progress = stored.run.checkpointHash ? stored.run.stage === 'review' ? (await readModelReviewCheckpoint(io, stored.run)).checkpoint : (await readGenerationCheckpoint(io, stored.run)).checkpoint : undefined
       return { run: stored.run, legacyStorage: stored.legacy, checkpoint: progress && { formatAttempts: progress.formatAttempts,
         transientRetries: progress.transientRetries ?? 0, retryNotBefore: progress.retryNotBefore, savedCandidate: !!progress.output } }
     })
@@ -850,6 +857,102 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
       const revision = mutationRevision(context), { io } = await resolveStore(this.ctx, context, signal)
       return runReview(io, revision) })
+  }
+
+  @Remote('review.prepareModel')
+  async reviewPrepareModel(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = modelReviewRequest.parse(request); mutationRevision(input.context); this.pruneSkills()
+      invariant(this.modelReviewPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有模型审查预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), model = await selectedModel(this.ctx, input.context.sessionId, signal)
+      const plan = await prepareModelReview(io, input, { providerId: model.selected.provider, modelId: model.selected.model,
+        ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }) }, binding => readPrivateSkill(binding, io))
+      invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '完整审查范围超过模型上下文预算，请缩小稿件；未隐式删掉关键证据。')
+      this.modelReviewPlans.set(plan.id, { plan, peerId, selected: model.selected, expires: Date.now() + 600000 })
+      return this.reviewPreview(plan)
+    })
+  }
+
+  private reviewPreview(plan: ModelReviewPlan) {
+    return { planId: plan.id, planHash: plan.contentHash, runId: plan.snapshot.runId, model: plan.snapshot.modelDescriptor, inputBytes: plan.inputBytes,
+      documentHash: plan.snapshot.documentHash, evidenceIds: plan.context.evidence.map(item => item.id), sourceIds: plan.context.sources.map(source => source.id),
+      blocks: plan.context.blocks.length, budget: plan.snapshot.budget, skillDigests: plan.snapshot.skillDigests,
+      risks: ['向所列宿主模型发送当前全部已保存主稿、项目要求、相关论点、有效已选定位证据、已确认记忆、文风与本审查阶段固定 Skill 说明；本地模式不代表模型离线处理。',
+        '只生成同版审查与问题，不修改正文或升级来源身份；未知项和未关闭问题保持可见。暂停／恢复保留调用预算，已有产物不重放。',
+        '宿主会话保存模型请求与结果以供追溯，项目诊断不另存完整 Prompt；阶段最多一次格式修复和两次临时错误重试。'] }
+  }
+
+  @Remote('review.dismissModel')
+  async reviewDismissModel(request: unknown) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), { planId } = z.object({ planId: z.string() }).strict().parse(request)
+      invariant(this.modelReviewPlans.get(planId)?.peerId === peerId, 'INVALID_APPROVAL', '模型审查预览不属于当前用户。')
+      this.modelReviewPlans.delete(planId); return { dismissed: true }
+    })
+  }
+
+  @Remote('review.startModel')
+  async reviewStartModel(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = runStartRequest.parse(request), row = this.modelReviewPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '模型审查须确认当前有效预览。')
+      invariant(input.context.workspaceId === row.plan.input.context.workspaceId && input.context.sessionId === row.plan.input.context.sessionId && input.context.projectId === row.plan.snapshot.projectId,
+        'SESSION_BINDING_CHANGED', '模型审查确认的项目与会话改变。')
+      const model = await selectedModel(this.ctx, input.context.sessionId, signal)
+      invariant(json(model.selected) === json(row.selected), 'MODEL_SELECTION_CHANGED', '宿主模型选择改变，请重新预览审查发送范围。')
+      signal.throwIfAborted(); const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal), runId = row.plan.snapshot.runId
+      invariant(!this.running.has(runId), 'RUN_IN_PROGRESS', '此审查已经执行。')
+      const active = { controller: new AbortController(), context: row.plan.input.context, pauseRequested: false }; this.running.set(runId, active); this.modelReviewPlans.delete(input.planId)
+      try { const result = await executeModelReview(io, row.plan, { pid: process.pid, bootInstance: this.bootInstance }, AbortSignal.any([signal, active.controller.signal]),
+        call => callStageModel(this.ctx, model.session, model.selected, call), candidate => this.ownerAlive(candidate), { pauseRequested: () => active.pauseRequested })
+        return { ...result, ...await inspectReview(io) }
+      } finally { this.running.delete(runId) }
+    })
+  }
+
+  @Remote('review.prepareAction')
+  async reviewPrepareAction(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = runControlRequest.extend({ action: z.enum(['resume', 'retry']) }).parse(request); mutationRevision(input.context); this.pruneSkills()
+      invariant(this.modelReviewActions.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有审查恢复预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), action = await prepareModelReviewAction(io, input.runId, input.action, candidate => this.ownerAlive(candidate))
+      let plan = action.frozen, selected: { provider: string; model: string; reasoningEffort?: string } | undefined
+      if (!action.existingReportId) {
+        const model = await selectedModel(this.ctx, input.context.sessionId, signal), selection: { provider: string; model: string; reasoningEffort?: string } = model.selected; selected = selection
+        if (input.action === 'resume') invariant(selection.provider === plan.snapshot.modelDescriptor.providerId && selection.model === plan.snapshot.modelDescriptor.modelId &&
+          selection.reasoningEffort === plan.snapshot.modelDescriptor.reasoningEffort, 'MODEL_SELECTION_CHANGED', '恢复须使用原审查的提供方、模型和推理设置；请恢复宿主选择或明确新建重试。')
+        else plan = linkModelReviewRetry(await prepareModelReview(io, { context: input.context }, { providerId: selection.provider, modelId: selection.model,
+          ...(selection.reasoningEffort && { reasoningEffort: selection.reasoningEffort }) }, binding => readPrivateSkill(binding, io)), action)
+        invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '恢复的完整审查输入超过当前模型上下文预算。')
+      }
+      this.modelReviewActions.set(action.id, { action, plan, context: input.context, peerId, selected, expires: Date.now() + 600000 })
+      return { ...this.reviewPreview(plan), planId: action.id, planHash: action.contentHash, action: input.action, originalRunId: action.runId,
+        existingReportId: action.existingReportId, retryNotBefore: action.retryNotBefore, recoveredCalls: (await readRun(io, action.runId, action.projectId)).run.usedModelCalls }
+    })
+  }
+
+  @Remote('review.confirmAction')
+  async reviewConfirmAction(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = runStartRequest.parse(request), row = this.modelReviewActions.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.action.contentHash === input.planHash, 'INVALID_APPROVAL', '审查恢复须确认有效预览。')
+      invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.context.projectId,
+        'SESSION_BINDING_CHANGED', '审查恢复项目或会话改变。')
+      const model = row.action.existingReportId ? undefined : await selectedModel(this.ctx, input.context.sessionId, signal)
+      invariant(!model || json(model.selected) === json(row.selected), 'MODEL_SELECTION_CHANGED', '确认期间宿主模型选择改变。')
+      signal.throwIfAborted(); const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal), runId = row.plan.snapshot.runId
+      invariant(!this.running.has(runId), 'RUN_IN_PROGRESS', '原审查仍在执行。')
+      const active = { controller: new AbortController(), context: row.context, pauseRequested: false }; this.running.set(runId, active); this.modelReviewActions.delete(input.planId)
+      try { const result = await executeModelReview(io, row.plan, { pid: process.pid, bootInstance: this.bootInstance }, AbortSignal.any([signal, active.controller.signal]),
+        call => { invariant(model, 'RUN_ARTIFACT_EXISTS', '已有报告恢复不能再次调用模型。'); return callStageModel(this.ctx, model.session, model.selected, call) }, candidate => this.ownerAlive(candidate),
+        { pauseRequested: () => active.pauseRequested, executionSessionId: input.context.sessionId, ...(row.action.action === 'resume' ? { resume: row.action } : { retry: row.action }) })
+        return { ...result, ...await inspectReview(io) }
+      } finally { this.running.delete(runId) }
+    })
+  }
+
+  @Remote('review.dismissAction')
+  async reviewDismissAction(request: unknown) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), { planId } = z.object({ planId: z.string() }).strict().parse(request)
+      invariant(this.modelReviewActions.get(planId)?.peerId === peerId, 'INVALID_APPROVAL', '审查恢复预览不属于当前用户。'); this.modelReviewActions.delete(planId); return { dismissed: true }
+    })
   }
 
   @Remote('review.prepareManual')

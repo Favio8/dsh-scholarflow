@@ -11,7 +11,7 @@ import type { GenerationPlan } from './generation.ts'
 
 export const frozenPlanFile = (runId: string) => `.scholarflow/runs/${id.parse(runId)}/plan.json`
 export const checkpointFile = (runId: string) => `.scholarflow/runs/${id.parse(runId)}/checkpoint.json`
-const frozenSchema = z.object({ id, contentHash: hash, snapshot: runSnapshotSchema, input: generationRequest,
+const frozenSchema = z.object({ id, contentHash: hash, snapshot: runSnapshotSchema.refine(value => ['drafting', 'revision'].includes(value.stage)), input: generationRequest,
   context: z.record(z.string(), z.unknown()), evidenceIds: z.array(id).max(10000), inputBytes: z.number().int().min(0), ledgerHash: hash,
   parentRunId: id.optional(), retryNotBefore: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), sectionTarget: z.object({ sectionId: id, title: z.string(), depth: z.number().int().min(1).max(6),
     mode: z.enum(['insert', 'replace-body']), startUtf16: z.number().int().min(0), endUtf16: z.number().int().min(0) }).strict().optional() }).strict()

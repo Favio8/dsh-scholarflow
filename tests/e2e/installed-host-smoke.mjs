@@ -88,6 +88,11 @@ async function reloadWorkbench() {
   await page.locator('button[aria-label="ScholarFlow"]').click({ timeout: 20000 })
   await page.getByRole('tab', { name: /^Draft ·/ }).click()
 }
+async function waitModelReviewOutcome(status, timeout = 120000) {
+  await Promise.race([status.waitFor({ timeout }), page.locator('.sf-project > .sf-error').waitFor({ timeout }).then(async () => {
+    throw new Error(`Actual model review failed: ${await page.locator('.sf-project > .sf-error').innerText()}`)
+  })])
+}
 try {
   let errors = await start('workspace-write')
   const diagnostics = await rpc('scholarflow.v1/diagnostics')
@@ -726,6 +731,59 @@ try {
   assert.equal(manualLedger.reviewIssues[`issue_${digest('argument_assessment').slice(7, 31)}`].state, 'open')
   assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
   const savedBeforeExport = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+  if (liveModel) {
+    // Actual provider review, with a fixed review-stage builtin and a durable
+    // pause. No TEST_ONLY response is substituted for the Host model callback.
+    await page.getByRole('tab', { name: /^Overview ·/ }).click()
+    await projectSkillsUi.getByRole('button', { name: '刷新固定 Skill 资源清单', exact: true }).click()
+    const reviewerOption = await installedProjectChoices.locator('option').filter({ hasText: 'builtin:research-results-integrity' }).getAttribute('value')
+    await installedProjectChoices.selectOption(reviewerOption)
+    await projectSkillsUi.getByRole('button', { name: '加入待确认启用清单', exact: true }).click()
+    await projectSkillsUi.getByRole('button', { name: '预览本项目 Skill 绑定', exact: true }).click()
+    await projectSkillsUi.getByRole('button', { name: '确认项目 Skill 绑定', exact: true }).click()
+    await page.getByRole('dialog', { name: '项目 Skill 绑定确认', exact: true }).waitFor({ state: 'detached' })
+    await page.getByRole('tab', { name: /^Review ·/ }).click()
+    const modelUi = page.getByRole('region', { name: '模型辅助审查', exact: true })
+    const beforeReviewLedger = await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')
+    const beforeReviewRuns = await readdir(join(projectRoot, '.scholarflow/runs'))
+    await modelUi.getByRole('button', { name: '预览模型辅助审查', exact: true }).click()
+    const reviewDialog = modelUi.getByRole('dialog', { name: '模型审查确认', exact: true })
+    assert.match(await reviewDialog.innerText(), /deepseek-official \/ deepseek-flash/u)
+    assert.match(await reviewDialog.innerText(), /builtin:research-results-integrity/u)
+    await modelUi.getByRole('button', { name: '取消模型审查预览', exact: true }).click()
+    await reviewDialog.waitFor({ state: 'detached' })
+    assert.equal(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), beforeReviewLedger)
+    assert.deepEqual(await readdir(join(projectRoot, '.scholarflow/runs')), beforeReviewRuns)
+    await modelUi.getByRole('button', { name: '预览模型辅助审查', exact: true }).click()
+    await modelUi.getByRole('button', { name: '确认执行模型审查', exact: true }).click()
+    await modelUi.getByRole('region', { name: '当前模型审查', exact: true }).getByRole('status').filter({ hasText: '已调用 1 次' }).waitFor({ timeout: 30000 })
+    await modelUi.getByRole('button', { name: '暂停当前模型审查', exact: true }).click()
+    await waitModelReviewOutcome(modelUi.getByRole('status').filter({ hasText: '审查已暂停，冻结输入与已计费调用保留' }))
+    const pausedReview = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs/active.json'), 'utf8'))
+    assert.equal(pausedReview.stage, 'review'); assert.equal(pausedReview.status, 'paused'); assert.ok(pausedReview.usedModelCalls >= 1)
+    const frozenReview = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', pausedReview.runId, 'plan.json'), 'utf8'))
+    assert.equal(frozenReview.context.manuscript, manualBody)
+    assert.equal(frozenReview.context.evidence.length, 1)
+    assert.deepEqual(frozenReview.context.academicSkills.map(row => row.qualifiedId), ['builtin:research-results-integrity'])
+    assert.equal(frozenReview.context.blocks.at(-1).sourceRange.startUtf16, manualBody.lastIndexOf(repeatedParagraph))
+    const pausedCheckpoint = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', pausedReview.runId, 'checkpoint.json'), 'utf8'))
+    const chargedBeforeResume = pausedReview.usedModelCalls
+    await modelUi.getByRole('button', { name: `预览恢复模型审查 ${pausedReview.runId}`, exact: true }).click()
+    await modelUi.getByRole('button', { name: '确认执行模型审查', exact: true }).click()
+    await waitModelReviewOutcome(modelUi.getByRole('status').filter({ hasText: new RegExp(`模型审查 ${pausedReview.runId} · (completed-with-issues|succeeded)`) }))
+    const actualReviewRun = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', pausedReview.runId, 'run.json'), 'utf8'))
+    assert.equal(actualReviewRun.usedModelCalls, chargedBeforeResume + (pausedCheckpoint.output ? 0 : 1))
+    const actualReport = JSON.parse(await readFile(join(projectRoot, '.scholarflow/reviews', actualReviewRun.reviewId, 'report.json'), 'utf8'))
+    assert.equal(actualReport.modelRunId, pausedReview.runId); assert.equal(actualReport.documentHash, digest(manualBody))
+    assert.equal(actualReport.checks.filter(row => ['argument_assessment', 'style_assessment'].includes(row.id) && row.method === 'model-assisted').length, 2)
+    for (const issue of actualReport.issues.filter(row => row.location)) {
+      const range = issue.location.sourceRange
+      assert.equal(manualBody.slice(range.startUtf16, range.endUtf16), issue.location.quote)
+    }
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+    assert.equal(await readFile(join(projectRoot, '原始材料.txt'), 'utf8'), 'TEST_ONLY raw source: never overwrite this file.\r\n')
+    assert.equal(Object.values(JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).claims)[0].status, 'partially-supported')
+  }
   await page.getByRole('tab', { name: /^Export ·/ }).click()
   await page.getByRole('button', { name: '预检当前版本导出', exact: true }).click()
   await page.getByRole('dialog', { name: '导出确认', exact: true }).waitFor()
@@ -900,6 +958,8 @@ try {
     nativeDomEntityUnicodeDecode: true, crossParagraphSelectionRejected: true, manuscriptColdRestore: true,
     nativeUiDeterministicReview: true, nativeUiWorkingDraftExportDownload: true, exportDoesNotMutateBody: true,
     nativeUiManualReviewPreviewCancelConfirmAndVersionedHistory: true,
+    realProviderModelReviewWithFixedSkillAndExactIssuePositions: liveModel,
+    realProviderModelReviewPauseResumeKeepsChargedCallsAndBody: liveModel,
     realProviderSectionCandidateAcceptWithClaimAnchors: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
     nativeUiManualParagraphClaimAssociation: true, renderedSelectionDisplaysCurrentClaims: true,
     nativeUiLegacyRunStorageMigrationKeepsAllBytes: true,
