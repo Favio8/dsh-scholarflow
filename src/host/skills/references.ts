@@ -3,6 +3,9 @@ import { digest, json } from '../../core/store/files.ts'
 import { parseConfig } from '../../core/project/project.ts'
 import { resourceLockSchema } from '../../shared/skills.ts'
 import { runSnapshotSchema } from '../../shared/runs.ts'
+import { draftSequenceInputSchema, draftSequencePlanSchema, draftSequenceRunSchema, draftSequenceCheckpointSchema } from '../../shared/draft-sequence.ts'
+import { workflowInputSchema, workflowPlanSchema, workflowRunSchema } from '../../core/pipeline/workflow.ts'
+import { workflowCheckpointSchema } from '../../shared/workflow.ts'
 import { invariant } from '../../shared/errors.ts'
 
 type Host = any
@@ -55,9 +58,32 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
     observations.push({ rootFingerprint, path: '.scholarflow/runs', hash: digest(json(rows.map((row: Host) => ({ name: row.name, type: row.type })).sort((a: Host, b: Host) => a.name.localeCompare(b.name)))) })
     for (const row of rows) {
       if (row.type !== 'directory') continue
-      invariant(/^run_[\w]+$/u.test(row.name) && ++checkedRuns <= 1000, 'SKILL_REFERENCE_SCAN_LIMIT', '项目包含未知运行目录或总量过多，未卸载。')
+      invariant(/^(?:run|workflow|draft)_[\w]+$/u.test(row.name) && ++checkedRuns <= 1000, 'SKILL_REFERENCE_SCAN_LIMIT', '项目包含未知运行目录或总量过多，未卸载。')
       const text = await read(`.scholarflow/runs/${row.name}/input.json`) ?? await read(`.scholarflow/runs/${row.name}/snapshot.json`)
       invariant(text, 'SKILL_REFERENCES_UNAVAILABLE', '一个历史运行缺少快照，引用状态未知，未卸载。')
+      if (!row.name.startsWith('run_')) {
+        const [planText, checkpointText, stateText] = await Promise.all(['plan.json', 'checkpoint.json', 'run.json'].map(file => read(`.scholarflow/runs/${row.name}/${file}`)))
+        invariant(planText && checkpointText && stateText, 'SKILL_REFERENCES_UNAVAILABLE', '父流程记录不完整，引用状态未知，未卸载。')
+        if (row.name.startsWith('workflow_')) {
+          const input = workflowInputSchema.parse(JSON.parse(text)), plan = workflowPlanSchema.parse(JSON.parse(planText)), state = workflowRunSchema.parse(JSON.parse(stateText))
+          const checkpoint = workflowCheckpointSchema.parse(JSON.parse(checkpointText)), { contentHash, ...body } = plan
+          invariant([input, plan, state, checkpoint].every(value => value.projectId === config.project.id && value.workflowId === row.name) &&
+            plan.inputHash === digest(text) && contentHash === digest(json(body)) && state.planHash === contentHash && checkpoint.planHash === contentHash &&
+            state.checkpointHash === digest(checkpointText) && state.status === checkpoint.status,
+            'SKILL_REFERENCES_UNAVAILABLE', '引导目标身份或摘要改变，引用状态未知，未卸载。')
+          // The goal record declares no fixed Skill versions; actual stage
+          // snapshots retain their own references and are scanned separately.
+        } else {
+          const input = draftSequenceInputSchema.parse(JSON.parse(text)), plan = draftSequencePlanSchema.parse(JSON.parse(planText)), state = draftSequenceRunSchema.parse(JSON.parse(stateText))
+          const checkpoint = draftSequenceCheckpointSchema.parse(JSON.parse(checkpointText)), { contentHash, ...body } = plan
+          invariant(input.skillDigests && [input, plan, state, checkpoint].every(value => value.projectId === config.project.id && value.sequenceId === row.name) &&
+            plan.inputHash === digest(text) && state.inputHash === plan.inputHash && checkpoint.inputHash === plan.inputHash && contentHash === digest(json(body)) &&
+            state.planHash === contentHash && checkpoint.planHash === contentHash && state.checkpointHash === digest(checkpointText) && state.status === checkpoint.status,
+            'SKILL_REFERENCES_UNAVAILABLE', '初稿顺序缺少固定 Skill 清单、身份或摘要不一致，引用状态未知，未卸载。')
+          if (input.skillDigests.some(skill => skill.qualifiedId === qualifiedId && skill.digest === resourceDigest)) references.push({ workspaceId: workspace.id, kind: 'run', recordId: input.sequenceId })
+        }
+        continue
+      }
       const run = runSnapshotSchema.parse(JSON.parse(text))
       invariant(run.projectId === config.project.id && run.runId === row.name, 'SKILL_REFERENCES_UNAVAILABLE', '历史运行快照的身份不同，未卸载。')
       if (run.skillDigests.some(skill => skill.qualifiedId === qualifiedId && skill.digest === resourceDigest)) references.push({ workspaceId: workspace.id, kind: 'run', recordId: run.runId })

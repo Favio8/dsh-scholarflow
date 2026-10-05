@@ -6,6 +6,9 @@ import { MemoryStore } from '../fixtures/memory-store.ts'
 import { json } from '../../src/core/store/files.ts'
 import { packageSkill } from '../../src/core/skills/package.ts'
 import { applyBindings, prepareBindings } from '../../src/core/skills/bindings.ts'
+import { prepareWorkflow, startWorkflow } from '../../src/core/pipeline/workflow.ts'
+import { prepareDraftSequence, startDraftSequence } from '../../src/core/pipeline/draft-sequence.ts'
+import { confirmOutline } from '../../src/core/evidence/evidence.ts'
 
 // TEST_ONLY Host seam; native installed tests separately exercise real fs APIs.
 async function fixture() {
@@ -46,5 +49,33 @@ test('reference scans retain project and historical-run references and hash obse
 test('unknown or missing reference state cannot be treated as unreferenced', async () => {
   const { io, host, bundle } = await fixture()
   io.externalEdit('.scholarflow/resources.lock.json', json({ schemaVersion: 99, projectId: 'TEST_ONLY' }))
+  await assert.rejects(knownSkillReferences(host, bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, new AbortController().signal), { code: 'SKILL_REFERENCES_UNAVAILABLE' })
+})
+test('known guided goals without fixed resources do not mask unrelated retirement; corrupt parent records remain unknown', async () => {
+  const { io, host, bundle } = await fixture()
+  const { workflowId } = await startWorkflow(io, await prepareWorkflow(io, { researchQuestion: 'TEST_ONLY 引用扫描', minimumSources: 1, minimumLocatedEvidence: 1 }, 'session_TEST_ONLY'))
+  await applyBindings(io, await prepareBindings(io, [], async () => bundle))
+  const scan = await knownSkillReferences(host, bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, new AbortController().signal)
+  assert.equal(scan.references.length, 0); assert.equal(scan.checkedRuns, 1)
+  io.externalEdit(`.scholarflow/runs/${workflowId}/checkpoint.json`, '{}')
+  await assert.rejects(knownSkillReferences(host, bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, new AbortController().signal))
+})
+test('an initial draft sequence retains its frozen Skill version even after the current project unbinds it', async () => {
+  const { io, host, bundle } = await fixture()
+  const locked = JSON.parse((await io.read('.scholarflow/resources.lock.json'))!.text)
+  await applyBindings(io, await prepareBindings(io, [{ ...locked.bindings[0], enabledStages: ['drafting', 'revision'] }], async () => bundle))
+  const current = await snapshot(io)
+  await confirmOutline(io, { version: 0, title: 'TEST_ONLY', researchQuestion: 'TEST_ONLY', thesis: 'TEST_ONLY', confirmation: 'draft',
+    sections: [{ id: 'sec_TEST_ONLY', title: '正文', purpose: '', claimIds: [], missingEvidence: [] }] }, current.ledger.revision, 0)
+  await startWorkflow(io, await prepareWorkflow(io, { researchQuestion: 'TEST_ONLY', minimumSources: 1, minimumLocatedEvidence: 1 }, 'session_TEST_ONLY'))
+  const latest = await snapshot(io), preview = await prepareDraftSequence(io, { context: { requestId: 'req_TEST_ONLY', sessionId: 'session_TEST_ONLY',
+    workspaceId: 'workspace_TEST_ONLY', projectId: latest.ledger.projectId, expectedLedgerRevision: latest.ledger.revision }, instruction: 'TEST_ONLY', summarySectionIds: [] },
+    { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' }, async () => bundle)
+  await startDraftSequence(io, preview, async () => bundle)
+  await applyBindings(io, await prepareBindings(io, [], async () => bundle))
+  const scan = await knownSkillReferences(host, bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, new AbortController().signal)
+  assert.deepEqual(scan.references, [{ workspaceId: 'workspace_TEST_ONLY', kind: 'run', recordId: preview.input.sequenceId }])
+  const path = `.scholarflow/runs/${preview.input.sequenceId}/input.json`, old = JSON.parse((await io.read(path))!.text)
+  delete old.skillDigests; io.externalEdit(path, json(old))
   await assert.rejects(knownSkillReferences(host, bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, new AbortController().signal), { code: 'SKILL_REFERENCES_UNAVAILABLE' })
 })

@@ -21,6 +21,9 @@ import { saveManual, rejectProposal, undoRevision, proposalImage } from '../core
 import { wordStats } from '../core/editing/markdown.ts'
 import { generationRequest, runStartRequest, runControlRequest, runStateSchema } from '../shared/runs.ts'
 import { prepareGeneration, executeGeneration, type GenerationPlan } from '../core/pipeline/generation.ts'
+import { draftSequenceRequest, draftSequenceActionRequest } from '../shared/draft-sequence.ts'
+import { inspectDraftSequence, readDraftSequence, prepareDraftSequence, startDraftSequence, prepareDraftSequenceAction, applyDraftSequenceAction,
+  type DraftSequenceStartPlan, type DraftSequenceActionPlan } from '../core/pipeline/draft-sequence.ts'
 import { workflowPrepareRequest, workflowActionRequest } from '../shared/workflow.ts'
 import { currentWorkflow, prepareWorkflow, startWorkflow, prepareWorkflowAction, applyWorkflowAction, type WorkflowStartPlan, type WorkflowActionPlan } from '../core/pipeline/workflow.ts'
 import { workflowBudgetInfo } from '../core/pipeline/workflow-budget.ts'
@@ -85,7 +88,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private initPlans = new Map<string, StoredInitPlan>()
   private workflowPlans = new Map<string, { plan: WorkflowStartPlan | WorkflowActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
   private recoveryPlans = new Map<string, { context: StoredInitPlan['context']; peerId: string; hash: string; expires: number }>()
-  private generationPlans = new Map<string, { plan: GenerationPlan; peerId: string; expires: number; selected: { provider: string; model: string; reasoningEffort?: string } }>()
+  private generationPlans = new Map<string, { plan: GenerationPlan; peerId: string; expires: number; selected: { provider: string; model: string; reasoningEffort?: string }; sequence?: DraftSequenceActionPlan }>()
+  private draftSequencePlans = new Map<string, { plan: DraftSequenceStartPlan | DraftSequenceActionPlan; context: RequestContext; peerId: string; expires: number }>()
   private running = new Map<string, { controller: AbortController; context: RequestContext; pauseRequested: boolean }>()
   private runActionPlans = new Map<string, { plan: RunActionPlan; generation?: GenerationPlan; selected?: { provider: string; model: string; reasoningEffort?: string }; context: RequestContext; peerId: string; expires: number }>()
   private exportPlans = new Map<string, { plan: DeliveryPlan; context: RequestContext; peerId: string; expires: number }>()
@@ -119,6 +123,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => () => this.sourceRegistrationPlans.clear(), 'scholarflow: clear source registration previews')
     ctx.effect(() => () => this.researchBatchPlans.clear(), 'scholarflow: clear multi-query previews')
     ctx.effect(() => () => this.workflowPlans.clear(), 'scholarflow: clear workflow previews')
+    ctx.effect(() => () => { this.draftSequencePlans.clear(); this.generationPlans.clear() }, 'scholarflow: clear draft previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
@@ -338,6 +343,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
   }
 
   private pruneSkills() {
+    for (const [key, row] of this.draftSequencePlans) if (row.expires < Date.now()) this.draftSequencePlans.delete(key)
+    for (const [key, row] of this.generationPlans) if (row.expires < Date.now()) this.generationPlans.delete(key)
     for (const [key, row] of this.workflowPlans) if (row.expires < Date.now()) this.workflowPlans.delete(key)
     for (const [key, row] of this.researchBatchPlans) if (row.expires < Date.now()) this.researchBatchPlans.delete(key)
     for (const [key, row] of this.sourceRegistrationPlans) if (row.expires < Date.now()) this.sourceRegistrationPlans.delete(key)
@@ -765,6 +772,78 @@ export class ScholarFlowRemote extends TypertRemoteService {
       return { document: current.document, revision: current.ledger.revision, statistics: wordStats(current.document.text) } })
   }
 
+  @Remote('draftSequence.inspect')
+  async draftSequenceInspect(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal); return inspectDraftSequence(io) })
+  }
+
+  @Remote('draftSequence.prepare')
+  async draftSequencePrepare(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = draftSequenceRequest.parse(request)
+      mutationRevision(input.context); this.pruneSkills()
+      invariant(this.draftSequencePlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理初稿顺序预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), model = await selectedModel(this.ctx, input.context.sessionId, signal)
+      const plan = await prepareDraftSequence(io, input, { providerId: model.selected.provider, modelId: model.selected.model,
+        ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }), maxOutputTokens: 16384 }, binding => readPrivateSkill(binding, io))
+      this.draftSequencePlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, action: 'start', input: plan.input,
+        risks: ['顺序只调度缺失或空白章节；已有正文原样保留。每节另行预览资料发送范围并审阅接受，主稿不会自动被覆盖。',
+          '摘要／结论由你明确标记，排到正文之后；只依据实际保存正文。无定位证据时仅提供固定待补标记，不调用模型。',
+          '计入原引导目标累计预算。资料、文风、记忆、Skill、大纲或人工稿变化会停止旧顺序，已有稿件与建议保留。'] }
+    })
+  }
+
+  @Remote('draftSequence.prepareAction')
+  async draftSequencePrepareAction(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = draftSequenceActionRequest.parse(request)
+      mutationRevision(input.context); this.pruneSkills()
+      const { io } = await resolveStore(this.ctx, input.context, signal), plan = await prepareDraftSequenceAction(io, input, binding => readPrivateSkill(binding, io))
+      if (plan.generation) {
+        const model = await selectedModel(this.ctx, input.context.sessionId, signal), frozen = (await readDraftSequence(io, input.sequenceId)).input.model
+        invariant(model.selected.provider === frozen.providerId && model.selected.model === frozen.modelId &&
+          model.selected.reasoningEffort === frozen.reasoningEffort, 'MODEL_SELECTION_CHANGED', '宿主模型选择与初稿顺序不同，请取消旧顺序后重新预览发送范围。')
+        invariant(plan.generation.context.structuralGap === true || plan.generation.inputBytes + 16384 + 2000 <= model.contextWindow,
+          'CONTEXT_WINDOW_EXCEEDED', '当前实际正文与证据超出模型上下文预算，没有删掉关键输入继续。')
+        invariant(this.generationPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有章节预览。')
+        this.generationPlans.set(plan.generation.id, { plan: plan.generation, sequence: plan, selected: model.selected, peerId, expires: Date.now() + 600000 })
+        return { ...await this.generationPreview(plan.generation, io), sequenceId: input.sequenceId }
+      }
+      invariant(this.draftSequencePlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理初稿顺序预览。')
+      this.draftSequencePlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, action: plan.action, sequenceId: plan.sequenceId, status: plan.next.status,
+        risks: ['只更新已确认顺序和真实进度，不修改正文、不接受候选、不重试付费调用。', '待补、未关闭问题、原稿与拒绝建议均保留；完成章节顺序不表示审查通过或研究完成。'] }
+    })
+  }
+
+  @Remote('draftSequence.confirm')
+  async draftSequenceConfirm(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = onlineConfirmRequest.parse(request), row = this.draftSequencePlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash,
+        'INVALID_APPROVAL', '请重新预览初稿顺序操作。')
+      invariant(row.context.sessionId === input.context.sessionId && row.context.workspaceId === input.context.workspaceId && row.context.projectId === input.context.projectId,
+        'SESSION_BINDING_CHANGED', '初稿顺序确认不属于当前项目会话。')
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      const result = row.plan.action === 'start' ? await startDraftSequence(io, row.plan, binding => readPrivateSkill(binding, io)) :
+        await applyDraftSequenceAction(io, row.plan, binding => readPrivateSkill(binding, io))
+      this.draftSequencePlans.delete(input.planId); return result
+    })
+  }
+
+  @Remote('draftSequence.dismiss')
+  async draftSequenceDismiss(request: unknown, _signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), { planId } = z.object({ planId: id }).strict().parse(request)
+      invariant(this.draftSequencePlans.get(planId)?.peerId === peerId, 'INVALID_APPROVAL', '只可取消自己的初稿操作预览。')
+      this.draftSequencePlans.delete(planId); return { dismissed: true } })
+  }
+
+  @Remote('writing.dismiss')
+  async writingDismiss(request: unknown, _signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), { planId } = z.object({ planId: id }).strict().parse(request)
+      invariant(this.generationPlans.get(planId)?.peerId === peerId, 'INVALID_APPROVAL', '只可取消自己的生成预览。')
+      this.generationPlans.delete(planId); return { dismissed: true } })
+  }
+
   @Remote('writing.prepare')
   async writingPrepare(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => this.prepareWriting(generationRequest.parse(request), this.requireOperator(), signal))
@@ -779,15 +858,22 @@ export class ScholarFlowRemote extends TypertRemoteService {
       for (const [key, row] of this.generationPlans) if (row.expires < Date.now()) this.generationPlans.delete(key)
       invariant(this.generationPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有生成计划。')
       this.generationPlans.set(plan.id, { plan, selected: model.selected, peerId, expires: Date.now() + 600000 })
-      return { planId: plan.id, planHash: plan.contentHash, runId: plan.snapshot.runId, model: plan.snapshot.modelDescriptor, stage: plan.snapshot.stage,
+      return this.generationPreview(plan, io)
+  }
+
+  private async generationPreview(plan: GenerationPlan, io: import('../core/store/files.ts').FileStore) {
+      const input = plan.input, gap = plan.context.structuralGap === true
+      return { planId: plan.id, planHash: plan.contentHash, runId: plan.snapshot.runId, model: plan.snapshot.modelDescriptor, stage: plan.snapshot.stage, structuralGap: gap,
         workflowId: plan.snapshot.workflowId, workflowBudget: await workflowBudgetInfo(io),
         inputBytes: plan.inputBytes, evidenceIds: plan.evidenceIds, budget: plan.snapshot.budget, skillDigests: plan.snapshot.skillDigests,
         scope: input.selection ? input.selection.sourceRange : plan.sectionTarget ? { startUtf16: plan.sectionTarget.startUtf16, endUtf16: plan.sectionTarget.endUtf16 } : { startUtf16: 0, endUtf16: (await snapshot(io)).document.text.length },
         sectionTarget: plan.sectionTarget, sourceText: input.selection?.sourceText, reviewIssueId: input.reviewIssueId, risks: [
           ...(input.reviewIssueId ? ['修复范围是问题所在完整段落，保留引用与人工内容；接受后先复查规则，模型问题只有明确同版本复查才能关闭。'] : []),
           ...(plan.sectionTarget ? ['本节候选仅修改上述范围；为核对摘要、结论与跨节一致性，同时向模型发送当前全部已保存主稿。待补项不能作为已有结果。'] : []),
-          '将选定证据、当前稿件范围、项目文风、确认记忆和当前阶段固定 Skill 说明／文本参考发送给所列宿主模型提供方；本地资料模式不等于模型离线处理。',
-          '生成结果为待审阅建议，接受前不会改写主稿。宿主会话日志保留模型请求以供追溯；项目诊断日志不另存完整 Prompt。'] }
+          ...(gap ? ['本节没有可用定位证据，只创建固定待补结构建议，不发送模型请求。'] : [
+            '将选定证据、当前稿件范围、项目文风、确认记忆和当前阶段固定 Skill 说明／文本参考发送给所列宿主模型提供方；本地资料模式不等于模型离线处理。',
+            '宿主会话日志保留模型请求以供追溯；项目诊断日志不另存完整 Prompt。']),
+          '生成结果为待审阅建议，接受前不会改写主稿。'] }
   }
 
   @Remote('review.locateIssue')
@@ -847,6 +933,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       this.generationPlans.delete(input.planId)
       const owner = { pid: process.pid, bootInstance: this.bootInstance }
       try {
+        if (row.sequence) await applyDraftSequenceAction(io, row.sequence, binding => readPrivateSkill(binding, io))
         return await executeGeneration(io, row.plan, owner, AbortSignal.any([signal, controller.signal]),
           call => callStageModel(this.ctx, model.session, model.selected, call), candidate => this.ownerAlive(candidate),
           { pauseRequested: () => active.pauseRequested })

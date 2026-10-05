@@ -4,6 +4,7 @@ import { sectionTarget } from '../core/editing/sections.ts'
 import { MarkdownView, captureSelection } from './markdown.tsx'
 import type { SelectionPayload } from '../shared/editing.ts'
 import { ProposalRevision } from './proposal-revision.tsx'
+import { DraftSequence } from './draft-sequence.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
@@ -197,8 +198,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     <button disabled={busy || dirty || !sectionId || project.ledger.outline.confirmation !== 'confirmed' || !instruction.trim()} onClick={() => run(async () => {
       setPlan(await api('writing.prepare', { context: context(), instruction, sectionId }))
     })}>预览本节生成计划</button>
-    <button disabled={busy || dirty || !instruction.trim()} onClick={() => prepare(true)}>预览全文生成计划</button>
-    {plan && <section role="dialog" aria-modal="false" aria-label="模型生成确认"><h4>确认宿主模型调用</h4>
+    <DraftSequence project={project} context={context} api={api} run={run} busy={busy} dirty={dirty} onGenerationPlan={setPlan} onProposal={setProposal} />
+    {plan && <section role="dialog" aria-modal="false" aria-label="模型生成确认"><h4>{plan.structuralGap ? '确认待补结构建议（不调用模型）' : '确认宿主模型调用'}</h4>
       <p>{plan.model.providerId} / {plan.model.modelId} · 输入约 {plan.inputBytes} bytes · 源码范围 [{plan.scope.startUtf16}, {plan.scope.endUtf16})</p>
       <p>模型调用预算 {plan.budget.maxModelCalls}；运行时限 {plan.budget.maxDurationMinutes} 分钟；仅生成待审阅建议。</p>
       <p>本次固定输出上限 {plan.model.maxOutputTokens ?? 4096} token（包含提供方计入的推理输出）；额度耗尽时保留调用，不自动重试截断结果。</p>
@@ -212,7 +213,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         try { const result = await api('runs.start', { context: context(), planId: confirmedPlan.planId, planHash: confirmedPlan.planHash }); if (result.proposal) setProposal(result); if (result.paused) setMessage('运行已暂停，检查点已保存；可从历史预览恢复。'); await refresh() }
         finally { setActiveRun(''); setHistorySequence(value => value + 1) }
       })}>确认生成建议</button>
-      <button disabled={busy} onClick={() => setPlan(undefined)}>取消生成计划</button></section>}
+      <button disabled={busy} onClick={() => run(async () => { await api('writing.dismiss', { planId: plan.planId }); setPlan(undefined) })}>取消生成计划</button></section>}
     {activeRun && <section aria-label="当前生成运行"><p role="status">运行 {activeRun} · {progress?.status ?? '准备开始'} · 已调用模型 {progress?.usedModelCalls ?? 0} 次</p>
       {!!progress?.checkpoint?.transientRetries && <p>临时错误重试 {progress.checkpoint.transientRetries} / 2{progress.checkpoint.retryNotBefore ? `；等待到 ${new Date(progress.checkpoint.retryNotBefore).toLocaleTimeString()}` : ''}</p>}
       <button onClick={() => api('runs.pause', { context: context(), runId: activeRun }).then(() => setMessage('已请求暂停：当前调用结束后保存检查点，不再调度新工作。')).catch(e => setMessage(e.message))}>暂停当前生成</button>

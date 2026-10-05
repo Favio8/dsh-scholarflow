@@ -642,7 +642,9 @@ try {
   if (liveModel) {
     const beforeCancel = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
     await page.getByRole('textbox', { name: '改写生成指令', exact: true }).fill('TEST_ONLY 取消验证：基于确认大纲输出详细的证据与限制说明，保留引用。')
-    await page.getByRole('button', { name: '预览全文生成计划', exact: true }).click()
+    const cancellationOutline = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).outline
+    await page.getByRole('combobox', { name: '按大纲生成章节', exact: true }).selectOption(cancellationOutline.sections.find(section => section.claimIds.length).id)
+    await page.getByRole('button', { name: '预览本节生成计划', exact: true }).click()
     await page.getByRole('button', { name: '确认生成建议', exact: true }).click()
     const running = page.getByRole('region', { name: '当前生成运行', exact: true })
     await running.waitFor()
@@ -1003,6 +1005,28 @@ try {
   assert.equal(await workflowUi.getByRole('button', { name: '预览结束七阶段交付', exact: true }).isEnabled(), false)
   await workflowUi.getByRole('button', { name: '前往初稿', exact: true }).click()
   assert.equal(await page.getByRole('tab', { name: /^Draft ·/ }).getAttribute('aria-selected'), 'true')
+  if (liveModel) {
+    const sequenceUi = page.getByRole('region', { name: '按节初稿', exact: true })
+    await sequenceUi.getByRole('button', { name: '预览按节初稿顺序', exact: true }).click()
+    await sequenceUi.getByRole('button', { name: '取消初稿顺序预览', exact: true }).click()
+    await assert.rejects(stat(join(projectRoot, '.scholarflow/drafting/current.json')), { code: 'ENOENT' })
+    await sequenceUi.getByRole('button', { name: '预览按节初稿顺序', exact: true }).click()
+    const sequencePreview = sequenceUi.getByRole('dialog', { name: '按节初稿顺序确认', exact: true })
+    assert.ok((await sequencePreview.innerText()).includes('deepseek-official / deepseek-flash'))
+    await sequenceUi.getByRole('button', { name: '确认初稿顺序操作', exact: true }).click()
+    await sequenceUi.getByRole('status', { name: '按节初稿进度', exact: true }).filter({ hasText: 'waiting-input' }).waitFor()
+    const sequencePointer = JSON.parse(await readFile(join(projectRoot, '.scholarflow/drafting/current.json'), 'utf8'))
+    const checkpointPath = join(projectRoot, `.scholarflow/runs/${sequencePointer.sequenceId}/checkpoint.json`)
+    const beforeSequenceCheckpoint = await readFile(checkpointPath, 'utf8')
+    await sequenceUi.getByRole('button', { name: '预览下一节或结束初稿顺序', exact: true }).click()
+    await page.getByRole('dialog', { name: '模型生成确认', exact: true }).waitFor()
+    await page.getByRole('button', { name: '取消生成计划', exact: true }).click()
+    assert.equal(await readFile(checkpointPath, 'utf8'), beforeSequenceCheckpoint, 'dismissed child preview cannot register or dispatch a section')
+    await sequenceUi.getByRole('button', { name: '预览暂停按节初稿', exact: true }).click()
+    await sequenceUi.getByRole('button', { name: '确认初稿顺序操作', exact: true }).click()
+    await sequenceUi.getByRole('status', { name: '按节初稿进度', exact: true }).filter({ hasText: 'paused' }).waitFor()
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+  }
   await page.getByRole('tab', { name: /^Overview ·/ }).click()
   await workflowUi.getByRole('button', { name: '预览暂停引导任务', exact: true }).click()
   await workflowUi.getByRole('button', { name: '确认保存引导检查点', exact: true }).click()
@@ -1103,6 +1127,14 @@ try {
   assert.equal(coldWorkflow.value.data.workflow.checkpoint.status, 'paused')
   assert.equal(coldWorkflow.value.data.workflow.checkpoint.stamps.length, 3)
   assert.equal(coldWorkflow.value.data.workflow.gates[2].current, true)
+  if (liveModel) {
+    const coldSequence = await rpc('scholarflow.v1/draftSequence.inspect', { request: { context: { requestId: 'req_TEST_ONLY_draft_cold',
+      workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
+    assert.equal(coldSequence.value.ok, true, JSON.stringify(coldSequence.value))
+    assert.equal(coldSequence.value.data.sequence.checkpoint.status, 'paused')
+    assert.ok(coldSequence.value.data.sequence.checkpoint.steps.every(step => step.state === 'pending' || step.state === 'preserved'))
+    assert.deepEqual(coldSequence.value.data.sequence.diagnostics, [])
+  }
   const coldBuffer = await rpc('scholarflow.v1/editor.bufferRead', { request: { context: { requestId: 'req_TEST_ONLY_buffer_cold', workspaceId: projectWorkspace.value.workspace.workspaceId,
     sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
   assert.equal(coldBuffer.value.ok, true)
@@ -1187,6 +1219,7 @@ try {
     twoSessionProjectRestore: true, coldProjectBindingRestore: true, mismatchedBindingRejected: true,
     nativeUiInterruptedInitRecovery: true,
     nativeWorkflowPreviewCancelOrderedFactsInsufficiencyPauseAndColdRestore: true,
+    nativeDraftSequenceScopePreviewChildDismissPauseAndColdRestore: liveModel,
     realProviderGuidedAggregateBudget: nativePaidWorkflowId ? { workflowId: nativePaidWorkflowId, used: nativeWorkflowUsed } : false,
     nativeFutureSchemasReadonlyOriginalDownloadsAndMutationDenial: true,
     nativeUiMaterialParseEvidenceClaimOutline: true, evidenceChainColdRestore: true,

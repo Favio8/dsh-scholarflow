@@ -9,7 +9,7 @@ export const generationRequest = z.object({ context: requestContext, instruction
 export const runStartRequest = z.object({ context: requestContext, planId: id, planHash: hash }).strict()
 export const runControlRequest = z.object({ context: requestContext, runId: id }).strict()
 export const runSnapshotSchema = z.object({ schemaVersion: z.literal(1), runId: id, projectId: id, sessionId: id, stage: z.enum(['requirements', 'research', 'outline', 'drafting', 'review', 'revision', 'delivery']), configHash: hash,
-  workflowId: id.optional(),
+  workflowId: id.optional(), draftSequenceId: id.optional(),
   ledgerRevision: z.number().int().min(0), documentHash: hash, outlineVersion: z.number().int().min(0), materialHashes: z.record(id, hash), sourceHashes: z.record(id, hash), profileHash: hash,
   skillDigests: z.array(z.object({ qualifiedId: z.string(), digest: hash }).strict()), resourceLockHash: hash.optional(), modelDescriptor: z.object({ providerId: z.string(), modelId: z.string(), reasoningEffort: z.string().max(100).optional(), maxOutputTokens: z.number().int().min(1).max(32768).optional() }).strict(),
   budget: z.object({ maxModelCalls: z.number().int().min(1).max(40), maxSearchQueries: z.number().int().min(0).max(12), maxCandidateSources: z.number().int().min(1).max(80), maxDurationMinutes: z.number().int().min(1).max(30) }).strict(),

@@ -35,6 +35,7 @@ const planSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, proje
 const pointerSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id }).strict()
 const runSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id, planHash: hash, checkpointHash: hash,
   status: workflowCheckpointSchema.shape.status, startedAt: z.string(), updatedAt: z.string() }).strict()
+export { inputSchema as workflowInputSchema, planSchema as workflowPlanSchema, runSchema as workflowRunSchema }
 // Explicitly selecting materials, changing stage bindings or editing writing
 // preferences is normal stage work. It invalidates affected facts, without
 // renewing the overall budget or silently changing its permission policy.

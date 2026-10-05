@@ -8,12 +8,14 @@ export function ProjectSkills({ project, context, api, refresh, run, busy }: Pro
   const [plan, setPlan] = useState<any>(), [error, setError] = useState(''), [stage, setStage] = useState('drafting')
   const [refreshSequence, setRefreshSequence] = useState(0)
   const edited = useRef(false)
+  const stageEdited = useRef(false)
   useEffect(() => {
     let live = true
     api('skills.project', { context: context() }).then(result => {
       if (!live) return
       setData(result); setError('')
-      if (!edited.current) { setSelections(result.resources.map((row: any) => ({ qualifiedId: row.binding.qualifiedId, digest: row.binding.digest, enabledStages: row.binding.enabledStages, scope: row.binding.scope }))); setStage(result.stage.stage) }
+      if (!edited.current) setSelections(result.resources.map((row: any) => ({ qualifiedId: row.binding.qualifiedId, digest: row.binding.digest, enabledStages: row.binding.enabledStages, scope: row.binding.scope })))
+      if (!stageEdited.current) setStage(result.stage.stage)
     }).catch(error => live && setError(error.message))
     return () => { live = false }
   }, [project.ledger.revision, refreshSequence])
@@ -52,8 +54,8 @@ export function ProjectSkills({ project, context, api, refresh, run, busy }: Pro
       <button disabled={busy} onClick={() => run(async () => { await api('skills.applyBindings', { context: context(), planId: plan.planId, planHash: plan.planHash }); edited.current = false; setPlan(undefined); await refresh() })}>确认项目 Skill 绑定{plan.legacyMigration ? '并迁移旧资源锁' : ''}</button>
       <button disabled={busy} onClick={() => run(async () => { await api('skills.dismiss', { planId: plan.planId }); setPlan(undefined) })}>取消项目 Skill 绑定</button>
     </section>}
-    <label>会话工具的 Skill 调用阶段<select aria-label="Skill 调用阶段" value={stage} onChange={e => setStage(e.target.value)}>{STAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-    <button disabled={busy || !data || stage === data.stage.stage} onClick={() => run(async () => { await api('skills.selectStage', { context: context(), stage }); await refresh() })}>确认 Skill 调用阶段</button>
+    <label>会话工具的 Skill 调用阶段<select aria-label="Skill 调用阶段" value={stage} onChange={e => { stageEdited.current = true; setStage(e.target.value) }}>{STAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    <button disabled={busy || !data || stage === data.stage.stage} onClick={() => run(async () => { await api('skills.selectStage', { context: context(), stage }); stageEdited.current = false; await refresh() })}>确认 Skill 调用阶段</button>
     <p>会话工具只列出这个项目与调用阶段的启用项。正文生成固定使用写作阶段，选区改写固定使用修订阶段；既有聊天历史不会被删除。</p>
   </section>
 }
