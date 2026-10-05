@@ -18,7 +18,7 @@ const root = (workflowId: string) => {
   return `.scholarflow/runs/${workflowId}`
 }
 const terminal = (status: WorkflowCheckpoint['status']) => ['cancelled', 'succeeded', 'completed-with-issues'].includes(status)
-async function ensureNoStageExecuting(io: FileStore, projectId: string, allowDeadRun?: { runId: string; ownerAlive: (owner: { pid: number; bootInstance: string }) => boolean }) {
+export async function ensureNoStageExecuting(io: FileStore, projectId: string, allowDeadRun?: { runId: string; ownerAlive: (owner: { pid: number; bootInstance: string }) => boolean }) {
   const active = await io.read(ACTIVE_RUN)
   if (!active || await isDetachedProjectPointer(io, ACTIVE_RUN, active)) return
   let parsed

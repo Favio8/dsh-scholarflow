@@ -15,6 +15,7 @@ import { transientRetry, waitRetrySlice } from '../pipeline/retry.ts'
 import type { ModelCall } from '../pipeline/generation.ts'
 import { workflowCall, syncWorkflowDuration } from '../pipeline/workflow-budget.ts'
 import { isDetachedProjectPointer } from '../project/identity.ts'
+import { ensureNoAutomaticExecuting } from '../pipeline/automatic-lease.ts'
 
 const frozenSchema = z.object({ kind: z.literal('model-review'), id, reportId: id, contentHash: hash, input: modelReviewRequest,
   snapshot: runSnapshotSchema.refine(value => value.stage === 'review'), dependencyHash: hash, ledgerHash: hash, inputBytes: z.number().int().min(0).max(20 * 1024 * 1024),
@@ -121,6 +122,7 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
     expectedStateHash = digest(stateText); expectedCheckpointHash = digest(progressText)
   })
   await io.lock(async () => {
+    await ensureNoAutomaticExecuting(io, plan.snapshot.projectId)
     const active = await io.read(ACTIVE_RUN)
     if (control.retry) { invariant(control.retry.action === 'retry' && plan.parentRunId === control.retry.runId, 'INVALID_APPROVAL', '关联重试与原运行不符。'); await validateAction(io, control.retry, ownerAlive) }
     if (control.resume) {

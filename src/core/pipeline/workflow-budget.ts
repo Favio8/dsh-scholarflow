@@ -6,6 +6,7 @@ import { commit } from '../store/transactions.ts'
 import { readWorkflowRecord, workflowCheckpointMutations, WORKFLOW_POINTER } from './workflow.ts'
 import type { WorkflowCheckpoint } from '../../shared/workflow.ts'
 import { isDetachedProjectPointer } from '../project/identity.ts'
+import { ensureNoAutomaticExecuting } from './automatic-lease.ts'
 
 const pointerSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id }).strict()
 const requestSchema = z.object({ callId: id, runId: id, stage, kind: z.enum(['model', 'search', 'lookup']),
@@ -60,6 +61,7 @@ export async function reserveWorkflowCall(io: FileStore, expected: string | unde
   return io.lock(async () => {
     const stored = await binding(io, expected)
     if (!stored) return undefined
+    await ensureNoAutomaticExecuting(io, stored.input.projectId)
     invariant(request.owner, 'WORKFLOW_OWNER_REQUIRED', '累计请求须绑定可检查的实际执行进程；未发起请求。')
     const checkpoint = structuredClone(stored.checkpoint), budget = checkpoint.budget!, limits = stored.input.budget!
     invariant(!budget.calls.some(row => row.callId === request.callId), 'WORKFLOW_CALL_ALREADY_CHARGED', '这个调用已经计入累计预算；未知响应不能重新发送同一次请求。')

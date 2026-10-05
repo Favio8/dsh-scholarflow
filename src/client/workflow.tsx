@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react'
+import { AutomaticWorkflow } from './workflow-automatic.tsx'
 const labels: Record<string, string> = { requirements: '要求确认', research: '检索与证据', outline: '大纲', drafting: '初稿', review: '审查', revision: '修订建议', delivery: '交付' }
 const states: Record<string, string> = { pending: '待开始', ready: '可确认', running: '执行中', blocked: '待处理', completed: '已确认', stale: '输入已变，需重新检查', skipped: '已说明理由跳过', failed: '失败' }
 const pages: Record<string, string> = { requirements: 'Overview', research: 'Research', outline: 'Outline', drafting: 'Draft', review: 'Review', revision: 'Review', delivery: 'Export' }
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; run: (fn: () => Promise<unknown>) => void;
-  busy: boolean; navigate?: (page: string) => void }
-export function GuidedWorkflow({ project, context, api, run, busy, navigate }: Props) {
+  busy: boolean; refresh: () => Promise<void>; navigate?: (page: string) => void }
+export function GuidedWorkflow({ project, context, api, run, busy, refresh, navigate }: Props) {
   const [value, setValue] = useState<any>(), [preview, setPreview] = useState<any>(), [error, setError] = useState('')
   const [question, setQuestion] = useState(''), [noRequirements, setNoRequirements] = useState(''), [reason, setReason] = useState('')
   const [sources, setSources] = useState(1), [evidence, setEvidence] = useState(1)
@@ -33,6 +34,7 @@ export function GuidedWorkflow({ project, context, api, run, busy, navigate }: P
     </>}
     {workflow && <>
       <p role="status">{workflow.input.goal.researchQuestion} · {workflow.checkpoint.status} · 检查点 {workflow.checkpoint.revision}</p>
+      <AutomaticWorkflow key={`${workflow.input.workflowId}:${project.binding.sessionId}`} workflow={workflow} context={context} api={api} refresh={refresh} inspectWorkflow={inspect} run={run} busy={busy} />
       {value.budget?.used && <p role="status" aria-label="引导累计预算">模型调用 {value.budget.used.modelCalls}/{value.budget.limits.maxModelCalls} · 查询 {value.budget.used.searchQueries}/{value.budget.limits.maxSearchQueries} · 候选及未知响应预留 {value.budget.used.candidates}/{value.budget.limits.maxCandidateSources} · 模型审查轮次 {value.budget.used.reviewRounds}/{value.budget.maxReviewRounds} · 执行 {Math.ceil(value.budget.used.durationMs / 1000)} 秒/{value.budget.limits.maxDurationMinutes} 分钟</p>}
       {value.budget?.pendingCalls.map((call: any) => <p key={call.callId}>未结算请求：{call.runId} · {labels[call.stage]} · {call.callId}
         <button disabled={busy || reason.trim().length < 10} onClick={() => action('close-unknown-call', undefined, call.callId)}>预览结束无应答请求 {call.callId}</button></p>)}

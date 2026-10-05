@@ -30,6 +30,9 @@ import { inspectDraftSequence, readDraftSequence, prepareDraftSequence, startDra
 import { workflowPrepareRequest, workflowActionRequest } from '../shared/workflow.ts'
 import { currentWorkflow, prepareWorkflow, startWorkflow, prepareWorkflowAction, applyWorkflowAction, type WorkflowStartPlan, type WorkflowActionPlan } from '../core/pipeline/workflow.ts'
 import { workflowBudgetInfo } from '../core/pipeline/workflow-budget.ts'
+import { automaticPrepareRequest, automaticActionRequest } from '../shared/workflow-automatic.ts'
+import { prepareAutomatic, startAutomatic, driveAutomatic, readAutomatic, inspectAutomatic, prepareAutomaticAction, applyAutomaticAction,
+  type AutomaticPlan, type AutomaticActionPlan } from '../core/pipeline/workflow-automatic.ts'
 import { selectedModel, callStageModel } from './executor/model.ts'
 import { runReview, inspectReview, decideIssue } from '../core/review/review.ts'
 import { prepareDelivery, createDelivery, readDelivery, type DeliveryPlan } from '../core/export/delivery.ts'
@@ -97,6 +100,7 @@ const mutationRevision = (context: RequestContext) => {
 export class ScholarFlowRemote extends TypertRemoteService {
   private initPlans = new Map<string, StoredInitPlan>()
   private workflowPlans = new Map<string, { plan: WorkflowStartPlan | WorkflowActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
+  private automaticPlans = new Map<string, { plan: AutomaticPlan | AutomaticActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
   private recoveryPlans = new Map<string, { context: StoredInitPlan['context']; peerId: string; hash: string; expires: number }>()
   private generationPlans = new Map<string, { plan: GenerationPlan; peerId: string; expires: number; selected: { provider: string; model: string; reasoningEffort?: string }; sequence?: DraftSequenceActionPlan }>()
   private draftSequencePlans = new Map<string, { plan: DraftSequenceStartPlan | DraftSequenceActionPlan; context: RequestContext; peerId: string; expires: number }>()
@@ -139,6 +143,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => () => this.skillCopyPlans.clear(), 'scholarflow: clear project Skill copy previews')
     ctx.effect(() => () => this.manuscriptPlans.clear(), 'scholarflow: clear manuscript import previews')
     ctx.effect(() => () => this.identityPlans.clear(), 'scholarflow: clear project identity previews')
+    ctx.effect(() => () => this.automaticPlans.clear(), 'scholarflow: clear automatic previews')
     ctx.effect(() => () => { this.draftSequencePlans.clear(); this.generationPlans.clear() }, 'scholarflow: clear draft previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
     ctx.effect(() => {
@@ -152,6 +157,81 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async workflowInspect(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
       const { io } = await resolveStore(this.ctx, context, signal); return { ...await currentWorkflow(io), budget: await workflowBudgetInfo(io) } })
+  }
+
+  @Remote('automatic.inspect')
+  async automaticInspect(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = inspectRequest.extend({ workflowId: z.string() }).strict().parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal); return inspectAutomatic(io, input.workflowId) })
+  }
+
+  @Remote('automatic.prepare')
+  async automaticPrepare(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = automaticPrepareRequest.parse(request)
+      mutationRevision(input.context); this.pruneSkills()
+      invariant(this.automaticPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有自动推进预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io)
+      invariant(current.ledger.revision === input.context.expectedLedgerRevision, 'STALE_LEDGER_REVISION', '先重新读取项目，再预览自动推进。')
+      const plan = await prepareAutomatic(io, input.workflowId, input.context.sessionId, input.policy)
+      this.automaticPlans.set(plan.id, { plan, action: false, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, input: plan.input,
+        risks: ['当前自动推进只确认已有事实、执行已授权规则审查及工作草稿交付，不调用模型或在线检索。',
+          '要求冲突、大纲未确认、主稿缺章节和未授权缺口都会停止。不会接受 AI 建议、关闭语义问题或标记可提交。',
+          '步骤、执行时间和无进展上限计入原引导目标；新尝试与恢复不重置原额度。',
+          '资料、实际稿件、文风、记忆或目标改变会使旧授权停止；中断登记不会自动重放。'] }
+    })
+  }
+
+  @Remote('automatic.prepareAction')
+  async automaticPrepareAction(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = automaticActionRequest.parse(request)
+      mutationRevision(input.context); this.pruneSkills()
+      invariant(this.automaticPlans.size < 8 && !this.running.has(input.automaticId), 'RUN_IN_PROGRESS', '请先等待原调度保存，或在原会话暂停／取消。')
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      const plan = await prepareAutomaticAction(io, input.workflowId, input.automaticId, input.context.sessionId, input.action, input.reason, owner => this.ownerAlive(owner))
+      this.automaticPlans.set(plan.id, { plan, action: true, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, action: plan.action, automaticId: plan.automaticId, workflowId: plan.workflowId, reason: plan.reason,
+        risks: ['恢复重新核对原范围，不重置步骤、时间、调用或无进展额度；旧待定登记不会自动重放。', '结束只停止这次推进，原引导目标、主稿、报告和问题均保留。'] }
+    })
+  }
+
+  @Remote('automatic.confirm')
+  async automaticConfirm(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = onlineConfirmRequest.parse(request), row = this.automaticPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '自动推进需要有效的操作者预览。')
+      invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.context.projectId,
+        'SESSION_BINDING_CHANGED', '确认不属于原工作区、项目或会话。')
+      signal.throwIfAborted(); const { io } = await resolveStore(this.ctx, row.context, new AbortController().signal)
+      const owner = { pid: process.pid, bootInstance: this.bootInstance }, automaticId = row.action ? (row.plan as AutomaticActionPlan).automaticId : (row.plan as AutomaticPlan).input.automaticId
+      invariant(!this.running.has(automaticId), 'RUN_IN_PROGRESS', '这个调度仍在执行。')
+      if (row.action) {
+        const result = await applyAutomaticAction(io, row.plan as AutomaticActionPlan, owner, candidate => this.ownerAlive(candidate))
+        this.automaticPlans.delete(input.planId)
+        if ((row.plan as AutomaticActionPlan).action === 'close') return result
+      } else { await startAutomatic(io, row.plan as AutomaticPlan, owner); this.automaticPlans.delete(input.planId) }
+      const workflowId = row.action ? (row.plan as AutomaticActionPlan).workflowId : (row.plan as AutomaticPlan).input.workflowId
+      const active = { controller: new AbortController(), context: row.context, pauseRequested: false }; this.running.set(automaticId, active)
+      try { return { automaticId, state: await driveAutomatic(io, workflowId, automaticId, AbortSignal.any([signal, active.controller.signal]), { pauseRequested: () => active.pauseRequested }) } }
+      finally { this.running.delete(automaticId) }
+    })
+  }
+
+  @Remote('automatic.control')
+  async automaticControl(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = inspectRequest.extend({ workflowId: z.string(), automaticId: z.string(), action: z.enum(['pause', 'cancel']) }).strict().parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal); await readAutomatic(io, input.workflowId, input.automaticId)
+      const active = this.running.get(input.automaticId)
+      invariant(active && active.context.projectId === input.context.projectId && active.context.workspaceId === input.context.workspaceId && active.context.sessionId === input.context.sessionId,
+        'RUN_CONTROL_UNAVAILABLE', '仅实际原执行会话可以暂停或取消这个调度。')
+      if (input.action === 'pause') active.pauseRequested = true; else active.controller.abort('operator-cancel')
+      return { automaticId: input.automaticId, action: input.action }
+    })
+  }
+
+  @Remote('automatic.dismiss')
+  async automaticDismiss(request: unknown, _signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = z.object({ planId: z.string() }).strict().parse(request), row = this.automaticPlans.get(input.planId)
+      invariant(!row || row.peerId === peerId, 'INVALID_APPROVAL', '不能取消其他操作者的预览。'); this.automaticPlans.delete(input.planId); return { cancelled: true } })
   }
 
   @Remote('workflow.prepare')
@@ -448,6 +528,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     for (const [key, row] of this.draftSequencePlans) if (row.expires < Date.now()) this.draftSequencePlans.delete(key)
     for (const [key, row] of this.generationPlans) if (row.expires < Date.now()) this.generationPlans.delete(key)
     for (const [key, row] of this.workflowPlans) if (row.expires < Date.now()) this.workflowPlans.delete(key)
+    for (const [key, row] of this.automaticPlans) if (row.expires < Date.now()) this.automaticPlans.delete(key)
     for (const [key, row] of this.researchBatchPlans) if (row.expires < Date.now()) this.researchBatchPlans.delete(key)
     for (const [key, row] of this.sourceRegistrationPlans) if (row.expires < Date.now()) this.sourceRegistrationPlans.delete(key)
     for (const [key, row] of this.proposalRevisionPlans) if (row.expires < Date.now()) this.proposalRevisionPlans.delete(key)

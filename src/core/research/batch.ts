@@ -11,6 +11,7 @@ import { transientRetry, waitRetrySlice } from '../pipeline/retry.ts'
 import { readSearch } from './online.ts'
 import { workflowAssociation, workflowCall, syncWorkflowDuration } from '../pipeline/workflow-budget.ts'
 import { isDetachedProjectPointer } from '../project/identity.ts'
+import { ensureNoAutomaticExecuting } from '../pipeline/automatic-lease.ts'
 
 const terminal = (status: RunState['status']) => ['failed', 'cancelled', 'succeeded', 'completed-with-issues'].includes(status)
 const searchPath = (searchId: string) => `.scholarflow/research/${searchId}.json`
@@ -139,6 +140,7 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
     stateHash = digest(text); checkpointHash = digest(progressText)
   })
   await io.lock(async () => {
+    await ensureNoAutomaticExecuting(io, plan.snapshot.projectId)
     const current = await snapshot(io), active = await io.read(ACTIVE_RUN)
     invariant(!(await inspectRecovery(io, current.config.paths.manuscriptDir)).pending.length, 'RECOVERY_REQUIRED', '先恢复项目事务，再开始检索。')
     if (control.action?.action === 'resume') {

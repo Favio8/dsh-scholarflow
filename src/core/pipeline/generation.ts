@@ -17,6 +17,7 @@ import { validateIssueFix } from '../review/issue-fixes.ts'
 import { workflowAssociation, workflowCall, syncWorkflowDuration } from './workflow-budget.ts'
 import { draftSequenceCheckpointSchema } from '../../shared/draft-sequence.ts'
 import { isDetachedProjectPointer } from '../project/identity.ts'
+import { ensureNoAutomaticExecuting } from './automatic-lease.ts'
 
 export { modelOutputSchema } from '../../shared/runs.ts'
 export interface GenerationPlan { id: string; contentHash: string; snapshot: z.infer<typeof runSnapshotSchema>; input: z.infer<typeof generationRequest>;
@@ -158,6 +159,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
     expectedStateHash = digest(text); expectedCheckpointHash = digest(progressText)
   })
   await io.lock(async () => {
+    await ensureNoAutomaticExecuting(io, plan.snapshot.projectId)
     const latest = await snapshot(io), active = await io.read(ACTIVE)
     invariant(existingArtifact || latest.ledgerHash === plan.ledgerHash && latest.ledger.revision === plan.snapshot.ledgerRevision && latest.configHash === plan.snapshot.configHash && latest.document.contentHash === plan.snapshot.documentHash,
       'STALE_DOCUMENT_VERSION', '开始前项目发生变化。')

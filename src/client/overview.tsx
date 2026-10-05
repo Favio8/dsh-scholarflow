@@ -28,7 +28,7 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
     setOperator(row.constraint?.operator ?? 'equals'); setValue(String(row.constraint?.value ?? '')); setUnit(row.constraint?.unit === 'words' ? 'words' : 'zh-characters');
     setYearStart(row.constraint?.windowStart ?? ''); setYearEnd(row.constraint?.windowEnd ?? ''); setMixedCount(row.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1'); setChangeReason(''); setRequirementPreview(undefined) }
   return <section aria-label="项目概览"><h3>项目概览与要求确认</h3>
-    <GuidedWorkflow project={project} context={context} api={api} run={run} busy={busy} navigate={navigate} />
+    <GuidedWorkflow project={project} context={context} api={api} run={run} refresh={refresh} busy={busy} navigate={navigate} />
     <ProjectIdentityHistory context={context} api={api} run={run} busy={busy} />
     <p>{project.config.project.type} · {project.config.project.language} · 要求 {requirements.length} · 已登记材料 {Object.keys(project.ledger.materials).length}</p>
     <p>资料中的要求先作为候选。老师要求与用户输入不一致时，保留双方并由你明确选择；插件不擅自采用最大值或最新值。</p>
