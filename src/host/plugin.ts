@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { applicationResult, inspectProject, inspectRequest, prepareInitRequest, initializeRequest, resolveStore, type StoredInitPlan } from './bridge/project-api.ts'
 import { prepareInit, initialize, snapshot, updateProjectText } from '../core/project/project.ts'
+import { verifiedMemoryProjection, memoryHistory } from '../core/project/memory-entries.ts'
 import { recover } from '../core/store/transactions.ts'
 import { newId, digest, json } from '../core/store/files.ts'
 import { invariant } from '../shared/errors.ts'
@@ -1315,14 +1316,22 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const input = projectTextReadRequest.parse(request)
       const { io } = await resolveStore(this.ctx, input.context, signal), file = await io.read(input.path)
       invariant(file && Buffer.byteLength(file.text) <= 65536, 'PROJECT_TEXT_UNAVAILABLE', '项目指令文件缺失或超过 64 KiB。')
-      return { path: input.path, text: file.text, contentHash: digest(file.text) } })
+      return { path: input.path, text: file.text, contentHash: digest(file.text), ...(input.path.includes('/context/') &&
+        { memory: await verifiedMemoryProjection(io, (await snapshot(io)).ledger, input.path, file.text) }) } })
+  }
+
+  @Remote('project.memoryHistory')
+  async projectMemoryHistory(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = projectTextReadRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io)
+      return memoryHistory(io, current.ledger.projectId, input.path) })
   }
 
   @Remote('project.saveText')
   async projectSaveText(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const input = projectTextSaveRequest.parse(request)
       const { io } = await resolveStore(this.ctx, input.context, signal)
-      return updateProjectText(io, input.path, input.text, input.baseHash, mutationRevision(input.context), input.context.sessionId) })
+      return updateProjectText(io, input.path, input.text, input.baseHash, mutationRevision(input.context), input.context.sessionId, input.changeReason) })
   }
 
   @Remote('review.inspect')

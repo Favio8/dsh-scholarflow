@@ -93,8 +93,17 @@ export const deliverySchema = z.object({ id, projectId: id, documentId: id, docu
   unresolvedIssueIds: z.array(id), sourceIds: z.array(id),
   files: z.array(z.object({ relativePath, hash, sizeBytes: z.number().int().min(0) }).strict()), createdAt: z.string() }).strict()
 const record = <T extends z.ZodType>(schema: T) => z.record(id, schema)
+export const memoryEntrySchema = z.object({ id, kind: z.enum(['decision', 'terminology', 'writing-preference']), state: z.literal('confirmed'),
+  textHash: hash, contextHash: hash, startUtf16: z.number().int().nonnegative(), endUtf16: z.number().int().nonnegative(),
+  source: z.literal('user-operation'), sourceOperationId: id, sourceSessionId: id.optional(), originContentHash: hash,
+  confirmedAt: z.string(), representation: z.enum(['paragraph', 'opaque']) }).strict()
+export const memoryFileSchema = z.object({ contentHash: hash, operationId: id, confirmedAt: z.string(),
+  entries: z.array(memoryEntrySchema).max(2000) }).strict().refine(value => new Set(value.entries.map(entry => entry.id)).size === value.entries.length &&
+    value.entries.every((entry, index) => /^memory_change_[\w]+$/.test(entry.sourceOperationId) && entry.endUtf16 > entry.startUtf16 &&
+      (index === 0 || entry.startUtf16 >= value.entries[index - 1].endUtf16)) && /^memory_change_[\w]+$/.test(value.operationId), 'Invalid memory source identities or ranges')
 export const ledgerSchema = z.object({ schemaVersion: z.literal(1), projectId: id, revision: z.number().int().min(0), requirements: record(requirementSchema), materials: record(materialSchema), sources: record(sourceSchema), evidence: record(evidenceSchema), claims: record(claimSchema), outline: outlineSchema,
   documents: record(documentSchema), claimAnchors: record(anchorSchema), proposalStates: record(proposalStateSchema), reviewIssues: record(issueSchema), deliveries: record(deliverySchema),
+  memoryFiles: z.partialRecord(z.enum(['.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md']), memoryFileSchema).optional(),
 }).strict()
 export type Ledger = z.infer<typeof ledgerSchema>
 export type Source = z.infer<typeof sourceSchema>

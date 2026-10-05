@@ -3,6 +3,7 @@ import { projectTextPaths } from '../shared/requirements.ts'
 import { ProjectSkills } from './project-skills.tsx'
 import { ProjectWritingProfile } from './writing-profiles.tsx'
 import { GuidedWorkflow } from './workflow.tsx'
+import { MemoryEntries } from './memory-entries.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean; navigate?: (page: string) => void }
 export function Overview({ project, context, api, refresh, run, busy, navigate }: Props) {
@@ -12,6 +13,7 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
   const [yearStart, setYearStart] = useState(''), [yearEnd, setYearEnd] = useState(''), [mixedCount, setMixedCount] = useState(false)
   const [selected, setSelected] = useState(''), [reason, setReason] = useState(''), [confirmCount, setConfirmCount] = useState(false)
   const [path, setPath] = useState<(typeof projectTextPaths)[number]>(projectTextPaths[0]), [file, setFile] = useState<any>(), [text, setText] = useState(''), [message, setMessage] = useState('')
+  const [memoryReason, setMemoryReason] = useState('')
   const requirements = Object.values(project.ledger.requirements) as any[], conflicts = requirements.filter(row => row.confirmation === 'conflicting')
   const requirementInput = () => {
     const numeric = ['length', 'references'].includes(kind)
@@ -87,13 +89,16 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
     </section>}
     <h3>项目文风与已确认记忆</h3><p>只进入当前 ScholarFlow 项目的阶段输入。保存会使相关检查需更新，其他项目保持独立。</p>
     <ProjectWritingProfile project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} dirty={!!file && text !== file.text} />
-    <label>项目指令文件<select aria-label="项目指令文件" disabled={busy || (!!file && text !== file.text)} value={path} onChange={e => { setPath(e.target.value as typeof path); setFile(undefined); setText('') }}>
+    <label>项目指令文件<select aria-label="项目指令文件" disabled={busy || (!!file && text !== file.text)} value={path} onChange={e => { setPath(e.target.value as typeof path); setFile(undefined); setText(''); setMemoryReason('') }}>
       {projectTextPaths.map(path => <option key={path} value={path}>{path}</option>)}</select></label>
     <button disabled={busy || (!!file && text !== file.text)} onClick={() => run(async () => { const result = await api('project.readText', { context: context(), path }); setFile(result); setText(result.text) })}>读取所选项目指令</button>
     {file && <><label>项目指令内容<textarea aria-label="项目指令内容" rows={8} disabled={busy} value={text} onChange={e => setText(e.target.value)} /></label>
-      <button disabled={busy || text === file.text} onClick={() => run(async () => { await api('project.saveText', { context: context(), path: file.path, text, baseHash: file.contentHash }); setFile(undefined); setMessage('项目指令已保存；相关检查需更新。'); await refresh() })}>确认保存项目指令</button>
+      {file.memory && <><label>记忆更正说明（可选）<textarea aria-label="记忆更正说明" maxLength={4000} disabled={busy} value={memoryReason} onChange={e => setMemoryReason(e.target.value)} /></label>
+        <MemoryEntries key={`${file.path}:${file.contentHash}`} file={file} context={context} api={api} run={run} busy={busy} /></>}
+      <button disabled={busy || text === file.text} onClick={() => run(async () => { await api('project.saveText', { context: context(), path: file.path, text, baseHash: file.contentHash,
+        ...(file.memory && memoryReason.trim() && { changeReason: memoryReason.trim() }) }); setFile(undefined); setMemoryReason(''); setMessage('项目指令已保存；相关检查需更新。'); await refresh() })}>确认保存项目指令</button>
       {file.path.includes('/context/') && <button disabled={busy || text !== file.text} onClick={() => run(async () => {
-        await api('project.saveText', { context: context(), path: file.path, text, baseHash: file.contentHash }); setFile(undefined); setMessage('已明确确认当前记忆纳入项目阶段上下文。'); await refresh()
+        await api('project.saveText', { context: context(), path: file.path, text, baseHash: file.contentHash, ...(memoryReason.trim() && { changeReason: memoryReason.trim() }) }); setFile(undefined); setMemoryReason(''); setMessage('已明确确认当前记忆纳入项目阶段上下文。'); await refresh()
       })}>确认将当前文本纳入项目记忆</button>}
       <button disabled={busy} onClick={() => { if (text !== file.text && !window.confirm('放弃这份未保存的项目指令编辑？')) return; setFile(undefined); setText('') }}>关闭项目指令编辑</button></>}
     <p role="status">{message}</p>

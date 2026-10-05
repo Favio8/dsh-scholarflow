@@ -723,6 +723,20 @@ try {
   await page.getByRole('button', { name: '确认保存项目指令', exact: true }).click()
   await page.getByRole('status').filter({ hasText: '项目指令已保存；相关检查需更新。' }).waitFor()
   assert.equal(await readFile(join(projectRoot, '.scholarflow/context/terminology.md'), 'utf8'), terminology)
+  await page.getByRole('button', { name: '读取所选项目指令', exact: true }).click()
+  const memoryUi = page.getByRole('region', { name: '记忆条目来源', exact: true })
+  await memoryUi.locator('summary').filter({ hasText: '术语 · 用户已确认' }).waitFor()
+  await memoryUi.getByRole('button', { name: '读取记忆确认与更正历史', exact: true }).click()
+  const memoryHistoryUi = memoryUi.getByRole('region', { name: '记忆确认与更正历史', exact: true })
+  await memoryHistoryUi.locator('summary').waitFor()
+  const nativeMemoryLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  const nativeMemory = nativeMemoryLedger.memoryFiles['.scholarflow/context/terminology.md']
+  assert.equal(nativeMemory.entries.length, 1); assert.equal(nativeMemory.contentHash, digest(terminology))
+  assert.equal(nativeMemory.entries[0].sourceSessionId, await page.locator('.sf-project').getAttribute('data-sf-session-id'))
+  assert.equal(nativeMemory.entries[0].kind, 'terminology'); assert.equal(nativeMemory.entries[0].state, 'confirmed')
+  const nativeMemoryHistory = JSON.parse(await readFile(join(projectRoot, `.scholarflow/context/history/${nativeMemory.operationId}.json`), 'utf8'))
+  assert.equal(nativeMemoryHistory.text, terminology); assert.equal(nativeMemoryHistory.projectId, nativeMemoryLedger.projectId)
+  await page.getByRole('button', { name: '关闭项目指令编辑', exact: true }).click()
   assert.equal(await readFile(join(projectRoot, 'TEST_ONLY 作业要求.txt'), 'utf8'), assignmentBytes)
   const requirementArchive = await Promise.all((await readdir(join(projectRoot, '.scholarflow/planning/requirements'))).map(async file => JSON.parse(await readFile(join(projectRoot, '.scholarflow/planning/requirements', file), 'utf8'))))
   assert.ok(requirementArchive.some(row => row.selectedId === teacher.id))
@@ -1127,6 +1141,10 @@ try {
   assert.equal(coldWorkflow.value.data.workflow.checkpoint.status, 'paused')
   assert.equal(coldWorkflow.value.data.workflow.checkpoint.stamps.length, 3)
   assert.equal(coldWorkflow.value.data.workflow.gates[2].current, true)
+  const coldMemory = await rpc('scholarflow.v1/project.readText', { request: { context: { requestId: 'req_TEST_ONLY_memory_cold',
+    workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId }, path: '.scholarflow/context/terminology.md' } })
+  assert.equal(coldMemory.value.ok, true, JSON.stringify(coldMemory.value))
+  assert.equal(coldMemory.value.data.memory.current, true); assert.equal(coldMemory.value.data.memory.entries[0].sourceOperationId, nativeMemory.operationId)
   if (liveModel) {
     const coldSequence = await rpc('scholarflow.v1/draftSequence.inspect', { request: { context: { requestId: 'req_TEST_ONLY_draft_cold',
       workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
@@ -1237,6 +1255,7 @@ try {
     nativeUiLegacyRunStorageMigrationKeepsAllBytes: true,
     realModelPauseAndCrossSessionResume: liveModel, cancelledRunActionPreviewLeavesStateUnchanged: liveModel,
     realProviderCancellation: liveModel, nativeUiRequirementConflictResolution: true, nativeUiProjectMemoryEdit: true,
+    nativeMemoryEntryProvenanceHistoryAndColdRestore: true,
     nativeUiRequirementEditCancelConfirmHistoryAndRemove: true, nativeUiRecentRatioWindowConfirmed: true,
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,

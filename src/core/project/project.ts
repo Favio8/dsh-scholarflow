@@ -6,6 +6,7 @@ import { commit, inspectRecovery, type Mutation } from '../store/transactions.ts
 import { MEMORY_APPROVALS, memoryApprovalsSchema } from './memory.ts'
 import { builtinProjectProfile } from './profiles.ts'
 import { resourceLockSchema } from '../../shared/skills.ts'
+import { memoryEntryMutations, verifiedMemoryProjection } from './memory-entries.ts'
 
 export const CONFIG_PATH = '.scholarflow/project.yaml'
 export const LEDGER_PATH = '.scholarflow/data/ledger.json'
@@ -167,7 +168,7 @@ export function invalidateReviews(ledger: Ledger, categories?: string[]) {
   for (const issue of Object.values(ledger.reviewIssues)) if (!categories || categories.includes(issue.category)) issue.stale = true
 }
 
-export async function updateProjectText(io: FileStore, path: string, text: string, expectedHash: string, expectedRevision: number, sourceSessionId?: string) {
+export async function updateProjectText(io: FileStore, path: string, text: string, expectedHash: string, expectedRevision: number, sourceSessionId?: string, changeReason?: string) {
   invariant(['.scholarflow/profiles/writing.md', '.scholarflow/profiles/review.md', '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md'].includes(path), 'PATH_OUTSIDE_ALLOWED_ROOT', '仅允许项目 Profile 和确认记忆。')
   invariant(Buffer.byteLength(text) <= 65536, 'CONTENT_TOO_LARGE', '项目指令最多 64 KiB。')
   return mutateLedger(io, expectedRevision, async ledger => {
@@ -182,6 +183,10 @@ export async function updateProjectText(io: FileStore, path: string, text: strin
         sourceSessionId, confirmedAt: new Date().toISOString() }) })
     }
     if (path.includes('/context/')) {
+      const historyRoot = '.scholarflow/context/history'
+      invariant(!await io.stat(historyRoot) || (await io.list(historyRoot)).length < 1000, 'MEMORY_HISTORY_LIMIT', '记忆历史达到读取限额；原文和记录保留，未继续追加无法读取的历史。')
+      const previousProjection = await verifiedMemoryProjection(io, ledger, path, file.text)
+      mutations.push(...memoryEntryMutations(ledger, path, file.text, text, sourceSessionId, changeReason, previousProjection.current))
       const previous = await io.read(MEMORY_APPROVALS)
       const approvals = previous ? memoryApprovalsSchema.parse(JSON.parse(previous.text)) : { schemaVersion: 1 as const, projectId: ledger.projectId, entries: {} as MemoryEntries }
       invariant(approvals.projectId === ledger.projectId, 'PROJECT_ID_CONFLICT', '确认记忆记录的项目身份不同。')

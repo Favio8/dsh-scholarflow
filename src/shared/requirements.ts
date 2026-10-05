@@ -10,4 +10,4 @@ export const requirementResolveRequest = z.object({ context: requestContext, req
 export const requirementRemoveRequest = z.object({ context: requestContext, requirementId: id, reason: z.string().trim().min(1).max(2000) }).strict()
 export const projectTextPaths = ['.scholarflow/profiles/writing.md', '.scholarflow/profiles/review.md', '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md'] as const
 export const projectTextReadRequest = z.object({ context: requestContext, path: z.enum(projectTextPaths) }).strict()
-export const projectTextSaveRequest = projectTextReadRequest.extend({ text: z.string().max(65536), baseHash: hash })
+export const projectTextSaveRequest = projectTextReadRequest.extend({ text: z.string().max(65536), baseHash: hash, changeReason: z.string().trim().min(1).max(4000).optional() })
