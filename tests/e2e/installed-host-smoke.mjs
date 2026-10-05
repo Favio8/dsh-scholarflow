@@ -1050,6 +1050,31 @@ try {
   const download = page.waitForEvent('download')
   await page.getByRole('button', { name: /^下载 quality-report\.md/ }).click()
   assert.equal((await download).suggestedFilename(), 'quality-report.md')
+  for (const [suffix, errorCode] of [
+    ['TEST_ONLY [unbundled](../原始材料.txt)', 'LOCAL_RESOURCE_NOT_EXPORTABLE'],
+    ['TEST_ONLY [private][local]\n\n[local]: file:///C:/Users/TEST_ONLY/private.txt', 'PRIVATE_PATH_NOT_EXPORTABLE'],
+    ['TEST_ONLY [signed](https://example.org/file?access_token=TEST_ONLY_PRIVATE_VALUE)', 'PRIVATE_CREDENTIAL_NOT_EXPORTABLE'],
+  ]) {
+    await page.getByRole('tab', { name: /^Draft ·/ }).click()
+    const refusedBody = manualBody + '\n' + suffix + '\n'
+    await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).fill(refusedBody)
+    await page.getByRole('button', { name: '保存手工稿', exact: true }).click()
+    await page.getByText('手工稿已保存，审查需按新版本重跑。', { exact: true }).waitFor()
+    await page.waitForFunction(() => !document.querySelector('textarea[aria-label="Markdown 手工编辑"]').disabled)
+    const refusedLedger = await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')
+    await page.getByRole('tab', { name: /^Export ·/ }).click()
+    await page.getByRole('button', { name: '预检当前版本导出', exact: true }).click()
+    await page.locator('.sf-project > .sf-error').filter({ hasText: errorCode }).waitFor()
+    assert.equal(await page.getByRole('dialog', { name: '导出确认', exact: true }).count(), 0)
+    assert.equal(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), refusedLedger)
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), refusedBody)
+    assert.equal(await readFile(join(deliveredRoot, 'paper.md'), 'utf8'), manualBody)
+  }
+  await page.getByRole('tab', { name: /^Draft ·/ }).click()
+  await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).fill(manualBody)
+  await page.getByRole('button', { name: '保存手工稿', exact: true }).click()
+  await page.getByText('手工稿已保存，审查需按新版本重跑。', { exact: true }).waitFor()
+  await page.waitForFunction(() => !document.querySelector('textarea[aria-label="Markdown 手工编辑"]').disabled)
   if (liveResearch) {
     await beginPaidWorkflow()
     const beforeResearch = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
@@ -1623,6 +1648,7 @@ try {
     nativeUiRequirementEditCancelConfirmHistoryAndRemove: true, nativeUiRecentRatioWindowConfirmed: true,
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     nativeAgentPanelKeyboardAndPointerResizeCollapseInputRetentionEscapeFocusAndNarrowSwitch: true,
+    nativeExportPreflightRefusesUnbundledLinksPrivateDefinitionsAndCredentialUrlsWithoutChangingFactsOrArchivedDelivery: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,
     unsavedHostBufferColdRestartRestore: true,
     nineAcademicToolsExecutedWithBoundAgent: true, forgedToolScopeDenied: true, scopedPromptAndToolsIsolated: true,

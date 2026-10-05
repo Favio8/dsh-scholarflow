@@ -55,6 +55,7 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode, 
       <ReviewFixes project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} />
     </section>
     <section id="sf-panel-Export" role="tabpanel" aria-labelledby="sf-tab-Export" hidden={mode !== 'Export'} aria-label="导出"><h3>导出</h3><p>支持 Markdown、BibTeX 和质量报告。每次创建独立交付快照，保持主稿不变。</p>
+      <p>支持公开链接和稿内锚点；未打包的相对资源、图片与原始 HTML 会在预检中拒绝。请先明确移除凭据与私有绝对路径，再导出新版本。</p>
       <button disabled={busy || project.document.externalChange} onClick={() => run(async () => setPlan(await api('export.preflight', { context: context() })))}>预检当前版本导出</button>
       {plan && <section role="dialog" aria-modal="false" aria-label="导出确认"><h4>确认当前稿件快照</h4><p>{plan.revisionId} · {plan.reviewState} · 尚未关闭问题 {plan.unresolvedIssueIds.length} 项</p>
         <p>正文、references.bib 与 quality-report.md 将来自此稿件版本。未知或真实性阻塞项保留在报告中。</p>

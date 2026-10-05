@@ -2,7 +2,8 @@ import { snapshot, mutateLedger } from '../project/project.ts'
 import { inspectReview, reviewInput } from '../review/review.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { bibliography } from './bibliography.ts'
-import { projectMarkdown, walk } from '../editing/markdown.ts'
+import { projectMarkdown } from '../editing/markdown.ts'
+import { validateArtifactPrivacy, validateExportUrl, validateManuscriptPublication } from './public-artifacts.ts'
 import { deliverySchema, type Ledger } from '../../shared/schema.ts'
 import { invariant } from '../../shared/errors.ts'
 
@@ -15,10 +16,14 @@ export async function prepareDelivery(io: FileStore) {
     invariant(source, 'CITATION_KEY_UNKNOWN', `引用 ${key} 缺少来源，导出前必须修复。`)
     return source.id
   })
-  walk(projection.tree, node => {
-    invariant(node.type !== 'image', 'IMAGE_EXPORT_UNAVAILABLE', '当前导出器尚未验证图片资源；请先移除图片或等待已测试的资源导出支持。')
-    if (node.type === 'link') invariant(!/^(?:file:|[a-z]:[\\/]|\/)/i.test(node.url ?? ''), 'PRIVATE_LINK_NOT_EXPORTABLE', '正文包含本地绝对路径链接，请改为可导出的资源引用。')
-  })
+  validateManuscriptPublication(current.document.text, projection.tree)
+  for (const sourceId of sourceIds) {
+    const source = current.ledger.sources[sourceId], url = source.identifiers.url
+    validateArtifactPrivacy([source.title, source.venue, ...source.authors.flatMap(author => [author.literal, author.family, author.given]),
+      url, source.identifiers.doi, source.identifiers.arxiv].filter(value => value !== undefined).join('\n'))
+    if (url) validateExportUrl(url)
+  }
+  validateArtifactPrivacy(bibliography(current.document.text, current.ledger))
   const issues = Object.values(current.ledger.reviewIssues)
   const currentIssues = issues.filter(issue => issue.reviewId === review.report?.id && issue.state !== 'resolved')
   const hasB0 = currentIssues.some(issue => issue.severity === 'B0')
@@ -60,6 +65,7 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
       '- 本报告不提供课程成绩、接收概率或学术真实性保证。', '' ].join('\n')
     const root = `${config.paths.manuscriptDir}/exports/${deliveryId}`
     const files = [{ relativePath: 'paper.md', text: current.document.text }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger) }, { relativePath: 'quality-report.md', text: report }]
+    for (const file of files) validateArtifactPrivacy(file.text)
     manifest = deliverySchema.parse({ id: deliveryId, projectId: ledger.projectId, documentId: 'paper', documentHash: plan.documentHash,
       revisionId: plan.revisionId, ledgerRevision: plan.ledgerRevision, ...(plan.reviewId && { reviewId: plan.reviewId }), reviewState,
       unresolvedIssueIds: plan.unresolvedIssueIds, sourceIds: plan.sourceIds,

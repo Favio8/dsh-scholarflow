@@ -1198,6 +1198,15 @@ Unicode／CRLF 文本。浏览器配置、存储或 origin 改变的限制见
 `nativeAgentPanelKeyboardAndPointerResizeCollapseInputRetentionEscapeFocusAndNarrowSwitch`。
 本次回归也包含选区延迟 RPC 拒绝旧输入插入的布尔证据字段。
 
+2026-10-05 导出边界补充：308/308 独立测试、类型检查与真实安装宿主
+完整回归通过。实际 UI 明确保存 TEST_ONLY 未打包相对链接、私有路径引用
+定义和带访问令牌的 URL，预检分别拒绝；没有生成确认计划或新交付，
+每次拒绝前后的正文、ledger 与旧交付正文完全一致。测试随后通过正常
+手工保存恢复夹具原正文，未修改原资料。公开链接、锚点、BOM／CRLF
+的原文一致性由领域测试验证；图片与原始 HTML 仍明确拒绝，未宣称打包支持。
+对应真实证据字段：
+`nativeExportPreflightRefusesUnbundledLinksPrivateDefinitionsAndCredentialUrlsWithoutChangingFactsOrArchivedDelivery`。
+
 | 副作用 | 处置 |
 |---|---|
 | desktop profile 组合新增 `dsh-scholarflow` bundle | **保留**（G0-01 验收对象）；安装前已备份 4 个控制文件并记录 SHA-256；回滚脚本见 `scripts/rollback-profile.ps1` |
