@@ -332,6 +332,38 @@ try {
   assert.equal(changedProjectResource.value.readOk, false, 'fixed project bindings must not silently adopt external edits')
   await writeFile(join(projectSkillRoot, 'SKILL.md'), projectInstructions)
   assert.deepEqual(new Uint8Array(await readFile(join(projectSkillRoot, 'binary.bin'))), new Uint8Array([0, 255, 13, 10]))
+  await installedProjectChoices.selectOption(localProjectOption)
+  const copyUi = page.getByRole('region', { name: '项目 Skill 副本与定制', exact: true })
+  await copyUi.getByRole('button', { name: '读取所选 Skill 并定制项目副本', exact: true }).click()
+  await copyUi.getByRole('textbox', { name: '项目 Skill 说明', exact: true }).fill(projectInstructions + 'TEST_ONLY explicit project customization\r\n')
+  await copyUi.getByRole('textbox', { name: '项目 Skill 定制说明', exact: true }).fill('TEST_ONLY preserve binary resources and old fixed binding')
+  const beforeSkillCopyConfig = await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8')
+  const beforeSkillCopyLock = await readFile(join(projectRoot, '.scholarflow/resources.lock.json'), 'utf8')
+  await copyUi.getByRole('button', { name: '预览项目 Skill 副本', exact: true }).click()
+  await copyUi.getByRole('dialog', { name: '项目 Skill 副本确认', exact: true }).waitFor()
+  await assert.rejects(stat(join(projectRoot, '.scholarflow/skills/copies')), { code: 'ENOENT' })
+  await copyUi.getByRole('button', { name: '取消项目 Skill 副本', exact: true }).click()
+  await copyUi.getByRole('dialog', { name: '项目 Skill 副本确认', exact: true }).waitFor({ state: 'detached' })
+  await assert.rejects(stat(join(projectRoot, '.scholarflow/skills/copies')), { code: 'ENOENT' })
+  await copyUi.getByRole('button', { name: '预览项目 Skill 副本', exact: true }).click()
+  const copyDialog = copyUi.getByRole('dialog', { name: '项目 Skill 副本确认', exact: true })
+  await copyDialog.waitFor()
+  const copiedSkillId = (await copyDialog.innerText()).match(/project:copies:skill_[a-f0-9]+/)[0]
+  const copiedSkillRoot = join(projectRoot, '.scholarflow/skills/copies', copiedSkillId.split(':')[2])
+  await copyUi.getByRole('button', { name: '确认创建项目 Skill 副本', exact: true }).click()
+  await copyDialog.waitFor({ state: 'detached', timeout: 15000 })
+  await installedProjectChoices.locator('option').filter({ hasText: copiedSkillId }).waitFor({ state: 'attached' })
+  assert.equal(await readFile(join(copiedSkillRoot, 'SKILL.md'), 'utf8'), projectInstructions + 'TEST_ONLY explicit project customization\r\n')
+  assert.deepEqual(new Uint8Array(await readFile(join(copiedSkillRoot, 'binary.bin'))), new Uint8Array([0, 255, 13, 10]))
+  assert.equal(await readFile(join(copiedSkillRoot, 'scripts/no-run.js'), 'utf8'), await readFile(join(projectSkillRoot, 'scripts/no-run.js'), 'utf8'))
+  assert.equal(await readFile(join(projectSkillRoot, 'SKILL.md'), 'utf8'), projectInstructions)
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8'), beforeSkillCopyConfig)
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/resources.lock.json'), 'utf8'), beforeSkillCopyLock)
+  const copyHistoryFiles = await readdir(join(projectRoot, '.scholarflow/skill-copy-history'))
+  assert.equal(copyHistoryFiles.length, 1)
+  const copyHistory = JSON.parse(await readFile(join(projectRoot, '.scholarflow/skill-copy-history', copyHistoryFiles[0]), 'utf8'))
+  assert.equal(copyHistory.copiedManifest.metadata.qualifiedId, copiedSkillId)
+  assert.equal(copyHistory.source.digest, projectBinding.digest); assert.equal(copyHistory.bindingChanged, false)
   const referencedRetirement = await rpc('scholarflow.v1/skills.prepareRetirement', { request: { qualifiedId: installedSkill.metadata.qualifiedId, digest: installedSkill.digest } })
   assert.equal(referencedRetirement.value.ok, true, JSON.stringify(referencedRetirement))
   assert.equal(referencedRetirement.value.data.blocked, true)
@@ -1135,6 +1167,27 @@ try {
   assert.equal(Object.values(cold.value.data.ledger.claims)[0].status, 'partially-supported')
   assert.equal(cold.value.data.ledger.outline.confirmation, 'confirmed')
   assert.equal(cold.value.data.document.text, manualBody)
+  const coldSkillContext = { requestId: 'req_TEST_ONLY_skill_copy_cold', workspaceId: projectWorkspace.value.workspace.workspaceId,
+    sessionId: second.value.sessionId, projectId: projectLedger.projectId, expectedLedgerRevision: cold.value.data.ledger.revision }
+  const copiedSkillSelection = { qualifiedId: copiedSkillId, digest: copyHistory.copiedManifest.digest, scope: 'project' }
+  const coldSkillCopy = await rpc('scholarflow.v1/skills.readVersion', { request: { context: coldSkillContext, selection: copiedSkillSelection } })
+  assert.equal(coldSkillCopy.value.ok, true, JSON.stringify(coldSkillCopy))
+  assert.equal(coldSkillCopy.value.data.instructions, projectInstructions + 'TEST_ONLY explicit project customization\r\n')
+  // Persisted sessions retain their own permission mode across Host restart.
+  // A newly created session inherits the current read-only deployment default.
+  const readonlyCopySession = await rpc('session/create', { request: { workspaceId: projectWorkspace.value.workspace.workspaceId, agentPreset: 'scholarflow' } })
+  assert.equal(readonlyCopySession.ok, true)
+  const readonlyCopyContext = { ...coldSkillContext, sessionId: readonlyCopySession.value.sessionId }
+  const beforeReadonlyCopy = new Map()
+  for (const path of ['.scholarflow/project.yaml', '.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json']) beforeReadonlyCopy.set(path, await readFile(join(projectRoot, path), 'utf8'))
+  const readOnlyCopy = await rpc('scholarflow.v1/skills.prepareProjectCopy', { request: { context: readonlyCopyContext, selection: copiedSkillSelection,
+    options: { capabilities: ['selection-transform'], suggestedStages: ['revision'] }, reason: 'TEST_ONLY read-only authorization must deny mutation' } })
+  assert.equal(readOnlyCopy.value.ok, true, JSON.stringify(readOnlyCopy))
+  const readOnlyCopyApply = await rpc('scholarflow.v1/skills.applyProjectCopy', { request: { context: readonlyCopyContext, planId: readOnlyCopy.value.data.planId, planHash: readOnlyCopy.value.data.planHash } })
+  assert.equal(readOnlyCopyApply.value.ok, false)
+  assert.equal(readOnlyCopyApply.value.error.code, 'FS_SANDBOX_DENIED')
+  await assert.rejects(stat(join(projectRoot, '.scholarflow/skills/copies', readOnlyCopy.value.data.qualifiedId.split(':')[2])), { code: 'ENOENT' })
+  for (const [path, original] of beforeReadonlyCopy) assert.equal(await readFile(join(projectRoot, path), 'utf8'), original)
   const coldWorkflow = await rpc('scholarflow.v1/workflow.inspect', { request: { context: { requestId: 'req_TEST_ONLY_workflow_cold',
     workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
   assert.equal(coldWorkflow.value.ok, true, JSON.stringify(coldWorkflow.value))
@@ -1271,6 +1324,7 @@ try {
     privateSkillOriginalBytesAndInertScriptsPreserved: true, globalSkillCatalogNotModified: true,
     privateSkillVersionsSurviveReadOnlyHostRestart: true,
     nativeProjectStaticSkillBindingAndRead: true, changedProjectResourceDigestRejected: true,
+    nativeProjectSkillBinaryCopyPreviewCustomizeCancelColdRestoreAndReadonlyDenial: true,
     githubNetworkDisabledBeforeIO: true, realPublicGithubMultiSkillPreviewAndImport: liveSkills,
     nativeUiProjectSkillBindingCancelAndConfirm: true, boundAgentSkillReadStageAndScriptDenial: true,
     builtinSkillBindingAndCompatibleSelectionMenu: true,

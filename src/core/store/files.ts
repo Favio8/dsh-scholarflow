@@ -12,6 +12,9 @@ export interface FileStore {
   // continues to deny all metadata and manuscript paths.
   resourceStat?(path: string): Promise<FileEntry | undefined>
   readResourceBytes?(path: string, maxBytes: number): Promise<Uint8Array>
+  // Create-only fixed resource publication under the project writer lock.
+  // A failed or interrupted copy remains unbound; this never replaces bytes.
+  createResourceBytes?(path: string, bytes: Uint8Array): Promise<void>
   stat(path: string): Promise<FileEntry | undefined>
   list(path: string): Promise<FileEntry[]>
   write(path: string, text: string, expected: FileImage | undefined): Promise<FileImage>

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { ProjectSkillCopy } from './project-skill-copy.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const STAGES = [['requirements', '要求'], ['research', '研究'], ['outline', '大纲'], ['drafting', '写作'], ['review', '审查'], ['revision', '修订'], ['delivery', '交付']] as const
@@ -37,6 +38,8 @@ export function ProjectSkills({ project, context, api, refresh, run, busy }: Pro
       if (!version || selections.some(row => row.qualifiedId === version.metadata.qualifiedId)) { setError('同一 Skill 已有绑定；请在该项中明确选择新的固定版本。'); return }
       change([...selections, { qualifiedId: version.metadata.qualifiedId, digest: version.digest, enabledStages: version.metadata.suggestedStages, scope: version.scope }])
     }}>加入待确认启用清单</button>
+    <ProjectSkillCopy selected={selectedVersion === '' ? undefined : versions[Number(selectedVersion)]} context={context} api={api} run={run} busy={busy}
+      refresh={async () => { setSelectedVersion(''); setRefreshSequence(value => value + 1); await refresh() }} />
     {selections.map((selection, index) => <fieldset key={selection.qualifiedId}><legend>优先顺序 {index + 1} · {selection.qualifiedId}</legend>
       <label>固定版本<select aria-label={`固定 Skill 版本 ${selection.qualifiedId}`} value={selection.digest} onChange={e => change(selections.map((row, position) => position === index ? { ...row, digest: e.target.value } : row))}>
         {versions.filter((version: any) => version.metadata.qualifiedId === selection.qualifiedId).map((version: any) => <option key={version.digest} value={version.digest}>{version.digest} · {version.metadata.compatibility}</option>)}

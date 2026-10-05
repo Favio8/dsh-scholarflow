@@ -52,6 +52,8 @@ import { knownSkillReferences } from './skills/references.ts'
 import { anchorUpsertRequest } from '../shared/editing.ts'
 import { upsertAnchor } from '../core/editing/anchors.ts'
 import { listProjectSkills, projectSkillEntry } from '../core/skills/project-resources.ts'
+import { prepareProjectSkillCopy, applyProjectSkillCopy, type ProjectSkillCopyPlan } from '../core/skills/project-copy.ts'
+import type { FileStore } from '../core/store/files.ts'
 import { readRun, inspectRuns, prepareRunMigration, migrateRun } from '../core/pipeline/run-store.ts'
 import { prepareRunAction, validateRunAction, closeRun, readGenerationCheckpoint, type RunActionPlan } from '../core/pipeline/run-control.ts'
 import { newProjectDefaultsSchema, resolveInitDefaults } from '../shared/project-defaults.ts'
@@ -80,6 +82,7 @@ export const Config = Schema.object({
   maxModelCalls: Schema.number().min(1).max(40).step(1).default(40).volatile(),
 })
 const sessionRequest = z.object({ sessionId: z.string().min(1).max(200) }).strict()
+const skillVersionSelection = z.object({ qualifiedId: z.string().min(1).max(1000), digest: hash, scope: z.enum(['library', 'builtin', 'project']) }).strict()
 const mutationRevision = (context: RequestContext) => {
   invariant(context.projectId && context.expectedLedgerRevision !== undefined, 'INVALID_REQUEST', '项目变更需要项目身份和预期 ledger 版本。')
   return context.expectedLedgerRevision
@@ -114,6 +117,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private githubProvider: ReturnType<typeof githubSkills>
   private preparingSkill = false
   private bindingPlans = new Map<string, { plan: BindingPlan; context: RequestContext; peerId: string; expires: number }>()
+  private skillCopyPlans = new Map<string, { plan: ProjectSkillCopyPlan; context: RequestContext; peerId: string; expires: number }>()
   private retirementPlans = new Map<string, { qualifiedId: string; digest: string; observationHash: string; hash: string; peerId: string; expires: number }>()
   private runMigrationPlans = new Map<string, { plan: Awaited<ReturnType<typeof prepareRunMigration>>; context: RequestContext; peerId: string; expires: number }>()
   constructor(ctx: Host) {
@@ -124,6 +128,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => () => this.sourceRegistrationPlans.clear(), 'scholarflow: clear source registration previews')
     ctx.effect(() => () => this.researchBatchPlans.clear(), 'scholarflow: clear multi-query previews')
     ctx.effect(() => () => this.workflowPlans.clear(), 'scholarflow: clear workflow previews')
+    ctx.effect(() => () => this.skillCopyPlans.clear(), 'scholarflow: clear project Skill copy previews')
     ctx.effect(() => () => { this.draftSequencePlans.clear(); this.generationPlans.clear() }, 'scholarflow: clear draft previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
     ctx.effect(() => {
@@ -361,6 +366,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     for (const [key, row] of this.githubSources) if (row.expires < Date.now()) this.githubSources.delete(key)
     for (const [key, row] of this.skillPlans) if (row.expires < Date.now()) this.skillPlans.delete(key)
     for (const [key, row] of this.bindingPlans) if (row.expires < Date.now()) this.bindingPlans.delete(key)
+    for (const [key, row] of this.skillCopyPlans) if (row.expires < Date.now()) this.skillCopyPlans.delete(key)
     for (const [key, row] of this.retirementPlans) if (row.expires < Date.now()) this.retirementPlans.delete(key)
   }
 
@@ -390,6 +396,59 @@ export class ScholarFlowRemote extends TypertRemoteService {
       return { resources, legacyMigration: locked.legacyMigration, stage, installed: { ...installed,
         diagnostics: [...installed.diagnostics, ...projectResources.diagnostics],
         versions: [...await builtinSkills(), ...installed.versions.map(manifest => ({ ...manifest, scope: 'library' })), ...projectResources.versions] } }
+    })
+  }
+
+  private async selectedSkill(selection: z.infer<typeof skillVersionSelection>, io: FileStore) {
+    const builtin = selection.scope === 'builtin' ? (await builtinSkills()).find(row => row.metadata.qualifiedId === selection.qualifiedId && row.digest === selection.digest) : undefined
+    invariant(selection.scope !== 'builtin' || builtin?.origin.kind === 'builtin', 'SKILL_RESOURCE_MISSING', '所选内置固定版本不存在。')
+    const binding: ResourceBinding = { bindingId: 'binding_copy_source', ...selection, enabledStages: [],
+      entryPath: selection.scope === 'project' ? projectSkillEntry(selection.qualifiedId) : builtin?.origin.kind === 'builtin' ? builtin.origin.asset : libraryEntry(selection.qualifiedId, selection.digest) }
+    return { binding, bundle: await readPrivateSkill(binding, io) }
+  }
+
+  @Remote('skills.readVersion')
+  async skillsReadVersion(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = z.object({ context: inspectRequest.shape.context, selection: skillVersionSelection }).strict().parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal), { bundle } = await this.selectedSkill(input.selection, io)
+      return { selection: input.selection, metadata: bundle.manifest.metadata, instructions: bundle.instructions, files: bundle.manifest.files }
+    })
+  }
+
+  @Remote('skills.prepareProjectCopy')
+  async skillsPrepareProjectCopy(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.pruneSkills()
+      const input = z.object({ context: inspectRequest.shape.context, selection: skillVersionSelection, instructions: z.string().max(65536).optional(),
+        options: skillOptions, reason: z.string().min(1).max(4000) }).strict().parse(request)
+      invariant(this.skillCopyPlans.size < 4, 'TOO_MANY_PENDING_PLANS', '请先处理已有项目 Skill 副本预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), { binding } = await this.selectedSkill(input.selection, io)
+      const plan = await prepareProjectSkillCopy(io, binding, row => readPrivateSkill(row, io), { ...input.options,
+        instructions: input.instructions, reason: input.reason, sessionId: input.context.sessionId })
+      invariant(plan.ledgerRevision === mutationRevision(input.context) && plan.projectId === input.context.projectId, 'STALE_LEDGER_REVISION', '项目版本已变化，请刷新后预览。')
+      const reserved = [...this.skillCopyPlans.values()].reduce((sum, row) => sum + row.plan.bundle.files.reduce((n, file) => n + file.bytes.byteLength, 0), 0)
+      invariant(reserved + plan.bundle.files.reduce((n, file) => n + file.bytes.byteLength, 0) <= 60 * 1024 * 1024, 'TOO_MANY_PENDING_PLANS', '待确认的资源副本累计超过 60 MiB，请先确认或取消已有预览。')
+      this.skillCopyPlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, source: plan.source, qualifiedId: plan.bundle.manifest.metadata.qualifiedId,
+        metadata: plan.bundle.manifest.metadata, digest: plan.bundle.manifest.digest, files: plan.bundle.manifest.files, reason: plan.reason,
+        previousInstructions: plan.sourceInstructions, instructions: plan.bundle.instructions,
+        risks: ['完整静态资源将复制到本项目的新目录。原版本与已有绑定保留；复制后仍需另行确认启用。',
+          '项目定制保留 name/description frontmatter。路由设置写入 scholarflow.json；附带脚本始终不执行。',
+          '写入中断时，新文件保持未启用状态；重新预览使用新的副本位置，不覆盖残留文件。'] }
+    })
+  }
+
+  @Remote('skills.applyProjectCopy')
+  async skillsApplyProjectCopy(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = onlineConfirmRequest.parse(request), row = this.skillCopyPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请重新预览项目 Skill 副本。')
+      invariant(input.context.sessionId === row.context.sessionId && input.context.workspaceId === row.context.workspaceId && input.context.projectId === row.plan.projectId,
+        'SESSION_BINDING_CHANGED', '副本确认不属于当前项目会话。')
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      this.skillCopyPlans.delete(input.planId)
+      return this.skillLibrary.withCatalogLock(() => applyProjectSkillCopy(io, row.plan, binding => readPrivateSkill(binding, io)))
     })
   }
 
@@ -589,6 +648,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       if (input.sourceId && this.githubSources.get(input.sourceId)?.peerId === peerId) this.githubSources.delete(input.sourceId)
       if (input.planId && this.skillPlans.get(input.planId)?.peerId === peerId) this.skillPlans.delete(input.planId)
       if (input.planId && this.bindingPlans.get(input.planId)?.peerId === peerId) this.bindingPlans.delete(input.planId)
+      if (input.planId && this.skillCopyPlans.get(input.planId)?.peerId === peerId) this.skillCopyPlans.delete(input.planId)
       if (input.planId && this.retirementPlans.get(input.planId)?.peerId === peerId) this.retirementPlans.delete(input.planId)
       return { dismissed: true }
     })

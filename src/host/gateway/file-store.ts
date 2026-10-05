@@ -1,11 +1,12 @@
 import { join, relative, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { lstat } from 'node:fs/promises'
+import { lstat, mkdir, open } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { relativePath } from '../../shared/schema.ts'
 import { sensitivePath } from '../../core/materials/materials.ts'
 import { ScholarError, invariant } from '../../shared/errors.ts'
-import { type FileStore, type FileImage, type FileEntry, json } from '../../core/store/files.ts'
+import { type FileStore, type FileImage, type FileEntry, json, digest } from '../../core/store/files.ts'
 
 const bootInstance = randomUUID()
 const queues = new Map<string, Promise<unknown>>()
@@ -108,6 +109,59 @@ export class HostFileStore implements FileStore {
     if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
     const result = await this.ctx.fs.stat(await this.target(path), this.signal)
     return result ? { path, type: result.type === 'file' || result.type === 'directory' ? result.type : 'other', size: result.size } : undefined
+  }
+  async createResourceBytes(path: string, bytes: Uint8Array): Promise<void> {
+    invariant(!this.binding.readOnly && this.insideLock, 'PROJECT_READONLY', '资源副本只能在已授权的项目写锁内创建。')
+    relativePath.parse(path)
+    invariant(path.startsWith('.scholarflow/skills/') && path.split('/').length >= 5 && !sensitivePath(path)
+      && !path.split('/').some(part => ['.git', '.hg', '.svn', 'node_modules'].includes(part.toLowerCase())),
+      'SKILL_RESOURCE_PATH_INVALID', '新资源只能位于当前项目的具体 Skill 目录。')
+    invariant(bytes instanceof Uint8Array && bytes.byteLength <= 20 * 1024 * 1024, 'CONTENT_TOO_LARGE', '静态资源最多 20 MiB。')
+    const frozen = new Uint8Array(bytes)
+    await this.binding.revalidate()
+    const resolved = await this.ctx.sessionController.resolveAgent(this.binding.sessionId)
+    if (resolved.error) throw resolved.error
+    const policy = this.ctx.sandboxPolicy.resolve({ session: resolved.agent.session })
+    invariant(policy.mode !== 'read-only', 'FS_SANDBOX_DENIED', '只读会话不能创建项目资源。')
+    invariant(policy.workspaceRoot === this.binding.canonicalRoot || policy.mode === 'danger-full-access', 'PATH_OUTSIDE_ALLOWED_ROOT', '沙箱根与绑定项目不同。')
+    // Version-pinned rc.2 backend capability, verified in the installed Host.
+    // The public seam exposes text mutation only. Never pass binary to writeText
+    // or silently use native writes when this actual policy fence is absent.
+    invariant(typeof this.ctx.fs.checkedTarget === 'function', 'SKILL_RESOURCE_WRITE_UNAVAILABLE', '当前宿主未验证静态资源创建所需的沙箱路径校验。')
+    const authorize = async () => {
+      this.signal.throwIfAborted(); await this.binding.revalidate()
+      const current = await this.ctx.sessionController.resolveAgent(this.binding.sessionId)
+      if (current.error) throw current.error
+      const currentPolicy = this.ctx.sandboxPolicy.resolve({ session: current.agent.session })
+      invariant(currentPolicy.mode !== 'read-only', 'FS_SANDBOX_DENIED', '资源创建期间会话已转为只读。')
+      invariant(currentPolicy.workspaceRoot === this.binding.canonicalRoot || currentPolicy.mode === 'danger-full-access', 'PATH_OUTSIDE_ALLOWED_ROOT', '资源创建期间沙箱根发生变化。')
+      await this.resourceTarget(path) // lstat every existing ancestor; refuse links.
+      const target = await this.target(path, true)
+      const checked = await this.ctx.fs.checkedTarget(target, currentPolicy)
+      invariant(this.ctx.fs.processPath(checked) === this.ctx.fs.processPath(target), 'SKILL_SOURCE_CHANGED', '授权期间资源真实路径变化。')
+      return this.ctx.fs.processPath(checked) as string
+    }
+    await authorize()
+    let parent = this.binding.canonicalRoot
+    for (const part of path.split('/').slice(0, -1)) {
+      parent = join(parent, part); await authorize()
+      try { await mkdir(parent, { mode: 0o700 }) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+      const info = await lstat(parent)
+      invariant(info.isDirectory() && !info.isSymbolicLink(), 'SKILL_SOURCE_LINK', '资源父目录不是普通目录。')
+    }
+    const absolute = await authorize()
+    // Exclusive creation protects existing files even when an external editor
+    // ignores our lock. Partial new files on abort/crash are retained unbound.
+    const handle = await open(absolute, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600)
+    let identity
+    try { identity = await handle.stat(); await handle.writeFile(frozen, { signal: this.signal }); await handle.sync() }
+    finally { await handle.close() }
+    await authorize()
+    const final = await lstat(absolute)
+    invariant(final.isFile() && final.nlink === 1 && final.ino === identity.ino && final.dev === identity.dev && final.size === frozen.byteLength,
+      'SKILL_SOURCE_CHANGED', '资源创建期间发生外部替换，副本未启用。')
+    invariant(digest(await this.readResourceBytes(path, Math.max(1, frozen.byteLength))) === digest(frozen), 'SKILL_SOURCE_CHANGED', '新资源字节未通过复核，副本未启用。')
   }
   async list(path: string): Promise<FileEntry[]> {
     if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)

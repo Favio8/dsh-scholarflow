@@ -7,6 +7,16 @@
 
 ## 0. 阅读约定
 
+2026-10-05 新增项目 Skill 复制验证：当前实现使用 `HostFileStore.createResourceBytes`，
+在项目写锁内先调用安装版 sandbox 后端实际的 `checkedTarget`，再独占创建静态字节文件。
+公共 fs seam 仍无二进制写入接口；后端缺少该能力时拒绝，未把 Uint8Array 传给 writeText。
+`tests/e2e/installed-host-smoke.mjs` 已在隔离 DSH_HOME 的真实 rc.2 Host 验证：
+完整二进制／脚本静态副本、中文说明 BOM/CRLF、定制预览取消、原资源与绑定不变、冷恢复，
+以及新建只读会话拒绝写入且 config/ledger/资源锁无变化。
+证据字段：`nativeProjectSkillBinaryCopyPreviewCustomizeCancelColdRestoreAndReadonlyDenial`。
+原生适配器的锁、链接／硬链接、独占创建、中断残留与路径范围另有契约和故障测试；
+未将测试 seam 视为官方权限验证。详见 [实现决定](decisions/project-skill-copy.md)。
+
 ### 0.1 证据等级
 
 | 标记 | 含义 |
