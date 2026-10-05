@@ -1190,6 +1190,14 @@ Unicode／CRLF 文本。浏览器配置、存储或 origin 改变的限制见
 `nativeSelectionContextDelayedReadonlyRpcRefusesChangedHostInputAndAllowsExplicitRetry`。
 用户可在宿主输入中删除或撤销已插入文本，再自行发送；不冒充原生附件 chip。
 
+2026-10-05 布局补充：类型检查、305/305 独立测试及完整真实安装宿主
+回归通过。真实浏览器验证键盘宽度增减／最小值、指针拖动到 340 px、
+折叠后原生输入与选区卡仍保留、Escape 焦点返回展开按钮；700 px 视口下
+正文无水平溢出，会话面板切换／返回保留项目。检查点依据实际工作台宽度，
+未改变宿主外层侧栏。证据字段：
+`nativeAgentPanelKeyboardAndPointerResizeCollapseInputRetentionEscapeFocusAndNarrowSwitch`。
+本次回归也包含选区延迟 RPC 拒绝旧输入插入的布尔证据字段。
+
 | 副作用 | 处置 |
 |---|---|
 | desktop profile 组合新增 `dsh-scholarflow` bundle | **保留**（G0-01 验收对象）；安装前已备份 4 个控制文件并记录 SHA-256；回滚脚本见 `scripts/rollback-profile.ps1` |

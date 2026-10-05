@@ -630,6 +630,24 @@ try {
   await page.getByRole('button', { name: '附加选区到当前会话', exact: true }).click()
   const contextCard = page.getByRole('region', { name: '选区上下文卡', exact: true }); await contextCard.waitFor()
   assert.equal(await contextCard.getByRole('button', { name: '插入宿主输入，随后由我发送', exact: true }).isEnabled(), true, 'installed provide-channel offers captureInsertion and draftRev-guarded insertText')
+  const separator = page.getByRole('separator', { name: '调整当前会话面板宽度', exact: true })
+  const initialPanelWidth = Number(await separator.getAttribute('aria-valuenow'))
+  await separator.focus(); await page.keyboard.press('ArrowLeft')
+  assert.equal(Number(await separator.getAttribute('aria-valuenow')), Math.min(initialPanelWidth + 20, Number(await separator.getAttribute('aria-valuemax'))))
+  await page.keyboard.press('Home'); assert.equal(Number(await separator.getAttribute('aria-valuenow')), 280)
+  const handleBox = await separator.boundingBox(), paneBox = await page.getByRole('complementary', { name: 'DSH 当前会话', exact: true }).boundingBox()
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2); await page.mouse.down()
+  await page.mouse.move(paneBox.x + paneBox.width - 340, handleBox.y + handleBox.height / 2); await page.mouse.up()
+  assert.equal(Number(await separator.getAttribute('aria-valuenow')), 340)
+  await page.getByRole('button', { name: '收起当前会话面板', exact: true }).click()
+  assert.equal(await contextCard.isVisible(), false)
+  await page.getByRole('button', { name: '展开当前会话面板', exact: true }).click()
+  assert.equal(await contextCard.isVisible(), true)
+  assert.equal(await nativeComposer.innerText(), 'TEST_ONLY existing operator input must remain')
+  await nativeComposer.press('Escape')
+  const reopenPanel = page.getByRole('button', { name: '展开当前会话面板', exact: true })
+  await reopenPanel.waitFor(); assert.equal(await reopenPanel.evaluate(element => element === document.activeElement), true)
+  await reopenPanel.click()
   await page.getByRole('tab', { name: /^Research ·/ }).click(); assert.equal(await contextCard.isVisible(), true)
   await contextCard.getByRole('button', { name: '移除选区上下文卡', exact: true }).click()
   assert.equal(await nativeComposer.innerText(), 'TEST_ONLY existing operator input must remain')
@@ -1248,6 +1266,12 @@ try {
   assert.equal(await page.getByRole('tablist', { name: '论文工作区页面', exact: true }).isVisible(), true)
   const overflow = await page.locator('.sf-body').evaluate(element => element.scrollWidth > element.clientWidth + 2)
   assert.equal(overflow, false, 'ScholarFlow workbench must remain readable on narrow screens')
+  await page.getByRole('button', { name: '展开当前会话面板', exact: true }).click()
+  assert.equal(await page.locator('.sf-body').isVisible(), false)
+  assert.equal(await page.getByRole('complementary', { name: 'DSH 当前会话', exact: true }).isVisible(), true)
+  await page.getByRole('button', { name: '返回论文工作台', exact: true }).click()
+  assert.equal(await page.locator('.sf-body').isVisible(), true)
+  assert.equal(await page.getByRole('button', { name: '展开当前会话面板', exact: true }).evaluate(element => element === document.activeElement), true)
   await page.setViewportSize({ width: 1500, height: 960 })
   // Reproduce an interrupted initialization using a TEST_ONLY durable journal,
   // then recover through the actual authenticated UI and sandboxed Host writer.
@@ -1598,6 +1622,7 @@ try {
     nativeLastKeyOfflineForcedPageCloseAndSameBrowserProfileRestoreKeepsSavedBody: true,
     nativeUiRequirementEditCancelConfirmHistoryAndRemove: true, nativeUiRecentRatioWindowConfirmed: true,
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
+    nativeAgentPanelKeyboardAndPointerResizeCollapseInputRetentionEscapeFocusAndNarrowSwitch: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,
     unsavedHostBufferColdRestartRestore: true,
     nineAcademicToolsExecutedWithBoundAgent: true, forgedToolScopeDenied: true, scopedPromptAndToolsIsolated: true,

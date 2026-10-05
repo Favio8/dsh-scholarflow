@@ -8,12 +8,14 @@ import { WritingProfiles } from './writing-profiles.tsx'
 import { ReadonlyProject } from './readonly-project.tsx'
 import { ProjectIdentity } from './project-identity.tsx'
 import { SelectionCard, clearSelectionCard, invalidateSelectionCard } from './selection-card.tsx'
+import { WorkbenchLayout } from './workbench-layout.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export'] as const
 const TAB_LABELS = ['概览', '资料与研究', '大纲', '正文', '审查', '导出']
 const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-app button,.sf-app select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
 export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'layout']
+const LAYOUT_CSS = `.sf-agent-resize{width:8px;flex-shrink:0;cursor:col-resize;touch-action:none;background:#8881}.sf-agent-resize:focus-visible{outline:2px solid currentColor;outline-offset:-2px}.sf-app[data-sf-narrow=true] .sf-agent{height:100%;min-height:0;flex:1}.sf-header{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.sf-header button{margin-left:auto}`
 const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:6px;padding:8px;resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid #8884;padding:12px 0;margin:12px 0}.sf-tabs button[aria-selected=true]{background:#8882;border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:2px solid currentColor;outline-offset:2px}`
 
 export function apply(ctx: Host) {
@@ -37,12 +39,12 @@ export function apply(ctx: Host) {
     const [info, setInfo] = useState<Host>()
     const [error, setError] = useState('')
     useEffect(() => { let live = true; call('diagnostics').then(v => live && setInfo(v)).catch(e => live && setError(e.message)); return () => { live = false } }, [])
-    return <div className="sf-app"><style>{CSS + EXTRA_CSS}</style><header className="sf-header"><b>ScholarFlow</b> · 学术写作工作台</header>
-      <div className="sf-columns"><main className="sf-body"><h2>论文工作台</h2>
+    return <WorkbenchLayout header={<><style>{CSS + EXTRA_CSS + LAYOUT_CSS}</style><b>ScholarFlow</b> · 学术写作工作台</>}
+      agent={props.renderSlot('scholarflow.agent', {})}><h2>论文工作台</h2>
         {error && <p role="alert" className="sf-error">{error}</p>}
         {info && <p role="status">已连接 Host · 协议 v{info.protocol} · {info.settings.length ? '设置可持久化' : '设置能力不足'}</p>}
         {props.renderSlot('scholarflow.project', {})}
-      </main><aside className="sf-agent" aria-label="DSH 当前会话">{props.renderSlot('scholarflow.agent', {})}</aside></div></div>
+    </WorkbenchLayout>
   }
   function Project(props: Host) {
     const workspaces = props.useWorkspaces((state: Host) => state.items)
