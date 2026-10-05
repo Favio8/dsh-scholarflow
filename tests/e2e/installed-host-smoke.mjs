@@ -1047,6 +1047,8 @@ try {
   await page.getByText('项目已保存', { exact: false }).waitFor()
   const futureSessionId = await page.locator('.sf-project').getAttribute('data-sf-session-id')
   const futureContext = { requestId: 'req_TEST_ONLY_future', workspaceId: recoveryWorkspace.value.workspace.workspaceId, sessionId: futureSessionId, projectId: crashPlan.config.project.id, expectedLedgerRevision: 0 }
+  const diagnosticOriginals = new Map()
+  for (const path of ['.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json', '.scholarflow/project.yaml']) diagnosticOriginals.set(path, await readFile(join(recoveryRoot, path), 'utf8'))
   for (const path of ['.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json', '.scholarflow/project.yaml']) {
     const originalVersion = await readFile(join(recoveryRoot, path), 'utf8')
     const futureData = path.endsWith('.yaml') ? parseYaml(originalVersion) : JSON.parse(originalVersion)
@@ -1074,6 +1076,32 @@ try {
   const originalManuscriptDownload = page.waitForEvent('download')
   await futureOriginalUi.getByRole('button', { name: '下载原始文件 写作成果/paper.md', exact: true }).click()
   assert.equal(digest(await readFile(await (await originalManuscriptDownload).path())), recoveredLedger.documents.paper.currentHash)
+  const badTxnPath = `.scholarflow/transactions/txn_${'d'.repeat(32)}/manifest.json`
+  for (const [path, broken, code] of [
+    ['.scholarflow/data/ledger.json', '\ufeff{"TEST_ONLY":\r\n', 'PROJECT_LEDGER_INVALID'],
+    ['.scholarflow/project.yaml', 'schemaVersion: [\r\nTEST_ONLY invalid YAML', 'PROJECT_CONFIG_INVALID'],
+    ['.scholarflow/resources.lock.json', '{TEST_ONLY invalid lock\r\n', 'SKILL_RESOURCE_LOCK_INVALID'],
+    [badTxnPath, '{TEST_ONLY invalid transaction\r\n', 'RECOVERY_CONFLICT'],
+  ]) {
+    for (const [originalPath, text] of diagnosticOriginals) await writeFile(join(recoveryRoot, originalPath), text)
+    if (path === badTxnPath) await mkdir(join(recoveryRoot, '.scholarflow/transactions', `txn_${'d'.repeat(32)}`), { recursive: true })
+    await writeFile(join(recoveryRoot, path), broken)
+    await page.getByRole('button', { name: '刷新项目状态', exact: true }).click()
+    const diagnosticUi = page.getByRole('region', { name: '不兼容项目只读查看', exact: true })
+    await diagnosticUi.getByRole('alert').filter({ hasText: code }).waitFor()
+    assert.equal(await page.getByRole('button', { name: '确认初始化', exact: true }).count(), 0)
+    const damagedDetails = diagnosticUi.locator('summary').filter({ hasText: `${path} · 原始文件` }).locator('..')
+    if (await damagedDetails.getAttribute('open') === null) await damagedDetails.locator('summary').click()
+    await diagnosticUi.getByText(digest(broken), { exact: true }).waitFor()
+    const damagedDownload = page.waitForEvent('download')
+    await diagnosticUi.getByRole('button', { name: `下载原始文件 ${path}`, exact: true }).click()
+    assert.equal(digest(await readFile(await (await damagedDownload).path())), digest(broken))
+    const denied = await rpc('scholarflow.v1/document.saveManual', { request: { context: futureContext, text: 'TEST_ONLY forbidden damaged-project write', baseHash: recoveredLedger.documents.paper.currentHash } })
+    assert.equal(denied.value.ok, false); assert.equal(denied.value.error.code, code)
+    assert.equal(await readFile(join(recoveryRoot, path), 'utf8'), broken)
+    assert.equal(await readFile(join(recoveryRoot, '写作成果/paper.md'), 'utf8'), crashPlan.files.find(row => row.path === '写作成果/paper.md').text)
+    assert.equal(await readFile(join(recoveryRoot, '原始资料.txt'), 'utf8'), 'TEST_ONLY 原始资料保持只读\r\n')
+  }
   const reset = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: originalType, ...originalDefaults }, expectedRevision: restored.value.settings[0].revision })
   assert.equal(reset.ok, true)
   assert.deepEqual(errors, [])
@@ -1112,6 +1140,7 @@ try {
     cancelledSearchPreviewDoesNotSend: liveResearch, realCrossrefCandidateIncludedWithReason: liveResearch,
     realCrossrefDoiIdentityMatchedWithoutEvidenceUpgrade: liveResearch,
     realMultiQueryPreviewCancelPauseResumeAndStableDoi: liveResearch,
+    damagedConfigLedgerResourceLockAndTransactionOriginalsReadonly: true,
     nativeUiPrivateSkillMultiCandidateImport: true, cancelledSkillPreviewDoesNotInstall: true,
     privateSkillOriginalBytesAndInertScriptsPreserved: true, globalSkillCatalogNotModified: true,
     privateSkillVersionsSurviveReadOnlyHostRestart: true,

@@ -15,6 +15,7 @@ export interface GatewayBinding {
   manuscriptDir: string
   sessionId: string
   revalidate: () => Promise<void>
+  readOnly?: boolean
 }
 
 export class HostFileStore implements FileStore {
@@ -115,6 +116,7 @@ export class HostFileStore implements FileStore {
       type: ['file', 'directory'].includes(entry.type) ? entry.type : 'other', size: entry.size ?? 0 }))
   }
   async write(path: string, text: string, expected: FileImage | undefined): Promise<FileImage> {
+    invariant(!this.binding.readOnly, 'PROJECT_READONLY', '诊断读取通道不允许写入。')
     await this.binding.revalidate()
     const target = await this.target(path, true)
     const resolved = await this.ctx.sessionController.resolveAgent(this.binding.sessionId)
@@ -124,6 +126,7 @@ export class HostFileStore implements FileStore {
     return { text, version: outcome.version }
   }
   async lock<T>(operation: () => Promise<T>): Promise<T> {
+    invariant(!this.binding.readOnly, 'PROJECT_READONLY', '诊断读取通道不创建写锁或恢复元数据。')
     const key = this.binding.canonicalRoot
     const previous = queues.get(key) ?? Promise.resolve()
     const pending = previous.catch(() => undefined).then(async () => {

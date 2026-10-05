@@ -7,6 +7,8 @@ import { readTransactionJournals, inspectRecovery } from '../../core/store/trans
 import { HostFileStore } from '../gateway/file-store.ts'
 import { initInputSchema } from '../../shared/project-defaults.ts'
 import { readonlyEnvelope, inspectCompatibility, schemaVersionOf } from '../../core/project/compatibility.ts'
+import { inspectDamagedProject } from '../../core/project/diagnostics.ts'
+import { readBindings } from '../../core/skills/bindings.ts'
 type Host = any
 export const inspectRequest = z.object({ context: requestContext }).strict()
 export const prepareInitRequest = z.object({ context: requestContext, input: initInputSchema }).strict()
@@ -32,6 +34,7 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
   invariant(ctx.fs.contains(target, configTarget), 'PATH_OUTSIDE_ALLOWED_ROOT', '项目配置链接超出工作区。')
   const stat = await ctx.fs.stat(configTarget, signal)
   let projectId: string | undefined
+  let bindingDiagnostic: { code: string; message: string } | undefined
   const checkCopies = async (identity: string) => {
     for (const other of ctx.workspaceRegistry.list()) {
       if (other.id === workspace.id) continue
@@ -45,27 +48,39 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
     }
   }
   if (stat) {
-    const configText = await ctx.fs.readText(configTarget, signal)
+    let configText = ''
     let config
-    try { config = parseConfig(configText) }
+    try { configText = await ctx.fs.readText(configTarget, signal); config = parseConfig(configText) }
     catch (error) {
-      if (!readonlyFuture || !(error instanceof ScholarError) || error.code !== 'PROJECT_SCHEMA_TOO_NEW') throw error
-      const original = readonlyEnvelope(configText)
-      config = { project: original.project, paths: { manuscriptDir: original.paths?.manuscriptDir ?? 'manuscript' } }
+      if (!readonlyFuture || signal.aborted) throw error
+      let original: ReturnType<typeof readonlyEnvelope> | undefined
+      try { original = readonlyEnvelope(configText) } catch { /* No guessed identity or output reads. */ }
+      config = { project: original?.project, paths: { manuscriptDir: original?.paths?.manuscriptDir ?? 'manuscript' } }
+      if (!(error instanceof ScholarError && error.code === 'PROJECT_SCHEMA_TOO_NEW' && original))
+        bindingDiagnostic = { code: 'PROJECT_CONFIG_INVALID', message: '项目配置无法安全解释，原文件保留。' }
     }
-    projectId = config.project.id; manuscriptDir = config.paths.manuscriptDir
-    invariant(!context.projectId || context.projectId === projectId, 'PROJECT_ID_CONFLICT', '请求项目与当前会话项目不同。')
+    projectId = config.project?.id; manuscriptDir = config.paths.manuscriptDir
+    invariant(!projectId || !context.projectId || context.projectId === projectId, 'PROJECT_ID_CONFLICT', '请求项目与当前会话项目不同。')
     // Detect copies among Host registrations, without traversing raw material trees.
-    await checkCopies(projectId)
+    if (projectId) await checkCopies(projectId)
   } else {
     invariant(!context.projectId, 'PROJECT_NOT_INITIALIZED', '当前工作区尚未初始化。')
     // An initialization may stop immediately after publishing its journal. Read
     // only the journal's verified config image to recover the confirmed output.
     const provisional = new HostFileStore(ctx, { canonicalRoot: root, manuscriptDir, sessionId: context.sessionId, revalidate: async () => {} }, signal)
-    const journals = await readTransactionJournals(provisional)
+    let journals: Awaited<ReturnType<typeof readTransactionJournals>> = []
+    try { journals = await readTransactionJournals(provisional) } catch (error) {
+      if (!readonlyFuture || signal.aborted) throw error
+      bindingDiagnostic = { code: 'RECOVERY_CONFLICT', message: '未完成初始化的事务记录无法安全解释，原文件保留。' }
+    }
     const configs = journals.flatMap(row => row.txn.changes.filter(change => change.path === CONFIG_PATH))
     invariant(configs.length <= 1, 'RECOVERY_CONFLICT', '多个未完成初始化配置需要人工检查。')
-    if (configs[0]?.after) manuscriptDir = parseConfig(configs[0].after.text).paths.manuscriptDir
+    if (configs[0]?.after) {
+      try { manuscriptDir = parseConfig(configs[0].after.text).paths.manuscriptDir } catch (error) {
+        if (!readonlyFuture) throw error
+        bindingDiagnostic = { code: 'RECOVERY_CONFLICT', message: '初始化事务内的配置无法安全解释，未恢复或重建。' }
+      }
+    }
   }
   const binding = { workspaceId: workspace.id, sessionId: context.sessionId, projectId, modeId: 'scholarflow', rootFingerprint: digest(process.platform === 'win32' ? root.toLowerCase() : root) }
   const revalidate = async () => {
@@ -90,10 +105,13 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
       await checkCopies(projectId)
     }
   }
-  const io = new HostFileStore(ctx, { canonicalRoot: root, manuscriptDir, sessionId: context.sessionId, revalidate }, signal)
+  const io = new HostFileStore(ctx, { canonicalRoot: root, manuscriptDir, sessionId: context.sessionId, revalidate, readOnly: readonlyFuture }, signal)
   if (!readonlyFuture && projectId) for (const path of ['.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json'])
     invariant((schemaVersionOf((await io.read(path))?.text) ?? 1) <= 1, 'PROJECT_SCHEMA_TOO_NEW', '项目记录或资源锁版本过新；请只读查看原文件，当前操作已停止。')
-  return { io, binding, manuscriptDir }
+  if (!readonlyFuture && projectId && !(await inspectRecovery(io, manuscriptDir)).pending.length) {
+    const current = await snapshot(io); await readBindings(io, current.config)
+  }
+  return { io, binding, manuscriptDir, bindingDiagnostic }
 }
 
 export async function applicationResult<T>(operation: () => Promise<T>) {
@@ -109,14 +127,25 @@ export async function applicationResult<T>(operation: () => Promise<T>) {
 
 export async function inspectProject(ctx: Host, request: unknown, signal: AbortSignal) {
   const { context } = inspectRequest.parse(request)
-  const { io, binding, manuscriptDir } = await resolveStore(ctx, context, signal, undefined, true)
-  const compatibility = await inspectCompatibility(io)
-  if (compatibility) return { binding, initialized: false, metadataExists: true, readonly: compatibility }
-  const recovery = await inspectRecovery(io, manuscriptDir)
-  if (recovery.pending.length) return { binding, initialized: false, metadataExists: true, recovery: {
-    planHash: recovery.contentHash, transactions: recovery.pending.map(row => ({ id: row.txn.id, createdAt: row.txn.createdAt,
-      files: row.txn.changes.map((change, i) => ({ relativePath: change.path, status: row.images[i] && digest(row.images[i]!.text) === change.after?.hash ? 'published' : 'pending' })) })),
-  } }
-  if (!await io.stat(CONFIG_PATH)) return { binding, initialized: false, metadataExists: !!await io.stat('.scholarflow') }
-  return { binding, initialized: true, ...await snapshot(io) }
+  const { io, binding, manuscriptDir, bindingDiagnostic } = await resolveStore(ctx, context, signal, undefined, true)
+  if (bindingDiagnostic) return { binding, initialized: false, metadataExists: true, readonly: await inspectDamagedProject(io, bindingDiagnostic) }
+  try {
+    const compatibility = await inspectCompatibility(io)
+    if (compatibility) return { binding, initialized: false, metadataExists: true, readonly: compatibility }
+    const recovery = await inspectRecovery(io, manuscriptDir)
+    if (recovery.pending.length) return { binding, initialized: false, metadataExists: true, recovery: {
+      planHash: recovery.contentHash, transactions: recovery.pending.map(row => ({ id: row.txn.id, createdAt: row.txn.createdAt,
+        files: row.txn.changes.map((change, i) => ({ relativePath: change.path, status: row.images[i] && digest(row.images[i]!.text) === change.after?.hash ? 'published' : 'pending' })) })),
+    } }
+    if (!await io.stat(CONFIG_PATH)) return { binding, initialized: false, metadataExists: !!await io.stat('.scholarflow') }
+    const current = await snapshot(io)
+    try { await readBindings(io, current.config) } catch (error) {
+      if (error instanceof ScholarError) throw error
+      throw new ScholarError('SKILL_RESOURCE_LOCK_INVALID', '资源锁无法安全解释，原文件保留。')
+    }
+    return { binding, initialized: true, ...current }
+  } catch (error) {
+    if (!(error instanceof ScholarError) || !['PROJECT_CONFIG_INVALID', 'PROJECT_LEDGER_INVALID', 'RECOVERY_CONFLICT', 'PROJECT_ID_CONFLICT', 'DOCUMENT_NOT_FOUND', 'SKILL_RESOURCE_LOCK_INVALID', 'SKILL_RESOURCE_LOCK_MISSING', 'SKILL_BINDING_MISMATCH'].includes(error.code)) throw error
+    return { binding, initialized: false, metadataExists: true, readonly: await inspectDamagedProject(io, { code: error.code, message: error.message }) }
+  }
 }

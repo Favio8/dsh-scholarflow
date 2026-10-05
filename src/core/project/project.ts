@@ -5,6 +5,7 @@ import { digest, newId, json, type FileStore, type FileImage } from '../store/fi
 import { commit, inspectRecovery, type Mutation } from '../store/transactions.ts'
 import { MEMORY_APPROVALS, memoryApprovalsSchema } from './memory.ts'
 import { builtinProjectProfile } from './profiles.ts'
+import { resourceLockSchema } from '../../shared/skills.ts'
 
 export const CONFIG_PATH = '.scholarflow/project.yaml'
 export const LEDGER_PATH = '.scholarflow/data/ledger.json'
@@ -121,16 +122,26 @@ export async function snapshot(io: FileStore) {
   if (!ledgerFile) throw new ScholarError('PROJECT_LEDGER_INVALID', '缺少 ledger，禁止自动创建空数据覆盖。')
   const ledger = parseLedger(ledgerFile.text)
   const resourceLock = await io.read('.scholarflow/resources.lock.json')
+  invariant(resourceLock, 'SKILL_RESOURCE_LOCK_MISSING', '项目资源锁缺失，未创建替代记录。')
   if (resourceLock) {
-    let resourceVersion: unknown
-    try { resourceVersion = JSON.parse(resourceLock.text)?.schemaVersion } catch { /* Resource-specific readers reject malformed locks. */ }
+    let rawResource: any
+    try { rawResource = JSON.parse(resourceLock.text) } catch { throw new ScholarError('SKILL_RESOURCE_LOCK_INVALID', '资源锁不是有效 JSON，未覆盖原文件。') }
+    const resourceVersion = rawResource?.schemaVersion
     invariant(!(typeof resourceVersion === 'number' && resourceVersion > 1), 'PROJECT_SCHEMA_TOO_NEW', '资源锁版本过新，当前项目只读。')
+    const currentLock = resourceLockSchema.safeParse(rawResource)
+    // The already supported legacy format retains opaque Profile history for
+    // explicit migration; empty skills are required and never auto-enabled.
+    const legacyEmptySkills = rawResource?.schemaVersion === 1 && rawResource.projectId === config.project.id && Array.isArray(rawResource.skills) && rawResource.skills.length === 0 &&
+      Array.isArray(rawResource.profiles) && Object.keys(rawResource).sort().join(',') === 'profiles,projectId,schemaVersion,skills'
+    invariant(currentLock.success || legacyEmptySkills, 'SKILL_RESOURCE_LOCK_INVALID', '资源锁未通过校验，项目操作已停止，原文件保留。')
+    invariant(!currentLock.success || currentLock.data.projectId === config.project.id, 'PROJECT_ID_CONFLICT', '资源锁身份与当前配置不符。')
   }
   invariant(ledger.projectId === config.project.id, 'PROJECT_ID_CONFLICT', '配置与 ledger 项目身份不同。')
   invariant(ledger.documents.paper, 'DOCUMENT_NOT_FOUND', '项目没有主稿记录，禁止推测或重建覆盖。')
   const documentFile = await io.read(config.paths.mainDocument)
   invariant(documentFile, 'DOCUMENT_NOT_FOUND', '主稿缺失，已保留项目记录。')
-  invariant((await io.read(CONFIG_PATH))?.version === configFile.version && (await io.read(LEDGER_PATH))?.version === ledgerFile.version,
+  invariant((await io.read(CONFIG_PATH))?.version === configFile.version && (await io.read(LEDGER_PATH))?.version === ledgerFile.version &&
+    (await io.read('.scholarflow/resources.lock.json'))?.version === resourceLock.version,
     'STALE_LEDGER_REVISION', '读取期间项目发生提交，请重新读取完整快照。')
   return { config, configWarnings, configHash: digest(configFile.text), ledgerHash: digest(ledgerFile.text), ledger, document: { ...ledger.documents.paper, text: documentFile.text,
     contentHash: digest(documentFile.text), externalChange: digest(documentFile.text) !== ledger.documents.paper.currentHash } }
