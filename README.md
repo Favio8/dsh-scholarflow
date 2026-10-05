@@ -121,6 +121,7 @@ node tests/e2e/installed-host-smoke.mjs --live-skills
 - 编辑、审查与交付验证：[Editing and delivery](docs/editing-delivery-2026-10-05.md)
 - 私有库导入边界：[Private Skill storage](docs/decisions/private-skill-storage.md)
 - 重复身份只读诊断、明确绑定副本与旧执行归档：[Copy identity](docs/decisions/project-identity-transactions.md)。保留原稿与内容 ID，旧请求不重放，历史会话不成为权限绑定。
+- 未提交正文、文风与记忆的暂存／断线恢复：[Editor recovery](docs/decisions/unsubmitted-instruction-buffers.md)。缓冲不进入项目事实，恢复后仍需明确保存。
 - 历史验证：[integration-verification](docs/integration-verification.md)
 - 版本范围：[compatibility](docs/compatibility.md)
 

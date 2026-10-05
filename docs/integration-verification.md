@@ -1131,6 +1131,17 @@ host Service.listService  { service: "agentPresets" }      # 精确签名与引�
 
 ## 附录 A：G0 期间产生的副作用与清理
 
+2026-10-05 编辑缓冲补充：297/297 独立测试及真实安装宿主零模型调用回归
+通过。术语未提交编辑在 Tab 切换与移除浏览器备份后可从 Host 明确恢复；
+主稿、术语原文、approvals 和 ledger 均逐字保持原状。正文在断线状态下
+最后按键后强制关闭 TEST_ONLY 页面，再用同一浏览器配置打开时恢复备份，
+主稿不变。第二会话未提交 Review Profile 在只读 Host 冷重启后保留完整
+Unicode／CRLF 文本。浏览器配置、存储或 origin 改变的限制见
+[未提交编辑 ADR](./decisions/unsubmitted-instruction-buffers.md)。
+证据字段：`nativeUnsubmittedInstructionBufferRecoveryLeavesAllFactsAndApprovalsUnchanged`、
+`nativeLastKeyOfflineForcedPageCloseAndSameBrowserProfileRestoreKeepsSavedBody`、
+`nativeInstructionBufferColdReadonlyRestartPreservesUnsubmittedUnicodeWithoutChangingProfile`。
+
 2026-10-05 补充：真实安装宿主验证重复 `projectId` 的两个独立 TEST_ONLY
 工作区。当前副本只读 UI 显示原始配置、ledger、资源锁、正文及 BibTeX；
 普通正文写入返回 `PROJECT_ID_CONFLICT`，诊断未创建 `.scholarflow/tmp`。

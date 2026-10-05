@@ -37,6 +37,8 @@ import { issueDecisionRequest, exportCreateRequest } from '../shared/review.ts'
 import { requirementUpsertRequest, requirementExtractRequest, requirementConfirmRequest, requirementResolveRequest, requirementRemoveRequest, projectTextReadRequest, projectTextSaveRequest } from '../shared/requirements.ts'
 import { upsertRequirement, extractRequirements, confirmRequirement, resolveRequirementConflict, removeRequirement, requirementHistory } from '../core/requirements/requirements.ts'
 import { bufferWriteRequest } from '../shared/editor-buffer.ts'
+import { projectTextBufferReadRequest, projectTextBufferWriteRequest } from '../shared/project-text-buffer.ts'
+import { readProjectTextBuffer, writeProjectTextBuffer } from '../core/editing/project-text-buffer.ts'
 import { readEditorBuffer, writeEditorBuffer } from '../core/editing/buffer.ts'
 import { searchPrepareRequest, onlineConfirmRequest, candidateDecisionRequest, lookupPrepareRequest, type ResearchProvider } from '../shared/online-research.ts'
 import { crossrefProvider } from './providers/crossref.ts'
@@ -1528,6 +1530,20 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const input = projectTextReadRequest.parse(request)
       const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io)
       return memoryHistory(io, current.ledger.projectId, input.path) })
+  }
+
+  @Remote('project.bufferRead')
+  async projectBufferRead(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context, path } = projectTextBufferReadRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal)
+      return readProjectTextBuffer(io, context.sessionId, path) })
+  }
+
+  @Remote('project.bufferWrite')
+  async projectBufferWrite(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context, path, ...input } = projectTextBufferWriteRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal)
+      return writeProjectTextBuffer(io, context.sessionId, path, input) })
   }
 
   @Remote('project.saveText')

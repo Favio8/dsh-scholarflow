@@ -49,7 +49,8 @@ async function start(mode) {
     })
     child.on('exit', code => { clearTimeout(timeout); reject(new Error(`G0 Host exited ${code}`)) })
   })
-  page = await browser.newPage({ viewport: { width: 1500, height: 960 } })
+  const browserContext = await browser.newContext({ viewport: { width: 1500, height: 960 } })
+  page = await browserContext.newPage()
   page.setDefaultTimeout(10000)
   const errors = []
   page.on('pageerror', e => errors.push(e.message))
@@ -74,7 +75,7 @@ async function rpc(method, args = {}) {
   }, { method, args })
 }
 async function stop() {
-  await page?.close()
+  await page?.context().close()
   if (child && child.exitCode === null) {
     const exited = new Promise(done => child.once('exit', done))
     child.kill(); await exited
@@ -794,6 +795,24 @@ try {
   await page.getByRole('tab', { name: /^Overview ·/ }).click()
   await page.getByRole('combobox', { name: '项目指令文件', exact: true }).selectOption('.scholarflow/context/terminology.md')
   await page.getByRole('button', { name: '读取所选项目指令', exact: true }).click()
+  const instructionOriginals = new Map()
+  for (const path of ['.scholarflow/context/terminology.md', '.scholarflow/context/approvals.json', '.scholarflow/data/ledger.json', 'manuscript/paper.md'])
+    instructionOriginals.set(path, await readFile(join(projectRoot, path), 'utf8'))
+  const pendingTerminology = '# TEST_ONLY 未提交术语\n\nTEST_ONLY 最后编辑尚未批准进入模型上下文𐐀。\n'
+  await page.getByRole('textbox', { name: '项目指令内容', exact: true }).fill(pendingTerminology)
+  await page.getByRole('status', { name: '项目指令暂存状态', exact: true }).filter({ hasText: '未提交编辑已暂存到宿主' }).waitFor()
+  await page.getByRole('tab', { name: /^Draft ·/ }).click(); await page.getByRole('tab', { name: /^Overview ·/ }).click()
+  assert.equal(await page.getByRole('textbox', { name: '项目指令内容', exact: true }).inputValue(), pendingTerminology)
+  for (const [path, original] of instructionOriginals) assert.equal(await readFile(join(projectRoot, path), 'utf8'), original)
+  await page.evaluate(() => { for (const key of Object.keys(localStorage)) if (key.startsWith('sf-scratch:v1:') && key.endsWith(':.scholarflow/context/terminology.md')) localStorage.removeItem(key) })
+  page.once('dialog', dialog => dialog.accept()); await reloadWorkbench()
+  await page.getByRole('tab', { name: /^Overview ·/ }).click()
+  await page.getByRole('combobox', { name: '项目指令文件', exact: true }).selectOption('.scholarflow/context/terminology.md')
+  await page.getByRole('button', { name: '读取所选项目指令', exact: true }).click()
+  await page.getByRole('region', { name: '宿主项目指令缓冲恢复', exact: true }).waitFor()
+  await page.getByRole('button', { name: '恢复宿主未提交项目指令', exact: true }).click()
+  assert.equal(await page.getByRole('textbox', { name: '项目指令内容', exact: true }).inputValue(), pendingTerminology)
+  for (const [path, original] of instructionOriginals) assert.equal(await readFile(join(projectRoot, path), 'utf8'), original)
   const terminology = '# 已确认术语\n\nTEST_ONLY 原始资料：经用户选择且保持只读的文件。\n'
   await page.getByRole('textbox', { name: '项目指令内容', exact: true }).fill(terminology)
   await page.getByRole('button', { name: '确认保存项目指令', exact: true }).click()
@@ -1149,7 +1168,7 @@ try {
   assert.equal(await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).inputValue(), unsaved)
   // Emulate a new browser page without its temporary local edit backup. The Host
   // copy must still be offered explicitly and never auto-write the manuscript.
-  await page.evaluate(() => { for (const key of Object.keys(sessionStorage)) if (key.startsWith('sf-editor:')) sessionStorage.removeItem(key) })
+  await page.evaluate(() => { for (const key of Object.keys(localStorage)) if (key.startsWith('sf-scratch:v1:') && key.endsWith(':paper')) localStorage.removeItem(key) })
   page.once('dialog', dialog => dialog.accept())
   await reloadWorkbench()
   await page.getByRole('region', { name: '宿主未提交缓冲恢复', exact: true }).waitFor()
@@ -1158,6 +1177,22 @@ try {
   assert.equal(await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).inputValue(), unsaved)
   page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '显式采用服务端版本', exact: true }).click()
+  await page.getByRole('status', { name: '编辑暂存状态', exact: true }).filter({ hasText: '宿主暂存缓冲已清理' }).waitFor()
+  // Last-key loss before a Host acknowledgement: deliberately disconnect and
+  // forcibly close this TEST_ONLY page. The same browser profile keeps its
+  // synchronous uncommitted copy; it never changes the saved manuscript.
+  const browserContext = page.context(), reconnectUrl = page.url()
+  await browserContext.setOffline(true)
+  const lastKeyDraft = manualBody + '\nTEST_ONLY 断线关闭前的最后按键𐐀。\n'
+  await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).fill(lastKeyDraft)
+  assert.equal(await page.evaluate(text => Object.keys(localStorage).some(key => key.startsWith('sf-scratch:v1:') && key.endsWith(':paper') && JSON.parse(localStorage.getItem(key)).text === text), lastKeyDraft), true)
+  await page.close({ runBeforeUnload: false }); await browserContext.setOffline(false)
+  page = await browserContext.newPage(); page.setDefaultTimeout(10000); page.on('pageerror', error => errors.push(error.message))
+  await page.goto(reconnectUrl); await page.waitForTimeout(1200); await reloadWorkbench()
+  assert.equal(await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).inputValue(), lastKeyDraft)
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+  await page.getByRole('status', { name: '编辑暂存状态', exact: true }).filter({ hasText: '未提交编辑已暂存到宿主' }).waitFor()
+  page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: '显式采用服务端版本', exact: true }).click()
   await page.getByRole('status', { name: '编辑暂存状态', exact: true }).filter({ hasText: '宿主暂存缓冲已清理' }).waitFor()
   await page.setViewportSize({ width: 700, height: 800 })
   assert.equal(await page.getByRole('tablist', { name: '论文工作区页面', exact: true }).isVisible(), true)
@@ -1192,6 +1227,13 @@ try {
   const staged = await rpc('scholarflow.v1/editor.bufferWrite', { request: { context: { requestId: 'req_TEST_ONLY_buffer', workspaceId: projectWorkspace.value.workspace.workspaceId,
     sessionId: second.value.sessionId, projectId: projectLedger.projectId }, baseBufferHash: null, baseHash: delivered.documentHash, text: 'TEST_ONLY 第二会话的未提交缓冲。', state: 'dirty' } })
   assert.equal(staged.value.ok, true, JSON.stringify(staged.value))
+  const stagedInstructionPath = '.scholarflow/profiles/review.md'
+  const stagedInstructionOriginal = await readFile(join(projectRoot, stagedInstructionPath), 'utf8')
+  const stagedInstruction = await rpc('scholarflow.v1/project.bufferWrite', { request: { context: { requestId: 'req_TEST_ONLY_instruction_buffer', workspaceId: projectWorkspace.value.workspace.workspaceId,
+    sessionId: second.value.sessionId, projectId: projectLedger.projectId }, path: stagedInstructionPath, baseBufferHash: null,
+    baseHash: digest(stagedInstructionOriginal), text: 'TEST_ONLY 第二会话尚未提交的审查文风𐐀。\r\n', state: 'dirty' } })
+  assert.equal(stagedInstruction.value.ok, true, JSON.stringify(stagedInstruction.value))
+  assert.equal(await readFile(join(projectRoot, stagedInstructionPath), 'utf8'), stagedInstructionOriginal)
   assert.deepEqual(errors, [])
   await stop()
   errors = await start('read-only')
@@ -1256,6 +1298,10 @@ try {
     sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
   assert.equal(coldBuffer.value.ok, true)
   assert.equal(coldBuffer.value.data.buffer.text, 'TEST_ONLY 第二会话的未提交缓冲。')
+  const coldInstructionBuffer = await rpc('scholarflow.v1/project.bufferRead', { request: { context: { requestId: 'req_TEST_ONLY_instruction_buffer_cold', workspaceId: projectWorkspace.value.workspace.workspaceId,
+    sessionId: second.value.sessionId, projectId: projectLedger.projectId }, path: stagedInstructionPath } })
+  assert.equal(coldInstructionBuffer.value.ok, true); assert.equal(coldInstructionBuffer.value.data.buffer.text, 'TEST_ONLY 第二会话尚未提交的审查文风𐐀。\r\n')
+  assert.equal(await readFile(join(projectRoot, stagedInstructionPath), 'utf8'), stagedInstructionOriginal)
   const readOnlySession = await rpc('session/create', { request: { workspaceId: workspace.value.workspace.workspaceId, agentPreset: 'scholarflow' } })
   assert.equal(readOnlySession.ok, true, JSON.stringify(readOnlySession))
   const denied = await rpc('scholarflow.v1/verifyGateway', { request: { sessionId: readOnlySession.value.sessionId } })
@@ -1494,6 +1540,9 @@ try {
     realModelPauseAndCrossSessionResume: liveModel, cancelledRunActionPreviewLeavesStateUnchanged: liveModel,
     realProviderCancellation: liveModel, nativeUiRequirementConflictResolution: true, nativeUiProjectMemoryEdit: true,
     nativeMemoryEntryProvenanceHistoryAndColdRestore: true,
+    nativeUnsubmittedInstructionBufferRecoveryLeavesAllFactsAndApprovalsUnchanged: true,
+    nativeInstructionBufferColdReadonlyRestartPreservesUnsubmittedUnicodeWithoutChangingProfile: true,
+    nativeLastKeyOfflineForcedPageCloseAndSameBrowserProfileRestoreKeepsSavedBody: true,
     nativeUiRequirementEditCancelConfirmHistoryAndRemove: true, nativeUiRecentRatioWindowConfirmed: true,
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,

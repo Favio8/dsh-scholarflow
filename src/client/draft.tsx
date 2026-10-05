@@ -6,18 +6,18 @@ import type { SelectionPayload } from '../shared/editing.ts'
 import { ProposalRevision } from './proposal-revision.tsx'
 import { DraftSequence } from './draft-sequence.tsx'
 import { ManuscriptImport } from './manuscript-import.tsx'
+import { scratchKey, readScratch, writeScratch, ScratchQueue } from './scratch-backup.ts'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
 function readLocalBuffer(key: string) {
   try {
-    const value = JSON.parse(window.sessionStorage.getItem(key) ?? 'null')
-    if (value && typeof value.text === 'string' && value.text.length <= 2 * 1024 * 1024 && /^sha256:[0-9a-f]{64}$/.test(value.baseHash)) return value as { text: string; baseHash: string }
+    return readScratch(window.localStorage, key, 8 * 1024 * 1024)
   } catch { /* Host temporary buffer remains available when browser storage fails. */ }
 }
 export function Draft({ project, context, api, refresh, run, busy, issueLocation }: Props & { issueLocation?: any }) {
   const projectId = project.binding.projectId
-  const bufferKey = `sf-editor:${projectId}:${project.binding.sessionId}`
+  const bufferKey = scratchKey(project.binding, 'paper')
   const cached = buffers.get(bufferKey) ?? readLocalBuffer(bufferKey)
   if (cached && !buffers.has(bufferKey)) buffers.set(bufferKey, cached)
   const [text, setText] = useState(cached?.text ?? project.document.text)
@@ -35,7 +35,14 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const [actionPlan, setActionPlan] = useState<any>()
   const [skills, setSkills] = useState<any[]>([]), [skillBindingId, setSkillBindingId] = useState('')
   const [bufferReady, setBufferReady] = useState(false), [bufferMessage, setBufferMessage] = useState('正在读取宿主暂存缓冲…'), [recoverable, setRecoverable] = useState<any>()
-  const bufferHash = useRef<string | null>(null), hostDirty = useRef(false), persistence = useRef(Promise.resolve()), persistenceBlocked = useRef(false)
+  const bufferHash = useRef<string | null>(null), hostDirty = useRef(false), persistenceBlocked = useRef(false)
+  const persistence = useRef<ScratchQueue<{ text: string; baseHash: string; state: 'dirty' | 'cleared'; context: any }> | null>(null)
+  if (!persistence.current) persistence.current = new ScratchQueue(async edit => {
+    const result = await api('editor.bufferWrite', { ...edit, baseBufferHash: bufferHash.current })
+    bufferHash.current = result.bufferHash; hostDirty.current = result.buffer.state === 'dirty'
+    const latest = buffers.get(bufferKey)
+    if (!latest || (latest.text === edit.text && latest.baseHash === edit.baseHash)) setBufferMessage(edit.state === 'dirty' ? '未提交编辑已暂存到宿主；主稿尚未改变。' : '宿主暂存缓冲已清理；主稿版本保持一致。')
+  }, error => { persistenceBlocked.current = true; setBufferMessage(`暂存未完成，保留本页面和浏览器备份：${(error as Error).message}`) })
   const root = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!issueLocation || issueLocation.projectId !== projectId || issueLocation.documentHash !== project.document.contentHash) return
@@ -77,22 +84,12 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   }, [bufferKey])
   useEffect(() => {
     if (!bufferReady || persistenceBlocked.current || recoverable || (!dirty && !hostDirty.current)) return
-    const timer = window.setTimeout(() => {
-      const edit = { text, baseHash, state: dirty ? 'dirty' as const : 'cleared' as const }
-      persistence.current = persistence.current.then(async () => {
-        if (persistenceBlocked.current) return
-        const result = await api('editor.bufferWrite', { context: context(), ...edit, baseBufferHash: bufferHash.current })
-        bufferHash.current = result.bufferHash; hostDirty.current = result.buffer.state === 'dirty'
-        const latest = buffers.get(bufferKey)
-        if (!latest || (latest.text === edit.text && latest.baseHash === edit.baseHash)) setBufferMessage(edit.state === 'dirty' ? '未提交编辑已暂存到宿主；主稿尚未改变。' : '宿主暂存缓冲已清理；主稿版本保持一致。')
-      }).catch(error => { persistenceBlocked.current = true; setBufferMessage(`暂存未完成，保留本页面编辑：${error.message}`) })
-    }, 500)
-    return () => clearTimeout(timer)
+    persistence.current!.enqueue({ text, baseHash, state: dirty ? 'dirty' : 'cleared', context: context() })
   }, [text, baseHash, project.document.contentHash, bufferReady, recoverable])
   const remember = (value?: { text: string; baseHash: string }) => {
     if (value) buffers.set(bufferKey, value); else buffers.delete(bufferKey)
-    try { if (value) window.sessionStorage.setItem(bufferKey, JSON.stringify(value)); else window.sessionStorage.removeItem(bufferKey) }
-    catch { setBufferMessage('浏览器临时备份不可用；请等宿主暂存完成后再刷新。') }
+    try { writeScratch(window.localStorage, bufferKey, value, 8 * 1024 * 1024) }
+    catch { setBufferMessage('浏览器备份未完成；请等宿主暂存完成后再关闭页面。') }
   }
   useEffect(() => {
     // Only explicit edits create a buffer. A server revision renders before the
@@ -147,7 +144,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       <button disabled={busy} onClick={() => { if (dirty && !window.confirm('用宿主未提交缓冲替换当前未保存编辑？')) return; setText(recoverable.text); setBaseHash(recoverable.baseHash); remember({ text: recoverable.text, baseHash: recoverable.baseHash }); setRecoverable(undefined); setBufferMessage('已恢复宿主缓冲，请核对版本后明确保存。') }}>恢复宿主未提交缓冲</button>
     </section>}
     <button disabled={busy || !persistenceBlocked.current} onClick={() => run(async () => {
+      if (persistence.current!.busy) throw new Error('请先等待正在进行的暂存请求结束。')
       const result = await api('editor.bufferRead', { context: context() }); bufferHash.current = result.bufferHash; hostDirty.current = result.buffer?.state === 'dirty'
+      persistence.current!.reset()
       persistenceBlocked.current = false; setBufferReady(true); setRecoverable(result.buffer?.state === 'dirty' ? result.buffer : undefined); setBufferMessage('已重读宿主缓冲，请比较保留的本页面编辑与宿主副本。')
     })}>重读冲突暂存缓冲</button>
     <p>{statistics.chineseCharacters} 汉字 · {statistics.westernWords} 西文词元。{statistics.detail}</p>
