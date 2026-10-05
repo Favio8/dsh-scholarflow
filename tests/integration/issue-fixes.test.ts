@@ -11,6 +11,7 @@ import { prepareModelReview, publishModelReview } from '../../src/core/review/mo
 import { prepareGeneration, executeGeneration } from '../../src/core/pipeline/generation.ts'
 import { digest, json } from '../../src/core/store/files.ts'
 import { ScholarError } from '../../src/shared/errors.ts'
+import { prepareProposalRevision, publishProposalRevision } from '../../src/core/editing/proposal-revision.ts'
 const quote = 'TEST_ONLY 这个判断缺少实际依据。', replacement = 'TEST_ONLY 此判断仍需核对实际依据，当前只适用于所列测试范围。'
 async function setup() {
   const io = new MemoryStore({ 'raw.txt': 'TEST_ONLY original bytes\r\n' })
@@ -35,6 +36,21 @@ function candidate(current: Awaited<ReturnType<typeof snapshot>>, issueId: strin
   return buildProposal(current, { runId: 'run_TEST_ONLY_fix', instruction: 'TEST_ONLY 修复范围并保留原文。', replacementText: replacement,
     selection: issueFixSelection(current, issueId), reviewIssueId: issueId, dependentEvidenceIds: [] })
 }
+
+test('operator edits preserve issue provenance and restore the original risk decision after both candidates are rejected', async () => {
+  const { io, issue } = await setup()
+  await mutateLedger(io, (await snapshot(io)).ledger.revision, ledger => { ledger.reviewIssues[issue.id].state = 'accepted-risk'; ledger.reviewIssues[issue.id].resolutionReason = 'TEST_ONLY 风险保留待补证据。' })
+  const current = await snapshot(io), parent = candidate(current, issue.id), stored = await storeProposal(io, parent, current.ledger.revision)
+  const plan = await prepareProposalRevision(io, { context: context(await snapshot(io)), proposalId: parent.id, proposalHash: stored.proposalHash, replacementText: replacement + ' TEST_ONLY 再核对边界。' })
+  const child = await publishProposalRevision(io, plan, 'session_TEST_ONLY')
+  assert.equal(plan.proposal.reviewIssue?.issueId, issue.id)
+  assert.equal((await snapshot(io)).document.text, current.document.text)
+  await rejectProposal(io, parent.id, child.revision)
+  assert.equal((await snapshot(io)).ledger.reviewIssues[issue.id].state, 'proposed-fix')
+  await rejectProposal(io, plan.proposal.id, (await snapshot(io)).ledger.revision)
+  assert.equal((await snapshot(io)).ledger.reviewIssues[issue.id].state, 'accepted-risk')
+  assert.equal((await snapshot(io)).ledger.reviewIssues[issue.id].resolutionReason, 'TEST_ONLY 风险保留待补证据。')
+})
 
 test('SF-024: issue fix uses the second exact paragraph, checkpoints its cause and stays proposed until explicit semantic recheck', async () => {
   const { io, issue, current, selection } = await setup(), original = current.document.text

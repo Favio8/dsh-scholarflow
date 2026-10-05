@@ -15,7 +15,8 @@ import { parseRegisteredMaterial } from '../core/materials/parse.ts'
 import { parseMaterialBytes } from './parsers/parse.ts'
 import { registerSource, confirmEvidence, upsertClaim, confirmOutline, saveOutline } from '../core/evidence/evidence.ts'
 import type { RequestContext } from '../shared/schema.ts'
-import { saveDocumentRequest, proposalRequest, applyProposalRequest, undoDocumentRequest } from '../shared/document-api.ts'
+import { saveDocumentRequest, proposalRequest, applyProposalRequest, undoDocumentRequest, proposalRevisionRequest } from '../shared/document-api.ts'
+import { prepareProposalRevision, publishProposalRevision, type ProposalRevisionPlan } from '../core/editing/proposal-revision.ts'
 import { saveManual, rejectProposal, undoRevision, proposalImage } from '../core/editing/proposals.ts'
 import { wordStats } from '../core/editing/markdown.ts'
 import { generationRequest, runStartRequest, runControlRequest, runStateSchema } from '../shared/runs.ts'
@@ -92,6 +93,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private manualReviewPlans = new Map<string, { plan: ManualReviewPlan; context: RequestContext; peerId: string; expires: number }>()
   private modelReviewPlans = new Map<string, { plan: ModelReviewPlan; peerId: string; expires: number; selected: { provider: string; model: string; reasoningEffort?: string } }>()
   private modelReviewActions = new Map<string, { action: ModelReviewAction; plan: ModelReviewPlan; context: RequestContext; peerId: string; expires: number; selected?: { provider: string; model: string; reasoningEffort?: string } }>()
+  private proposalRevisionPlans = new Map<string, { plan: ProposalRevisionPlan; peerId: string; expires: number }>()
   private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
   private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
   private skillPlans = new Map<string, { resource: { kind: 'local'; bundle: SkillBundle } | { kind: 'github'; preview: GithubSkillPreview }; hash: string; peerId: string; expires: number }>()
@@ -104,6 +106,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
     this.researchProvider = crossrefProvider(ctx.web)
     this.githubProvider = githubSkills(ctx.web)
+    ctx.effect(() => () => this.proposalRevisionPlans.clear(), 'scholarflow: clear operator candidate previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
@@ -271,6 +274,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   }
 
   private pruneSkills() {
+    for (const [key, row] of this.proposalRevisionPlans) if (row.expires < Date.now()) this.proposalRevisionPlans.delete(key)
     for (const [key, row] of this.modelReviewPlans) if (row.expires < Date.now()) this.modelReviewPlans.delete(key)
     for (const [key, row] of this.modelReviewActions) if (row.expires < Date.now()) this.modelReviewActions.delete(key)
     for (const [key, row] of this.manualReviewPlans) if (row.expires < Date.now()) this.manualReviewPlans.delete(key)
@@ -1145,6 +1149,42 @@ export class ScholarFlowRemote extends TypertRemoteService {
       invariant(ledger.proposalStates[input.proposalId], 'PROPOSAL_NOT_FOUND', '建议不属于当前项目。')
       const image = await proposalImage(io, input.proposalId)
       return { proposal: image.proposal, proposalHash: image.contentHash, state: ledger.proposalStates[input.proposalId] } })
+  }
+
+  @Remote('edits.prepareRevision')
+  async editsPrepareRevision(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = proposalRevisionRequest.parse(request)
+      mutationRevision(input.context); this.pruneSkills()
+      invariant(this.proposalRevisionPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有候选编辑预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), plan = await prepareProposalRevision(io, input)
+      this.proposalRevisionPlans.set(plan.id, { plan, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, proposal: plan.proposal, reason: plan.input.reason,
+        risks: ['仅发布新的待审阅候选并保留原建议。无需模型调用；接受前核对规则、事实变化和引用，规则通过不能证明学术真实性。'] }
+    })
+  }
+
+  @Remote('edits.publishRevision')
+  async editsPublishRevision(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = runStartRequest.parse(request), row = this.proposalRevisionPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请确认有效的候选编辑校验预览。')
+      const expected = row.plan.input.context
+      invariant(input.context.workspaceId === expected.workspaceId && input.context.sessionId === expected.sessionId && input.context.projectId === expected.projectId && input.context.expectedLedgerRevision === expected.expectedLedgerRevision,
+        'SESSION_BINDING_CHANGED', '候选编辑确认的会话或项目版本改变。')
+      const { io } = await resolveStore(this.ctx, expected, signal), result = await publishProposalRevision(io, row.plan, expected.sessionId)
+      this.proposalRevisionPlans.delete(input.planId)
+      return { ...result, proposal: row.plan.proposal, state: 'pending' }
+    })
+  }
+
+  @Remote('edits.dismissRevision')
+  async editsDismissRevision(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ planId: id }).strict().parse(request), row = this.proposalRevisionPlans.get(input.planId)
+      signal.throwIfAborted(); invariant(row && row.peerId === peerId, 'INVALID_APPROVAL', '候选编辑预览不属于当前用户。')
+      this.proposalRevisionPlans.delete(input.planId); return { dismissed: true }
+    })
   }
 
   @Remote('edits.apply')

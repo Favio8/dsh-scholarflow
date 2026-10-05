@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { ProposalRevision } from './proposal-revision.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 export function ReviewFixes({ project, context, api, refresh, run, busy }: Props) {
@@ -35,6 +36,9 @@ export function ReviewFixes({ project, context, api, refresh, run, busy }: Props
       {proposal.proposal.edits.map((edit: any, index: number) => <div key={index}><p>源码 [{edit.startUtf16}, {edit.endUtf16})</p><b>− 原文</b><pre>{edit.expectedText}</pre><b>+ 修复候选</b><pre>{edit.replacementText}</pre></div>)}
       {proposal.proposal.protectedFactChanges.map((change: string) => <p key={change}>{change}</p>)}
       {proposal.proposal.checks.map((check: any) => <p key={check.id}>{check.status} · {check.detail}</p>)}
+      <ProposalRevision key={proposal.proposal.id} image={proposal} context={context} api={api} run={run} busy={busy}
+        disabled={project.document.externalChange || proposal.proposal.baseDocumentHash !== project.document.contentHash || project.ledger.proposalStates[proposal.proposal.id]?.state !== 'pending'}
+        onRevised={async image => { setProposal(image); await refresh(); setMessage('修复编辑已保存为新候选，保留问题关联和原建议；主稿未改变。') }} />
       <p>引用新增 {proposal.proposal.citationChanges.added.join('、') || '无'}；删除 {proposal.proposal.citationChanges.removed.join('、') || '无'}。问题只有复查通过才能关闭。</p>
       {(project.ledger.proposalStates[proposal.proposal.id]?.state === 'pending') && <>
         <button disabled={busy || project.document.externalChange || proposal.proposal.baseDocumentHash !== project.document.contentHash} onClick={() => run(async () => {

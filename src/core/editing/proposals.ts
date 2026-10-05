@@ -13,6 +13,10 @@ import { validateIssueFix } from '../review/issue-fixes.ts'
 type Snapshot = Awaited<ReturnType<typeof snapshot>>
 const proposalPath = (proposalId: string) => `.scholarflow/proposals/${id.parse(proposalId)}.json`
 const now = () => new Date().toISOString()
+function sameCitationTokens(before: string, after: string) {
+  const tokens = (text: string) => projectMarkdown(text).leaves.filter(leaf => leaf.citationKeys).map(leaf => JSON.stringify(leaf.citationKeys)).sort()
+  return JSON.stringify(tokens(before)) === JSON.stringify(tokens(after))
+}
 export function applyEdits(source: string, edits: EditProposal['edits']) {
   const sorted = [...edits].sort((a, b) => a.startUtf16 - b.startUtf16)
   let previousEnd = 0
@@ -56,7 +60,7 @@ export function buildProposal(current: Snapshot, input: { runId: string; instruc
   const beforeKeys = citationKeys(current.document.text), afterKeys = citationKeys(changed)
   const added = afterKeys.filter(key => !beforeKeys.includes(key)), removed = beforeKeys.filter(key => !afterKeys.includes(key))
   bibliography(changed, current.ledger)
-  invariant(!input.selection || (!added.length && !removed.length), 'CITATION_CHANGE_REQUIRES_CONFIRMATION', '基础选区改写必须保留引用 token；引用变更须单独提出。')
+  invariant(!input.selection || (!added.length && !removed.length && sameCitationTokens(expectedText, edits[0].replacementText)), 'CITATION_CHANGE_REQUIRES_CONFIRMATION', '基础选区改写必须保留本选区引用 token；引用变更须单独提出。')
   for (const evidenceId of input.dependentEvidenceIds) invariant(current.ledger.evidence[evidenceId]?.validation === 'located', 'EVIDENCE_NOT_CURRENT', '建议依赖的证据未定位或已过期。')
   const factChanges = protectedChanges(expectedText, edits[0].replacementText)
   invariant(!input.reviewIssueId || input.selection, 'ISSUE_FIX_SCOPE_INVALID', '问题修复必须包含明确完整段落。')
@@ -83,12 +87,13 @@ async function publishLedger(io: FileStore, current: Snapshot, ledger: Ledger, m
   await commit(io, [...mutations, { path: LEDGER_PATH, before, after: json(ledgerSchema.parse(ledger)) }])
   return ledger.revision
 }
-export async function storeProposal(io: FileStore, proposal: EditProposal, revision: number) {
+export async function storeProposal(io: FileStore, proposal: EditProposal, revision: number, extra: Mutation[] = [], verify?: (current: Snapshot) => Promise<void>) {
   proposal = proposalSchema.parse(proposal)
   return io.lock(async () => {
     const current = await writable(io)
     invariant(current.ledger.revision === revision && proposal.projectId === current.config.project.id && proposal.baseDocumentHash === current.document.contentHash && proposal.baseRevisionId === current.document.revisionId,
       'STALE_DOCUMENT_VERSION', '生成期间项目或稿件已改变；建议未覆盖正文。')
+    await verify?.(current)
     const next = structuredClone(current.ledger)
     let fixRecord: Mutation[] = []
     if (proposal.reviewIssue) {
@@ -113,7 +118,7 @@ export async function storeProposal(io: FileStore, proposal: EditProposal, revis
         after: json({ schemaVersion: 1, projectId: proposal.projectId, proposalId: proposal.id, proposalHash: digest(json(proposal)), originalIssue: issue, restoreState, createdAt: now() }) }]
     }
     next.proposalStates[proposal.id] = { proposalId: proposal.id, state: 'pending', updatedAt: now() }
-    const nextRevision = await publishLedger(io, current, next, [{ path: proposalPath(proposal.id), before: undefined, after: json(proposal) }, ...fixRecord])
+    const nextRevision = await publishLedger(io, current, next, [{ path: proposalPath(proposal.id), before: undefined, after: json(proposal) }, ...fixRecord, ...extra])
     return { proposal, proposalHash: digest(json(proposal)), revision: nextRevision }
   })
 }
@@ -208,7 +213,7 @@ export async function applyProposal(io: FileStore, proposalId: string, revision:
     const beforeKeys = citationKeys(current.document.text), afterKeys = citationKeys(text)
     invariant(JSON.stringify(afterKeys.filter(key => !beforeKeys.includes(key))) === JSON.stringify(proposal.citationChanges.added) &&
       JSON.stringify(beforeKeys.filter(key => !afterKeys.includes(key))) === JSON.stringify(proposal.citationChanges.removed), 'PROPOSAL_INVALID', '建议引用差异与实际内容不一致。')
-    invariant(!proposal.selection || (!proposal.citationChanges.added.length && !proposal.citationChanges.removed.length), 'CITATION_CHANGE_REQUIRES_CONFIRMATION', '选区改写不能静默增删引用。')
+    invariant(!proposal.selection || (!proposal.citationChanges.added.length && !proposal.citationChanges.removed.length && sameCitationTokens(proposal.edits[0].expectedText, proposal.edits[0].replacementText)), 'CITATION_CHANGE_REQUIRES_CONFIRMATION', '选区改写不能静默增删本选区引用。')
     const ledger = structuredClone(current.ledger), change = await documentMutation(io, current, ledger, text, proposal.id, proposal.edits)
     if (proposal.reviewIssue) {
       const issue = current.ledger.reviewIssues[proposal.reviewIssue.issueId], { state: _state, ...currentIssue } = issue ?? {}

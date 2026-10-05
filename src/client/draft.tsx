@@ -3,6 +3,7 @@ import { projectMarkdown, wordStats, textOf } from '../core/editing/markdown.ts'
 import { sectionTarget } from '../core/editing/sections.ts'
 import { MarkdownView, captureSelection } from './markdown.tsx'
 import type { SelectionPayload } from '../shared/editing.ts'
+import { ProposalRevision } from './proposal-revision.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
@@ -254,6 +255,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         {proposal.proposal.section.limitations.map((gap: string, i: number) => <p key={i}>缺口：{gap}</p>)}</div>}
       {proposal.proposal.protectedFactChanges.map((change: string) => <p key={change}>{change}</p>)}
       {proposal.proposal.checks.map((check: any) => <p key={check.id}>{check.status} · {check.detail}</p>)}
+      <ProposalRevision key={proposal.proposal.id} image={proposal} context={context} api={api} run={run} busy={busy}
+        disabled={dirty || project.document.externalChange || proposal.proposal.baseDocumentHash !== project.document.contentHash || project.ledger.proposalStates[proposal.proposal.id]?.state !== 'pending'}
+        onRevised={async image => { setProposal(image); await refresh(); setMessage('编辑后的候选已校验并保存，原建议保留，主稿未改变。') }} />
       <button disabled={busy || dirty} onClick={() => run(async () => { await api('edits.apply', { context: context(), proposalId: proposal.proposal.id, proposalHash: proposal.proposalHash }); remember(); setProposal(undefined); await refresh() })}>接受此条建议</button>
       <button disabled={busy} onClick={() => run(async () => { await api('edits.reject', { context: context(), proposalId: proposal.proposal.id }); setProposal(undefined); await refresh() })}>拒绝此条建议</button></section>}
     <p role="status">{message}</p>

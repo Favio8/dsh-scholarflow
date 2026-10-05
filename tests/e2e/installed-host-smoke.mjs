@@ -803,7 +803,32 @@ try {
     await waitModelReviewOutcome(fixUi.getByRole('region', { name: '问题修复差异', exact: true }))
     assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
     assert.equal(JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).reviewIssues[fixIssue.id].state, 'proposed-fix')
+    const fixParentLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+    const fixParentId = (await Promise.all(Object.values(fixParentLedger.proposalStates).filter(row => row.state === 'pending').map(async row => {
+      const proposal = JSON.parse(await readFile(join(projectRoot, '.scholarflow/proposals', `${row.proposalId}.json`), 'utf8'))
+      return proposal.reviewIssue?.issueId === fixIssue.id ? row.proposalId : undefined
+    }))).find(Boolean)
+    assert.ok(fixParentId)
+    const fixParentBytes = await readFile(join(projectRoot, '.scholarflow/proposals', `${fixParentId}.json`), 'utf8')
+    await fixUi.getByRole('button', { name: '编辑候选并重新校验', exact: true }).click()
+    const candidateEditor = fixUi.getByRole('textbox', { name: '编辑候选正文', exact: true })
+    await candidateEditor.fill((await candidateEditor.inputValue()) + ' TEST_ONLY 仍需人工核对。')
+    const beforeEditLedger = await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')
+    await fixUi.getByRole('button', { name: '预览编辑校验', exact: true }).click()
+    await fixUi.getByRole('dialog', { name: '编辑候选校验确认', exact: true }).waitFor()
+    await fixUi.getByRole('button', { name: '取消编辑校验预览', exact: true }).click()
+    assert.equal(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), beforeEditLedger)
+    await fixUi.getByRole('button', { name: '预览编辑校验', exact: true }).click()
+    await fixUi.getByRole('button', { name: '确认保存新候选', exact: true }).click()
+    await fixUi.getByRole('status').filter({ hasText: '修复编辑已保存为新候选' }).waitFor()
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+    assert.equal(await readFile(join(projectRoot, '.scholarflow/proposals', `${fixParentId}.json`), 'utf8'), fixParentBytes)
     await fixUi.getByRole('button', { name: '拒绝问题修复候选', exact: true }).click()
+    await fixUi.getByRole('status').filter({ hasText: '已拒绝修复候选，正文未改变，问题仍待复查。' }).waitFor()
+    assert.equal(JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).reviewIssues[fixIssue.id].state, 'proposed-fix')
+    await fixUi.getByRole('button', { name: `查看问题修复建议 ${fixParentId}`, exact: true }).click()
+    await fixUi.getByRole('button', { name: '拒绝问题修复候选', exact: true }).click()
+    await fixUi.getByRole('region', { name: '问题修复差异', exact: true }).waitFor({ state: 'detached' })
     await fixUi.getByRole('status').filter({ hasText: '已拒绝修复候选，正文未改变，问题仍待复查。' }).waitFor()
     assert.equal(JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).reviewIssues[fixIssue.id].state, 'open')
     assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
@@ -987,6 +1012,7 @@ try {
     realProviderModelReviewWithFixedSkillAndExactIssuePositions: liveModel,
     realProviderModelReviewPauseResumeKeepsChargedCallsAndBody: liveModel,
     realProviderIssueFixLocatePreviewCancelAndRejectKeepsBody: liveModel,
+    nativeCandidateEditCancelPublishRejectKeepsParentAndBody: liveModel,
     realProviderSectionCandidateAcceptWithClaimAnchors: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
     nativeUiManualParagraphClaimAssociation: true, renderedSelectionDisplaysCurrentClaims: true,
     nativeUiLegacyRunStorageMigrationKeepsAllBytes: true,
