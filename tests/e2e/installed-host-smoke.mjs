@@ -1323,6 +1323,38 @@ try {
     assert.equal(await readFile(join(recoveryRoot, '写作成果/paper.md'), 'utf8'), crashPlan.files.find(row => row.path === '写作成果/paper.md').text)
     assert.equal(await readFile(join(recoveryRoot, '原始资料.txt'), 'utf8'), 'TEST_ONLY 原始资料保持只读\r\n')
   }
+  // TEST_ONLY duplicate identity: diagnostics inspect only this workspace's
+  // owned originals. The other root stays untouched and writes stay blocked.
+  const copyRoot = resolve(`.dsh-tmp/项目身份副本 TEST_ONLY ${Date.now()}`), copyOriginals = new Map()
+  const copyConfig = parseYaml(await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8'))
+  for (const path of ['.scholarflow/project.yaml', '.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json', copyConfig.paths.mainDocument, copyConfig.paths.references]) {
+    const text = await readFile(join(projectRoot, path), 'utf8'); copyOriginals.set(path, text)
+    await mkdir(join(copyRoot, path, '..'), { recursive: true }); await writeFile(join(copyRoot, path), text)
+  }
+  await writeFile(join(copyRoot, '未选择资料.txt'), 'TEST_ONLY unselected copy material must not enter diagnostics\r\n')
+  const copyWorkspace = await rpc('workspace/create', { request: { path: copyRoot } }); assert.equal(copyWorkspace.ok, true)
+  await page.locator('.sf-project').getByRole('combobox', { name: 'DSH 工作区', exact: true }).selectOption(copyWorkspace.value.workspace.workspaceId)
+  await page.getByRole('button', { name: '新建 ScholarFlow 会话', exact: true }).click()
+  const copyReadonlyUi = page.getByRole('region', { name: '不兼容项目只读查看', exact: true }); await copyReadonlyUi.waitFor()
+  await copyReadonlyUi.getByRole('alert').filter({ hasText: 'PROJECT_ID_CONFLICT' }).waitFor()
+  const copySessionId = await page.locator('.sf-project').getAttribute('data-sf-session-id')
+  const copyContext = { requestId: 'req_TEST_ONLY_copy', workspaceId: copyWorkspace.value.workspace.workspaceId, sessionId: copySessionId, projectId: projectLedger.projectId,
+    expectedLedgerRevision: JSON.parse(copyOriginals.get('.scholarflow/data/ledger.json')).revision }
+  const conflict = await rpc('scholarflow.v1/project.inspect', { request: { context: copyContext } })
+  assert.equal(conflict.value.ok, true, JSON.stringify(conflict.value)); assert.equal(conflict.value.data.initialized, false)
+  assert.equal(conflict.value.data.identityConflict.copies[0].workspaceId, projectWorkspace.value.workspace.workspaceId)
+  assert.equal(conflict.value.data.readonly.originals.find(row => row.relativePath === copyConfig.paths.mainDocument).text, copyOriginals.get(copyConfig.paths.mainDocument))
+  assert.ok(!JSON.stringify(conflict.value.data).includes('TEST_ONLY unselected copy material'))
+  const copyDenied = await rpc('scholarflow.v1/document.saveManual', { request: { context: copyContext, text: 'TEST_ONLY copied project must not write', baseHash: digest(copyOriginals.get(copyConfig.paths.mainDocument)) } })
+  assert.equal(copyDenied.value.ok, false); assert.equal(copyDenied.value.error.code, 'PROJECT_ID_CONFLICT')
+  await assert.rejects(stat(join(copyRoot, '.scholarflow/tmp')), { code: 'ENOENT' })
+  const unregisterCopy = await rpc('workspace/delete', { request: { workspaceId: copyWorkspace.value.workspace.workspaceId } })
+  assert.equal(unregisterCopy.ok, true); assert.equal(unregisterCopy.value.deleted, true)
+  for (const [path, text] of copyOriginals) {
+    assert.equal(await readFile(join(copyRoot, path), 'utf8'), text); assert.equal(await readFile(join(projectRoot, path), 'utf8'), text)
+  }
+  const originalAfterConflict = await rpc('scholarflow.v1/project.inspect', { request: { context: { ...copyContext, workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId } } })
+  assert.equal(originalAfterConflict.value.ok, true); assert.equal(originalAfterConflict.value.data.initialized, true)
   const reset = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: originalType, ...originalDefaults }, expectedRevision: restored.value.settings[0].revision })
   assert.equal(reset.ok, true)
   assert.deepEqual(errors, [])
@@ -1366,6 +1398,7 @@ try {
     realCrossrefDoiIdentityMatchedWithoutEvidenceUpgrade: liveResearch,
     realMultiQueryPreviewCancelPauseResumeAndStableDoi: liveResearch,
     damagedConfigLedgerResourceLockAndTransactionOriginalsReadonly: true,
+    duplicateProjectIdentityReadonlyOriginalsMutationDenialAndRegistrationRemovalKeepBytes: true,
     nativeUiPrivateSkillMultiCandidateImport: true, cancelledSkillPreviewDoesNotInstall: true,
     privateSkillOriginalBytesAndInertScriptsPreserved: true, globalSkillCatalogNotModified: true,
     privateSkillVersionsSurviveReadOnlyHostRestart: true,

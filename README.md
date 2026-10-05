@@ -120,6 +120,7 @@ node tests/e2e/installed-host-smoke.mjs --live-skills
 - 本地证据链验证：[M2 local evidence](docs/m2-local-evidence-2026-10-04.md)
 - 编辑、审查与交付验证：[Editing and delivery](docs/editing-delivery-2026-10-05.md)
 - 私有库导入边界：[Private Skill storage](docs/decisions/private-skill-storage.md)
+- 重复项目身份的只读诊断：[Copy diagnostics](docs/decisions/project-copy-readonly-diagnostics.md)；独立身份重新绑定仍在开发中。
 - 历史验证：[integration-verification](docs/integration-verification.md)
 - 版本范围：[compatibility](docs/compatibility.md)
 

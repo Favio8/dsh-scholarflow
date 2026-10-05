@@ -35,17 +35,24 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
   const stat = await ctx.fs.stat(configTarget, signal)
   let projectId: string | undefined
   let bindingDiagnostic: { code: string; message: string } | undefined
+  const identityCopies: Array<{ workspaceId: string; rootFingerprint: string }> = []
   const checkCopies = async (identity: string) => {
+    const copies: typeof identityCopies = []
     for (const other of ctx.workspaceRegistry.list()) {
       if (other.id === workspace.id) continue
       const otherRoot = await ctx.fs.resolve(other.path, { signal })
-      if (ctx.fs.processPath(otherRoot) === root) continue
+      const otherPath = ctx.fs.processPath(otherRoot)
+      if (process.platform === 'win32' ? otherPath.toLowerCase() === root.toLowerCase() : otherPath === root) continue
       const otherConfig = await ctx.fs.resolve(`${other.path}/.scholarflow/project.yaml`, { signal })
       if (!ctx.fs.contains(otherRoot, otherConfig) || !await ctx.fs.stat(otherConfig, signal)) continue
       let candidate
       try { candidate = parseConfig(await ctx.fs.readText(otherConfig, signal)) } catch { continue }
-      invariant(candidate.project.id !== identity, 'PROJECT_ID_CONFLICT', '同一宿主存在项目身份相同的副本，请先为副本建立独立身份。')
+      if (candidate.project.id === identity) copies.push({ workspaceId: other.id,
+        rootFingerprint: digest(process.platform === 'win32' ? otherPath.toLowerCase() : otherPath) })
     }
+    invariant(readonlyFuture || !copies.length, 'PROJECT_ID_CONFLICT', '同一宿主存在项目身份相同的副本，请先为副本建立独立身份。')
+    identityCopies.splice(0, identityCopies.length, ...copies)
+    if (copies.length) bindingDiagnostic = { code: 'PROJECT_ID_CONFLICT', message: '同一宿主注册了身份相同的另一份项目。当前工作区仅可查看原文件；须明确选择要绑定为副本的工作区，再建立独立身份。' }
   }
   if (stat) {
     let configText = ''
@@ -111,7 +118,7 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
   if (!readonlyFuture && projectId && !(await inspectRecovery(io, manuscriptDir)).pending.length) {
     const current = await snapshot(io); await readBindings(io, current.config)
   }
-  return { io, binding, manuscriptDir, bindingDiagnostic }
+  return { io, binding, manuscriptDir, bindingDiagnostic, identityCopies }
 }
 
 export async function applicationResult<T>(operation: () => Promise<T>) {
@@ -127,8 +134,10 @@ export async function applicationResult<T>(operation: () => Promise<T>) {
 
 export async function inspectProject(ctx: Host, request: unknown, signal: AbortSignal) {
   const { context } = inspectRequest.parse(request)
-  const { io, binding, manuscriptDir, bindingDiagnostic } = await resolveStore(ctx, context, signal, undefined, true)
-  if (bindingDiagnostic) return { binding, initialized: false, metadataExists: true, readonly: await inspectDamagedProject(io, bindingDiagnostic) }
+  const { io, binding, manuscriptDir, bindingDiagnostic, identityCopies } = await resolveStore(ctx, context, signal, undefined, true)
+  if (bindingDiagnostic) return { binding, initialized: false, metadataExists: true,
+    ...(identityCopies.length && { identityConflict: { projectId: binding.projectId, workspaceId: binding.workspaceId, copies: identityCopies } }),
+    readonly: await inspectDamagedProject(io, bindingDiagnostic) }
   try {
     const compatibility = await inspectCompatibility(io)
     if (compatibility) return { binding, initialized: false, metadataExists: true, readonly: compatibility }

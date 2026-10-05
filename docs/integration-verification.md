@@ -1131,6 +1131,14 @@ host Service.listService  { service: "agentPresets" }      # 精确签名与引�
 
 ## 附录 A：G0 期间产生的副作用与清理
 
+2026-10-05 补充：真实安装宿主验证重复 `projectId` 的两个独立 TEST_ONLY
+工作区。当前副本只读 UI 显示原始配置、ledger、资源锁、正文及 BibTeX；
+普通正文写入返回 `PROJECT_ID_CONFLICT`，诊断未创建 `.scholarflow/tmp`。
+通过官方 `workspace/delete` 移除测试注册后，原项目恢复正常读取，两个根
+目录的所有已检查文件保持逐字一致。此动作只移除注册，不删除文件或会话。
+对应证据字段：`duplicateProjectIdentityReadonlyOriginalsMutationDenialAndRegistrationRemovalKeepBytes`。
+这项验证不代表“绑定为副本”已实现；身份变更和旧运行归档仍在开发中。
+
 | 副作用 | 处置 |
 |---|---|
 | desktop profile 组合新增 `dsh-scholarflow` bundle | **保留**（G0-01 验收对象）；安装前已备份 4 个控制文件并记录 SHA-256；回滚脚本见 `scripts/rollback-profile.ps1` |
