@@ -1,0 +1,5 @@
+[
+  { "type": "course-paper", "title": "TEST_ONLY 课程练习：证据层次", "question": "如何在本练习中区分身份、定位和支持范围？", "limitation": "仅讨论一份本地教学说明，出版身份与论证质量仍待核对。" },
+  { "type": "literature-review", "title": "TEST_ONLY 有限资料综述练习", "question": "现有练习资料对证据层次作了哪些区分？", "limitation": "只有一份教学资料，不是系统检索结果或完整学术综述。" },
+  { "type": "research-paper", "title": "TEST_ONLY 研究计划待补练习", "question": "没有独立实验记录时如何呈现研究计划与证据边界？", "limitation": "实验未开展，没有用户实测、结果或效果数据。" }
+]

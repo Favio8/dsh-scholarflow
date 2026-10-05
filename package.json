@@ -24,6 +24,7 @@
     "dist",
     "cordis.patch.yml",
     "README.md",
+    "examples/local-evidence",
     "presets",
     "academic-skills"
   ],

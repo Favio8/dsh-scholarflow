@@ -24,6 +24,9 @@ const prefix = (sequenceId: string) => {
   return `.scholarflow/runs/${sequenceId}`
 }
 const terminal = (checkpoint: DraftSequenceCheckpoint) => ['cancelled', 'completed-with-issues'].includes(checkpoint.status)
+// Match the existing generation executor's output default. Old immutable
+// inputs remain untouched; only this absent field has a known default.
+const sequenceModel = (model: DraftSequenceInput['model']) => ({ ...model, maxOutputTokens: model.maxOutputTokens ?? 16384 })
 async function scope(io: FileStore, skillReader?: SkillReader) {
   const observed = await reviewInput(io), { current, materialHashes } = observed
   const contextHashes: Record<string, string> = {}
@@ -76,7 +79,7 @@ async function acceptedChild(io: FileStore, stored: Awaited<ReturnType<typeof re
   invariant(run.run.planHash === step.childPlanHash && frozen.plan.contentHash === step.childPlanHash &&
     frozen.plan.input.sectionId === step.sectionId && frozen.plan.snapshot.documentHash === checkpoint.expectedDocumentHash &&
     frozen.plan.snapshot.workflowId === stored.input.workflowId && frozen.plan.snapshot.draftSequenceId === stored.input.sequenceId &&
-    json(frozen.plan.snapshot.modelDescriptor) === json(stored.input.model), 'DRAFT_SEQUENCE_INVALID', '章节运行与确认顺序不一致，未采用其进度。')
+    json(frozen.plan.snapshot.modelDescriptor) === json(sequenceModel(stored.input.model)), 'DRAFT_SEQUENCE_INVALID', '章节运行与确认顺序不一致，未采用其进度。')
   const pendingProposalIds: string[] = [], accepted: Awaited<ReturnType<typeof proposalImage>>[] = []
   const states = Object.values(stored.current.ledger.proposalStates)
   invariant(states.length <= 1000, 'DRAFT_SEQUENCE_HISTORY_LIMIT', '建议历史超过读取限额，未猜测章节进度。')
@@ -160,7 +163,7 @@ export async function prepareDraftSequence(io: FileStore, request: z.infer<typeo
   const workflowId = await workflowAssociation(io)
   invariant(workflowId, 'DRAFT_SEQUENCE_WORKFLOW_REQUIRED', '先在概览确认引导目标和累计预算，再开始多节初稿。')
   const input = draftSequenceInputSchema.parse({ schemaVersion: 1, sequenceId: newId('draft'), projectId: current.ledger.projectId,
-    sessionId: request.context.sessionId, instruction: request.instruction, scopeHash: observed.scopeHash, model, workflowId,
+    sessionId: request.context.sessionId, instruction: request.instruction, scopeHash: observed.scopeHash, model: sequenceModel(model), workflowId,
     initialDocumentHash: current.document.contentHash, initialRevisionId: current.document.revisionId, createdAt: new Date().toISOString(), sections, skillDigests: observed.skillDigests })
   const body = { id: newId('draft_plan'), action: 'start' as const, input, ledgerHash: current.ledgerHash, pointerHash: pointer ? digest(pointer.text) : null }
   return { ...body, contentHash: digest(json(body)) }

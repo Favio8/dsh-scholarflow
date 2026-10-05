@@ -15,7 +15,7 @@ import { parseRegisteredMaterial } from '../../src/core/materials/parse.ts'
 import { parseMaterialBytes } from '../../src/host/parsers/parse.ts'
 import { registerSource, confirmEvidence, upsertClaim, confirmOutline } from '../../src/core/evidence/evidence.ts'
 import { recover } from '../../src/core/store/transactions.ts'
-import { type FileImage } from '../../src/core/store/files.ts'
+import { type FileImage, digest, json } from '../../src/core/store/files.ts'
 const model = { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY', maxOutputTokens: 16384 }
 const owner = { pid: 1, bootInstance: 'TEST_ONLY' }, signal = () => new AbortController().signal
 async function context(io: MemoryStore, sessionId = 'session_TEST_ONLY') {
@@ -111,6 +111,32 @@ test('each evidenced section receives the actual accepted body; both paid dispat
   }))
   await applyDraftSequenceAction(io, await action(io, sequenceId, 'next'))
   assert.equal(calls, 2); assert.equal((await workflowBudgetInfo(io))!.used!.modelCalls, 2)
+})
+
+test('old sequences without an output-token field use the known generation default after cold acceptance without rewriting immutable input or renewing calls', async () => {
+  const { io, citeKey, claimIds } = await setup({ evidence: true }), sequenceId = await begin(io)
+  const prefix = `.scholarflow/runs/${sequenceId}`, stored = await readDraftSequence(io, sequenceId)
+  // TEST_ONLY earlier optional-field representation, with all original hashes
+  // made coherent before execution. It does not alter a live user project.
+  const oldInput = structuredClone(stored.input); delete oldInput.model.maxOutputTokens
+  const oldText = json(oldInput), { contentHash: _hash, ...planBody } = JSON.parse((await io.read(`${prefix}/plan.json`))!.text)
+  planBody.inputHash = digest(oldText); const oldPlanHash = digest(json(planBody))
+  const checkpoint = { ...stored.checkpoint, inputHash: digest(oldText), planHash: oldPlanHash }, checkpointText = json(checkpoint)
+  const run = { ...JSON.parse(stored.record.text), inputHash: digest(oldText), planHash: oldPlanHash, checkpointHash: digest(checkpointText) }
+  for (const [path, text] of [[`${prefix}/input.json`, oldText], [`${prefix}/plan.json`, json({ ...planBody, contentHash: oldPlanHash })],
+    [`${prefix}/checkpoint.json`, checkpointText], [`${prefix}/run.json`, json(run)]]) io.externalEdit(path, text)
+  const first = await dispatch(io, sequenceId)
+  assert.equal(first.snapshot.modelDescriptor.maxOutputTokens, 16384)
+  await accept(io, await execute(io, first, async (request: any) => {
+    assert.equal(request.maxTokens, 16384)
+    return json({ replacementText: `TEST_ONLY 缺失结果仍保留 [@${citeKey}]。`, sectionId: 'sec_body', paragraphClaims: [{ paragraphIndex: 0, claimIds }], limitations: ['真实结果待补'] })
+  }))
+  const cold = new MemoryStore(Object.fromEntries([...io.files].map(([path, file]) => [path, file.text])))
+  const second = await action(cold, sequenceId, 'next')
+  assert.equal(second.generation!.input.sectionId, 'sec_summary'); assert.equal(second.generation!.snapshot.modelDescriptor.maxOutputTokens, 16384)
+  await applyDraftSequenceAction(cold, second)
+  assert.equal((await cold.read(`${prefix}/input.json`))!.text, oldText)
+  assert.equal((await workflowBudgetInfo(cold))!.used!.modelCalls, 1)
 })
 test('rejecting a chapter never advances or automatically retries it, and cancellation preserves both the proposal and body', async () => {
   const { io } = await setup(), sequenceId = await begin(io), result = await execute(io, await dispatch(io, sequenceId)), before = (await snapshot(io)).document.text
