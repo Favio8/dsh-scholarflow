@@ -29,14 +29,14 @@ export async function reviewInput(io: FileStore) {
     materialHashes, contextHashes, reviewProfileHash: profile ? digest(profile.text) : 'missing' })) }
 }
 
-export async function inspectReview(io: FileStore) {
+export async function inspectReview(io: FileStore, observedInput?: Awaited<ReturnType<typeof reviewInput>>) {
   const reference = await io.read(CURRENT)
   if (!reference) return { report: undefined, stale: true }
   const pointer = JSON.parse(reference.text)
   invariant(typeof pointer.reviewId === 'string' && /^review_[\w]+$/.test(pointer.reviewId), 'REVIEW_INVALID', '当前审查索引损坏。')
   const file = await io.read(`.scholarflow/reviews/${pointer.reviewId}/report.json`)
   invariant(file && digest(file.text) === pointer.reportHash, 'REVIEW_INVALID', '审查快照缺失或已被修改。')
-  const report = reviewReportSchema.parse(JSON.parse(file.text)), input = await reviewInput(io)
+  const report = reviewReportSchema.parse(JSON.parse(file.text)), input = observedInput ?? await reviewInput(io)
   invariant(report.projectId === input.current.ledger.projectId, 'PROJECT_ID_CONFLICT', '审查不属于当前项目。')
   return { report, stale: report.dependencyHash !== input.dependencyHash || input.current.document.externalChange,
     issues: Object.values(input.current.ledger.reviewIssues).filter(issue => issue.reviewId === report.id),

@@ -947,6 +947,39 @@ try {
     assert.equal(disableAgain.ok, true)
     await page.getByRole('tab', { name: /^Export ·/ }).click()
   }
+  // TEST_ONLY: actual operator workflow previews, ordered facts and cold pause.
+  // This manuscript lacks its confirmed outline headings; it must remain blocked.
+  await page.getByRole('tab', { name: /^Overview ·/ }).click()
+  const workflowUi = page.getByRole('region', { name: '七阶段引导任务', exact: true })
+  const beforeWorkflowLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  await workflowUi.getByRole('textbox', { name: '引导研究问题', exact: true }).fill(beforeWorkflowLedger.outline.researchQuestion)
+  await workflowUi.getByRole('spinbutton', { name: '引导最低来源数', exact: true }).fill('2')
+  await workflowUi.getByRole('button', { name: '预览七阶段目标', exact: true }).click()
+  await workflowUi.getByRole('button', { name: '取消引导预览', exact: true }).click()
+  await assert.rejects(stat(join(projectRoot, '.scholarflow/workflows/current.json')), { code: 'ENOENT' })
+  await workflowUi.getByRole('button', { name: '预览七阶段目标', exact: true }).click()
+  await workflowUi.getByRole('button', { name: '确认保存引导检查点', exact: true }).click()
+  await workflowUi.getByRole('button', { name: '预览确认要求确认', exact: true }).click()
+  await workflowUi.getByRole('button', { name: '确认保存引导检查点', exact: true }).click()
+  await workflowUi.getByRole('textbox', { name: '引导阶段决定理由', exact: true }).fill('TEST_ONLY 当前证据数量目标不足，保留不足与旧问题，不宣称论文已完成。')
+  await workflowUi.getByRole('button', { name: '预览确认检索与证据', exact: true }).click()
+  await workflowUi.getByRole('button', { name: '确认保存引导检查点', exact: true }).click()
+  await workflowUi.getByRole('button', { name: '预览确认大纲', exact: true }).click()
+  await workflowUi.getByRole('button', { name: '确认保存引导检查点', exact: true }).click()
+  assert.equal(await workflowUi.getByRole('button', { name: '预览确认初稿', exact: true }).isEnabled(), false)
+  assert.equal(await workflowUi.getByRole('button', { name: '预览结束七阶段交付', exact: true }).isEnabled(), false)
+  await workflowUi.getByRole('button', { name: '前往初稿', exact: true }).click()
+  assert.equal(await page.getByRole('tab', { name: /^Draft ·/ }).getAttribute('aria-selected'), 'true')
+  await page.getByRole('tab', { name: /^Overview ·/ }).click()
+  await workflowUi.getByRole('button', { name: '预览暂停引导任务', exact: true }).click()
+  await workflowUi.getByRole('button', { name: '确认保存引导检查点', exact: true }).click()
+  await workflowUi.getByRole('status').filter({ hasText: 'paused' }).waitFor()
+  const pausedWorkflowPointer = JSON.parse(await readFile(join(projectRoot, '.scholarflow/workflows/current.json'), 'utf8'))
+  const pausedWorkflowCheckpoint = JSON.parse(await readFile(join(projectRoot, `.scholarflow/runs/${pausedWorkflowPointer.workflowId}/checkpoint.json`), 'utf8'))
+  assert.equal(pausedWorkflowCheckpoint.stamps.length, 3); assert.equal(pausedWorkflowCheckpoint.stamps[1].outcome, 'insufficient')
+  assert.deepEqual(JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).reviewIssues, beforeWorkflowLedger.reviewIssues)
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+  await page.getByRole('tab', { name: /^Export ·/ }).click()
   // Tabs keep editor state mounted; keyboard navigation has a single tab stop.
   const exportTab = page.getByRole('tab', { name: /^Export ·/ })
   await exportTab.focus(); await exportTab.press('Home')
@@ -1031,6 +1064,12 @@ try {
   assert.equal(Object.values(cold.value.data.ledger.claims)[0].status, 'partially-supported')
   assert.equal(cold.value.data.ledger.outline.confirmation, 'confirmed')
   assert.equal(cold.value.data.document.text, manualBody)
+  const coldWorkflow = await rpc('scholarflow.v1/workflow.inspect', { request: { context: { requestId: 'req_TEST_ONLY_workflow_cold',
+    workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
+  assert.equal(coldWorkflow.value.ok, true, JSON.stringify(coldWorkflow.value))
+  assert.equal(coldWorkflow.value.data.workflow.checkpoint.status, 'paused')
+  assert.equal(coldWorkflow.value.data.workflow.checkpoint.stamps.length, 3)
+  assert.equal(coldWorkflow.value.data.workflow.gates[2].current, true)
   const coldBuffer = await rpc('scholarflow.v1/editor.bufferRead', { request: { context: { requestId: 'req_TEST_ONLY_buffer_cold', workspaceId: projectWorkspace.value.workspace.workspaceId,
     sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
   assert.equal(coldBuffer.value.ok, true)
@@ -1114,6 +1153,7 @@ try {
     nativeUiPrivateProfileImportCancelVersionExportAndProjectCopy: true, oldProfileBytesAndProjectCopyPreservedAcrossRestart: true,
     twoSessionProjectRestore: true, coldProjectBindingRestore: true, mismatchedBindingRejected: true,
     nativeUiInterruptedInitRecovery: true,
+    nativeWorkflowPreviewCancelOrderedFactsInsufficiencyPauseAndColdRestore: true,
     nativeFutureSchemasReadonlyOriginalDownloadsAndMutationDenial: true,
     nativeUiMaterialParseEvidenceClaimOutline: true, evidenceChainColdRestore: true,
     nativeUiOutlineEditReorderDraftCancelDeleteAndConfirm: true,

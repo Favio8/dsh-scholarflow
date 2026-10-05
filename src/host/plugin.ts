@@ -21,6 +21,8 @@ import { saveManual, rejectProposal, undoRevision, proposalImage } from '../core
 import { wordStats } from '../core/editing/markdown.ts'
 import { generationRequest, runStartRequest, runControlRequest, runStateSchema } from '../shared/runs.ts'
 import { prepareGeneration, executeGeneration, type GenerationPlan } from '../core/pipeline/generation.ts'
+import { workflowPrepareRequest, workflowActionRequest } from '../shared/workflow.ts'
+import { currentWorkflow, prepareWorkflow, startWorkflow, prepareWorkflowAction, applyWorkflowAction, type WorkflowStartPlan, type WorkflowActionPlan } from '../core/pipeline/workflow.ts'
 import { selectedModel, callStageModel } from './executor/model.ts'
 import { runReview, inspectReview, decideIssue } from '../core/review/review.ts'
 import { prepareDelivery, createDelivery, readDelivery, type DeliveryPlan } from '../core/export/delivery.ts'
@@ -80,6 +82,7 @@ const mutationRevision = (context: RequestContext) => {
 
 export class ScholarFlowRemote extends TypertRemoteService {
   private initPlans = new Map<string, StoredInitPlan>()
+  private workflowPlans = new Map<string, { plan: WorkflowStartPlan | WorkflowActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
   private recoveryPlans = new Map<string, { context: StoredInitPlan['context']; peerId: string; hash: string; expires: number }>()
   private generationPlans = new Map<string, { plan: GenerationPlan; peerId: string; expires: number; selected: { provider: string; model: string; reasoningEffort?: string } }>()
   private running = new Map<string, { controller: AbortController; context: RequestContext; pauseRequested: boolean }>()
@@ -114,12 +117,65 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => () => this.proposalRevisionPlans.clear(), 'scholarflow: clear operator candidate previews')
     ctx.effect(() => () => this.sourceRegistrationPlans.clear(), 'scholarflow: clear source registration previews')
     ctx.effect(() => () => this.researchBatchPlans.clear(), 'scholarflow: clear multi-query previews')
+    ctx.effect(() => () => this.workflowPlans.clear(), 'scholarflow: clear workflow previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
       timer.unref()
       return () => { clearInterval(timer); this.skillPlans.clear(); this.skillSources.clear(); this.githubSources.clear(); this.bindingPlans.clear(); this.retirementPlans.clear(); this.runMigrationPlans.clear(); this.runActionPlans.clear(); this.profilePlans.clear(); this.profileCopyPlans.clear(); this.manualReviewPlans.clear(); this.modelReviewPlans.clear(); this.modelReviewActions.clear() }
     }, 'scholarflow: expire operator skill previews')
+  }
+
+  @Remote('workflow.inspect')
+  async workflowInspect(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal); return currentWorkflow(io) })
+  }
+
+  @Remote('workflow.prepare')
+  async workflowPrepare(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = workflowPrepareRequest.parse(request)
+      mutationRevision(input.context); this.pruneSkills()
+      invariant(this.workflowPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先确认或取消已有引导任务预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io)
+      invariant(current.ledger.revision === input.context.expectedLedgerRevision, 'STALE_LEDGER_REVISION', '项目已更新，请刷新后预览引导目标。')
+      const plan = await prepareWorkflow(io, input.goal, input.context.sessionId)
+      this.workflowPlans.set(plan.id, { plan, action: false, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, goal: plan.goal, gates: plan.gates, workflowId: plan.workflowId }
+    })
+  }
+
+  @Remote('workflow.prepareAction')
+  async workflowPrepareAction(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = workflowActionRequest.parse(request)
+      mutationRevision(input.context); this.pruneSkills()
+      invariant(this.workflowPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有引导任务预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io)
+      invariant(current.ledger.revision === input.context.expectedLedgerRevision, 'STALE_LEDGER_REVISION', '项目已更新，请刷新后预览阶段操作。')
+      const plan = await prepareWorkflowAction(io, input)
+      this.workflowPlans.set(plan.id, { plan, action: true, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, action: plan.action, stage: plan.stage, reason: plan.reason, gate: plan.gate }
+    })
+  }
+
+  @Remote('workflow.confirm')
+  async workflowConfirm(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = onlineConfirmRequest.parse(request), row = this.workflowPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '引导任务操作需要有效的操作者预览。')
+      invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.context.projectId,
+        'SESSION_BINDING_CHANGED', '引导任务确认的会话或项目发生变化。')
+      const { io } = await resolveStore(this.ctx, row.context, signal)
+      const result = row.action ? await applyWorkflowAction(io, row.plan as WorkflowActionPlan) : await startWorkflow(io, row.plan as WorkflowStartPlan)
+      this.workflowPlans.delete(input.planId); return result
+    })
+  }
+
+  @Remote('workflow.dismiss')
+  async workflowDismiss(request: unknown, _signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), { planId } = z.object({ planId: z.string().max(200) }).strict().parse(request)
+      const row = this.workflowPlans.get(planId); invariant(row && row.peerId === peerId, 'INVALID_APPROVAL', '只可取消自己的引导任务预览。')
+      this.workflowPlans.delete(planId); return { dismissed: true }
+    })
   }
 
   @Remote('project.inspect')
@@ -281,6 +337,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   }
 
   private pruneSkills() {
+    for (const [key, row] of this.workflowPlans) if (row.expires < Date.now()) this.workflowPlans.delete(key)
     for (const [key, row] of this.researchBatchPlans) if (row.expires < Date.now()) this.researchBatchPlans.delete(key)
     for (const [key, row] of this.sourceRegistrationPlans) if (row.expires < Date.now()) this.sourceRegistrationPlans.delete(key)
     for (const [key, row] of this.proposalRevisionPlans) if (row.expires < Date.now()) this.proposalRevisionPlans.delete(key)
