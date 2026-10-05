@@ -113,6 +113,10 @@ pnpm test
 node tests/e2e/installed-host-smoke.mjs
 # 可选：使用现有 Host 凭据服务发起有限真实模型测试（会产生提供方费用）
 node tests/e2e/installed-host-smoke.mjs --live-model
+# 可选：三类 TEST_ONLY 教学论文，真实模型、每目标最多8次调用、模型会话重启恢复
+node tests/e2e/installed-paper-types.mjs --live-model
+# 失败后显式继续相同测试目录；已接受章节不重放，原额度和失败调用保留
+# node tests/e2e/installed-paper-types.mjs --live-model --resume=.dsh-tmp/paper-types/<timestamp>
 # 可选：真实 Crossref 查询和 DOI 核验，不调用模型，不读取模型凭据
 node tests/e2e/installed-host-smoke.mjs --live-research
 # 可选：真实公开 GitHub Skill 导入，不调用模型，不执行导入资源
@@ -137,6 +141,7 @@ node tests/e2e/installed-host-smoke.mjs --live-skills
 - 五项全文审查与旧检查点范围：[Cross-section review](docs/decisions/cross-section-review-scope.md)。术语、贡献和摘要／结论分别保留依据与未知项，修复使用正常建议流程。
 - 历史验证：[integration-verification](docs/integration-verification.md)
 - 版本范围：[compatibility](docs/compatibility.md)
+- 模型所属会话的真实重启恢复：[Persistable stage audit](docs/decisions/restorable-stage-audit.md)
 
 Core 不依赖 DSH、React 或模型 SDK。Markdown 为唯一正文，原始资料只读；
 AI 修改须先生成建议、由用户接受后再受控写入。无证据和未做实验不能宣称完成。

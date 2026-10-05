@@ -155,6 +155,29 @@ test('model review gets one format repair, never creates fake completion, and ca
   assert.equal((await inspectReview(other.io)).report, undefined)
 })
 
+test('the only repair explains a real structure-finding versus argument-pass contradiction without dropping the finding', async () => {
+  const { io, plan } = await setup(), original = (await snapshot(io)).document.text
+  const candidate = output(plan)
+  candidate.checks[0].status = 'pass'
+  candidate.checks.find(row => row.id === 'contribution_consistency')!.status = 'fail'
+  candidate.findings[0].category = 'structure'
+  candidate.findings[0].assessmentId = 'contribution_consistency'
+  let calls = 0
+  const result = await execute(io, plan, async (call: any) => {
+    if (++calls === 1) return json(candidate)
+    assert.match(call.repair, /具体违反合同：MODEL_REVIEW_INVALID/u)
+    assert.match(call.repair, /structure、requirement、integrity/u)
+    assert.match(call.repair, /不得删除真实问题/u)
+    candidate.checks[0].status = 'fail'
+    return json(candidate)
+  })
+  assert.equal(calls, 2); assert.equal(result.run.usedModelCalls, 2)
+  assert.equal(result.report!.checks.find(row => row.id === 'argument_assessment')!.status, 'fail')
+  assert.ok(result.report!.issues.some(row => row.category === 'structure' && row.location?.quote === quote))
+  assert.equal((await snapshot(io)).document.text, original)
+  assert.ok((await readModelReviewCheckpoint(io, result.run)).checkpoint.repair!.length <= 2000)
+})
+
 test('a validated review output survives pause and resume without another paid call or downtime budget renewal', async () => {
   const { io, plan } = await setup(); let paused = false
   const first = await execute(io, plan, async () => { paused = true; return json(output(plan)) }, () => paused)

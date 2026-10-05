@@ -1,5 +1,11 @@
 # 兼容性记录（ScholarFlow × DSH）
 
+2026-10-05 模型会话冷恢复修正：rc.2 live Session 能接受未知事件名，
+持久化读取却会拒绝未标记 ignorable 的插件事件；其 append 可选参数不支持写该标记。
+阶段审计现使用公共 user/message 与明确插件来源，保持请求／结果持久屏障，
+不排队或唤醒 AgentLoop。三类真实模型样例已验证模型所属会话重启后继续摘要，
+先前拒绝的会话日志不被改写；见 [审计兼容决定](decisions/restorable-stage-audit.md)。
+
 2026-10-05 项目静态资源创建补充：rc.2 的公共 fs seam 没有 writeBytes。
 本插件仅在实际后端暴露 checkedTarget 路径校验、当前会话允许写入时，
 使用受限的原生独占创建适配器保存新 Skill 字节；缺少该后端能力时明确拒绝。
