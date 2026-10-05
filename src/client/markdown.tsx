@@ -8,7 +8,7 @@ export function MarkdownView({ projection }: { projection: Projection }) {
     const children = node.children?.map((child, index) => render(child, `${key}_${index}`))
     if (node.type === 'text') return <React.Fragment key={key}>{node.leafIds?.map(id => { const leaf = leaves.get(id)!; return <span key={id} data-sf-leaf={id} title={leaf.citationKeys ? leaf.citationKeys.map(key => `[@${key}]`).join('; ') : undefined}>{leaf.text}</span> })}</React.Fragment>
     if (node.type === 'root') return <React.Fragment key={key}>{children}</React.Fragment>
-    if (node.type === 'paragraph') return <p key={key} data-sf-block={node.blockId} style={{ whiteSpace: 'pre-wrap' }}>{children}</p>
+    if (node.type === 'paragraph') return <p key={key} data-sf-block={node.blockId} tabIndex={-1} style={{ whiteSpace: 'pre-wrap' }}>{children}</p>
     if (node.type === 'heading') return React.createElement(`h${node.depth ?? 2}`, { key, 'data-sf-heading-offset': node.position?.start.offset, tabIndex: -1 }, children)
     if (node.type === 'strong') return <strong key={key}>{children}</strong>
     if (node.type === 'emphasis') return <em key={key}>{children}</em>

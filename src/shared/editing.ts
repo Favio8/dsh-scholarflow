@@ -14,8 +14,10 @@ export const selectionSchema = z.object({ projectId: id, documentId: id, documen
 export const proposalSchema = z.object({ schemaVersion: z.literal(1), id, projectId: id, runId: id, documentId: id,
   baseDocumentHash: hash, baseRevisionId: id, scope: z.enum(['selection', 'section', 'document']), instruction: z.string().min(1).max(16000), selection: selectionSchema.optional(),
   section: sectionCandidateSchema.optional(),
+  reviewIssue: z.object({ issueId: id, issueHash: hash }).strict().optional(),
   edits: z.array(z.object({ startUtf16: z.number().int().min(0), endUtf16: z.number().int().min(0), expectedText: z.string(), replacementText: z.string() }).strict()).min(1).max(100),
   citationChanges: z.object({ added: z.array(z.string()), removed: z.array(z.string()) }).strict(), protectedFactChanges: z.array(z.string()), dependentEvidenceIds: z.array(id),
   checks: z.array(z.object({ id: z.string(), status: z.enum(['pass', 'fail', 'unknown']), detail: z.string() }).strict()), createdAt: z.string() }).strict()
+  .refine(value => !value.reviewIssue || value.scope === 'selection' && value.selection?.scope === 'paragraph' && !value.section, 'Issue fixes require a complete paragraph selection')
 export type SelectionPayload = z.infer<typeof selectionSchema>
 export type EditProposal = z.infer<typeof proposalSchema>

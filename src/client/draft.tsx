@@ -12,7 +12,7 @@ function readLocalBuffer(key: string) {
     if (value && typeof value.text === 'string' && value.text.length <= 2 * 1024 * 1024 && /^sha256:[0-9a-f]{64}$/.test(value.baseHash)) return value as { text: string; baseHash: string }
   } catch { /* Host temporary buffer remains available when browser storage fails. */ }
 }
-export function Draft({ project, context, api, refresh, run, busy }: Props) {
+export function Draft({ project, context, api, refresh, run, busy, issueLocation }: Props & { issueLocation?: any }) {
   const projectId = project.binding.projectId
   const bufferKey = `sf-editor:${projectId}:${project.binding.sessionId}`
   const cached = buffers.get(bufferKey) ?? readLocalBuffer(bufferKey)
@@ -34,6 +34,11 @@ export function Draft({ project, context, api, refresh, run, busy }: Props) {
   const [bufferReady, setBufferReady] = useState(false), [bufferMessage, setBufferMessage] = useState('正在读取宿主暂存缓冲…'), [recoverable, setRecoverable] = useState<any>()
   const bufferHash = useRef<string | null>(null), hostDirty = useRef(false), persistence = useRef(Promise.resolve()), persistenceBlocked = useRef(false)
   const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!issueLocation || issueLocation.projectId !== projectId || issueLocation.documentHash !== project.document.contentHash) return
+    const block = root.current?.querySelector<HTMLElement>(`[data-sf-block="${CSS.escape(issueLocation.location.blockId)}"]`)
+    if (block) { block.scrollIntoView({ block: 'center' }); block.focus(); setMessage(`已定位当前正文问题 ${issueLocation.issueId}；未保存缓冲保持原样。`) }
+  }, [issueLocation?.request])
   useEffect(() => {
     let live = true
     api('runs.list', { context: context() }).then(result => live && setHistory(result)).catch(error => live && setMessage(error.message))

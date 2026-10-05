@@ -25,6 +25,9 @@ export function ModelReview({ project, context, api, refresh, run, busy, onRevie
     setActive(running); setProgress(undefined); setMessage('正在登记审查运行与输入检查点。'); setPlan(undefined); setActionPlan(undefined)
     try { const result = await api(action ? 'review.confirmAction' : 'review.startModel', { context: captured, planId: preview.planId, planHash: preview.planHash })
       if (liveBinding.current === scope) { onReview(result); setMessage(result.paused ? '审查已暂停，冻结输入与已计费调用保留；继续前须预览恢复。' : `模型审查 ${result.run.runId} · ${result.run.status} · 调用 ${result.run.usedModelCalls} 次`); await refresh() }
+    } catch (error) {
+      if (liveBinding.current === scope) setMessage('审查未完成；历史保留实际终态与计费次数。可刷新后预览关联重试，正文未由审查改变。')
+      throw error
     } finally { if (liveBinding.current === scope) { setActive(undefined); setHistoryVersion(value => value + 1) } }
   })
   const rows = history?.runs.filter((row: any) => row.stage === 'review') ?? []

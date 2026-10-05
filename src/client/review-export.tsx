@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { ModelReview } from './model-review.tsx'
+import { ReviewFixes } from './review-fixes.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
-export function ReviewExport({ project, context, api, refresh, run, busy, mode }: Props & { mode: string }) {
+export function ReviewExport({ project, context, api, refresh, run, busy, mode, onLocate }: Props & { mode: string; onLocate: (location: any) => void }) {
   const [review, setReview] = useState<any>(), [plan, setPlan] = useState<any>(), [message, setMessage] = useState('')
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [manualCheck, setManualCheck] = useState(''), [manualStatus, setManualStatus] = useState('unknown'), [manualReason, setManualReason] = useState('')
@@ -43,6 +44,7 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode }
       {issues.map(issue => <section key={issue.id} aria-label={`审查问题 ${issue.id}`}><h4>{issue.severity} · {issue.title}</h4>
         <p>{issue.checkMethod} · {issue.state} · {issue.stale ? '需更新' : '当前'} · {issue.explanation}</p>
         {issue.location && <blockquote>位置：{issue.location.sourceRange.startUtf16}–{issue.location.sourceRange.endUtf16}<br />{issue.location.quote}</blockquote>}
+        {issue.location && <button disabled={busy || issue.stale || issue.documentHash !== project.document.contentHash} onClick={() => run(async () => onLocate(await api('review.locateIssue', { context: context(), issueId: issue.id })))}>定位正文问题 {issue.id}</button>}
         {issue.suggestedFix && <p>修订建议：{issue.suggestedFix}</p>}
         {issue.resolutionReason && <p>处理理由：{issue.resolutionReason}</p>}
         {issue.state !== 'resolved' && <><label>处理理由<input aria-label={`处理理由 ${issue.id}`} value={reasons[issue.id] ?? ''} onChange={e => setReasons({ ...reasons, [issue.id]: e.target.value })} maxLength={2000} /></label>
@@ -50,6 +52,7 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode }
             await api('review.decideIssue', { context: context(), issueId: issue.id, state, reason: reasons[issue.id] }); await refresh()
           })}>{state === 'accepted-risk' ? '记录接受风险' : '记录不采纳理由'}</button>)}</>}
       </section>)}
+      <ReviewFixes project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} />
     </section>
     <section id="sf-panel-Export" role="tabpanel" aria-labelledby="sf-tab-Export" hidden={mode !== 'Export'} aria-label="导出"><h3>导出</h3><p>支持 Markdown、BibTeX 和质量报告。每次创建独立交付快照，保持主稿不变。</p>
       <button disabled={busy || project.document.externalChange} onClick={() => run(async () => setPlan(await api('export.preflight', { context: context() })))}>预检当前版本导出</button>

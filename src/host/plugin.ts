@@ -16,7 +16,7 @@ import { parseMaterialBytes } from './parsers/parse.ts'
 import { registerSource, confirmEvidence, upsertClaim, confirmOutline, saveOutline } from '../core/evidence/evidence.ts'
 import type { RequestContext } from '../shared/schema.ts'
 import { saveDocumentRequest, proposalRequest, applyProposalRequest, undoDocumentRequest } from '../shared/document-api.ts'
-import { saveManual, applyProposal, rejectProposal, undoRevision, proposalImage } from '../core/editing/proposals.ts'
+import { saveManual, rejectProposal, undoRevision, proposalImage } from '../core/editing/proposals.ts'
 import { wordStats } from '../core/editing/markdown.ts'
 import { generationRequest, runStartRequest, runControlRequest, runStateSchema } from '../shared/runs.ts'
 import { prepareGeneration, executeGeneration, type GenerationPlan } from '../core/pipeline/generation.ts'
@@ -54,6 +54,9 @@ import { prepareManualReview, submitManualReview, type ManualReviewPlan } from '
 import { prepareModelReview, type ModelReviewPlan } from '../core/review/model.ts'
 import { executeModelReview, readModelReviewCheckpoint, prepareModelReviewAction, linkModelReviewRetry, type ModelReviewAction } from '../core/review/model-run.ts'
 import { modelReviewRequest } from '../shared/review.ts'
+import { locateIssue, issueFixSelection } from '../core/review/issue-fixes.ts'
+import { acceptAndRecheck } from '../core/review/fix-workflow.ts'
+import { id } from '../shared/schema.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -605,8 +608,10 @@ export class ScholarFlowRemote extends TypertRemoteService {
 
   @Remote('writing.prepare')
   async writingPrepare(request: unknown, signal: AbortSignal) {
-    return applicationResult(async () => {
-      const peerId = this.requireOperator(), input = generationRequest.parse(request)
+    return applicationResult(async () => this.prepareWriting(generationRequest.parse(request), this.requireOperator(), signal))
+  }
+
+  private async prepareWriting(input: z.infer<typeof generationRequest>, peerId: string, signal: AbortSignal) {
       mutationRevision(input.context)
       const { io } = await resolveStore(this.ctx, input.context, signal)
       const model = await selectedModel(this.ctx, input.context.sessionId, signal)
@@ -618,11 +623,39 @@ export class ScholarFlowRemote extends TypertRemoteService {
       return { planId: plan.id, planHash: plan.contentHash, runId: plan.snapshot.runId, model: plan.snapshot.modelDescriptor, stage: plan.snapshot.stage,
         inputBytes: plan.inputBytes, evidenceIds: plan.evidenceIds, budget: plan.snapshot.budget, skillDigests: plan.snapshot.skillDigests,
         scope: input.selection ? input.selection.sourceRange : plan.sectionTarget ? { startUtf16: plan.sectionTarget.startUtf16, endUtf16: plan.sectionTarget.endUtf16 } : { startUtf16: 0, endUtf16: (await snapshot(io)).document.text.length },
-        sectionTarget: plan.sectionTarget, sourceText: input.selection?.sourceText, risks: [
+        sectionTarget: plan.sectionTarget, sourceText: input.selection?.sourceText, reviewIssueId: input.reviewIssueId, risks: [
+          ...(input.reviewIssueId ? ['修复范围是问题所在完整段落，保留引用与人工内容；接受后先复查规则，模型问题只有明确同版本复查才能关闭。'] : []),
           ...(plan.sectionTarget ? ['本节候选仅修改上述范围；为核对摘要、结论与跨节一致性，同时向模型发送当前全部已保存主稿。待补项不能作为已有结果。'] : []),
           '将选定证据、当前稿件范围、项目文风、确认记忆和当前阶段固定 Skill 说明／文本参考发送给所列宿主模型提供方；本地资料模式不等于模型离线处理。',
           '生成结果为待审阅建议，接受前不会改写主稿。宿主会话日志保留模型请求以供追溯；项目诊断日志不另存完整 Prompt。'] }
-    })
+  }
+
+  @Remote('review.locateIssue')
+  async reviewLocateIssue(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = z.object({ context: inspectRequest.shape.context, issueId: id }).strict().parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io), { issue } = locateIssue(current, input.issueId)
+      return { projectId: current.ledger.projectId, issueId: issue.id, documentHash: current.document.contentHash, location: issue.location } })
+  }
+
+  @Remote('review.prepareFix')
+  async reviewPrepareFix(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = z.object({ context: inspectRequest.shape.context, issueId: id,
+      instruction: z.string().trim().min(1).max(12000).default('修复所列问题，保留事实、限定范围、引用和人工内容；仅返回目标完整段落候选。') }).strict().parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io), selection = issueFixSelection(current, input.issueId)
+      return this.prepareWriting(generationRequest.parse({ context: input.context, instruction: input.instruction, selection, reviewIssueId: input.issueId }), peerId, signal) })
+  }
+
+  @Remote('review.fixes')
+  async reviewFixes(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request), { io } = await resolveStore(this.ctx, context, signal), current = await snapshot(io)
+      const fixes: { proposalId: string; issueId: string; state: string; acceptedRevisionId?: string }[] = [], diagnostics: string[] = []
+      for (const state of Object.values(current.ledger.proposalStates).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 100)) {
+        try { const image = await proposalImage(io, state.proposalId)
+          invariant(image.proposal.projectId === current.ledger.projectId, 'PROJECT_ID_CONFLICT', '建议不属于当前项目。')
+          if (image.proposal.reviewIssue) fixes.push({ proposalId: state.proposalId, issueId: image.proposal.reviewIssue.issueId, state: state.state, acceptedRevisionId: state.acceptedRevisionId })
+        } catch { diagnostics.push('一个建议快照不可用，未采用其问题关联。') }
+      }
+      return { fixes, diagnostics } })
   }
 
   @Remote('anchors.upsert')
@@ -1118,7 +1151,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async editsApply(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const input = applyProposalRequest.parse(request)
       const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
-      return applyProposal(io, input.proposalId, revision, input.proposalHash) })
+      return acceptAndRecheck(io, input.proposalId, revision, input.proposalHash) })
   }
 
   @Remote('edits.reject')

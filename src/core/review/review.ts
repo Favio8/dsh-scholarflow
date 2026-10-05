@@ -124,11 +124,11 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
     statistics: { chineseCharacters: count.chineseCharacters, westernWords: count.westernWords, uniqueReferences: projection.citationOrder.length, countingPolicyId: 'sf-body-han-western-v1' } })
 }
 
-export async function runReview(io: FileStore, expectedRevision: number) {
+export async function runReview(io: FileStore, expectedRevision: number, extra: Mutation[] | ((report: ReviewReport) => Mutation[]) = []) {
   const input = await reviewInput(io)
   invariant(!input.current.document.externalChange, 'STALE_DOCUMENT_VERSION', '请先显式采用或保存外部改稿，再审查。')
   const report = evaluateReview(input)
-  return storeReview(io, report, expectedRevision)
+  return storeReview(io, report, expectedRevision, [], typeof extra === 'function' ? extra(report) : extra)
 }
 
 export async function storeReview(io: FileStore, report: ReviewReport, expectedRevision: number, completedCheckIds: string[] = [], extra: Mutation[] = [], resolvedModelIssueIds: string[] = []) {

@@ -56,6 +56,7 @@ export function apply(ctx: Host) {
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
     const [tab, setTab] = useState<(typeof TABS)[number]>('Overview')
+    const [issueLocation, setIssueLocation] = useState<Host>()
     const bindingKey = `${workspace?.workspaceId ?? ''}:${props.sessionId ?? ''}`
     const liveBinding = useRef(bindingKey), readSequence = useRef(0)
     const latest = useRef({ busy, project })
@@ -81,7 +82,7 @@ export function apply(ctx: Host) {
     const refreshRef = useRef(refresh); refreshRef.current = refresh
     useEffect(() => {
       let live = true
-      setPlan(undefined); setProject(undefined); setError(''); setTab('Overview')
+      setPlan(undefined); setProject(undefined); setError(''); setTab('Overview'); setIssueLocation(undefined)
       defaultsScope.current = ''; setTitle(''); setOutput('manuscript')
       if (workspace && props.sessionId) refresh().catch(e => live && setError(e.message))
       return () => { live = false }
@@ -148,8 +149,8 @@ export function apply(ctx: Host) {
         <div id="sf-panel-Overview" role="tabpanel" aria-labelledby="sf-tab-Overview" hidden={tab !== 'Overview'}><Overview key={`overview_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
         <div id="sf-panel-Research" role="tabpanel" aria-labelledby="sf-tab-Research" hidden={tab !== 'Research'}><Research key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
         <div id="sf-panel-Outline" role="tabpanel" aria-labelledby="sf-tab-Outline" hidden={tab !== 'Outline'}><OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
-        <div id="sf-panel-Draft" role="tabpanel" aria-labelledby="sf-tab-Draft" hidden={tab !== 'Draft'}><Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
-        <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} mode={tab} />
+        <div id="sf-panel-Draft" role="tabpanel" aria-labelledby="sf-tab-Draft" hidden={tab !== 'Draft'}><Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} issueLocation={issueLocation} /></div>
+        <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} mode={tab} onLocate={location => { setIssueLocation({ ...location, request: crypto.randomUUID() }); setTab('Draft') }} />
       </>}
     </section>
   }

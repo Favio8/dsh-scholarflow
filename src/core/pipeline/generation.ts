@@ -13,6 +13,7 @@ import { sectionTarget, sectionEdit } from '../editing/sections.ts'
 import { ACTIVE_RUN as ACTIVE, runFile as statePath, inputFile, readRun } from './run-store.ts'
 import { frozenPlanFile, checkpointFile, readGenerationCheckpoint, validateRunAction, type RunActionPlan } from './run-control.ts'
 import { transientRetry, waitRetrySlice } from './retry.ts'
+import { validateIssueFix } from '../review/issue-fixes.ts'
 
 export { modelOutputSchema } from '../../shared/runs.ts'
 export interface GenerationPlan { id: string; contentHash: string; snapshot: z.infer<typeof runSnapshotSchema>; input: z.infer<typeof generationRequest>;
@@ -43,6 +44,7 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
     invariant(input.selection.projectId === current.config.project.id && input.selection.documentHash === current.document.contentHash && input.selection.revisionId === current.document.revisionId, 'STALE_DOCUMENT_VERSION', '选区版本已改变。')
     validateSelection(current.document.text, input.selection)
   }
+  const reviewIssue = input.reviewIssueId ? validateIssueFix(current, input.reviewIssueId, input.selection!) : undefined
   const sections = input.sectionId ? current.ledger.outline.sections.filter(section => section.id === input.sectionId) : current.ledger.outline.sections
   invariant(!input.sectionId || sections.length === 1, 'OUTLINE_SECTION_NOT_FOUND', '所选大纲章节不存在。')
   const target = input.sectionId ? sectionTarget(current.document.text, current.ledger.outline, input.sectionId) : undefined
@@ -68,6 +70,9 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
   const context = { project: current.config.project, requirements: Object.values(current.ledger.requirements), outline: { ...current.ledger.outline, sections },
     claims, evidence, sources: [...new Set(evidence.map(item => item.sourceId))].map(id => current.ledger.sources[id]), projectProfile: profile.text, approvedMemory: memory,
     academicSkills: skills.resources,
+    ...(reviewIssue && { reviewIssue: { id: reviewIssue.id, category: reviewIssue.category, severity: reviewIssue.severity, title: reviewIssue.title,
+      explanation: reviewIssue.explanation, suggestedFix: reviewIssue.suggestedFix, location: reviewIssue.location, claimIds: reviewIssue.claimIds, evidenceIds: reviewIssue.evidenceIds,
+      instruction: '仅为此已定位问题生成完整目标段落修复候选；保留引用、事实、限定与人工内容。不能自报问题已经解决；接受后须对应复查。' } }),
     skillPolicy: '仅把锁定 Skill 用作此阶段的说明参考；priority 数字越小越优先。冲突与真实性／权限约束冲突时先保留硬约束，不运行任何脚本或要求安装。',
     manuscript: input.selection ? { sourceText: input.selection.sourceText, prefixContext: input.selection.prefixContext, suffixContext: input.selection.suffixContext } : target ? {
       existingSectionBody: current.document.text.slice(target.startUtf16, target.endUtf16), actualSavedManuscriptForConsistency: current.document.text,
@@ -247,7 +252,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
     await checkResources()
     budgetSignal.throwIfAborted()
     const proposal = checkpoint.proposal ?? buildProposal(after, { runId: state.runId, instruction: plan.input.instruction, replacementText: output.replacementText,
-      selection: plan.input.selection, ...(plan.input.sectionId && { section: { sectionId: plan.input.sectionId, outlineVersion: plan.snapshot.outlineVersion,
+      selection: plan.input.selection, ...(plan.input.reviewIssueId && { reviewIssueId: plan.input.reviewIssueId }), ...(plan.input.sectionId && { section: { sectionId: plan.input.sectionId, outlineVersion: plan.snapshot.outlineVersion,
         body: output.replacementText, paragraphClaims: output.paragraphClaims!, limitations: output.limitations } }), dependentEvidenceIds: plan.evidenceIds })
     checkpoint.proposal = proposal; await saveState()
     const stored = await storeProposal(io, proposal, after.ledger.revision)

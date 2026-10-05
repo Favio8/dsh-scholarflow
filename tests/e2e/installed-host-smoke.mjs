@@ -780,6 +780,32 @@ try {
       const range = issue.location.sourceRange
       assert.equal(manualBody.slice(range.startUtf16, range.endUtf16), issue.location.quote)
     }
+    const fixIssue = actualReport.issues.find(row => row.location && row.checkMethod === 'model-assisted')
+    assert.ok(fixIssue, 'this explicit repeated-paragraph fixture must expose a positioned model finding')
+    await page.getByRole('button', { name: `定位正文问题 ${fixIssue.id}`, exact: true }).click()
+    await page.getByRole('tab', { name: /^Draft ·/ }).and(page.locator('[aria-selected="true"]')).waitFor()
+    await page.waitForFunction(blockId => document.activeElement?.getAttribute('data-sf-block') === blockId, fixIssue.location.blockId)
+    assert.equal(await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).inputValue(), manualBody)
+    await page.getByRole('tab', { name: /^Review ·/ }).click()
+    const fixUi = page.getByRole('region', { name: '问题修复候选', exact: true })
+    await fixUi.getByRole('combobox', { name: '选择修复问题', exact: true }).selectOption(fixIssue.id)
+    await fixUi.getByRole('textbox', { name: '问题修复指令', exact: true }).fill('TEST_ONLY 功能验证。按所列问题改进表达但保留限定与完整引用 token，只返回当前目标完整段落，恰好一段且不超过120汉字；不添加任何实验或事实，不返回标题。')
+    const beforeFixLedger = await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), beforeFixRuns = await readdir(join(projectRoot, '.scholarflow/runs'))
+    await fixUi.getByRole('button', { name: '预览所选问题修复', exact: true }).click()
+    const fixDialog = fixUi.getByRole('dialog', { name: '问题修复确认', exact: true })
+    assert.match(await fixDialog.innerText(), /完整段落/u)
+    await fixUi.getByRole('button', { name: '取消问题修复预览', exact: true }).click()
+    await fixDialog.waitFor({ state: 'detached' })
+    assert.equal(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), beforeFixLedger)
+    assert.deepEqual(await readdir(join(projectRoot, '.scholarflow/runs')), beforeFixRuns)
+    await fixUi.getByRole('button', { name: '预览所选问题修复', exact: true }).click()
+    await fixUi.getByRole('button', { name: '确认生成问题修复候选', exact: true }).click()
+    await waitModelReviewOutcome(fixUi.getByRole('region', { name: '问题修复差异', exact: true }))
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
+    assert.equal(JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).reviewIssues[fixIssue.id].state, 'proposed-fix')
+    await fixUi.getByRole('button', { name: '拒绝问题修复候选', exact: true }).click()
+    await fixUi.getByRole('status').filter({ hasText: '已拒绝修复候选，正文未改变，问题仍待复查。' }).waitFor()
+    assert.equal(JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).reviewIssues[fixIssue.id].state, 'open')
     assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), manualBody)
     assert.equal(await readFile(join(projectRoot, '原始材料.txt'), 'utf8'), 'TEST_ONLY raw source: never overwrite this file.\r\n')
     assert.equal(Object.values(JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).claims)[0].status, 'partially-supported')
@@ -960,6 +986,7 @@ try {
     nativeUiManualReviewPreviewCancelConfirmAndVersionedHistory: true,
     realProviderModelReviewWithFixedSkillAndExactIssuePositions: liveModel,
     realProviderModelReviewPauseResumeKeepsChargedCallsAndBody: liveModel,
+    realProviderIssueFixLocatePreviewCancelAndRejectKeepsBody: liveModel,
     realProviderSectionCandidateAcceptWithClaimAnchors: liveModel, realProviderSecondParagraphRewriteAccept: liveModel,
     nativeUiManualParagraphClaimAssociation: true, renderedSelectionDisplaysCurrentClaims: true,
     nativeUiLegacyRunStorageMigrationKeepsAllBytes: true,
