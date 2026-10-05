@@ -16,11 +16,22 @@ export const prepareInitRequest = z.object({ context: requestContext, input: ini
 export const initializeRequest = z.object({ context: requestContext, planId: z.string(), planHash: hash }).strict()
 export interface StoredInitPlan { plan: InitPlan; context: RequestContext; peerId: string; expires: number }
 
+async function inspectSession(ctx: Host, sessionId: string, signal: AbortSignal) {
+  try { return await ctx.sessionController.inspect(sessionId, signal) }
+  catch (error) {
+    signal.throwIfAborted()
+    if (error instanceof ScholarError) throw error
+    // The pinned Host may wrap a format refusal. Classify by the failed seam,
+    // not private SDK text, and keep raw-log paths and content out of responses.
+    throw new ScholarError('SESSION_READ_FAILED', '当前会话读取失败。原日志与项目文件已保留；可重试连接，或在同一工作区新建 ScholarFlow 会话读取项目。')
+  }
+}
+
 export async function resolveStore(ctx: Host, context: RequestContext, signal: AbortSignal, output?: string, readonlyFuture = false, identityTransition?: IdentityTransition) {
   signal.throwIfAborted()
   const workspace = ctx.workspaceRegistry.get(context.workspaceId)
   invariant(workspace, 'SESSION_BINDING_CHANGED', '宿主工作区不存在，请重新选择。')
-  const observation = await ctx.sessionController.inspect(context.sessionId, signal)
+  const observation = await inspectSession(ctx, context.sessionId, signal)
   invariant(observation?.meta, 'SESSION_BINDING_CHANGED', '宿主会话不存在。')
   const target = await ctx.fs.resolve(workspace.path, { signal })
   const root = ctx.fs.processPath(target)
@@ -105,7 +116,7 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
   }
   const binding = { workspaceId: workspace.id, sessionId: context.sessionId, projectId, modeId: 'scholarflow', rootFingerprint }
   const revalidate = async () => {
-    const current = await ctx.sessionController.inspect(context.sessionId, signal)
+    const current = await inspectSession(ctx, context.sessionId, signal)
     const rootNow = await ctx.fs.resolve(workspace.path, { signal })
     const sessionNow = await ctx.fs.resolve(current.meta.cwd, { signal })
     let modeNow = current.meta.agentPreset

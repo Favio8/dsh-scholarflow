@@ -64,3 +64,20 @@ excludes the unselected-material sentinel, and the original limit remains
 eight. Evidence: `.dsh-tmp/paper-types-latest.json`; all material is TEST_ONLY.
 These short teaching cases do not establish full-length academic readiness,
 all automatic stages, other providers or complete V1 acceptance.
+
+Legacy project recovery supplement: the genuine first, refused native fixture
+also passes a separate no-model probe. The UI creates a new ScholarFlow Session
+in the same persisted Workspace, reads the original accepted chapter and
+sequence, and previews then dismisses the next summary. Every project file,
+the old Session archive and original one-call checkpoint are byte-identical
+from before Host startup through the end of the probe; credentials are unchanged.
+The refusal remains explicit in the old Session, whose log is never repaired or
+overwritten. Evidence: `.dsh-tmp/legacy-session-recovery.json`.
+
+The pinned SDK can wrap its read refusal, so testing only the public exception
+class was insufficient in this real fixture. The gateway now classifies the
+actual failing Session-inspection seam as `SESSION_READ_FAILED`, with a safe
+same-workspace recovery hint. It does not infer corruption from private SDK
+text or copy raw-log paths into the response. Cancellation and existing domain
+errors retain their original identity; refused reads cannot authorize project IO.
+Typecheck, build and the full suite now pass 335/335 after this gateway change.

@@ -117,6 +117,8 @@ node tests/e2e/installed-host-smoke.mjs --live-model
 node tests/e2e/installed-paper-types.mjs --live-model
 # 失败后显式继续相同测试目录；已接受章节不重放，原额度和失败调用保留
 # node tests/e2e/installed-paper-types.mjs --live-model --resume=.dsh-tmp/paper-types/<timestamp>
+# 可选：对修复前留下的真实测试目录验证旧会话拒绝及同工作区恢复；不调用模型
+# node tests/e2e/installed-paper-types.mjs --legacy-recovery --resume=.dsh-tmp/paper-types/<legacy-timestamp>
 # 可选：真实 Crossref 查询和 DOI 核验，不调用模型，不读取模型凭据
 node tests/e2e/installed-host-smoke.mjs --live-research
 # 可选：真实公开 GitHub Skill 导入，不调用模型，不执行导入资源

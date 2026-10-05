@@ -2,7 +2,7 @@
 // provider. This is not a claim that the teaching material is a published paper.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile, symlink, stat } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, symlink, stat, readdir } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
 import { chromium } from '@playwright/test'
@@ -10,7 +10,8 @@ import { stringify } from 'yaml'
 import { digest } from '../../src/core/store/files.ts'
 import { semanticReviewChecks } from '../../src/shared/review.ts'
 
-assert.ok(process.argv.includes('--live-model'), 'Explicit --live-model is required for bounded actual provider calls')
+const legacyRecovery = process.argv.includes('--legacy-recovery')
+assert.ok(process.argv.includes('--live-model') || legacyRecovery, 'Explicit --live-model is required for bounded actual provider calls')
 const tasks = JSON.parse(await readFile('examples/local-evidence/tasks.json', 'utf8'))
 const raw = Object.fromEntries(await Promise.all(['requirements.md', 'source-notes.md'].map(async name =>
   [name, await readFile(join('examples/local-evidence', name), 'utf8')])))
@@ -20,6 +21,7 @@ const credentialPath = join(homedir(), '.dsh/.credentials.yaml')
 const credentialHash = digest(await readFile(credentialPath))
 const resume = process.argv.find(arg => arg.startsWith('--resume='))?.slice('--resume='.length)
 assert.ok(!resume || /^\.dsh-tmp[\\/]paper-types[\\/]\d+$/.test(resume), 'Resume is confined to an explicit teaching-test directory')
+assert.ok(!legacyRecovery || resume, 'Legacy recovery requires an explicit existing teaching-test directory')
 const root = resume ? resolve(resume) : resolve('.dsh-tmp/paper-types', String(Date.now())), testHome = join(root, 'home')
 const profileName = 'scholarflow-paper-types', profile = join(testHome, 'profiles', profileName)
 if (!resume) {
@@ -134,7 +136,73 @@ async function auditSavedExample(task, row) {
   row.originalGoalModelLimit = 8
   row.failedReviewCallsPreserved = failedReviewCalls
 }
+async function verifyLegacyRecovery() {
+  // Uses the genuine pre-fix native fixture. Its refused Session archive is
+  // preserved; only the public UI creates a new Session for the same project.
+  const projectRoot = join(root, 'projects/course-paper')
+  const saved = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  assert.equal(saved.outline.title, tasks[0].title)
+  const registry = JSON.parse(await readFile(join(testHome, 'storages/workspace.json'), 'utf8'))
+  const match = Object.entries(registry.tables.workspaces).find(([, row]) => resolve(row.path).toLowerCase() === projectRoot.toLowerCase())
+  assert.ok(match)
+  const workspaceId = match[0]
+  const workflow = JSON.parse(await readFile(join(projectRoot, '.scholarflow/workflows/current.json'), 'utf8'))
+  const prefix = join(projectRoot, '.scholarflow/runs', workflow.workflowId)
+  const originalInput = JSON.parse(await readFile(join(prefix, 'input.json'), 'utf8'))
+  const oldSessionId = originalInput.sessionId
+  let oldLog
+  for (const directory of await readdir(join(testHome, 'sessions'))) {
+    const candidate = join(testHome, 'sessions', directory, oldSessionId, 'session.v4.jsonl.zstd')
+    if (await exists(candidate)) { assert.equal(oldLog, undefined); oldLog = candidate }
+  }
+  assert.ok(oldLog)
+  const oldLogHash = digest(await readFile(oldLog)), projectHashes = new Map()
+  async function capture(directory, relativePath = '') {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      assert.ok(!entry.isSymbolicLink(), 'Legacy teaching fixture must not follow links')
+      const name = relativePath ? `${relativePath}/${entry.name}` : entry.name
+      if (entry.isDirectory()) await capture(join(directory, entry.name), name)
+      else { assert.ok(entry.isFile()); assert.ok(projectHashes.size < 5000); projectHashes.set(name, digest(await readFile(join(directory, entry.name)))) }
+    }
+  }
+  await capture(projectRoot)
+  await start()
+  const oldContext = { requestId: 'req_native_legacy', workspaceId, sessionId: oldSessionId, projectId: saved.projectId, expectedLedgerRevision: saved.revision }
+  const refused = await rpc('scholarflow.v1/project.inspect', { request: { context: oldContext } })
+  assert.equal(refused.value.ok, false)
+  assert.equal(refused.value.error.code, 'SESSION_READ_FAILED')
+  assert.ok(!JSON.stringify(refused.value.error).includes(oldLog))
+  await page.locator('.sf-project').getByRole('combobox', { name: 'DSH 工作区', exact: true }).selectOption(workspaceId)
+  await page.getByRole('button', { name: '新建 ScholarFlow 会话', exact: true }).click()
+  await page.waitForFunction(previous => { const current = document.querySelector('.sf-project')?.dataset.sfSessionId; return current && current !== previous }, oldSessionId)
+  const sessionId = await page.locator('.sf-project').getAttribute('data-sf-session-id')
+  const context = { ...oldContext, sessionId }
+  const restored = await call('project.inspect', { context })
+  assert.equal(restored.ledger.projectId, saved.projectId)
+  assert.equal(restored.document.text, await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'))
+  const sequence = await call('draftSequence.inspect', { context })
+  assert.equal(sequence.sequence.diagnostics.length, 0)
+  assert.equal(sequence.sequence.checkpoint.steps.find(step => step.sectionId === 'sec_TEST_ONLY_body').state, 'accepted')
+  const preview = await call('draftSequence.prepareAction', { context, sequenceId: sequence.sequence.input.sequenceId, action: 'next' })
+  assert.equal(preview.sectionTarget.sectionId, 'sec_TEST_ONLY_summary')
+  assert.equal(preview.structuralGap, false)
+  await call('writing.dismiss', { planId: preview.planId })
+  for (const [name, hash] of projectHashes) assert.equal(digest(await readFile(join(projectRoot, name))), hash)
+  const afterHashes = new Map(projectHashes); projectHashes.clear(); await capture(projectRoot)
+  assert.deepEqual(projectHashes, afterHashes, 'Recovery viewing cannot add or remove project artifacts')
+  assert.equal(digest(await readFile(oldLog)), oldLogHash)
+  assert.equal(digest(await readFile(credentialPath)), credentialHash)
+  const checkpoint = JSON.parse(await readFile(join(prefix, 'checkpoint.json'), 'utf8'))
+  assert.equal(checkpoint.budget.calls.length, 1); assert.ok(checkpoint.budget.calls.every(call => call.state !== 'pending'))
+  assert.deepEqual(errors, [])
+  await writeFile(resolve('.dsh-tmp/legacy-session-recovery.json'), JSON.stringify({ date: new Date().toISOString(), testOnly: true,
+    actualLegacySessionRefused: true, publicUiNewSessionSameWorkspace: true, oldLogUnchanged: true, allProjectBytesUnchanged: true,
+    acceptedChapterRestored: true, nextSummaryPreviewValid: true, newProviderCalls: 0, originalPaidCalls: 1, credentialsUnchanged: true }, null, 2))
+  console.log('PASS TEST_ONLY legacy Session refusal, same-workspace UI recovery and next-chapter preview; all project bytes and original call preserved')
+}
 try {
+  if (legacyRecovery) await verifyLegacyRecovery()
+  else {
   await start()
   for (const task of tasks) {
     if (evidence.some(row => row.type === task.type)) continue
@@ -293,4 +361,5 @@ try {
   await writeFile(join(root, 'native-evidence.json'), JSON.stringify(evidence, null, 2))
   await writeFile(resolve('.dsh-tmp/paper-types-latest.json'), JSON.stringify({ date: new Date().toISOString(), testOnly: true, actualProvider: true,
     credentialsUnchanged: digest(await readFile(credentialPath)) === credentialHash, examples: evidence }, null, 2))
+  }
 } finally { await stop(); await browser.close() }
