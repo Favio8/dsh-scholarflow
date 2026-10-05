@@ -900,6 +900,49 @@ try {
     assert.equal(matchedLedger.sources[actualSource.id].citeKey, actualSource.citeKey)
     assert.equal(matchedLedger.sources[actualSource.id].textAccess, 'metadata')
     assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), beforeResearch)
+    const batchUi = page.getByRole('region', { name: '多查询检索', exact: true })
+    await page.getByRole('spinbutton', { name: '文献候选上限', exact: true }).fill('2')
+    await batchUi.getByRole('button', { name: '将当前查询加入检索计划', exact: true }).click()
+    await batchUi.getByRole('button', { name: '将当前查询加入检索计划', exact: true }).click()
+    const runsBeforeBatch = await readdir(join(projectRoot, '.scholarflow/runs'))
+    await batchUi.getByRole('button', { name: '预览多查询检索', exact: true }).click()
+    const batchDialog = batchUi.getByRole('dialog', { name: '多查询检索确认', exact: true })
+    await batchDialog.waitFor(); assert.equal(await batchDialog.locator('ol > li').count(), 2)
+    await batchUi.getByRole('button', { name: '取消多查询检索预览', exact: true }).click()
+    await batchDialog.waitFor({ state: 'detached' })
+    assert.deepEqual(await readdir(join(projectRoot, '.scholarflow/runs')), runsBeforeBatch)
+    assert.deepEqual((await readdir(join(projectRoot, '.scholarflow/research'))).filter(name => name.startsWith('search_')), searchFiles)
+    await batchUi.getByRole('button', { name: '预览多查询检索', exact: true }).click()
+    await batchUi.getByRole('button', { name: '确认本次检索操作', exact: true }).click()
+    await batchUi.getByRole('button', { name: '暂停当前检索批次', exact: true }).click()
+    const batchResult = batchUi.getByRole('region', { name: '检索批次结果', exact: true })
+    await batchResult.getByRole('status').filter({ hasText: /批次 run_.* · 已暂停/u }).waitFor({ timeout: 65000 })
+    const batchRunDir = (await readdir(join(projectRoot, '.scholarflow/runs'))).find(name => name.startsWith('run_') && !runsBeforeBatch.includes(name))
+    assert.ok(batchRunDir)
+    const pausedBatch = JSON.parse(await readFile(join(projectRoot, `.scholarflow/runs/${batchRunDir}/checkpoint.json`), 'utf8'))
+    assert.ok(pausedBatch.queriesUsed <= 1); assert.ok(pausedBatch.queries.every(query => query.state === 'pending' || query.state === 'completed'))
+    await batchUi.getByRole('button', { name: `预览恢复检索 ${batchRunDir}`, exact: true }).click()
+    await batchDialog.waitFor(); await batchUi.getByRole('button', { name: '取消多查询检索预览', exact: true }).click()
+    assert.equal(JSON.parse(await readFile(join(projectRoot, `.scholarflow/runs/${batchRunDir}/run.json`), 'utf8')).status, 'paused')
+    await batchUi.getByRole('button', { name: `预览恢复检索 ${batchRunDir}`, exact: true }).click()
+    await batchUi.getByRole('button', { name: '确认本次检索操作', exact: true }).click()
+    await batchResult.getByRole('status').filter({ hasText: /批次 run_.* · 检索结束，证据仍需确认/u }).waitFor({ timeout: 65000 })
+    const finalBatch = JSON.parse(await readFile(join(projectRoot, `.scholarflow/runs/${batchRunDir}/checkpoint.json`), 'utf8'))
+    assert.equal(finalBatch.queriesUsed, 2); assert.ok(finalBatch.queries.every(query => query.state === 'completed' && query.attempts.length === 1))
+    for (const query of finalBatch.queries) {
+      const resultRecord = JSON.parse(await readFile(join(projectRoot, `.scholarflow/research/${query.attempts[0].searchId}.json`), 'utf8'))
+      assert.equal(resultRecord.state, 'completed'); assert.ok(resultRecord.records.every(row => row.textAccess === 'metadata'))
+    }
+    const duplicateSearchId = finalBatch.queries[0].attempts[0].searchId
+    await batchResult.getByRole('button', { name: `查看查询记录 ${duplicateSearchId}`, exact: true }).click()
+    const duplicateCandidate = page.getByRole('region', { name: `文献候选 ${actualCandidate.candidateId}`, exact: true })
+    await duplicateCandidate.getByRole('textbox', { name: `文献决定理由 ${actualCandidate.candidateId}`, exact: true }).fill('TEST_ONLY 跨查询重复 DOI 沿用已经核验的稳定来源。')
+    await duplicateCandidate.getByRole('button', { name: '确认纳入此来源', exact: true }).click()
+    await duplicateCandidate.getByText('已纳入来源：TEST_ONLY 跨查询重复 DOI 沿用已经核验的稳定来源。', { exact: true }).waitFor()
+    const afterBatchLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+    assert.deepEqual(afterBatchLedger.sources[actualSource.id], matchedLedger.sources[actualSource.id])
+    assert.equal(Object.keys(afterBatchLedger.sources).length, Object.keys(matchedLedger.sources).length)
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), beforeResearch)
     const disableAgain = await rpc('settings/update', { ns: 'scholarflow', patch: { networkEnabled: false }, expectedRevision: enabled.value.revision })
     assert.equal(disableAgain.ok, true)
     await page.getByRole('tab', { name: /^Export ·/ }).click()
@@ -1068,6 +1111,7 @@ try {
     offlineResearchDeniedBeforePlanOrIO: true, realCrossrefSearchMetadataOnly: liveResearch,
     cancelledSearchPreviewDoesNotSend: liveResearch, realCrossrefCandidateIncludedWithReason: liveResearch,
     realCrossrefDoiIdentityMatchedWithoutEvidenceUpgrade: liveResearch,
+    realMultiQueryPreviewCancelPauseResumeAndStableDoi: liveResearch,
     nativeUiPrivateSkillMultiCandidateImport: true, cancelledSkillPreviewDoesNotInstall: true,
     privateSkillOriginalBytesAndInertScriptsPreserved: true, globalSkillCatalogNotModified: true,
     privateSkillVersionsSurviveReadOnlyHostRestart: true,

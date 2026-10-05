@@ -26,9 +26,11 @@ export function crossrefProvider(web: HostWeb): ResearchProvider {
       const final = new URL(result.url)
       invariant(final.origin === 'https://api.crossref.org', 'RESEARCH_REDIRECT_BLOCKED', '提供方返回了未批准的地址。')
       if (result.statusCode === 404) return null
-      if (result.statusCode === 429) throw new ScholarError('RESEARCH_RATE_LIMITED', 'Crossref 限流，本次停止；请稍后明确重试。')
+      // Installed DSH 0.2.0-rc.2 returns no HTTP headers. Do not invent a
+      // Retry-After window or schedule automatic 429 retries without it.
+      if (result.statusCode === 429) throw new ScholarError('RESEARCH_RATE_LIMITED', 'Crossref 限流；宿主未暴露重试窗口，停止调度，稍后明确恢复。', { status: 429, retryWindowUnavailable: true })
       invariant(result.statusCode !== 401 && result.statusCode !== 403, 'RESEARCH_ACCESS_DENIED', 'Crossref 拒绝访问，本次停止，不自动重试。')
-      invariant(result.statusCode >= 200 && result.statusCode < 300, 'RESEARCH_PROVIDER_FAILED', 'Crossref 暂时不可用，本次停止。')
+      if (result.statusCode < 200 || result.statusCode >= 300) throw new ScholarError('RESEARCH_PROVIDER_FAILED', 'Crossref 请求失败，本次停止。', { status: result.statusCode })
       invariant(!result.truncated && result.body.kind === 'text' && Buffer.byteLength(result.body.content) <= 1024 * 1024,
         'RESEARCH_RESPONSE_INVALID', '元数据响应过大、不完整或不是 JSON 文本。')
       let raw: unknown

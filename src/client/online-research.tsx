@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { ResearchBatch } from './research-batch.tsx'
 
 type Props = { project: any; sourceId: string; context: () => any; api: (method: string, request: any) => Promise<any>;
   refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
@@ -50,6 +51,10 @@ export function OnlineResearch({ project, sourceId, context, api, refresh, run, 
             })}>{decision === 'include' ? '确认纳入此来源' : '确认排除此候选'}</button>)}</>}
       </section>)}
     </>}
+    <ResearchBatch search={{ query, purpose, limit: Number(limit), ...(yearFrom && { yearFrom: Number(yearFrom) }), ...(yearTo && { yearTo: Number(yearTo) }) }}
+      context={context} api={api} run={run} busy={busy} refresh={refresh} onSearch={async searchId => {
+        setRecord(await api('research.read', { context: context(), searchId })); setHistory(await api('research.list', { context: context() }))
+      }} />
     <h4>所选来源 DOI 核验</h4>
     <p>{source ? `${source.title} · ${source.identity.status} · ${source.identity.reason ?? ''}` : '先在来源列表选择已登记的来源。'}</p>
     <button disabled={busy || !source?.identifiers.doi} onClick={() => run(async () => setLookup(await api('sources.prepareLookup', { context: context(), sourceId })))}>预览所选来源 DOI 查询</button>

@@ -59,6 +59,8 @@ import { locateIssue, issueFixSelection } from '../core/review/issue-fixes.ts'
 import { acceptAndRecheck } from '../core/review/fix-workflow.ts'
 import { id } from '../shared/schema.ts'
 import { prepareSourceRegistration, confirmSourceRegistration, type SourceRegistrationPlan } from '../core/research/source-registration.ts'
+import { batchPrepareRequest, batchActionRequest, type ResearchBatchPlan } from '../shared/research-batch.ts'
+import { prepareResearchBatch, executeResearchBatch, readResearchBatch, prepareResearchBatchAction, closeResearchBatch, type ResearchBatchAction } from '../core/research/batch.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -96,6 +98,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private modelReviewActions = new Map<string, { action: ModelReviewAction; plan: ModelReviewPlan; context: RequestContext; peerId: string; expires: number; selected?: { provider: string; model: string; reasoningEffort?: string } }>()
   private proposalRevisionPlans = new Map<string, { plan: ProposalRevisionPlan; peerId: string; expires: number }>()
   private sourceRegistrationPlans = new Map<string, { plan: SourceRegistrationPlan; peerId: string; expires: number }>()
+  private researchBatchPlans = new Map<string, { plan: ResearchBatchPlan; action?: ResearchBatchAction; context: RequestContext; peerId: string; expires: number }>()
   private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
   private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
   private skillPlans = new Map<string, { resource: { kind: 'local'; bundle: SkillBundle } | { kind: 'github'; preview: GithubSkillPreview }; hash: string; peerId: string; expires: number }>()
@@ -110,6 +113,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     this.githubProvider = githubSkills(ctx.web)
     ctx.effect(() => () => this.proposalRevisionPlans.clear(), 'scholarflow: clear operator candidate previews')
     ctx.effect(() => () => this.sourceRegistrationPlans.clear(), 'scholarflow: clear source registration previews')
+    ctx.effect(() => () => this.researchBatchPlans.clear(), 'scholarflow: clear multi-query previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
@@ -277,6 +281,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   }
 
   private pruneSkills() {
+    for (const [key, row] of this.researchBatchPlans) if (row.expires < Date.now()) this.researchBatchPlans.delete(key)
     for (const [key, row] of this.sourceRegistrationPlans) if (row.expires < Date.now()) this.sourceRegistrationPlans.delete(key)
     for (const [key, row] of this.proposalRevisionPlans) if (row.expires < Date.now()) this.proposalRevisionPlans.delete(key)
     for (const [key, row] of this.modelReviewPlans) if (row.expires < Date.now()) this.modelReviewPlans.delete(key)
@@ -534,6 +539,94 @@ export class ScholarFlowRemote extends TypertRemoteService {
       this.searchPlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
       return { planId: plan.id, planHash: plan.contentHash, provider: 'crossref', destination: 'https://api.crossref.org', search: plan.search,
         risks: ['仅发送所列查询词、数量与年份筛选；用途留在项目检索日志，不发送资料、主稿、Profile 或记忆。', '只返回元数据候选；尚未纳入来源，不下载全文，不证明论点支持。'] }
+    })
+  }
+
+  private researchBatchPreview(plan: ResearchBatchPlan, action?: ResearchBatchAction) {
+    return { planId: action?.id ?? plan.id, planHash: action?.contentHash ?? plan.contentHash, runId: plan.snapshot.runId,
+      previousRunId: action?.runId, action: action?.action ?? 'start', searches: plan.searches, budget: plan.snapshot.budget,
+      destination: 'https://api.crossref.org',
+      risks: ['仅发送列出的查询词、数量与年份；用途记录在项目，不发送主稿、资料、Profile、记忆或 Skill，不调用模型。',
+        '候选总量与查询预算按本次运行累计，重试和无应答的中断调用也计入查询次数；成功结果先保存，纳入来源另行确认。',
+        '宿主未暴露 Retry-After 响应头：Crossref 429 会暂停所有后续调度，不能猜测自动重试窗口。请稍后再明确恢复。',
+        ...(action?.action === 'resume' ? ['复用原查询计划及成功结果，不重发已完成请求；中断时无应答的查询可能重新发送，原尝试与费用预算记录保留。'] :
+          action?.action === 'retry' ? ['创建关联新运行，保留原失败／取消终态；按当前配置重新发送列出的查询。'] :
+          action?.action === 'close' ? ['只将原运行记为用户取消，保留全部结果和检查点，不发送请求、不修改主稿。'] : [])] }
+  }
+
+  @Remote('research.batchPrepare')
+  async researchBatchPrepare(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.requireNetwork(); this.pruneSkills()
+      const input = batchPrepareRequest.parse(request); mutationRevision(input.context)
+      invariant(this.researchBatchPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有检索批次预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), plan = await prepareResearchBatch(io, input)
+      this.researchBatchPlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return this.researchBatchPreview(plan)
+    })
+  }
+
+  @Remote('research.batchPrepareAction')
+  async researchBatchPrepareAction(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.pruneSkills(); const input = batchActionRequest.parse(request); mutationRevision(input.context)
+      if (input.action !== 'close') this.requireNetwork()
+      invariant(!this.running.has(input.runId), 'RUN_IN_PROGRESS', '请等待当前检索保存检查点。')
+      invariant(this.researchBatchPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有检索批次预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), data = await readResearchBatch(io, input.runId)
+      const action = await prepareResearchBatchAction(io, input.runId, input.action, candidate => this.ownerAlive(candidate), input.context.sessionId)
+      const plan = action.retryPlan ?? data.plan
+      this.researchBatchPlans.set(action.id, { plan, action, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { ...this.researchBatchPreview(plan, action), usedQueries: data.checkpoint.queriesUsed, candidatesReceived: data.checkpoint.candidatesReceived,
+        queryStates: data.checkpoint.queries }
+    })
+  }
+
+  @Remote('research.batchStart')
+  async researchBatchStart(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = onlineConfirmRequest.parse(request), row = this.researchBatchPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && (row.action?.contentHash ?? row.plan.contentHash) === input.planHash,
+        'INVALID_APPROVAL', '请重新预览并确认当前检索批次。')
+      invariant(row.context.projectId === input.context.projectId && row.context.sessionId === input.context.sessionId && row.context.workspaceId === input.context.workspaceId,
+        'SESSION_BINDING_CHANGED', '检索确认不属于当前会话和项目。')
+      signal.throwIfAborted(); const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal)
+      if (row.action?.action === 'close') { const result = await closeResearchBatch(io, row.action, candidate => this.ownerAlive(candidate)); this.researchBatchPlans.delete(input.planId); return result }
+      this.requireNetwork(); const runId = row.plan.snapshot.runId
+      invariant(!this.running.has(runId), 'RUN_IN_PROGRESS', '此检索执行器仍在运行。')
+      const active = { controller: new AbortController(), context: input.context, pauseRequested: false }
+      this.running.set(runId, active); this.researchBatchPlans.delete(input.planId)
+      try { return await executeResearchBatch(io, row.plan, this.researchProvider, AbortSignal.any([signal, active.controller.signal]),
+        { pid: process.pid, bootInstance: this.bootInstance }, candidate => this.ownerAlive(candidate),
+        { pauseRequested: () => active.pauseRequested, action: row.action, executionSessionId: input.context.sessionId }) }
+      finally { this.running.delete(runId) }
+    })
+  }
+
+  @Remote('research.batchRead')
+  async researchBatchRead(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = runControlRequest.parse(request), { io } = await resolveStore(this.ctx, input.context, signal)
+      const data = await readResearchBatch(io, input.runId)
+      return { run: data.stored.run, checkpoint: data.checkpoint, searches: data.plan.searches }
+    })
+  }
+
+  @Remote('research.batchList')
+  async researchBatchList(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const { context } = inspectRequest.parse(request), { io } = await resolveStore(this.ctx, context, signal)
+      const result = await inspectRuns(io)
+      return { ...result, runs: result.runs.filter(row => row.stage === 'research').slice(0, 20) }
+    })
+  }
+
+  @Remote('research.batchDismiss')
+  async researchBatchDismiss(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ planId: id }).strict().parse(request)
+      signal.throwIfAborted(); invariant(this.researchBatchPlans.get(input.planId)?.peerId === peerId, 'INVALID_APPROVAL', '检索预览不属于当前用户。')
+      this.researchBatchPlans.delete(input.planId); return { dismissed: true }
     })
   }
 
@@ -821,6 +914,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => {
       this.requireOperator(); const input = runControlRequest.parse(request), { io } = await resolveStore(this.ctx, input.context, signal)
       const stored = await readRun(io, input.runId, input.context.projectId!)
+      if (stored.run.stage === 'research') { const data = await readResearchBatch(io, input.runId)
+        return { run: data.stored.run, legacyStorage: false, checkpoint: { usedQueries: data.checkpoint.queriesUsed, candidatesReceived: data.checkpoint.candidatesReceived } } }
       const progress = stored.run.checkpointHash ? stored.run.stage === 'review' ? (await readModelReviewCheckpoint(io, stored.run)).checkpoint : (await readGenerationCheckpoint(io, stored.run)).checkpoint : undefined
       return { run: stored.run, legacyStorage: stored.legacy, checkpoint: progress && { formatAttempts: progress.formatAttempts,
         transientRetries: progress.transientRetries ?? 0, retryNotBefore: progress.retryNotBefore, savedCandidate: !!progress.output } }
