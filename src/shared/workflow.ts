@@ -11,12 +11,18 @@ export const workflowStageSchema = z.object({ stage, state: workflowStageState, 
 export type WorkflowStageGate = z.infer<typeof workflowStageSchema>
 export const workflowPrepareRequest = z.object({ context: requestContext, goal: workflowGoalSchema }).strict()
 export const workflowActionRequest = z.object({ context: requestContext, workflowId: id,
-  action: z.enum(['complete-stage', 'skip-stage', 'stop-revision', 'pause', 'resume', 'cancel', 'finish']),
-  stage: stage.optional(), reason: z.string().trim().max(4000).default('') }).strict()
+  action: z.enum(['complete-stage', 'skip-stage', 'stop-revision', 'pause', 'resume', 'cancel', 'finish', 'close-unknown-call']),
+  stage: stage.optional(), callId: id.optional(), reason: z.string().trim().max(4000).default('') }).strict()
 export const workflowStampSchema = z.object({ stage, fingerprint: hash, outcome: z.enum(['ready', 'with-issues', 'insufficient']),
   decision: z.enum(['completed', 'skipped', 'stopped']), reason: z.string().max(4000), artifacts: z.array(z.string().max(300)).max(200),
   decidedAt: z.string(), sessionId: id }).strict()
 export const workflowCheckpointSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id, planHash: hash,
   revision: z.number().int().min(0), status: z.enum(['waiting-input', 'paused', 'cancelled', 'succeeded', 'completed-with-issues']),
-  stamps: z.array(workflowStampSchema).max(7), updatedAt: z.string() }).strict()
+  stamps: z.array(workflowStampSchema).max(7), updatedAt: z.string(),
+  budget: z.object({ calls: z.array(z.object({ callId: id, runId: id, stage, kind: z.enum(['model', 'search', 'lookup']),
+    state: z.enum(['pending', 'succeeded', 'failed', 'interrupted']), startedAt: z.string(), completedAt: z.string().optional(),
+    owner: z.object({ pid: z.number().int().min(1), bootInstance: z.string().min(1).max(200) }).strict().optional(),
+    reservedCandidates: z.number().int().min(0).max(80), receivedCandidates: z.number().int().min(0).max(80),
+    startDurationMs: z.number().int().nonnegative() }).strict()).max(52), childDurationMs: z.record(id, z.number().int().nonnegative()) }).strict().optional(),
+}).strict()
 export type WorkflowCheckpoint = z.infer<typeof workflowCheckpointSchema>

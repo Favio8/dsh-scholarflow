@@ -201,6 +201,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     {plan && <section role="dialog" aria-modal="false" aria-label="模型生成确认"><h4>确认宿主模型调用</h4>
       <p>{plan.model.providerId} / {plan.model.modelId} · 输入约 {plan.inputBytes} bytes · 源码范围 [{plan.scope.startUtf16}, {plan.scope.endUtf16})</p>
       <p>模型调用预算 {plan.budget.maxModelCalls}；运行时限 {plan.budget.maxDurationMinutes} 分钟；仅生成待审阅建议。</p>
+      <p>本次固定输出上限 {plan.model.maxOutputTokens ?? 4096} token（包含提供方计入的推理输出）；额度耗尽时保留调用，不自动重试截断结果。</p>
+      {plan.workflowId && <p>计入引导任务 {plan.workflowId} 的原累计预算。{plan.workflowBudget?.used && `已用模型调用 ${plan.workflowBudget.used.modelCalls}；阶段开始或重试不重置总额度。`}</p>}
       {plan.sectionTarget && <p>目标章节：{plan.sectionTarget.title} · {plan.sectionTarget.mode === 'insert' ? '插入新章节' : '替换本节正文并保留标题及子章节'}</p>}
       <p>本次固定 Skill：{plan.skillDigests?.map((row: any) => `${row.qualifiedId} · ${row.digest}`).join('；') || '无'}</p>
       {plan.sourceText && <pre>{plan.sourceText}</pre>}{plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}

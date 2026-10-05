@@ -12,6 +12,7 @@ import { ACTIVE_RUN, readRun, readRunInput, runFile, inputFile } from '../pipeli
 import { frozenPlanFile, checkpointFile } from '../pipeline/run-control.ts'
 import { transientRetry, waitRetrySlice } from '../pipeline/retry.ts'
 import type { ModelCall } from '../pipeline/generation.ts'
+import { workflowCall, syncWorkflowDuration } from '../pipeline/workflow-budget.ts'
 
 const frozenSchema = z.object({ kind: z.literal('model-review'), id, reportId: id, contentHash: hash, input: modelReviewRequest,
   snapshot: runSnapshotSchema.refine(value => value.stage === 'review'), dependencyHash: hash, ledgerHash: hash, inputBytes: z.number().int().min(0).max(20 * 1024 * 1024),
@@ -146,7 +147,7 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
     expectedStateHash = digest(stateText); expectedCheckpointHash = digest(progressText)
   })
   const remainingMs = Math.max(1, plan.snapshot.budget.maxDurationMinutes * 60000 - priorDuration), bounded = AbortSignal.any([signal, AbortSignal.timeout(Math.min(remainingMs, 30 * 60000))])
-  const pause = async () => { bounded.throwIfAborted(); state.status = 'paused'; await save(); return { run: state, paused: true } }
+  const pause = async () => { bounded.throwIfAborted(); state.status = 'paused'; await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); return { run: state, paused: true } }
   try {
     if (checkpoint.output) {
       const existing = await existingModelReview(io, plan, checkpoint.output)
@@ -163,7 +164,9 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
       }
       delete checkpoint.retryNotBefore; await checkInputs(); state.usedModelCalls++; checkpoint.pendingCall = true; await save()
       let raw: string
-      try { raw = await modelCall({ system: MODEL_REVIEW_SYSTEM, instruction: '按合同审查给定当前稿件，保留未知与证据边界，只返回结构化结果。', context: plan.context, repair: checkpoint.repair, signal: bounded, runId: state.runId, maxTokens: plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096 }) }
+      try { raw = await workflowCall(io, plan.snapshot.workflowId, { callId: `${state.runId}.model.${state.usedModelCalls}`, runId: state.runId,
+        stage: 'review', kind: 'model', activeDurationMs: state.activeDurationMs ?? 0, owner }, bounded,
+        signal => modelCall({ system: MODEL_REVIEW_SYSTEM, instruction: '按合同审查给定当前稿件，保留未知与证据边界，只返回结构化结果。', context: plan.context, repair: checkpoint.repair, signal, runId: state.runId, maxTokens: plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096 })) }
       catch (error) { bounded.throwIfAborted(); const retry = transientRetry(error, checkpoint.transientRetries)
         if (!retry) throw error
         checkpoint.pendingCall = false; checkpoint.transientRetries = retry.retry; checkpoint.retryNotBefore = retry.notBefore; checkpoint.lastTransientCode = retry.code; await save(); continue }
@@ -171,6 +174,7 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
       try { checkpoint.output = validateModelReview(plan, JSON.parse(raw)) }
       catch { checkpoint.repair = '返回严格 JSON，checks 必须是数组 [{"id":"argument_assessment","status":"unknown","detail":"实际论证判断至少10字符。"},{"id":"style_assessment","status":"unknown","detail":"实际文风判断至少10字符。"}]，status 替换为实际 pass/fail/unknown，不能返回以检查名为键的对象。findings、rechecks、limitations 必须是数组；findings 和 rechecks 使用给定身份、实际源码块及其唯一连续原样 quote，关联 ID 只取本次范围。detail/explanation/reason 至少10字符。不能重复位置、制造引用或同时宣称有问题且通过。没有问题／复查时返回空数组，无法判断时明确 unknown。' }
       await save()
+      await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
     }
     if (control.pauseRequested()) return await pause()
     invariant(checkpoint.output, 'MODEL_REVIEW_INVALID', '一次格式修复后审查输出仍不满足合同，未更新报告。')
@@ -178,10 +182,11 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
     const result = await publishModelReview(io, plan, checkpoint.output)
     state.reviewId = result.report.id; state.status = result.report.issues.length || result.report.checks.some(check => check.status !== 'pass') ? 'completed-with-issues' : 'succeeded'
     checkpoint.published = { reviewId: result.report.id, reportHash: digest(json(result.report)) }; await save()
+    await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
     return { run: state, report: result.report, recoveredArtifact: 'recoveredArtifact' in result }
   } catch (error) {
     checkpoint.pendingCall = false; state.status = bounded.aborted ? signal.aborted ? signal.reason === 'plugin-unload' ? 'interrupted' : 'cancelled' : 'failed' : error instanceof ScholarError && error.code === 'REVIEW_INPUT_CHANGED' ? 'paused' : 'failed'
     state.errorCode = bounded.aborted ? signal.aborted ? 'CANCELLED' : 'BUDGET_EXHAUSTED' : error instanceof ScholarError ? error.code : 'MODEL_CALL_FAILED'
-    await save(); if (bounded.aborted) throw new ScholarError(state.errorCode, '审查已停止，保留检查点和已保存产物。'); throw error
+    await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); if (bounded.aborted) throw new ScholarError(state.errorCode, '审查已停止，保留检查点和已保存产物。'); throw error
   }
 }

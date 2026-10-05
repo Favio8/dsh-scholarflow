@@ -9,6 +9,7 @@ import { ACTIVE_RUN, readRun, readRunInput, runFile, inputFile } from '../pipeli
 import { frozenPlanFile, checkpointFile } from '../pipeline/run-control.ts'
 import { transientRetry, waitRetrySlice } from '../pipeline/retry.ts'
 import { readSearch } from './online.ts'
+import { workflowAssociation, workflowCall, syncWorkflowDuration } from '../pipeline/workflow-budget.ts'
 
 const terminal = (status: RunState['status']) => ['failed', 'cancelled', 'succeeded', 'completed-with-issues'].includes(status)
 const searchPath = (searchId: string) => `.scholarflow/research/${searchId}.json`
@@ -23,7 +24,9 @@ export async function prepareResearchBatch(io: FileStore, request: unknown, pare
   invariant(!current.config.research.providerRefs.length || current.config.research.providerRefs.includes('crossref'),
     'RESEARCH_PROVIDER_NOT_APPROVED', '项目未选择 Crossref 提供方。')
   const profile = await io.read(current.config.writing.projectProfile)
+  const workflowId = await workflowAssociation(io)
   const snapshotInput = runSnapshotSchema.parse({ schemaVersion: 1, runId: newId('run'), projectId: current.ledger.projectId,
+    ...(workflowId && { workflowId }),
     sessionId: input.context.sessionId, stage: 'research', configHash: current.configHash, ledgerRevision: current.ledger.revision,
     documentHash: current.document.contentHash, outlineVersion: current.ledger.outline.version, materialHashes: {}, sourceHashes: {},
     profileHash: digest(profile?.text ?? ''), skillDigests: [], modelDescriptor: { providerId: 'none', modelId: 'none' },
@@ -174,13 +177,13 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
     await save()
     while (checkpoint.queries.some(row => row.state === 'pending')) {
       budgetSignal.throwIfAborted()
-      if (control.pauseRequested()) { state.status = 'paused'; await save(); return result() }
+      if (control.pauseRequested()) { state.status = 'paused'; await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); return result() }
       invariant(priorDuration + Date.now() - executionStarted < budgetMs && checkpoint.queriesUsed < plan.snapshot.budget.maxSearchQueries,
         'RESEARCH_BUDGET_EXHAUSTED', '本次查询或时间预算耗尽，已取得结果保留。')
       const query = checkpoint.queries.find(row => row.state === 'pending')!, spec = plan.searches.find(row => row.queryId === query.queryId)!.search
       while (query.retryNotBefore && Date.now() < query.retryNotBefore) {
         budgetSignal.throwIfAborted()
-        if (control.pauseRequested()) { state.status = 'paused'; await save(); return result() }
+        if (control.pauseRequested()) { state.status = 'paused'; await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); return result() }
         invariant(query.retryNotBefore - Date.now() < budgetMs - priorDuration - (Date.now() - executionStarted), 'RESEARCH_BUDGET_EXHAUSTED', '提供方重试窗口超过剩余运行预算。')
         await waitRetrySlice(Math.min(200, query.retryNotBefore - Date.now()), budgetSignal)
       }
@@ -197,7 +200,9 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
       const searchFile = (await io.read(searchPath(searchId)))!
       let failure: unknown
       try {
-        const response = await provider.search(spec, AbortSignal.any([budgetSignal, AbortSignal.timeout(25000)])); budgetSignal.throwIfAborted()
+        const response = await workflowCall(io, plan.snapshot.workflowId, { callId: searchId, runId: state.runId, stage: 'research', kind: 'search',
+          candidateLimit: spec.limit, activeDurationMs: state.activeDurationMs ?? 0, owner }, AbortSignal.any([budgetSignal, AbortSignal.timeout(25000)]),
+          signal => provider.search(spec, signal), result => Math.min(spec.limit, result.records.length)); budgetSignal.throwIfAborted()
         record = searchRecordSchema.parse({ ...record, state: 'completed', records: response.records.slice(0, spec.limit), warnings: response.warnings, completedAt: new Date().toISOString() })
       } catch (error) {
         failure = error
@@ -212,15 +217,17 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
       if (retry && query.attempts.length < 3) { query.state = 'pending'; query.transientRetries = retry.retry; query.retryNotBefore = retry.notBefore }
       if ((unknownRetryWindow || record.state === 'interrupted') && query.attempts.length < 3) query.state = 'pending'
       await save([{ path: searchPath(searchId), before: searchFile, after: json(record) }])
+      await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
       budgetSignal.throwIfAborted()
-      if (unknownRetryWindow) { state.status = 'paused'; state.errorCode = 'RESEARCH_RETRY_WINDOW_UNAVAILABLE'; await save(); return result() }
+      if (record.errorCode?.startsWith('WORKFLOW_')) { state.status = 'failed'; state.errorCode = record.errorCode; await save(); return result() }
+      if (unknownRetryWindow) { state.status = 'paused'; state.errorCode = 'RESEARCH_RETRY_WINDOW_UNAVAILABLE'; await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); return result() }
     }
     state.status = checkpoint.queries.some(row => row.state === 'completed') ? 'completed-with-issues' : 'failed'
     if (state.status === 'failed') state.errorCode = 'RESEARCH_NO_SUCCESSFUL_QUERY'
-    await save(); return result()
+    await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); return result()
   } catch (error) {
     state.status = signal.aborted ? signal.reason === 'plugin-unload' ? 'interrupted' : 'cancelled' : 'failed'
     state.errorCode = signal.aborted ? signal.reason === 'plugin-unload' ? 'RESEARCH_INTERRUPTED' : 'RESEARCH_CANCELLED' : error instanceof ScholarError ? error.code : 'RESEARCH_EXECUTION_FAILED'
-    await save(); return result()
+    await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); return result()
   }
 }

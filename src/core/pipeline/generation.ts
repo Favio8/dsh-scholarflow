@@ -14,6 +14,7 @@ import { ACTIVE_RUN as ACTIVE, runFile as statePath, inputFile, readRun } from '
 import { frozenPlanFile, checkpointFile, readGenerationCheckpoint, validateRunAction, type RunActionPlan } from './run-control.ts'
 import { transientRetry, waitRetrySlice } from './retry.ts'
 import { validateIssueFix } from '../review/issue-fixes.ts'
+import { workflowAssociation, workflowCall, syncWorkflowDuration } from './workflow-budget.ts'
 
 export { modelOutputSchema } from '../../shared/runs.ts'
 export interface GenerationPlan { id: string; contentHash: string; snapshot: z.infer<typeof runSnapshotSchema>; input: z.infer<typeof generationRequest>;
@@ -29,7 +30,7 @@ export function validateModelReplacement(plan: GenerationPlan, replacementText: 
   else invariant(sources.some(source => keys.includes(source.citeKey)), 'MODEL_CITATION_INVALID', '事实性全文缺少已登记证据来源的有效引用 token。')
 }
 
-export async function prepareGeneration(io: FileStore, input: z.infer<typeof generationRequest>, model: { providerId: string; modelId: string }, skillReader?: SkillReader): Promise<GenerationPlan> {
+export async function prepareGeneration(io: FileStore, input: z.infer<typeof generationRequest>, model: { providerId: string; modelId: string; maxOutputTokens?: number }, skillReader?: SkillReader): Promise<GenerationPlan> {
   input = generationRequest.parse(input)
   const current = await snapshot(io)
   invariant(input.context.projectId === current.config.project.id && input.context.expectedLedgerRevision === current.ledger.revision,
@@ -84,10 +85,13 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
     citationContract: { syntax: '[@citeKey]', tokens: [...new Set(evidence.map(item => current.ledger.sources[item.sourceId].citeKey))].map(key => `[@${key}]`), preserveSelectionKeys: input.selection?.citationKeys ?? [] },
     limitations: current.config.project.type === 'research-paper' ? ['本地来源的结果不是本项目实验结果；尚无已确认用户测量时必须保留真实实验待补项。'] : [] }
   const runId = newId('run')
+  const workflowId = await workflowAssociation(io)
   const plan = { id: newId('plan'), snapshot: runSnapshotSchema.parse({ schemaVersion: 1, runId, projectId: current.config.project.id, sessionId: input.context.sessionId,
+    ...(workflowId && { workflowId }),
     stage: input.selection ? 'revision' : 'drafting', configHash: current.configHash, ledgerRevision: current.ledger.revision, documentHash: current.document.contentHash,
     outlineVersion: current.ledger.outline.version, materialHashes, sourceHashes, profileHash: digest(profile.text),
-    skillDigests: skills.resources.map(resource => ({ qualifiedId: resource.qualifiedId, digest: resource.digest })), resourceLockHash: skills.resourceLockHash, modelDescriptor: model,
+    skillDigests: skills.resources.map(resource => ({ qualifiedId: resource.qualifiedId, digest: resource.digest })), resourceLockHash: skills.resourceLockHash,
+    modelDescriptor: { ...model, maxOutputTokens: model.maxOutputTokens ?? 16384 },
     budget: current.config.workflow.budget, networkScope: 'local-only', createdAt: new Date().toISOString() }), input, context, evidenceIds,
     inputBytes: Buffer.byteLength(SYSTEM + input.instruction + json(context)), ledgerHash: current.ledgerHash, ...(target && { sectionTarget: target }) }
   return { ...plan, contentHash: digest(json(plan)) }
@@ -185,7 +189,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
   })
   const remainingMs = Math.max(1, plan.snapshot.budget.maxDurationMinutes * 60000 - priorDuration)
   const budgetSignal = AbortSignal.any([signal, AbortSignal.timeout(Math.min(remainingMs, 30 * 60000))])
-  const pause = async () => { budgetSignal.throwIfAborted(); state.status = 'paused'; await saveState()
+  const pause = async () => { budgetSignal.throwIfAborted(); state.status = 'paused'; await saveState(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
     return { run: state, paused: true, limitations: ['已停止调度，保留检查点；继续执行需要重新预览并确认。'] } }
   const validateOutput = (candidate: z.infer<typeof modelOutputSchema>) => {
     validateModelReplacement(plan, candidate.replacementText)
@@ -227,7 +231,10 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
       await checkResources()
       state.usedModelCalls++; checkpoint.pendingCall = true; await saveState()
       let raw: string
-      try { raw = await modelCall({ system: SYSTEM, instruction: plan.input.instruction, context: plan.context, repair: checkpoint.repair, signal: budgetSignal, runId: state.runId }) }
+      try { raw = await workflowCall(io, plan.snapshot.workflowId, { callId: `${state.runId}.model.${state.usedModelCalls}`, runId: state.runId,
+        stage: plan.snapshot.stage, kind: 'model', activeDurationMs: state.activeDurationMs ?? 0, owner }, budgetSignal,
+        signal => modelCall({ system: SYSTEM, instruction: plan.input.instruction, context: plan.context, repair: checkpoint.repair, signal, runId: state.runId,
+          maxTokens: plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096 })) }
       catch (error) {
         budgetSignal.throwIfAborted()
         const retry = transientRetry(error, checkpoint.transientRetries ?? 0)
@@ -243,6 +250,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
       }
       catch { checkpoint.repair = '上次输出不满足 JSON、范围、论点映射或引用合同。严格使用 context.citationContract 中的 [@sf_实际键] token，基础改写保留原选区引用。章节生成时必须按 context.sectionContract.output 返回同一 sectionId 和每段唯一的 paragraphClaims；只返回本节正文，不含大纲章节标题。其他动作仅返回 {"replacementText":"...","limitations":[]}。不要改写为执行命令。' }
       await saveState()
+      await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
     }
     if (control?.pauseRequested()) return await pause()
     invariant(output, 'MODEL_OUTPUT_INVALID', '一次格式修复后仍不满足合同；未产生可执行补丁。')
@@ -258,6 +266,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
     const stored = await storeProposal(io, proposal, after.ledger.revision)
     state.status = 'completed-with-issues'; state.proposalId = proposal.id
     await saveState()
+    await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
     return { run: state, ...stored, limitations: [...output.limitations, '建议尚需用户审阅并接受；学术真实性和语义支持仍需人工核对。'] }
   } catch (error) {
     checkpoint.pendingCall = false
@@ -265,6 +274,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
       error instanceof ScholarError && ['STALE_DOCUMENT_VERSION', 'STALE_RESOURCE_VERSION', 'STALE_MATERIAL_VERSION'].includes(error.code) ? 'paused' : 'failed'
     state.errorCode = budgetSignal.aborted ? signal.aborted ? 'CANCELLED' : 'BUDGET_EXHAUSTED' : error instanceof ScholarError ? error.code : 'MODEL_CALL_FAILED'
     await saveState()
+    await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
     if (budgetSignal.aborted) throw new ScholarError(state.errorCode!, signal.aborted ? '已取消生成，保留已有产物和运行记录。' : '运行时间预算耗尽，保留已有产物。')
     throw error
   }

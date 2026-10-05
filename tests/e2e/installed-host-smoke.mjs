@@ -460,7 +460,21 @@ try {
   assert.equal(await selectionSkills.locator('option').count(), 2, 'only compatible selection-transform Skill appears beside the default action')
   assert.match(await selectionSkills.innerText(), /selection-preserving-revision/u)
   assert.doesNotMatch(await selectionSkills.innerText(), /TEST_ONLY-private-static/u)
+  let nativePaidWorkflowId
+  const paidWorkflowContext = async () => ({ requestId: `req_TEST_ONLY_workflow_${Date.now()}`, workspaceId: projectWorkspace.value.workspace.workspaceId,
+    sessionId: await page.locator('.sf-project').getAttribute('data-sf-session-id'), projectId: projectLedger.projectId,
+    expectedLedgerRevision: JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')).revision })
+  const beginPaidWorkflow = async () => {
+    if (nativePaidWorkflowId) return
+    const context = await paidWorkflowContext(), ledger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+    const prepared = await rpc('scholarflow.v1/workflow.prepare', { request: { context, goal: { researchQuestion: ledger.outline.researchQuestion,
+      minimumSources: 1, minimumLocatedEvidence: 1, noFormalRequirementsReason: 'TEST_ONLY 开始时无正式要求，后续明确登记与确认的要求仍生效。' } } })
+    assert.equal(prepared.value.ok, true, JSON.stringify(prepared.value))
+    const confirmed = await rpc('scholarflow.v1/workflow.confirm', { request: { context, planId: prepared.value.data.planId, planHash: prepared.value.data.planHash } })
+    assert.equal(confirmed.value.ok, true, JSON.stringify(confirmed.value)); nativePaidWorkflowId = confirmed.value.data.workflowId
+  }
   if (liveModel) {
+    await beginPaidWorkflow()
     const before = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
     const readyLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
     const targetSection = readyLedger.outline.sections[0]
@@ -858,6 +872,7 @@ try {
   await page.getByRole('button', { name: /^下载 quality-report\.md/ }).click()
   assert.equal((await download).suggestedFilename(), 'quality-report.md')
   if (liveResearch) {
+    await beginPaidWorkflow()
     const beforeResearch = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
     const currentSettings = (await rpc('scholarflow.v1/diagnostics')).value.settings[0]
     const enabled = await rpc('settings/update', { ns: 'scholarflow', patch: { networkEnabled: true }, expectedRevision: currentSettings.revision })
@@ -949,14 +964,32 @@ try {
   }
   // TEST_ONLY: actual operator workflow previews, ordered facts and cold pause.
   // This manuscript lacks its confirmed outline headings; it must remain blocked.
+  let nativeWorkflowUsed
+  if (nativePaidWorkflowId) {
+    const context = await paidWorkflowContext(), observed = await rpc('scholarflow.v1/workflow.inspect', { request: { context } })
+    assert.equal(observed.value.ok, true, JSON.stringify(observed.value))
+    nativeWorkflowUsed = observed.value.data.budget.used
+    assert.equal(observed.value.data.budget.pendingCalls.length, 0)
+    assert.equal(observed.value.data.workflow.configChanged, false, 'explicit material selection and stage bindings do not renew or invalidate the overall budget policy')
+    if (liveModel) assert.ok(nativeWorkflowUsed.modelCalls >= 3)
+    if (liveResearch) { assert.equal(nativeWorkflowUsed.searchQueries, 4); assert.ok(nativeWorkflowUsed.candidates > 0 && nativeWorkflowUsed.candidates <= 9) }
+    const close = await rpc('scholarflow.v1/workflow.prepareAction', { request: { context, workflowId: nativePaidWorkflowId, action: 'cancel',
+      reason: 'TEST_ONLY 累计预算已验证，保留实际提供方记录与产物，不宣称七阶段研究完成。' } })
+    assert.equal(close.value.ok, true, JSON.stringify(close.value))
+    const closed = await rpc('scholarflow.v1/workflow.confirm', { request: { context, planId: close.value.data.planId, planHash: close.value.data.planHash } })
+    assert.equal(closed.value.ok, true, JSON.stringify(closed.value))
+  }
   await page.getByRole('tab', { name: /^Overview ·/ }).click()
   const workflowUi = page.getByRole('region', { name: '七阶段引导任务', exact: true })
+  await workflowUi.getByRole('button', { name: '刷新引导检查点', exact: true }).click()
   const beforeWorkflowLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  const beforeWorkflowPointer = await readFile(join(projectRoot, '.scholarflow/workflows/current.json'), 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
   await workflowUi.getByRole('textbox', { name: '引导研究问题', exact: true }).fill(beforeWorkflowLedger.outline.researchQuestion)
   await workflowUi.getByRole('spinbutton', { name: '引导最低来源数', exact: true }).fill('2')
   await workflowUi.getByRole('button', { name: '预览七阶段目标', exact: true }).click()
   await workflowUi.getByRole('button', { name: '取消引导预览', exact: true }).click()
-  await assert.rejects(stat(join(projectRoot, '.scholarflow/workflows/current.json')), { code: 'ENOENT' })
+  if (beforeWorkflowPointer) assert.equal(await readFile(join(projectRoot, '.scholarflow/workflows/current.json'), 'utf8'), beforeWorkflowPointer)
+  else await assert.rejects(stat(join(projectRoot, '.scholarflow/workflows/current.json')), { code: 'ENOENT' })
   await workflowUi.getByRole('button', { name: '预览七阶段目标', exact: true }).click()
   await workflowUi.getByRole('button', { name: '确认保存引导检查点', exact: true }).click()
   await workflowUi.getByRole('button', { name: '预览确认要求确认', exact: true }).click()
@@ -1154,6 +1187,7 @@ try {
     twoSessionProjectRestore: true, coldProjectBindingRestore: true, mismatchedBindingRejected: true,
     nativeUiInterruptedInitRecovery: true,
     nativeWorkflowPreviewCancelOrderedFactsInsufficiencyPauseAndColdRestore: true,
+    realProviderGuidedAggregateBudget: nativePaidWorkflowId ? { workflowId: nativePaidWorkflowId, used: nativeWorkflowUsed } : false,
     nativeFutureSchemasReadonlyOriginalDownloadsAndMutationDenial: true,
     nativeUiMaterialParseEvidenceClaimOutline: true, evidenceChainColdRestore: true,
     nativeUiOutlineEditReorderDraftCancelDeleteAndConfirm: true,

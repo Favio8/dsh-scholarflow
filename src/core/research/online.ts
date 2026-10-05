@@ -3,19 +3,22 @@ import { id, sourceSchema, type Source } from '../../shared/schema.ts'
 import { digest, newId, json, type FileStore, type FileImage } from '../store/files.ts'
 import { snapshot, mutateLedger, invalidateReviews } from '../project/project.ts'
 import { ScholarError, invariant } from '../../shared/errors.ts'
+import { workflowAssociation, workflowCall } from '../pipeline/workflow-budget.ts'
+import type { RunState } from '../../shared/runs.ts'
 
 const searchPath = (searchId: string) => `.scholarflow/research/${id.parse(searchId)}.json`
-export interface SearchPlan { id: string; projectId: string; configHash: string; ledgerRevision: number; search: ReturnType<typeof searchInput.parse>; contentHash: string }
+export interface SearchPlan { id: string; projectId: string; configHash: string; ledgerRevision: number; search: ReturnType<typeof searchInput.parse>; contentHash: string; workflowId?: string }
 export async function prepareSearch(io: FileStore, input: unknown): Promise<SearchPlan> {
   const current = await snapshot(io), search = searchInput.parse(input)
   invariant(current.config.workflow.budget.maxSearchQueries >= 1 && search.limit <= current.config.workflow.budget.maxCandidateSources,
     'RESEARCH_BUDGET_EXHAUSTED', '本项目检索预算不足，未发起外部请求。')
   invariant(!current.config.research.providerRefs.length || current.config.research.providerRefs.includes('crossref'), 'RESEARCH_PROVIDER_NOT_APPROVED', '项目未选择 Crossref 提供方。')
-  const plan = { id: newId('search'), projectId: current.ledger.projectId, configHash: current.configHash, ledgerRevision: current.ledger.revision, search }
+  const workflowId = await workflowAssociation(io)
+  const plan = { id: newId('search'), projectId: current.ledger.projectId, configHash: current.configHash, ledgerRevision: current.ledger.revision, search, ...(workflowId && { workflowId }) }
   return { ...plan, contentHash: digest(json(plan)) }
 }
 
-export async function executeSearch(io: FileStore, plan: SearchPlan, provider: ResearchProvider, signal: AbortSignal) {
+export async function executeSearch(io: FileStore, plan: SearchPlan, provider: ResearchProvider, signal: AbortSignal, owner?: RunState['owner']) {
   invariant(provider.id === 'crossref' && provider.capabilities.search, 'RESEARCH_PROVIDER_UNAVAILABLE', '此提供方不能检索。')
   const { contentHash, ...input } = plan
   invariant(digest(json(input)) === contentHash, 'INVALID_APPROVAL', '检索计划发生改变。')
@@ -32,7 +35,8 @@ export async function executeSearch(io: FileStore, plan: SearchPlan, provider: R
   })
   // Never hold a project writer lock while waiting for the provider.
   try {
-    const result = await provider.search(plan.search, signal)
+    const result = await workflowCall(io, plan.workflowId, { callId: plan.id, runId: plan.id, stage: 'research', kind: 'search', candidateLimit: plan.search.limit, owner }, signal,
+      signal => provider.search(plan.search, signal), result => Math.min(plan.search.limit, result.records.length))
     signal.throwIfAborted()
     record = searchRecordSchema.parse({ ...record, state: 'completed', records: result.records.slice(0, plan.search.limit), warnings: result.warnings, completedAt: new Date().toISOString() })
   } catch (error) {
@@ -119,17 +123,18 @@ export async function applyIdentityLookup(io: FileStore, sourceId: string, expec
 }
 
 export interface LookupPlan { id: string; projectId: string; configHash: string; ledgerRevision: number;
-  sourceId: string; sourceHash: string; doi: string; contentHash: string }
+  sourceId: string; sourceHash: string; doi: string; contentHash: string; workflowId?: string }
 export async function prepareLookup(io: FileStore, sourceId: string): Promise<LookupPlan> {
   const current = await snapshot(io), source = current.ledger.sources[sourceId]
   invariant(source?.identifiers.doi, 'SOURCE_IDENTIFIER_REQUIRED', '所选来源没有 DOI，不能进行 DOI 查询。')
   invariant(!current.config.research.providerRefs.length || current.config.research.providerRefs.includes('crossref'), 'RESEARCH_PROVIDER_NOT_APPROVED', '项目未选择 Crossref 提供方。')
   invariant(current.config.workflow.budget.maxSearchQueries > 0, 'RESEARCH_BUDGET_EXHAUSTED', '本项目在线查询预算为零。')
-  const plan = { id: newId('lookup'), projectId: current.ledger.projectId, configHash: current.configHash, ledgerRevision: current.ledger.revision,
+  const workflowId = await workflowAssociation(io)
+  const plan = { id: newId('lookup'), projectId: current.ledger.projectId, configHash: current.configHash, ledgerRevision: current.ledger.revision, ...(workflowId && { workflowId }),
     sourceId: source.id, sourceHash: digest(json(source)), doi: doi.parse(source.identifiers.doi) }
   return { ...plan, contentHash: digest(json(plan)) }
 }
-export async function executeLookup(io: FileStore, plan: LookupPlan, provider: ResearchProvider, signal: AbortSignal) {
+export async function executeLookup(io: FileStore, plan: LookupPlan, provider: ResearchProvider, signal: AbortSignal, owner?: RunState['owner']) {
   const { contentHash, ...input } = plan
   invariant(digest(json(input)) === contentHash && provider.id === 'crossref' && provider.capabilities.lookupIdentifier,
     'INVALID_APPROVAL', 'DOI 查询计划或提供方能力无效。')
@@ -145,12 +150,13 @@ export async function executeLookup(io: FileStore, plan: LookupPlan, provider: R
     return io.write(path, json(record), undefined)
   })
   let found: SourceCandidate | null = null, failureCode: string | undefined
-  try { found = await provider.lookup(plan.doi, signal); signal.throwIfAborted() }
+  try { found = await workflowCall(io, plan.workflowId, { callId: plan.id, runId: plan.id, stage: 'research', kind: 'lookup', owner }, signal,
+    signal => provider.lookup(plan.doi, signal)); signal.throwIfAborted() }
   catch (error) { failureCode = signal.aborted ? signal.reason?.name === 'TimeoutError' ? 'RESEARCH_TIMEOUT' : 'RESEARCH_CANCELLED'
     : (error as { code?: string }).code?.replace(/[^A-Z0-9_]/g, '').slice(0, 100) || 'RESEARCH_PROVIDER_FAILED' }
   record = lookupRecordSchema.parse({ ...record, found, completedAt: new Date().toISOString(),
     state: failureCode === 'RESEARCH_CANCELLED' ? 'cancelled' : failureCode ? 'failed' : 'completed', ...(failureCode && { errorCode: failureCode }) })
-  if (failureCode === 'RESEARCH_CANCELLED') {
+  if (failureCode === 'RESEARCH_CANCELLED' || failureCode?.startsWith('WORKFLOW_')) {
     await io.lock(async () => {
       invariant((await snapshot(io)).ledger.projectId === plan.projectId, 'PROJECT_ID_CONFLICT', '核验项目身份已改变。')
       await io.write(path, json(record), before)

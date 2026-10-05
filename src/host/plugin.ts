@@ -23,6 +23,7 @@ import { generationRequest, runStartRequest, runControlRequest, runStateSchema }
 import { prepareGeneration, executeGeneration, type GenerationPlan } from '../core/pipeline/generation.ts'
 import { workflowPrepareRequest, workflowActionRequest } from '../shared/workflow.ts'
 import { currentWorkflow, prepareWorkflow, startWorkflow, prepareWorkflowAction, applyWorkflowAction, type WorkflowStartPlan, type WorkflowActionPlan } from '../core/pipeline/workflow.ts'
+import { workflowBudgetInfo } from '../core/pipeline/workflow-budget.ts'
 import { selectedModel, callStageModel } from './executor/model.ts'
 import { runReview, inspectReview, decideIssue } from '../core/review/review.ts'
 import { prepareDelivery, createDelivery, readDelivery, type DeliveryPlan } from '../core/export/delivery.ts'
@@ -129,7 +130,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   @Remote('workflow.inspect')
   async workflowInspect(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
-      const { io } = await resolveStore(this.ctx, context, signal); return currentWorkflow(io) })
+      const { io } = await resolveStore(this.ctx, context, signal); return { ...await currentWorkflow(io), budget: await workflowBudgetInfo(io) } })
   }
 
   @Remote('workflow.prepare')
@@ -141,7 +142,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       invariant(current.ledger.revision === input.context.expectedLedgerRevision, 'STALE_LEDGER_REVISION', '项目已更新，请刷新后预览引导目标。')
       const plan = await prepareWorkflow(io, input.goal, input.context.sessionId)
       this.workflowPlans.set(plan.id, { plan, action: false, context: input.context, peerId, expires: Date.now() + 600000 })
-      return { planId: plan.id, planHash: plan.contentHash, goal: plan.goal, gates: plan.gates, workflowId: plan.workflowId }
+      return { planId: plan.id, planHash: plan.contentHash, goal: plan.goal, gates: plan.gates, workflowId: plan.workflowId, budget: plan.budget, maxReviewRounds: plan.maxReviewRounds }
     })
   }
 
@@ -152,9 +153,9 @@ export class ScholarFlowRemote extends TypertRemoteService {
       invariant(this.workflowPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有引导任务预览。')
       const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io)
       invariant(current.ledger.revision === input.context.expectedLedgerRevision, 'STALE_LEDGER_REVISION', '项目已更新，请刷新后预览阶段操作。')
-      const plan = await prepareWorkflowAction(io, input)
+      const plan = await prepareWorkflowAction(io, input, owner => this.ownerAlive(owner))
       this.workflowPlans.set(plan.id, { plan, action: true, context: input.context, peerId, expires: Date.now() + 600000 })
-      return { planId: plan.id, planHash: plan.contentHash, action: plan.action, stage: plan.stage, reason: plan.reason, gate: plan.gate }
+      return { planId: plan.id, planHash: plan.contentHash, action: plan.action, stage: plan.stage, callId: plan.callId, reason: plan.reason, gate: plan.gate }
     })
   }
 
@@ -165,7 +166,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId && input.context.projectId === row.context.projectId,
         'SESSION_BINDING_CHANGED', '引导任务确认的会话或项目发生变化。')
       const { io } = await resolveStore(this.ctx, row.context, signal)
-      const result = row.action ? await applyWorkflowAction(io, row.plan as WorkflowActionPlan) : await startWorkflow(io, row.plan as WorkflowStartPlan)
+      const result = row.action ? await applyWorkflowAction(io, row.plan as WorkflowActionPlan, owner => this.ownerAlive(owner)) : await startWorkflow(io, row.plan as WorkflowStartPlan)
       this.workflowPlans.delete(input.planId); return result
     })
   }
@@ -698,7 +699,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       signal.throwIfAborted()
       const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal)
       this.searchPlans.delete(input.planId)
-      return executeSearch(io, row.plan, this.researchProvider, AbortSignal.any([signal, AbortSignal.timeout(25000)]))
+      return executeSearch(io, row.plan, this.researchProvider, AbortSignal.any([signal, AbortSignal.timeout(25000)]), { pid: process.pid, bootInstance: this.bootInstance })
     })
   }
 
@@ -746,7 +747,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       signal.throwIfAborted()
       const { io } = await resolveStore(this.ctx, input.context, new AbortController().signal)
       this.lookupPlans.delete(input.planId)
-      return executeLookup(io, row.plan, this.researchProvider, AbortSignal.any([signal, AbortSignal.timeout(25000)]))
+      return executeLookup(io, row.plan, this.researchProvider, AbortSignal.any([signal, AbortSignal.timeout(25000)]), { pid: process.pid, bootInstance: this.bootInstance })
     })
   }
 
@@ -774,11 +775,12 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const { io } = await resolveStore(this.ctx, input.context, signal)
       const model = await selectedModel(this.ctx, input.context.sessionId, signal)
       const plan = await prepareGeneration(io, input, { providerId: model.selected.provider, modelId: model.selected.model }, binding => readPrivateSkill(binding, io))
-      invariant(plan.inputBytes + 6096 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '选定范围超过模型上下文预算；请缩小章节和证据范围，未截掉关键证据继续生成。')
+      invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '选定范围超过模型上下文预算；请缩小章节和证据范围，未截掉关键证据继续生成。')
       for (const [key, row] of this.generationPlans) if (row.expires < Date.now()) this.generationPlans.delete(key)
       invariant(this.generationPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有生成计划。')
       this.generationPlans.set(plan.id, { plan, selected: model.selected, peerId, expires: Date.now() + 600000 })
       return { planId: plan.id, planHash: plan.contentHash, runId: plan.snapshot.runId, model: plan.snapshot.modelDescriptor, stage: plan.snapshot.stage,
+        workflowId: plan.snapshot.workflowId, workflowBudget: await workflowBudgetInfo(io),
         inputBytes: plan.inputBytes, evidenceIds: plan.evidenceIds, budget: plan.snapshot.budget, skillDigests: plan.snapshot.skillDigests,
         scope: input.selection ? input.selection.sourceRange : plan.sectionTarget ? { startUtf16: plan.sectionTarget.startUtf16, endUtf16: plan.sectionTarget.endUtf16 } : { startUtf16: 0, endUtf16: (await snapshot(io)).document.text.length },
         sectionTarget: plan.sectionTarget, sourceText: input.selection?.sourceText, reviewIssueId: input.reviewIssueId, risks: [
@@ -895,7 +897,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
           invariant(generation.snapshot.modelDescriptor.providerId === selection.provider && generation.snapshot.modelDescriptor.modelId === selection.model,
             'MODEL_SELECTION_CHANGED', '恢复需要原提供方与模型；请选择原模型，或结束旧运行后为新模型预览新任务。')
         }
-        invariant(generation.inputBytes + 6096 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '恢复输入超过当前模型上下文限额。')
+        invariant(generation.inputBytes + (generation.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '恢复输入超过当前模型上下文限额。')
       }
       this.runActionPlans.set(plan.id, { plan, generation, selected, context: input.context, peerId, expires: Date.now() + 600000 })
       const stored = await readRun(io, input.runId, plan.projectId)
@@ -1068,6 +1070,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
 
   private reviewPreview(plan: ModelReviewPlan) {
     return { planId: plan.id, planHash: plan.contentHash, runId: plan.snapshot.runId, model: plan.snapshot.modelDescriptor, inputBytes: plan.inputBytes,
+      workflowId: plan.snapshot.workflowId,
       documentHash: plan.snapshot.documentHash, evidenceIds: plan.context.evidence.map(item => item.id), sourceIds: plan.context.sources.map(source => source.id),
       blocks: plan.context.blocks.length, budget: plan.snapshot.budget, skillDigests: plan.snapshot.skillDigests,
       risks: ['向所列宿主模型发送当前全部已保存主稿、项目要求、相关论点、有效已选定位证据、已确认记忆、文风与本审查阶段固定 Skill 说明；本地模式不代表模型离线处理。',

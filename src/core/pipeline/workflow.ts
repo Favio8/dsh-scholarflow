@@ -7,20 +7,42 @@ import { snapshot } from '../project/project.ts'
 import { workflowGates } from './workflow-gates.ts'
 import { invariant } from '../../shared/errors.ts'
 import { ACTIVE_RUN } from './run-store.ts'
+import { readRun } from './run-store.ts'
+import { runStateSchema, runSnapshotSchema } from '../../shared/runs.ts'
 
-const POINTER = '.scholarflow/workflows/current.json'
+export const WORKFLOW_POINTER = '.scholarflow/workflows/current.json'
+const POINTER = WORKFLOW_POINTER
 const root = (workflowId: string) => {
   id.parse(workflowId); invariant(/^workflow_[\w]+$/u.test(workflowId), 'WORKFLOW_INVALID', '引导任务身份无效。')
   return `.scholarflow/runs/${workflowId}`
 }
 const terminal = (status: WorkflowCheckpoint['status']) => ['cancelled', 'succeeded', 'completed-with-issues'].includes(status)
-const inputSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id, sessionId: id, goal: workflowGoalSchema, configHash: hash, createdAt: z.string() }).strict()
+async function ensureNoStageExecuting(io: FileStore, projectId: string, allowDeadRun?: { runId: string; ownerAlive: (owner: { pid: number; bootInstance: string }) => boolean }) {
+  const active = await io.read(ACTIVE_RUN)
+  if (!active) return
+  let parsed
+  try { parsed = runStateSchema.safeParse(JSON.parse(active.text)) } catch { /* Damaged active ownership is never ignored. */ }
+  invariant(parsed?.success, 'RUN_STATE_CHANGED', '活动阶段记录无法校验，先检查原记录。')
+  const authoritative = await readRun(io, parsed.data.runId, projectId)
+  invariant(json(authoritative.run) === json(parsed.data), 'RUN_STATE_CHANGED', '活动阶段投影与事实源不一致，先检查原记录。')
+  invariant(['failed', 'cancelled', 'succeeded', 'completed-with-issues'].includes(parsed.data.status) ||
+    allowDeadRun?.runId === parsed.data.runId && !allowDeadRun.ownerAlive(parsed.data.owner), 'RUN_IN_PROGRESS', '当前阶段尚未结束；先恢复或结束阶段，再确认引导检查点。')
+}
+const inputSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id, sessionId: id, goal: workflowGoalSchema, configHash: hash, createdAt: z.string(),
+  policyHash: hash.optional(), budget: runSnapshotSchema.shape.budget.optional(), maxReviewRounds: z.number().int().min(1).max(2).optional() }).strict()
 const planSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id, inputHash: hash,
   stages: z.array(stage).length(7), contentHash: hash }).strict()
 const pointerSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id }).strict()
 const runSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id, planHash: hash, checkpointHash: hash,
   status: workflowCheckpointSchema.shape.status, startedAt: z.string(), updatedAt: z.string() }).strict()
-export async function readWorkflow(io: FileStore, workflowId: string) {
+// Explicitly selecting materials, changing stage bindings or editing writing
+// preferences is normal stage work. It invalidates affected facts, without
+// renewing the overall budget or silently changing its permission policy.
+const policyHash = (current: Awaited<ReturnType<typeof snapshot>>) => {
+  const { project, paths, workflow, research, privacy, output, materials } = current.config
+  return digest(json({ project, paths, workflow, research, privacy, output, materialExcludes: materials.exclude }))
+}
+export async function readWorkflowRecord(io: FileStore, workflowId: string) {
   const current = await snapshot(io), prefix = root(workflowId)
   const [inputFile, planFile, checkpointFile, runFile] = await Promise.all(['input.json', 'plan.json', 'checkpoint.json', 'run.json'].map(path => io.read(`${prefix}/${path}`)))
   invariant(inputFile && planFile && checkpointFile && runFile, 'WORKFLOW_INVALID', '引导任务快照缺失；未重建历史。')
@@ -34,7 +56,14 @@ export async function readWorkflow(io: FileStore, workflowId: string) {
     run.checkpointHash === digest(checkpointFile.text) && run.status === checkpoint.status &&
     json(plan.stages) === json(stage.options) && new Set(checkpoint.stamps.map(row => row.stage)).size === checkpoint.stamps.length,
     'WORKFLOW_INVALID', '引导任务身份、计划或检查点校验失败；原记录保留。')
+  return { current, input, plan, checkpoint, checkpointFile, run, runFile,
+    configChanged: input.policyHash ? input.policyHash !== policyHash(current) : input.configHash !== current.configHash }
+}
+export async function readWorkflow(io: FileStore, workflowId: string) {
+  const stored = await readWorkflowRecord(io, workflowId), { input, checkpoint } = stored
   const facts = await workflowGates(io, input.goal)
+  invariant(stored.current.configHash === facts.current.configHash && stored.current.ledgerHash === facts.current.ledgerHash &&
+    stored.current.document.contentHash === facts.current.document.contentHash, 'WORKFLOW_INPUT_CHANGED', '读取检查点期间项目输入改变，请重新读取。')
   let priorCurrent = true
   const gates = facts.gates.map(gate => {
     const stamp = checkpoint.stamps.find(row => row.stage === gate.stage)
@@ -44,7 +73,13 @@ export async function readWorkflow(io: FileStore, workflowId: string) {
     priorCurrent = isCurrent
     return result
   })
-  return { current, input, plan, checkpoint, checkpointFile, run, runFile, gates, configChanged: input.configHash !== current.configHash }
+  return { ...stored, gates }
+}
+export function workflowCheckpointMutations(stored: Awaited<ReturnType<typeof readWorkflowRecord>>, checkpoint: WorkflowCheckpoint) {
+  const text = json(workflowCheckpointSchema.parse(checkpoint)), prefix = root(checkpoint.workflowId)
+  return [{ path: `${prefix}/checkpoint.json`, before: stored.checkpointFile, after: text },
+    { path: `${prefix}/run.json`, before: stored.runFile, after: json(runSchema.parse({ ...stored.run, status: checkpoint.status,
+      checkpointHash: digest(text), updatedAt: checkpoint.updatedAt })) }]
 }
 export async function currentWorkflow(io: FileStore) {
   const current = await snapshot(io), file = await io.read(POINTER)
@@ -63,6 +98,7 @@ export async function prepareWorkflow(io: FileStore, goal: WorkflowGoal, session
     invariant(terminal(previous.checkpoint.status), 'WORKFLOW_IN_PROGRESS', '当前引导任务尚未结束；请恢复或明确取消。')
   }
   const body = { id: newId('workflow_plan'), workflowId: newId('workflow'), projectId: facts.current.ledger.projectId, sessionId, goal,
+    budget: facts.current.config.workflow.budget, maxReviewRounds: facts.current.config.workflow.maxReviewRounds,
     configHash: facts.current.configHash, ledgerHash: facts.current.ledgerHash, documentHash: facts.current.document.contentHash,
     fingerprints: facts.gates.map(row => row.fingerprint), pointerHash: active ? digest(active.text) : null }
   return { ...body, contentHash: digest(json(body)), gates: facts.gates }
@@ -77,14 +113,16 @@ export async function startWorkflow(io: FileStore, plan: WorkflowStartPlan) {
       facts.current.ledgerHash === plan.ledgerHash && facts.current.document.contentHash === plan.documentHash &&
       json(facts.gates.map(row => row.fingerprint)) === json(plan.fingerprints) && (pointer ? digest(pointer.text) : null) === plan.pointerHash,
       'WORKFLOW_INPUT_CHANGED', '确认期间项目或引导目标输入已改变，请重新预览。')
-    invariant(!(await inspectRecovery(io, facts.current.config.paths.manuscriptDir)).pending.length && !await io.read(ACTIVE_RUN),
+    invariant(!(await inspectRecovery(io, facts.current.config.paths.manuscriptDir)).pending.length,
       'RUN_IN_PROGRESS', '先处理未完成事务或当前阶段执行，再建立引导任务。')
+    await ensureNoStageExecuting(io, plan.projectId)
     const createdAt = new Date().toISOString(), input = inputSchema.parse({ schemaVersion: 1, workflowId: plan.workflowId,
-      projectId: plan.projectId, sessionId: plan.sessionId, goal: plan.goal, configHash: plan.configHash, createdAt })
+      projectId: plan.projectId, sessionId: plan.sessionId, goal: plan.goal, configHash: plan.configHash, createdAt,
+      policyHash: policyHash(facts.current), budget: facts.current.config.workflow.budget, maxReviewRounds: facts.current.config.workflow.maxReviewRounds })
     const planBody = { schemaVersion: 1 as const, workflowId: plan.workflowId, projectId: plan.projectId, inputHash: digest(json(input)), stages: stage.options }
     const savedPlan = planSchema.parse({ ...planBody, contentHash: digest(json(planBody)) })
     const checkpoint = workflowCheckpointSchema.parse({ schemaVersion: 1, workflowId: plan.workflowId, projectId: plan.projectId,
-      planHash: savedPlan.contentHash, revision: 0, status: 'waiting-input', stamps: [], updatedAt: createdAt })
+      planHash: savedPlan.contentHash, revision: 0, status: 'waiting-input', stamps: [], updatedAt: createdAt, budget: { calls: [], childDurationMs: {} } })
     const prefix = root(plan.workflowId)
     await commit(io, [
       { path: `${prefix}/input.json`, before: undefined, after: json(input) },
@@ -97,13 +135,17 @@ export async function startWorkflow(io: FileStore, plan: WorkflowStartPlan) {
     return { workflowId: plan.workflowId }
   })
 }
-export async function prepareWorkflowAction(io: FileStore, input: z.infer<typeof workflowActionRequest>) {
+export async function prepareWorkflowAction(io: FileStore, input: z.infer<typeof workflowActionRequest>, ownerAlive: (owner: { pid: number; bootInstance: string }) => boolean = () => true) {
   input = workflowActionRequest.parse(input)
   const stored = await readWorkflow(io, input.workflowId), pointer = await io.read(POINTER)
   invariant(pointer && pointerSchema.parse(JSON.parse(pointer.text)).workflowId === input.workflowId, 'WORKFLOW_NOT_CURRENT', '只可变更当前引导任务；历史记录保持只读。')
   invariant(!terminal(stored.checkpoint.status), 'WORKFLOW_TERMINAL', '引导任务已结束，原历史不能重新执行。')
   const completing = ['complete-stage', 'skip-stage', 'stop-revision'].includes(input.action)
-  if (completing) {
+  if (input.action === 'close-unknown-call') {
+    const call = stored.checkpoint.budget?.calls.find(row => row.callId === input.callId)
+    invariant(call?.state === 'pending' && call.owner && !ownerAlive(call.owner) && input.reason.length >= 10, 'WORKFLOW_CALL_OWNER_ALIVE',
+      '只有实际执行进程已退出且明确说明理由，才可结束无应答请求；预算和未知候选上限保留。')
+  } else if (completing) {
     invariant(stored.checkpoint.status === 'waiting-input' && !stored.configChanged, 'WORKFLOW_INPUT_CHANGED', '任务已暂停或配置改变；请检查目标并处理当前任务。')
     const gate = stored.gates.find(row => row.stage === input.stage)
     invariant(gate && gate.priorCurrent, 'WORKFLOW_STAGE_ORDER', '先确认前序阶段的当前输入；过期阶段须重新检查。')
@@ -117,12 +159,12 @@ export async function prepareWorkflowAction(io: FileStore, input: z.infer<typeof
   else if (input.action === 'finish') invariant(stored.checkpoint.status === 'waiting-input' && !stored.configChanged && stored.gates.every(row => row.current), 'WORKFLOW_GATE_BLOCKED', '七阶段尚未全部按当前输入确认，不能结束交付。')
   else invariant(input.reason.length >= 10, 'WORKFLOW_REASON_REQUIRED', '取消任务须说明理由，已有产物和问题都会保留。')
   const body = { id: newId('workflow_action'), workflowId: input.workflowId, projectId: stored.current.ledger.projectId, sessionId: input.context.sessionId,
-    action: input.action, stage: input.stage, reason: input.reason, checkpointHash: digest(stored.checkpointFile.text), pointerHash: digest(pointer.text),
+    action: input.action, stage: input.stage, callId: input.callId, reason: input.reason, checkpointHash: digest(stored.checkpointFile.text), pointerHash: digest(pointer.text),
     configHash: stored.current.configHash, fingerprints: stored.gates.map(row => row.fingerprint), gate: stored.gates.find(row => row.stage === input.stage) }
   return { ...body, contentHash: digest(json(body)) }
 }
 export type WorkflowActionPlan = Awaited<ReturnType<typeof prepareWorkflowAction>>
-export async function applyWorkflowAction(io: FileStore, plan: WorkflowActionPlan) {
+export async function applyWorkflowAction(io: FileStore, plan: WorkflowActionPlan, ownerAlive: (owner: { pid: number; bootInstance: string }) => boolean = () => true) {
   const { contentHash, ...body } = plan
   invariant(digest(json(body)) === contentHash, 'INVALID_APPROVAL', '引导任务操作预览已改变。')
   return io.lock(async () => {
@@ -130,14 +172,22 @@ export async function applyWorkflowAction(io: FileStore, plan: WorkflowActionPla
     invariant(stored.current.ledger.projectId === plan.projectId && stored.current.configHash === plan.configHash &&
       digest(stored.checkpointFile.text) === plan.checkpointHash && pointer && digest(pointer.text) === plan.pointerHash &&
       json(stored.gates.map(row => row.fingerprint)) === json(plan.fingerprints), 'WORKFLOW_INPUT_CHANGED', '确认期间输入、检查点或当前任务改变；未采用旧预览。')
-    invariant(!await io.read(ACTIVE_RUN) && !(await inspectRecovery(io, stored.current.config.paths.manuscriptDir)).pending.length,
+    invariant(!(await inspectRecovery(io, stored.current.config.paths.manuscriptDir)).pending.length,
       'RUN_IN_PROGRESS', '当前阶段仍在执行或事务待恢复；先结束阶段操作，再确认引导检查点。')
+    await ensureNoStageExecuting(io, plan.projectId, plan.action === 'close-unknown-call' ?
+      { runId: stored.checkpoint.budget!.calls.find(row => row.callId === plan.callId)!.runId, ownerAlive } : undefined)
+    invariant(plan.action === 'close-unknown-call' || !stored.checkpoint.budget?.calls.some(row => row.state === 'pending'), 'RUN_IN_PROGRESS', '仍有未结算的阶段请求；先检查该阶段的中断记录。')
     const validated = await prepareWorkflowAction(io, { context: { requestId: plan.id, workspaceId: 'workspace_domain_validation', sessionId: plan.sessionId },
-      workflowId: plan.workflowId, action: plan.action, stage: plan.stage, reason: plan.reason })
+      workflowId: plan.workflowId, action: plan.action, stage: plan.stage, callId: plan.callId, reason: plan.reason }, ownerAlive)
     invariant(validated.checkpointHash === plan.checkpointHash && validated.pointerHash === plan.pointerHash && validated.configHash === plan.configHash &&
       json(validated.fingerprints) === json(plan.fingerprints), 'WORKFLOW_INPUT_CHANGED', '最终检查期间阶段输入改变，未保存检查点。')
     const updatedAt = new Date().toISOString(), checkpoint = structuredClone(stored.checkpoint)
-    if (['complete-stage', 'skip-stage', 'stop-revision'].includes(plan.action)) {
+    if (plan.action === 'close-unknown-call') {
+      const call = checkpoint.budget!.calls.find(row => row.callId === plan.callId)!
+      call.state = 'interrupted'; call.completedAt = updatedAt
+      checkpoint.budget!.childDurationMs[call.runId] = Math.max(checkpoint.budget!.childDurationMs[call.runId], call.startDurationMs +
+        Math.min(stored.input.budget!.maxDurationMinutes * 60000, Math.max(0, Date.parse(updatedAt) - Date.parse(call.startedAt))))
+    } else if (['complete-stage', 'skip-stage', 'stop-revision'].includes(plan.action)) {
       const gate = plan.gate!
       checkpoint.stamps = checkpoint.stamps.filter(row => row.stage !== gate.stage)
       checkpoint.stamps.push({ stage: gate.stage, fingerprint: gate.fingerprint,
@@ -147,14 +197,12 @@ export async function applyWorkflowAction(io: FileStore, plan: WorkflowActionPla
     } else if (plan.action === 'pause') checkpoint.status = 'paused'
     else if (plan.action === 'resume') checkpoint.status = 'waiting-input'
     else if (plan.action === 'cancel') checkpoint.status = 'cancelled'
-    else checkpoint.status = checkpoint.stamps.some(row => row.outcome !== 'ready') ? 'completed-with-issues' : 'succeeded'
+    else checkpoint.status = checkpoint.stamps.some(row => row.outcome !== 'ready') || checkpoint.budget?.calls.some(row => row.state === 'interrupted') ? 'completed-with-issues' : 'succeeded'
     checkpoint.revision++; checkpoint.updatedAt = updatedAt
     const prefix = root(plan.workflowId)
     await commit(io, [{ path: `${prefix}/decisions/${plan.id}.json`, before: undefined,
       after: json({ schemaVersion: 1, ...body, decidedAt: updatedAt, previous: stored.checkpoint, next: checkpoint }) },
-      { path: `${prefix}/checkpoint.json`, before: stored.checkpointFile, after: json(workflowCheckpointSchema.parse(checkpoint)) },
-      { path: `${prefix}/run.json`, before: stored.runFile, after: json(runSchema.parse({ ...stored.run, status: checkpoint.status,
-        checkpointHash: digest(json(checkpoint)), updatedAt })) }])
+      ...workflowCheckpointMutations(stored, checkpoint)])
     return { workflowId: plan.workflowId, status: checkpoint.status }
   })
 }

@@ -10,6 +10,7 @@ import { runReview } from '../../src/core/review/review.ts'
 import { prepareDelivery, createDelivery } from '../../src/core/export/delivery.ts'
 import { stage } from '../../src/shared/schema.ts'
 import { recover } from '../../src/core/store/transactions.ts'
+import { parse, stringify } from 'yaml'
 const goal = { researchQuestion: 'TEST_ONLY 不编造缺失结果', minimumSources: 1, minimumLocatedEvidence: 1,
   noFormalRequirementsReason: 'TEST_ONLY 没有正式课程要求；缺失证据和结果须保留。' }
 const context = { requestId: 'req_TEST_ONLY', sessionId: 'session_TEST_ONLY', workspaceId: 'workspace_TEST_ONLY' }
@@ -55,7 +56,8 @@ test('pause and cold resume retain approvals; actual changed inputs stale downst
   cold.externalEdit('.scholarflow/context/decisions.md', '# TEST_ONLY 改变研究方案\n')
   assert.equal((await readWorkflow(cold, workflowId)).gates[2].state, 'stale')
   await act(cold, workflowId, 'pause')
-  const config = '.scholarflow/project.yaml'; cold.externalEdit(config, (await cold.read(config))!.text + '\n# TEST_ONLY changed config bytes\n')
+  const config = '.scholarflow/project.yaml', changed = parse((await cold.read(config))!.text)
+  changed.workflow.budget.maxModelCalls = 1; cold.externalEdit(config, stringify(changed))
   await assert.rejects(act(cold, workflowId, 'resume'), { code: 'WORKFLOW_INPUT_CHANGED' })
   await act(cold, workflowId, 'cancel', undefined, 'TEST_ONLY 配置变更，保留原目标历史并取消。')
   const oldInput = (await cold.read(`.scholarflow/runs/${workflowId}/input.json`))!.text
@@ -89,7 +91,7 @@ test('stale approval, duplicate starts, active stage ownership and modified chec
   await assert.rejects(applyWorkflowAction(io, action), { code: 'WORKFLOW_INPUT_CHANGED' })
   io.externalEdit('.scholarflow/runs/active.json', JSON.stringify({ runId: 'run_TEST_ONLY' }))
   const pause = await prepareWorkflowAction(io, { context, workflowId, action: 'pause', reason: '' })
-  const writes = io.writes; await assert.rejects(applyWorkflowAction(io, pause), { code: 'RUN_IN_PROGRESS' }); assert.equal(io.writes, writes)
+  const writes = io.writes; await assert.rejects(applyWorkflowAction(io, pause), { code: 'RUN_STATE_CHANGED' }); assert.equal(io.writes, writes)
   const path = `.scholarflow/runs/${workflowId}/checkpoint.json`, checkpoint = JSON.parse((await io.read(path))!.text)
   checkpoint.revision++; io.externalEdit(path, JSON.stringify(checkpoint))
   await assert.rejects(readWorkflow(io, workflowId), { code: 'WORKFLOW_INVALID' })
