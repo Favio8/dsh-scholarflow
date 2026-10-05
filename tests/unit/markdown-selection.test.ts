@@ -2,6 +2,17 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { projectMarkdown, mapLeafPoint, validateRange, validateSelection, citationKeys, unicodeBoundary, wordStats } from '../../src/core/editing/markdown.ts'
 
+test('BOM remains in raw manuscript coordinates for CRLF headings and the second repeated Unicode paragraph', () => {
+  const paragraph = 'TEST_ONLY 重复段落 😀。', source = `\uFEFF# TEST_ONLY\r\n\r\n${paragraph}\r\n\r\n${paragraph}\r\n`
+  const projected = projectMarkdown(source), second = projected.blocks[1]
+  assert.equal(second.start, source.lastIndexOf(paragraph))
+  assert.equal(source.slice(second.start, second.end), paragraph)
+  assert.equal(validateRange(projected, second.start, second.end, 'paragraph').renderedText, paragraph)
+  const leaf = projected.leaves.find(row => row.blockId === second.id)!
+  assert.equal(mapLeafPoint(projected, leaf.id, 0, 'start'), second.start)
+  assert.equal(projected.tree.children![0].position!.start.offset, 1)
+})
+
 test('AT-11: repeated paragraphs have different AST block identities and source positions', () => {
   const source = '重复内容。\r\n\r\n重复内容。\r\n'
   const projected = projectMarkdown(source)

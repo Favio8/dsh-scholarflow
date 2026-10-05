@@ -2,7 +2,7 @@ import { snapshot, mutateLedger } from '../project/project.ts'
 import { digest, newId, json, type FileStore } from '../store/files.ts'
 import { invariant } from '../../shared/errors.ts'
 import { reviewReportSchema, type ReviewReport } from '../../shared/review.ts'
-import { projectMarkdown, walk, textOf, wordStats } from '../editing/markdown.ts'
+import { projectMarkdown, walk, textOf, wordStats, citationMarkers } from '../editing/markdown.ts'
 import type { Ledger } from '../../shared/schema.ts'
 import { requirementCount } from '../requirements/counting.ts'
 import type { Mutation } from '../store/transactions.ts'
@@ -24,7 +24,7 @@ export async function reviewInput(io: FileStore) {
     const image = await io.read(path); contextHashes[path] = image ? digest(image.text) : 'missing'
   }
   const { requirements, materials, sources, evidence, claims, outline, claimAnchors } = current.ledger
-  return { current, materialHashes, dependencyHash: digest(json({ configHash: current.configHash, documentHash: current.document.contentHash,
+  return { current, materialHashes, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v2-bom-and-unmanaged-citations', configHash: current.configHash, documentHash: current.document.contentHash,
     revisionId: current.document.revisionId, requirements, materials, sources, evidence, claims, outline, claimAnchors,
     materialHashes, contextHashes, reviewProfileHash: profile ? digest(profile.text) : 'missing' })) }
 }
@@ -75,6 +75,10 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
   walk(projection.tree, node => { if (node.type === 'text' && /\[待补[：:]/.test(node.value ?? '')) pending = true; if (node.type === 'image') imageCount++ })
   check('pending_markers', pending ? 'fail' : 'pass', '正文待补项必须保留并完成后复查。', 'integrity', 'B0')
   check('image_assets', imageCount ? 'unknown' : 'pass', imageCount ? '正文含图片；当前导出器尚未验证、复制及重写图片资源。' : '当前主稿不包含需要复制的图片。', 'structure', 'B1')
+  const unmanaged = citationMarkers(document.text, projection.tree).filter(marker => marker.kind === 'numeric' || marker.keys.some(key => !/^sf_[a-zA-Z0-9_]+$/u.test(key)))
+  check('unmanaged_citation_markers', unmanaged.length ? 'unknown' : 'pass', unmanaged.length
+    ? `正文含 ${unmanaged.length} 个未映射引用／数字标记；仅保留原文，未关联来源或纳入自动 BibTeX。请明确登记来源并改用项目引用键；数字方括号也可能是普通记号，不能猜测其含义。`
+    : '当前正文没有检测到所支持语法的未映射引用／数字标记；该规则不能识别所有文献格式。', 'citation', 'B1')
   for (const key of projection.citationOrder) {
     const source = Object.values(ledger.sources).find(source => source.citeKey === key)
     check(`cite_${key}`, source ? 'pass' : 'fail', source ? `引用 ${key} 有来源记录。` : `引用 ${key} 缺少来源记录。`, 'citation', 'B0')

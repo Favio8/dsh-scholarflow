@@ -7,6 +7,15 @@
 
 ## 0. 阅读约定
 
+2026-10-05 已有稿件采用补充：真实安装 Host 验证了项目内 UTF-8 Markdown 的
+读取／预览取消／明确采用、另一个项目引用键的用户映射、相对链接重定位、
+原稿与当前修订备份、BOM/CRLF 第二重复段的真实 DOM 选区、撤销与来源快照冷恢复。
+证据字段：`nativeExistingMarkdownImportCancelMapRelativeLinksBackupBomSelectionUndoAndColdRestore`。
+最新 `--live-model` 同时通过实际章节生成、第二段改写、取消、模型审查暂停恢复、
+问题修复候选与编辑后拒绝；同一测试引导目标累计 5 次模型调用、1 轮审查，未把导入算作模型调用。
+此用例没有复制图片或读取链接目标；图片导出仍保持明确能力限制。
+详见 [实现决定](decisions/existing-manuscript-adoption.md)。
+
 2026-10-05 新增项目 Skill 复制验证：当前实现使用 `HostFileStore.createResourceBytes`，
 在项目写锁内先调用安装版 sandbox 后端实际的 `checkedTarget`，再独占创建静态字节文件。
 公共 fs seam 仍无二进制写入接口；后端缺少该能力时拒绝，未把 Uint8Array 传给 writeText。

@@ -5,6 +5,7 @@ import { MarkdownView, captureSelection } from './markdown.tsx'
 import type { SelectionPayload } from '../shared/editing.ts'
 import { ProposalRevision } from './proposal-revision.tsx'
 import { DraftSequence } from './draft-sequence.tsx'
+import { ManuscriptImport } from './manuscript-import.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
@@ -124,6 +125,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   })
   return <section aria-label="正文编辑"><h3>正文编辑</h3>
     <p>Markdown 是主稿事实源。手工编辑与模型建议均校验当前版本；主稿不会被旧缓冲自动覆盖。</p>
+    <ManuscriptImport project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} dirty={dirty || !!recoverable} />
     <label>Markdown 手工编辑<textarea aria-label="Markdown 手工编辑" rows={10} disabled={busy} value={text} onChange={e => {
       const edited = project.document.lineEnding === 'crlf' ? e.target.value.replace(/\r\n|\r|\n/g, '\r\n') : e.target.value
       setText(edited)

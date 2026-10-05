@@ -533,6 +533,50 @@ try {
     assert.equal(anchors[0].documentHash, acceptedLedger.documents.paper.currentHash)
     assert.match(sectionBody, /\[@sf_/)
   }
+  const beforeImportBody = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+  const beforeImportLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  const importedSourcePath = 'old/已有稿件.md', importedRepeated = 'TEST_ONLY 已有重复段 😀。'
+  const importedRaw = `\uFEFF# TEST_ONLY 已有稿件\r\n\r\nTEST_ONLY [@sf_FOREIGN] [@legacy] [1] [笔记](./notes.md)。\r\n\r\n${importedRepeated}\r\n\r\n${importedRepeated}\r\n`
+  await mkdir(join(projectRoot, 'old'), { recursive: true }); await writeFile(join(projectRoot, importedSourcePath), importedRaw)
+  const importUi = page.getByRole('region', { name: '采用已有 Markdown 原稿', exact: true })
+  await importUi.getByRole('textbox', { name: '已有 Markdown 相对路径', exact: true }).fill(importedSourcePath)
+  await importUi.getByRole('button', { name: '读取已有 Markdown 原稿', exact: true }).click()
+  const importCiteKey = Object.values(beforeImportLedger.sources)[0].citeKey
+  await importUi.getByRole('combobox', { name: '导入引用映射 sf_FOREIGN', exact: true }).selectOption(importCiteKey)
+  await importUi.getByRole('textbox', { name: '采用原稿说明', exact: true }).fill('TEST_ONLY adopt existing Unicode manuscript with explicit citation mapping and original backup')
+  await importUi.getByRole('button', { name: '预览采用原稿差异与备份', exact: true }).click()
+  const importDialog = importUi.getByRole('dialog', { name: '采用已有稿件确认', exact: true })
+  await importDialog.waitFor()
+  await importUi.getByRole('button', { name: '取消采用原稿', exact: true }).click()
+  await importDialog.waitFor({ state: 'detached' })
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), beforeImportBody)
+  await assert.rejects(stat(join(projectRoot, '.scholarflow/imports')), { code: 'ENOENT' })
+  await importUi.getByRole('button', { name: '预览采用原稿差异与备份', exact: true }).click()
+  await importUi.getByRole('button', { name: '确认采用原稿并保留备份', exact: true }).click()
+  await importDialog.waitFor({ state: 'detached' })
+  const importedBody = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
+  assert.equal(importedBody, importedRaw.replace('sf_FOREIGN', importCiteKey).replace('(./notes.md)', '(../old/notes.md)'))
+  assert.equal(await readFile(join(projectRoot, importedSourcePath), 'utf8'), importedRaw)
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/drafts', beforeImportLedger.documents.paper.revisionId, 'paper.md'), 'utf8'), beforeImportBody)
+  const importRecords = await readdir(join(projectRoot, '.scholarflow/imports'))
+  assert.equal(importRecords.length, 1)
+  const nativeImportManifest = JSON.parse(await readFile(join(projectRoot, '.scholarflow/imports', importRecords[0], 'manifest.json'), 'utf8'))
+  assert.equal(nativeImportManifest.sourceHash, digest(importedRaw)); assert.equal(nativeImportManifest.originalModified, false)
+  await page.locator('.sf-prose p').filter({ hasText: importedRepeated }).nth(1).waitFor()
+  await page.evaluate(repeated => {
+    const paragraphs = [...document.querySelectorAll('.sf-prose p')].filter(row => row.textContent === repeated), second = paragraphs[1]
+    const leaf = second.querySelector('[data-sf-leaf]').firstChild, range = document.createRange()
+    range.setStart(leaf, 0); range.setEnd(leaf, leaf.textContent.length)
+    const selected = window.getSelection(); selected.removeAllRanges(); selected.addRange(range)
+    second.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  }, importedRepeated)
+  const importedCapture = page.getByRole('region', { name: '已捕获选区', exact: true })
+  await importedCapture.waitFor()
+  assert.equal(await importedCapture.locator('pre').innerText(), importedRepeated)
+  assert.ok((await importedCapture.innerText()).includes(`[${importedBody.lastIndexOf(importedRepeated)}, ${importedBody.lastIndexOf(importedRepeated) + importedRepeated.length})`))
+  await page.getByRole('button', { name: '撤销当前版本为新修订', exact: true }).click()
+  await page.waitForFunction(() => !document.querySelector('textarea[aria-label="Markdown 手工编辑"]').disabled)
+  assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), beforeImportBody)
   const selectedLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
   const citeKey = Object.values(selectedLedger.sources)[0].citeKey
   const repeatedParagraph = `TEST_ONLY **限定范围** \\* &amp; &#x1F600; [@${citeKey}]。`
@@ -1167,6 +1211,8 @@ try {
   assert.equal(Object.values(cold.value.data.ledger.claims)[0].status, 'partially-supported')
   assert.equal(cold.value.data.ledger.outline.confirmation, 'confirmed')
   assert.equal(cold.value.data.document.text, manualBody)
+  assert.equal(await readFile(join(projectRoot, importedSourcePath), 'utf8'), importedRaw)
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/imports', importRecords[0], 'source.md'), 'utf8'), importedRaw)
   const coldSkillContext = { requestId: 'req_TEST_ONLY_skill_copy_cold', workspaceId: projectWorkspace.value.workspace.workspaceId,
     sessionId: second.value.sessionId, projectId: projectLedger.projectId, expectedLedgerRevision: cold.value.data.ledger.revision }
   const copiedSkillSelection = { qualifiedId: copiedSkillId, digest: copyHistory.copiedManifest.digest, scope: 'project' }
@@ -1325,6 +1371,7 @@ try {
     privateSkillVersionsSurviveReadOnlyHostRestart: true,
     nativeProjectStaticSkillBindingAndRead: true, changedProjectResourceDigestRejected: true,
     nativeProjectSkillBinaryCopyPreviewCustomizeCancelColdRestoreAndReadonlyDenial: true,
+    nativeExistingMarkdownImportCancelMapRelativeLinksBackupBomSelectionUndoAndColdRestore: true,
     githubNetworkDisabledBeforeIO: true, realPublicGithubMultiSkillPreviewAndImport: liveSkills,
     nativeUiProjectSkillBindingCancelAndConfirm: true, boundAgentSkillReadStageAndScriptDenial: true,
     builtinSkillBindingAndCompatibleSelectionMenu: true,

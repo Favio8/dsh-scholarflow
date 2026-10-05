@@ -19,6 +19,7 @@ import type { RequestContext } from '../shared/schema.ts'
 import { saveDocumentRequest, proposalRequest, applyProposalRequest, undoDocumentRequest, proposalRevisionRequest } from '../shared/document-api.ts'
 import { prepareProposalRevision, publishProposalRevision, type ProposalRevisionPlan } from '../core/editing/proposal-revision.ts'
 import { saveManual, rejectProposal, undoRevision, proposalImage } from '../core/editing/proposals.ts'
+import { inspectManuscriptSource, prepareManuscriptAdoption, applyManuscriptAdoption, type ManuscriptAdoptionPlan } from '../core/editing/manuscript-adoption.ts'
 import { wordStats } from '../core/editing/markdown.ts'
 import { generationRequest, runStartRequest, runControlRequest, runStateSchema } from '../shared/runs.ts'
 import { prepareGeneration, executeGeneration, type GenerationPlan } from '../core/pipeline/generation.ts'
@@ -42,7 +43,7 @@ import { prepareSearch, executeSearch, listSearches, readSearch, decideCandidate
 import { PrivateSkillLibrary } from './skills/library.ts'
 import { LocalSkillSource } from './skills/local.ts'
 import { skillOptions, type SkillBundle } from '../shared/skills.ts'
-import { hash } from '../shared/schema.ts'
+import { hash, relativePath } from '../shared/schema.ts'
 import { githubLocation, githubSkills, type GithubDiscovery, type GithubSkillPreview } from './skills/github.ts'
 import { prepareBindings, applyBindings, readBindings, currentSkillStage, selectSkillStage, type BindingPlan } from '../core/skills/bindings.ts'
 import { readPrivateSkill, libraryEntry, builtinSkills } from './skills/reader.ts'
@@ -97,6 +98,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private running = new Map<string, { controller: AbortController; context: RequestContext; pauseRequested: boolean }>()
   private runActionPlans = new Map<string, { plan: RunActionPlan; generation?: GenerationPlan; selected?: { provider: string; model: string; reasoningEffort?: string }; context: RequestContext; peerId: string; expires: number }>()
   private exportPlans = new Map<string, { plan: DeliveryPlan; context: RequestContext; peerId: string; expires: number }>()
+  private manuscriptPlans = new Map<string, { plan: ManuscriptAdoptionPlan; context: RequestContext; peerId: string; expires: number }>()
   private bootInstance = randomUUID()
   private researchProvider: ResearchProvider
   private searchPlans = new Map<string, { plan: SearchPlan; context: RequestContext; peerId: string; expires: number }>()
@@ -129,6 +131,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => () => this.researchBatchPlans.clear(), 'scholarflow: clear multi-query previews')
     ctx.effect(() => () => this.workflowPlans.clear(), 'scholarflow: clear workflow previews')
     ctx.effect(() => () => this.skillCopyPlans.clear(), 'scholarflow: clear project Skill copy previews')
+    ctx.effect(() => () => this.manuscriptPlans.clear(), 'scholarflow: clear manuscript import previews')
     ctx.effect(() => () => { this.draftSequencePlans.clear(); this.generationPlans.clear() }, 'scholarflow: clear draft previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
     ctx.effect(() => {
@@ -367,6 +370,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     for (const [key, row] of this.skillPlans) if (row.expires < Date.now()) this.skillPlans.delete(key)
     for (const [key, row] of this.bindingPlans) if (row.expires < Date.now()) this.bindingPlans.delete(key)
     for (const [key, row] of this.skillCopyPlans) if (row.expires < Date.now()) this.skillCopyPlans.delete(key)
+    for (const [key, row] of this.manuscriptPlans) if (row.expires < Date.now()) this.manuscriptPlans.delete(key)
     for (const [key, row] of this.retirementPlans) if (row.expires < Date.now()) this.retirementPlans.delete(key)
   }
 
@@ -1172,6 +1176,56 @@ export class ScholarFlowRemote extends TypertRemoteService {
       if (this.runMigrationPlans.get(input.planId)?.peerId === peerId) this.runMigrationPlans.delete(input.planId)
       return { dismissed: true }
     })
+  }
+
+  @Remote('document.inspectImport')
+  async documentInspectImport(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = z.object({ context: inspectRequest.shape.context, sourcePath: relativePath }).strict().parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      return inspectManuscriptSource(io, input.sourcePath)
+    })
+  }
+
+  @Remote('document.prepareImport')
+  async documentPrepareImport(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(); this.pruneSkills()
+      const input = z.object({ context: inspectRequest.shape.context, sourcePath: relativePath, sourceHash: hash,
+        mappings: z.record(z.string().min(1).max(200), z.string().regex(/^sf_[a-zA-Z0-9_]+$/u)), reason: z.string().min(1).max(4000) }).strict().parse(request)
+      invariant(this.manuscriptPlans.size < 4, 'TOO_MANY_PENDING_PLANS', '请先处理已有稿件采用预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      const plan = await prepareManuscriptAdoption(io, { ...input, sessionId: input.context.sessionId })
+      invariant(plan.projectId === input.context.projectId && plan.ledgerRevision === mutationRevision(input.context), 'STALE_LEDGER_REVISION', '项目改变，请刷新后重新预览采用方案。')
+      this.manuscriptPlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, sourcePath: plan.sourcePath, sourceHash: plan.sourceHash, destinationPath: plan.destinationPath,
+        beforeHash: plan.beforeHash, baseRevisionId: plan.baseRevisionId, beforeText: plan.beforeText, text: plan.text,
+        mappings: plan.mappings, resourceChanges: plan.resourceChanges, unmanagedMarkers: plan.unmanagedMarkers,
+        reason: plan.reason, risks: ['确认会创建主稿的新修订与来源快照，保留当前稿件备份；所选原稿不修改。',
+          '相对资源地址已按原稿所在目录重新计算，保持指向同一项目内目标；不读取、复制图片，也不下载外部地址。',
+          '非项目引用／数字标记保留为待核对文本，不生成来源，不纳入自动 BibTeX。已有参考文献段落保留为原稿文本。',
+          '图片导出仍受当前导出能力限制；导入与学术真实性核验是不同操作。已存在的未提交编辑不会自动写入此稿件。'] }
+    })
+  }
+
+  @Remote('document.applyImport')
+  async documentApplyImport(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = onlineConfirmRequest.parse(request), row = this.manuscriptPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请重新预览已有稿件的完整采用差异。')
+      invariant(input.context.sessionId === row.context.sessionId && input.context.workspaceId === row.context.workspaceId && input.context.projectId === row.plan.projectId,
+        'SESSION_BINDING_CHANGED', '稿件采用确认不属于当前会话项目。')
+      const { io } = await resolveStore(this.ctx, input.context, signal)
+      this.manuscriptPlans.delete(input.planId)
+      return applyManuscriptAdoption(io, row.plan)
+    })
+  }
+
+  @Remote('document.dismissImport')
+  async documentDismissImport(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { const peerId = this.requireOperator(), input = z.object({ planId: id }).strict().parse(request)
+      signal.throwIfAborted(); invariant(this.manuscriptPlans.get(input.planId)?.peerId === peerId, 'INVALID_APPROVAL', '稿件采用预览不属于当前用户。')
+      this.manuscriptPlans.delete(input.planId); return { dismissed: true } })
   }
 
   @Remote('document.saveManual')

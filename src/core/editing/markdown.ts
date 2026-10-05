@@ -18,9 +18,33 @@ const start = (node: AstNode) => node.position?.start.offset ?? -1
 const end = (node: AstNode) => node.position?.end.offset ?? -1
 export function parseMarkdown(source: string): AstNode {
   invariant(source.length <= 2 * 1024 * 1024, 'DOCUMENT_TOO_LARGE', 'Markdown 正文超过 2 Mi UTF-16 单元，请缩小文档后再执行结构化编辑。')
-  return parser.parse(source) as AstNode
+  const tree = parser.parse(source) as AstNode
+  // micromark consumes the initial BOM without counting it in offsets. Our
+  // contract uses positions in the unchanged UTF-16 manuscript, including BOM.
+  if (source.startsWith('\uFEFF')) walk(tree, node => {
+    if (node.position?.start.offset !== undefined) node.position.start.offset++
+    if (node.position?.end.offset !== undefined) node.position.end.offset++
+  })
+  return tree
 }
 export function walk(node: AstNode, visit: (node: AstNode) => void) { visit(node); for (const child of node.children ?? []) walk(child, visit) }
+// Literal AST text only: markers remain unverified until mapped to Sources.
+export function citationMarkers(source: string, tree = parseMarkdown(source)) {
+  const rows: { startUtf16: number; endUtf16: number; text: string; keys: string[]; kind: 'keyed' | 'numeric' }[] = []
+  walk(tree, node => {
+    if (node.type !== 'text' || node.position?.start.offset === undefined || node.position?.end.offset === undefined) return
+    const start = node.position.start.offset, raw = source.slice(start, node.position.end.offset)
+    for (const match of raw.matchAll(/\[@[\p{L}\p{N}_.:+-]{1,200}(?:\s*;\s*@[\p{L}\p{N}_.:+-]{1,200})*\]|\[\d{1,4}(?:\s*[,–-]\s*\d{1,4})*\]/gu)) {
+      let backslashes = 0
+      for (let index = match.index - 1; index >= 0 && raw[index] === '\\'; index--) backslashes++
+      if (backslashes % 2) continue
+      const text = match[0], keyed = text.startsWith('[@')
+      rows.push({ startUtf16: start + match.index, endUtf16: start + match.index + text.length, text,
+        kind: keyed ? 'keyed' : 'numeric', keys: keyed ? [...text.matchAll(/@([\p{L}\p{N}_.:+-]+)/gu)].map(item => item[1]) : [] })
+    }
+  })
+  return rows
+}
 export function textOf(node: AstNode): string { return node.type === 'text' ? node.value ?? '' : (node.children ?? []).map(textOf).join('') }
 export function unicodeBoundary(text: string, offset: number) {
   return Number.isInteger(offset) && offset >= 0 && offset <= text.length && !(offset > 0 && offset < text.length &&
@@ -101,6 +125,8 @@ export function validateRange(projection: Projection, from: number, to: number, 
   invariant(block, 'SELECTION_UNSUPPORTED', '选区必须位于单个普通段落内；跨段或表格请使用明确的源码范围。')
   if (scope === 'paragraph') invariant(from === block.start && to === block.end, 'SELECTION_INVALID', '段落范围必须与 AST 中的完整段落一致。')
   const overlapping = projection.leaves.filter(leaf => leaf.start < to && leaf.end > from)
+  for (const marker of citationMarkers(source, projection.tree)) if ((marker.kind === 'numeric' || marker.keys.some(key => !/^sf_[a-zA-Z0-9_]+$/u.test(key))) && marker.startUtf16 < to && marker.endUtf16 > from)
+    invariant(from <= marker.startUtf16 && to >= marker.endUtf16, 'SELECTION_UNSUPPORTED', '引用或未映射标记必须作为完整 token 选择，不能切开数字引用。')
   invariant(overlapping.length > 0, 'SELECTION_UNSUPPORTED', '选区没有可安全改写的自然语言文本。')
   if (scope === 'inline') invariant(overlapping.some(leaf => leaf.units.some(unit => unit.sourceStart === from)) &&
     overlapping.some(leaf => leaf.units.some(unit => unit.sourceEnd === to)), 'SELECTION_INVALID', '渲染选区边界必须对应真实文本或完整引用 token。')

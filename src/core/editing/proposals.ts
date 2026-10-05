@@ -5,7 +5,7 @@ import { proposalSchema, selectionSchema, type EditProposal, type SelectionPaylo
 import { sectionEdit } from './sections.ts'
 import { ledgerSchema, id, type Ledger } from '../../shared/schema.ts'
 import { invariant } from '../../shared/errors.ts'
-import { citationKeys, unicodeBoundary, validateSelection, wordStats, parseMarkdown, projectMarkdown, walk } from './markdown.ts'
+import { citationKeys, citationMarkers, unicodeBoundary, validateSelection, wordStats, parseMarkdown, projectMarkdown, walk } from './markdown.ts'
 import { bibliography } from '../export/bibliography.ts'
 import { MAX_MATERIAL_BYTES, sensitivePath } from '../materials/materials.ts'
 import { validateIssueFix } from '../review/issue-fixes.ts'
@@ -14,7 +14,7 @@ type Snapshot = Awaited<ReturnType<typeof snapshot>>
 const proposalPath = (proposalId: string) => `.scholarflow/proposals/${id.parse(proposalId)}.json`
 const now = () => new Date().toISOString()
 function sameCitationTokens(before: string, after: string) {
-  const tokens = (text: string) => projectMarkdown(text).leaves.filter(leaf => leaf.citationKeys).map(leaf => JSON.stringify(leaf.citationKeys)).sort()
+  const tokens = (text: string) => citationMarkers(text).map(marker => marker.kind === 'keyed' ? JSON.stringify(marker.keys) : marker.text.replace(/\s/gu, '')).sort()
   return JSON.stringify(tokens(before)) === JSON.stringify(tokens(after))
 }
 export function applyEdits(source: string, edits: EditProposal['edits']) {
@@ -63,6 +63,7 @@ export function buildProposal(current: Snapshot, input: { runId: string; instruc
   invariant(!input.selection || (!added.length && !removed.length && sameCitationTokens(expectedText, edits[0].replacementText)), 'CITATION_CHANGE_REQUIRES_CONFIRMATION', '基础选区改写必须保留本选区引用 token；引用变更须单独提出。')
   for (const evidenceId of input.dependentEvidenceIds) invariant(current.ledger.evidence[evidenceId]?.validation === 'located', 'EVIDENCE_NOT_CURRENT', '建议依赖的证据未定位或已过期。')
   const factChanges = protectedChanges(expectedText, edits[0].replacementText)
+  const unmanaged = citationMarkers(changed).filter(marker => marker.kind === 'numeric' || marker.keys.some(key => !/^sf_[a-zA-Z0-9_]+$/u.test(key)))
   invariant(!input.reviewIssueId || input.selection, 'ISSUE_FIX_SCOPE_INVALID', '问题修复必须包含明确完整段落。')
   const reviewIssue = input.reviewIssueId ? validateIssueFix(current, input.reviewIssueId, input.selection!) : undefined
   return proposalSchema.parse({ schemaVersion: 1, id: newId('prop'), projectId: current.config.project.id, runId: input.runId, documentId: 'paper',
@@ -70,7 +71,9 @@ export function buildProposal(current: Snapshot, input: { runId: string; instruc
     instruction: input.instruction, ...(input.selection && { selection: input.selection }), ...(input.section && { section: input.section }), edits,
     ...(reviewIssue && { reviewIssue: { issueId: reviewIssue.id, issueHash: digest(json(reviewIssue)) } }),
     citationChanges: { added, removed }, protectedFactChanges: factChanges, dependentEvidenceIds: [...new Set(input.dependentEvidenceIds)], createdAt: now(),
-    checks: [{ id: 'citation-keys', status: 'pass', detail: '引用键均对应项目来源记录；这不代表出版身份或论点支持已核验。' },
+    checks: [{ id: 'citation-keys', status: unmanaged.length ? 'unknown' : 'pass', detail: unmanaged.length
+      ? '受支持项目引用键有已登记来源；其他引用／数字标记仍未映射，不计入自动 BibTeX，也不表示身份或论点支持已核验。'
+      : '受支持的项目引用键均有已登记来源；本规则不核验所有传统引用格式、出版身份或论点支持。' },
       { id: 'protected-facts', status: factChanges.length ? 'unknown' : 'pass', detail: factChanges.length ? '数字或限定条件变化，需要人工判断。' : '规则检查未发现列出的数字／限定词变化。' },
       { id: 'academic-truth', status: 'unknown', detail: '规则不能证明学术真实性、语义等价或支持范围；接受前逐项核对。' }] })
 }
@@ -169,13 +172,15 @@ async function documentMutation(io: FileStore, current: Snapshot, ledger: Ledger
   ]
   return { mutations, revisionId, documentHash, statistics }
 }
-export async function saveManual(io: FileStore, text: string, baseHash: string, revision: number) {
+export async function saveManual(io: FileStore, text: string, baseHash: string, revision: number,
+  adoption?: { origin: string; verify: (current: Snapshot) => Promise<void>; extra: Mutation[] }) {
   return io.lock(async () => {
     const current = await writable(io)
     invariant(current.ledger.revision === revision, 'STALE_LEDGER_REVISION', '项目记录已更新，请重新读取。')
     invariant(current.document.contentHash === baseHash, 'STALE_DOCUMENT_VERSION', '手工编辑基于旧稿，保留缓冲并重新比较。')
-    const ledger = structuredClone(current.ledger), change = await documentMutation(io, current, ledger, text, 'user-manual')
-    const nextRevision = await publishLedger(io, current, ledger, change.mutations)
+    await adoption?.verify(current)
+    const ledger = structuredClone(current.ledger), change = await documentMutation(io, current, ledger, text, adoption?.origin ?? 'user-manual')
+    const nextRevision = await publishLedger(io, current, ledger, [...change.mutations, ...(adoption?.extra ?? [])])
     return { ...change, mutations: undefined, revision: nextRevision }
   })
 }
