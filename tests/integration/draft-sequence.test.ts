@@ -16,8 +16,20 @@ import { parseMaterialBytes } from '../../src/host/parsers/parse.ts'
 import { registerSource, confirmEvidence, upsertClaim, confirmOutline } from '../../src/core/evidence/evidence.ts'
 import { recover } from '../../src/core/store/transactions.ts'
 import { type FileImage, digest, json } from '../../src/core/store/files.ts'
+import { closeRun, prepareRunAction } from '../../src/core/pipeline/run-control.ts'
 const model = { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY', maxOutputTokens: 16384 }
 const owner = { pid: 1, bootInstance: 'TEST_ONLY' }, signal = () => new AbortController().signal
+test('a closed interrupted chapter remains cancellable when identical state keys have a different serialization order', async () => {
+  const { io } = await setup(), sequenceId = await begin(io), plan = await dispatch(io, sequenceId)
+  await executeGeneration(io, plan, owner, signal(), async () => { throw new Error('TEST_ONLY paused before dispatch') }, () => false, { pauseRequested: () => true })
+  const close = await prepareRunAction(io, plan.snapshot.runId, 'close', () => false)
+  const result = await closeRun(io, close, () => false)
+  const { errorCode, ...body } = result.run, alternate = json({ ...body, errorCode })
+  io.externalEdit(`.scholarflow/runs/${plan.snapshot.runId}/run.json`, alternate)
+  io.externalEdit('.scholarflow/runs/active.json', alternate)
+  await applyDraftSequenceAction(io, await action(io, sequenceId, 'cancel', 'TEST_ONLY 明确结束中断章节，保留原登记。'))
+  assert.equal((await readDraftSequence(io, sequenceId)).checkpoint.status, 'cancelled')
+})
 async function context(io: MemoryStore, sessionId = 'session_TEST_ONLY') {
   const current = await snapshot(io)
   return { requestId: 'req_TEST_ONLY', workspaceId: 'workspace_TEST_ONLY', sessionId, projectId: current.ledger.projectId, expectedLedgerRevision: current.ledger.revision }

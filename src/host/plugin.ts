@@ -32,7 +32,7 @@ import { currentWorkflow, prepareWorkflow, startWorkflow, prepareWorkflowAction,
 import { workflowBudgetInfo } from '../core/pipeline/workflow-budget.ts'
 import { automaticPrepareRequest, automaticActionRequest } from '../shared/workflow-automatic.ts'
 import { prepareAutomatic, startAutomatic, driveAutomatic, readAutomatic, inspectAutomatic, prepareAutomaticAction, applyAutomaticAction,
-  type AutomaticPlan, type AutomaticActionPlan } from '../core/pipeline/workflow-automatic.ts'
+  type AutomaticPlan, type AutomaticActionPlan, type AutomaticWork } from '../core/pipeline/workflow-automatic.ts'
 import { selectedModel, callStageModel } from './executor/model.ts'
 import { runReview, inspectReview, decideIssue } from '../core/review/review.ts'
 import { prepareDelivery, createDelivery, readDelivery, type DeliveryPlan } from '../core/export/delivery.ts'
@@ -83,7 +83,7 @@ import { prepareResearchBatch, executeResearchBatch, readResearchBatch, prepareR
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
 export const name = 'scholarflow'
-export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools', 'systemPrompt', 'agentPresets', 'llm', 'agentDefaultModel', 'sessionProjections', 'web']
+export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools', 'skills', 'systemPrompt', 'agentPresets', 'llm', 'agentDefaultModel', 'sessionProjections', 'web']
 export const Config = Schema.object({
   defaultProjectType: Schema.union(['course-paper', 'literature-review', 'research-paper']).default('course-paper').volatile(),
   language: Schema.union(['zh', 'en']).default('zh').volatile(),
@@ -180,11 +180,36 @@ export class ScholarFlowRemote extends TypertRemoteService {
         invariant(reviewPlan.inputBytes + (reviewPlan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow,
           'CONTEXT_WINDOW_EXCEEDED', '完整审查范围超过宿主模型上下文，没有隐式裁剪。')
       }
-      const plan = await prepareAutomatic(io, input.workflowId, input.context.sessionId, input.policy, reviewPlan)
+      let work: AutomaticWork | undefined
+      if (input.searches) {
+        this.requireNetwork()
+        work = { kind: 'research', plan: await prepareResearchBatch(io, { context: input.context, searches: input.searches }) }
+      } else if (input.generation || input.draftSequenceId || input.revision) {
+        const model = await selectedModel(this.ctx, input.context.sessionId, signal)
+        const descriptor = { providerId: model.selected.provider, modelId: model.selected.model, ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }) }
+        if (input.draftSequenceId) {
+          const action = await prepareDraftSequenceAction(io, { context: input.context, sequenceId: input.draftSequenceId, action: 'next', reason: '' }, binding => readPrivateSkill(binding, io))
+          invariant(action.generation, 'DRAFT_SEQUENCE_COMPLETE', '初稿顺序已无待生成章节，请在初稿页确认结束顺序。')
+          invariant(action.generation.snapshot.modelDescriptor.providerId === descriptor.providerId && action.generation.snapshot.modelDescriptor.modelId === descriptor.modelId &&
+            action.generation.snapshot.modelDescriptor.reasoningEffort === descriptor.reasoningEffort, 'MODEL_SELECTION_CHANGED', '当前宿主模型与原初稿顺序不同，请明确重新规划。')
+          work = { kind: 'generation', plan: action.generation, sequenceAction: action }
+        } else {
+          const generation = input.revision ? { instruction: input.revision.instruction, reviewIssueId: input.revision.issueId, selection: issueFixSelection(current, input.revision.issueId) } : input.generation!
+          work = { kind: 'generation', plan: await prepareGeneration(io, { context: input.context, ...generation }, descriptor, binding => readPrivateSkill(binding, io)) }
+        }
+        invariant(work.plan.inputBytes + (work.plan.snapshot.modelDescriptor.maxOutputTokens ?? 16384) + 2000 <= model.contextWindow,
+          'CONTEXT_WINDOW_EXCEEDED', '所列生成范围超过当前模型上下文限额，没有截掉关键证据。')
+      }
+      const plan = await prepareAutomatic(io, input.workflowId, input.context.sessionId, input.policy, reviewPlan, work)
       this.automaticPlans.set(plan.id, { plan, action: false, context: input.context, peerId, expires: Date.now() + 600000 })
       return { planId: plan.id, planHash: plan.contentHash, input: plan.input,
-        risks: [reviewPlan ? '允许在审查阶段向所列固定宿主模型发送当前已保存全文、要求、相关定位证据、文风、批准记忆和固定 Skill；一次五项审查，格式修复和临时重试仍计入原预算。' : '当前自动推进只确认已有事实、执行已授权规则审查及工作草稿交付，不调用模型或在线检索。',
-          ...(reviewPlan ? ['宿主会话保留请求和结果；不发送未选资料全文，不自动接受正文差异。暂停等待当前有限调用保存后停止后续调度，取消传播到调用。'] : []),
+        ...(work && { stagePreview: work.kind === 'research' ? { destination: 'https://api.crossref.org', searches: work.plan.searches } :
+          { instruction: work.plan.input.instruction, sectionId: work.plan.input.sectionId, issueId: work.plan.input.reviewIssueId,
+            sourceText: work.plan.input.selection?.sourceText, evidenceIds: work.plan.evidenceIds, scope: work.plan.context.expectedScope } }),
+        risks: [work ? '允许按当前原目标执行所列冻结阶段；格式修复、暂时重试与查询仍计入原任务预算，候选保存后停止审阅。' : reviewPlan ? '允许在审查阶段向所列固定宿主模型发送当前已保存全文、要求、相关定位证据、文风、批准记忆和固定 Skill；一次五项审查，格式修复和临时重试仍计入原预算。' : '当前自动推进只确认已有事实、执行已授权规则审查及工作草稿交付，不调用模型或在线检索。',
+          ...(work ? [work.kind === 'research' ? '仅向 Crossref 发送所列查询、数量和年份；不发送主稿、资料、记忆或 Skill。元数据候选须另行收录和定位证据。' :
+            '向所列宿主模型发送冻结的章节／选区、相关已选证据、批准记忆、文风和固定 Skill；保存候选后停下审阅，不直接写主稿。'] : []),
+          ...(reviewPlan || work?.kind === 'generation' ? ['宿主会话保留请求和结果；不发送未选资料全文，不自动接受正文差异。暂停等待当前有限调用保存后停止后续调度，取消传播到调用。'] : []),
           '要求冲突、大纲未确认、主稿缺章节和未授权缺口都会停止。不会接受 AI 建议、关闭语义问题或标记可提交。',
           '步骤、执行时间和无进展上限计入原引导目标；新尝试与恢复不重置原额度。',
           '资料、实际稿件、文风、记忆或目标改变会使旧授权停止；中断登记不会自动重放。'] }
@@ -214,12 +239,13 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const owner = { pid: process.pid, bootInstance: this.bootInstance }, automaticId = row.action ? (row.plan as AutomaticActionPlan).automaticId : (row.plan as AutomaticPlan).input.automaticId
       const originalInput = row.action ? (await readAutomatic(io, (row.plan as AutomaticActionPlan).workflowId, automaticId)).input : (row.plan as AutomaticPlan).input
       const checkModel = async (sessionId: string, selectedSignal: AbortSignal) => {
-        const model = await selectedModel(this.ctx, sessionId, selectedSignal), descriptor = originalInput.modelReview!.modelDescriptor
+        const model = await selectedModel(this.ctx, sessionId, selectedSignal), descriptor = (originalInput.modelReview ?? originalInput.work)!.modelDescriptor
         invariant(model.selected.provider === descriptor.providerId && model.selected.model === descriptor.modelId && model.selected.reasoningEffort === descriptor.reasoningEffort,
           'MODEL_SELECTION_CHANGED', '宿主模型选择改变，旧自动审查授权停止，请重新预览。')
         return model
       }
-      if (originalInput.modelReview && (!row.action || (row.plan as AutomaticActionPlan).action === 'resume')) await checkModel(input.context.sessionId, signal)
+      if ((originalInput.modelReview || originalInput.work?.kind === 'generation') && (!row.action || (row.plan as AutomaticActionPlan).action === 'resume')) await checkModel(input.context.sessionId, signal)
+      if (originalInput.work?.kind === 'research' && (!row.action || (row.plan as AutomaticActionPlan).action === 'resume')) this.requireNetwork()
       invariant(!this.running.has(automaticId), 'RUN_IN_PROGRESS', '这个调度仍在执行。')
       if (row.action) {
         const result = await applyAutomaticAction(io, row.plan as AutomaticActionPlan, owner, candidate => this.ownerAlive(candidate))
@@ -229,6 +255,21 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const workflowId = row.action ? (row.plan as AutomaticActionPlan).workflowId : (row.plan as AutomaticPlan).input.workflowId
       const active = { controller: new AbortController(), context: row.context, pauseRequested: false }; this.running.set(automaticId, active)
       try { return { automaticId, state: await driveAutomatic(io, workflowId, automaticId, AbortSignal.any([signal, active.controller.signal]), { pauseRequested: () => active.pauseRequested }, {
+        skillReader: binding => readPrivateSkill(binding, io),
+        generation: async (plan, grant, childSignal, executionSessionId) => {
+          const model = await checkModel(executionSessionId, childSignal)
+          invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 16384) + 2000 <= model.contextWindow,
+            'CONTEXT_WINDOW_EXCEEDED', '宿主模型实际上下文限额改变，没有发送旧范围。')
+          return executeGeneration(io, plan, owner, childSignal, async call => {
+            const currentModel = await checkModel(executionSessionId, call.signal)
+            return callStageModel(this.ctx, currentModel.session, currentModel.selected, call)
+          }, candidate => this.ownerAlive(candidate), { pauseRequested: () => false, automaticChild: grant, executionSessionId })
+        },
+        research: async (plan, grant, childSignal, executionSessionId) => {
+          this.requireNetwork()
+          return executeResearchBatch(io, plan, this.researchProvider, childSignal, owner, candidate => this.ownerAlive(candidate),
+            { pauseRequested: () => false, automaticChild: grant, executionSessionId })
+        },
         modelReview: async (plan, grant, childSignal, executionSessionId) => {
           const model = await checkModel(executionSessionId, childSignal)
           invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow,
@@ -1886,7 +1927,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   @Remote
   diagnostics() {
     const ctx = this.ctx as Host
-    return { version: '0.1.0-dev', protocol: 1, node: process.versions.node,
+    return { version: '1.0.0', protocol: 1, node: process.versions.node,
       services: Object.fromEntries(['fs', 'sandboxPolicy', 'sessionController', 'workspaceRegistry', 'settings', 'llm']
         .map(key => [key, !!ctx.get(key)])),
       settings: ctx.settings.describe({ redactSecrets: true }).filter((row: Host) => row.ns === 'scholarflow'),
@@ -1924,6 +1965,22 @@ export class ScholarFlowRemote extends TypertRemoteService {
       dispose?.()
       if (ctx.agentPresets.composedPreset(agent.ctx) !== original) await ctx.agentPresets.select(agent, original)
     }
+  }
+
+  @Remote
+  async verifyOrdinaryCatalog(request: unknown, signal: AbortSignal) {
+    this.requireOperator()
+    invariant(process.env.SCHOLARFLOW_G0_VERIFY === '1', 'UNSUPPORTED_DSH_CAPABILITY', '此接口仅供隔离 G0 验证。')
+    const ctx = this.ctx as Host, { sessionId } = sessionRequest.parse(request)
+    const resolved = await ctx.sessionController.resolveAgent(sessionId)
+    if (resolved.error) throw resolved.error
+    const agent = resolved.agent
+    invariant(ctx.agentPresets.composedPreset(agent.ctx) === 'standard', 'INVALID_REQUEST', '目录检查仅限普通会话。')
+    const observed = await ctx.skills.snapshot({ cwd: agent.session.header.cwd, scope: agent, signal })
+    // The actual tool-skill consumer advertises only model-invocable entries.
+    // Return routing metadata only, never instructions or private paths.
+    return { complete: observed.complete, entries: observed.skills.filter((skill: Host) => skill.invocation.modelInvocable)
+      .map((skill: Host) => ({ name: skill.name, description: skill.description, provider: skill.provider })) }
   }
 
   @Remote

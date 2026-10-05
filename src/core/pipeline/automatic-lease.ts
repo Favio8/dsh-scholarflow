@@ -27,9 +27,10 @@ export async function ensureNoAutomaticExecuting(io: FileStore, projectId: strin
   if (approvedChild) {
     const grant = automaticChildGrantSchema.parse(approvedChild), pending = state.steps.filter(row => row.state === 'pending')
     invariant(state.status === 'running' && pending.length === 1 && grant.workflowId === current.workflowId && grant.automaticId === current.automaticId &&
-      pending[0].stepId === grant.stepId && pending[0].operation === 'model-review' && pending[0].child?.runId === grant.runId && pending[0].child.planHash === grant.planHash &&
-      input.modelReview?.runId === grant.runId && input.modelReview.planHash === grant.planHash,
-      'AUTOMATIC_CHILD_INVALID', '调用不属于当前已登记、已确认的唯一审查子步骤；未调用提供方。')
+      pending[0].stepId === grant.stepId && pending[0].child?.runId === grant.runId && pending[0].child.planHash === grant.planHash &&
+      (pending[0].operation === 'model-review' && input.modelReview?.runId === grant.runId && input.modelReview.planHash === grant.planHash ||
+        pending[0].operation === (input.work?.kind === 'generation' ? 'model-generation' : 'research-batch') && input.work?.runId === grant.runId && input.work.planHash === grant.planHash && pending[0].stage === input.work.stage),
+      'AUTOMATIC_CHILD_INVALID', '调用不属于当前已登记、已确认的唯一子步骤；未调用提供方。')
     return
   }
   invariant(!['queued', 'running'].includes(state.status), 'RUN_IN_PROGRESS', '当前自动推进仍在执行，先暂停或等待其保存，再启动独立阶段；未调用提供方。')

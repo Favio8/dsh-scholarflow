@@ -10,6 +10,7 @@ type Pending = { context: any; path: string; text: string; baseHash: string; sta
 export function ProjectTextEditor({ project, context, api, refresh, run, busy, onDirty }: Props) {
   const [path, setPath] = useState<string>(projectTextPaths[0]), [file, setFile] = useState<any>(), [text, setText] = useState(''), [baseHash, setBaseHash] = useState('')
   const [reason, setReason] = useState(''), [message, setMessage] = useState(''), [bufferMessage, setBufferMessage] = useState('')
+  const [impact, setImpact] = useState<any>()
   const [recoverable, setRecoverable] = useState<any>(), [ready, setReady] = useState(false), [blocked, setBlocked] = useState(false)
   const bufferHash = useRef<string | null>(null), hostDirty = useRef(false), queue = useRef<ScratchQueue<Pending> | null>(null)
   const latest = useRef({ text, baseHash }), scope = useRef(0)
@@ -56,7 +57,8 @@ export function ProjectTextEditor({ project, context, api, refresh, run, busy, o
     await queue.current.flush(); backup(); setRecoverable(undefined)
   }
   const save = () => run(async () => {
-    await api('project.saveText', { context: context(), path: file.path, text, baseHash, ...(file.memory && reason.trim() && { changeReason: reason.trim() }) })
+    const saved = await api('project.saveText', { context: context(), path: file.path, text, baseHash, ...(file.memory && reason.trim() && { changeReason: reason.trim() }) })
+    setImpact(saved.impact)
     // The actual fact is already saved even if subsequent scratch cleanup fails.
     // Preserve its new base before cleanup so a retry cannot duplicate approval.
     const current = await api('project.readText', { context: context(), path: file.path })
@@ -114,5 +116,10 @@ export function ProjectTextEditor({ project, context, api, refresh, run, busy, o
       setRecoverable(hostDirty.current ? staged.buffer : undefined); setBlocked(false); setReady(true); setBufferMessage('已重读宿主暂存，当前页面编辑保持原样，请比较双方。')
     })}>重读项目指令冲突缓冲</button>}
     <p role="status">{message}</p>
+    {impact?.changed && <section aria-label="项目指令变更影响"><h4>本次变更需要复查</h4>
+      <p>检查：{impact.checks.join('、')}。{impact.outlineNeedsConfirmation && '研究决定已改变，大纲需要重新确认。'}</p>
+      <ul>{impact.sections.map((section: any) => <li key={section.sectionId}>{section.title} · {section.located ? '已定位正文' : '标题尚未唯一定位'}{section.matchedTerms.length ? ` · 涉及 ${section.matchedTerms.join('、')}` : ''}</li>)}</ul>
+      {!impact.sections.length && <p>当前正文未找到明确的字面匹配；仍需核对隐含依赖。</p>}<p>{impact.limitation}</p>
+    </section>}
   </section>
 }

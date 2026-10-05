@@ -10,6 +10,7 @@ function conflict(a: Requirement, b: Requirement) {
   if (a.id === b.id || a.kind !== b.kind || !a.constraint || !b.constraint) return false
   if (a.kind === 'section' || a.kind === 'topic') return false
   if (a.constraint.windowStart !== b.constraint.windowStart || a.constraint.windowEnd !== b.constraint.windowEnd) return false
+  if (JSON.stringify([...(a.constraint.sourceKinds ?? [])].sort()) !== JSON.stringify([...(b.constraint.sourceKinds ?? [])].sort())) return false
   if (a.kind === 'length' && a.constraint.countingPolicyId && b.constraint.countingPolicyId && a.constraint.countingPolicyId !== b.constraint.countingPolicyId) return true
   if (a.constraint.unit !== b.constraint.unit || a.constraint.operator !== b.constraint.operator) {
     if (a.constraint.unit === b.constraint.unit && typeof a.constraint.value === 'number' && typeof b.constraint.value === 'number') {
@@ -97,10 +98,14 @@ export async function confirmRequirement(io: FileStore, requirementId: string, c
     }
     if (requirement.kind === 'references' && requirement.constraint) {
       const rule = requirement.constraint, hasWindow = !!(rule.windowStart || rule.windowEnd)
-      if (hasWindow || rule.operator === 'ratio') {
+      if (hasWindow) {
         invariant(rule.windowStart && rule.windowEnd && /^\d{4}$/u.test(rule.windowStart) && /^\d{4}$/u.test(rule.windowEnd) && Number(rule.windowStart) >= 1 && Number(rule.windowStart) <= Number(rule.windowEnd),
           'COUNTING_POLICY_CONFIRMATION_REQUIRED', '年份窗口须明确起止年份；只按来源记录的出版年份检查。')
-        invariant(countingPolicyId === (rule.operator === 'ratio' ? 'sf-cited-year-window-ratio-v1' : 'sf-cited-year-window-v1'),
+      }
+      if (hasWindow || rule.sourceKinds || rule.operator === 'ratio') {
+        invariant(rule.sourceKinds || hasWindow, 'COUNTING_POLICY_CONFIRMATION_REQUIRED', '引用比例须明确来源类别或起止年份，分母为全部实际唯一引用。')
+        const policy = rule.sourceKinds ? rule.operator === 'ratio' ? 'sf-cited-filter-ratio-v1' : 'sf-cited-filter-v1' : rule.operator === 'ratio' ? 'sf-cited-year-window-ratio-v1' : 'sf-cited-year-window-v1'
+        invariant(countingPolicyId === policy,
           'COUNTING_POLICY_CONFIRMATION_REQUIRED', '请确认实际唯一引用来源的年份口径及比例分母，年份缺失保持未知。')
         rule.countingPolicyId = countingPolicyId
       }

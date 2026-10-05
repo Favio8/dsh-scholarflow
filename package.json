@@ -1,6 +1,6 @@
 {
   "name": "dsh-scholarflow",
-  "version": "0.1.0-dev",
+  "version": "1.0.0",
   "private": true,
   "description": "ScholarFlow academic project workspace for DeepSeek Harness",
   "type": "module",
@@ -24,6 +24,7 @@
     "dist",
     "cordis.patch.yml",
     "README.md",
+    "docs",
     "examples/local-evidence",
     "presets",
     "academic-skills"
@@ -62,7 +63,6 @@
     "remark-math": "6.0.0",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
-    "schemastery": "^3.18.0",
     "unified": "^11.0.5",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"

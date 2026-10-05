@@ -1,5 +1,10 @@
 # 兼容性记录（ScholarFlow × DSH）
 
+2026-10-05 当前交付范围：ScholarFlow 1.0.0、Windows DSH Desktop 0.2.0-rc.2。
+类型、构建、343 项分层测试、实际 Host 和 Electron 工作台已通过；详见
+[最终验证记录](final-runtime-validation.md)。下面按时间保留 G0 早期调查，
+其中“尚未验证”“需确认”表示当时状态，不是当前交付缺口；后续实测和实现决定优先。
+
 2026-10-05 模型会话冷恢复修正：rc.2 live Session 能接受未知事件名，
 持久化读取却会拒绝未标记 ignorable 的插件事件；其 append 可选参数不支持写该标记。
 阶段审计现使用公共 user/message 与明确插件来源，保持请求／结果持久屏障，

@@ -11,6 +11,7 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
   const [operator, setOperator] = useState('min'), [unit, setUnit] = useState('zh-characters'), [materialId, setMaterialId] = useState('')
   const [editing, setEditing] = useState<any>(), [changeReason, setChangeReason] = useState(''), [requirementPreview, setRequirementPreview] = useState<any>(), [history, setHistory] = useState<any>()
   const [yearStart, setYearStart] = useState(''), [yearEnd, setYearEnd] = useState(''), [mixedCount, setMixedCount] = useState(false)
+  const [sourceKinds, setSourceKinds] = useState<string[]>([])
   const [selected, setSelected] = useState(''), [reason, setReason] = useState(''), [confirmCount, setConfirmCount] = useState(false)
   const [message, setMessage] = useState(''), [instructionDirty, setInstructionDirty] = useState(false)
   const requirements = Object.values(project.ledger.requirements) as any[], conflicts = requirements.filter(row => row.confirmation === 'conflicting')
@@ -21,12 +22,13 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
       verificationMethod: editing?.row.verificationMethod ?? (['length', 'references', 'section', 'format'].includes(kind) ? 'deterministic' : 'manual'),
       constraint: { operator, value: numeric ? Number(value) : value, ...(numeric && { unit: kind === 'references' ? operator === 'ratio' ? 'percent' : 'items' : mixedCount ? 'words' : unit }),
         ...(kind === 'length' && mixedCount && { countingPolicyId: 'sf-body-han-plus-western-v1' }),
-        ...(kind === 'references' && (yearStart || yearEnd || operator === 'ratio') && { windowStart: yearStart, windowEnd: yearEnd }) } }
+        ...(kind === 'references' && (yearStart || yearEnd) && { windowStart: yearStart, windowEnd: yearEnd }),
+        ...(kind === 'references' && sourceKinds.length > 0 && { sourceKinds }) } }
   }
-  const clearEdit = () => { setEditing(undefined); setDescription(''); setChangeReason(''); setYearStart(''); setYearEnd(''); setMixedCount(false); setRequirementPreview(undefined) }
+  const clearEdit = () => { setEditing(undefined); setDescription(''); setChangeReason(''); setYearStart(''); setYearEnd(''); setSourceKinds([]); setMixedCount(false); setRequirementPreview(undefined) }
   const beginEdit = (row: any) => { setEditing({ row: structuredClone(row), revision: project.ledger.revision }); setDescription(row.description); setKind(row.kind);
     setOperator(row.constraint?.operator ?? 'equals'); setValue(String(row.constraint?.value ?? '')); setUnit(row.constraint?.unit === 'words' ? 'words' : 'zh-characters');
-    setYearStart(row.constraint?.windowStart ?? ''); setYearEnd(row.constraint?.windowEnd ?? ''); setMixedCount(row.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1'); setChangeReason(''); setRequirementPreview(undefined) }
+    setYearStart(row.constraint?.windowStart ?? ''); setYearEnd(row.constraint?.windowEnd ?? ''); setSourceKinds(row.constraint?.sourceKinds ?? []); setMixedCount(row.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1'); setChangeReason(''); setRequirementPreview(undefined) }
   return <section aria-label="项目概览"><h3>项目概览与要求确认</h3>
     <GuidedWorkflow project={project} context={context} api={api} run={run} refresh={refresh} busy={busy} navigate={navigate} />
     <ProjectIdentityHistory context={context} api={api} run={run} busy={busy} />
@@ -38,12 +40,14 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
     <label>要求描述<textarea aria-label="要求描述" value={description} maxLength={4000} onChange={e => setDescription(e.target.value)} /></label>
     <label>要求类别<select aria-label="要求类别" value={kind} onChange={e => setKind(e.target.value)}>
       <option value="length">篇幅</option><option value="references">引用数量</option><option value="section">必需章节</option><option value="format">输出格式</option><option value="topic">主题</option><option value="ai-policy">AI 使用政策</option><option value="other">其他人工要求</option></select></label>
-    <label>约束方式<select aria-label="约束方式" value={operator} onChange={e => setOperator(e.target.value)}><option value="min">至少</option><option value="max">至多</option><option value="equals">等于</option><option value="contains">包含</option>{kind === 'references' && <option value="ratio">近期比例至少（%）</option>}</select></label>
+    <label>约束方式<select aria-label="约束方式" value={operator} onChange={e => setOperator(e.target.value)}><option value="min">至少</option><option value="max">至多</option><option value="equals">等于</option><option value="contains">包含</option>{kind === 'references' && <option value="ratio">所选年份／类别比例至少（%）</option>}</select></label>
     <label>约束值<input aria-label="约束值" value={value} onChange={e => setValue(e.target.value)} /></label>
     {kind === 'length' && !mixedCount && <label>篇幅单位<select aria-label="篇幅单位" value={unit} onChange={e => setUnit(e.target.value)}><option value="zh-characters">汉字数</option><option value="words">西文词元数</option></select></label>}
     {kind === 'length' && <label><input type="checkbox" checked={mixedCount} onChange={e => setMixedCount(e.target.checked)} />改用汉字数 + 西文词元数之和，sf-body-han-plus-western-v1（不等同于学校 Word 字数）</label>}
     {kind === 'references' && <><label>引用年份窗口起点（可留空）<input aria-label="引用年份窗口起点" value={yearStart} onChange={e => setYearStart(e.target.value)} /></label>
       <label>引用年份窗口终点（可留空）<input aria-label="引用年份窗口终点" value={yearEnd} onChange={e => setYearEnd(e.target.value)} /></label>
+      <fieldset><legend>引用来源类别（不选表示全部；多个类别取并集）</legend>{Object.entries({ paper: '论文', dataset: '数据集', web: '网页', book: '书籍', 'user-result': '用户结果', other: '其他' }).map(([key, title]) =>
+        <label key={key}><input type="checkbox" aria-label={`计数来源类别 ${title}`} checked={sourceKinds.includes(key)} onChange={e => setSourceKinds(kinds => e.target.checked ? [...kinds, key] : kinds.filter(kind => kind !== key))} />{title}</label>)}</fieldset>
       <p>数量按正文实际唯一引用计数；窗口含起止年份。近期比例的分母为全部实际唯一引用；缺失年份保持未知，不按当前年补齐。</p></>}
     {editing && <p>正在修改 {editing.row.id}，基于 ledger {editing.revision}；原来源与定位保留，保存后须重新确认。</p>}
     <label>要求修改／删除理由<textarea aria-label="要求修改删除理由" value={changeReason} onChange={e => setChangeReason(e.target.value)} maxLength={2000} /></label>
@@ -57,12 +61,14 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
     {requirements.map(row => <section key={row.id} aria-label={`写作要求 ${row.id}`}><h4>{row.kind} · {row.confirmation}</h4><p>{row.description}</p>
       <p>约束：{row.constraint?.operator} {String(row.constraint?.value ?? '需人工判断')} {row.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1' ? '汉字 + 西文词元合计' : row.constraint?.unit} · {row.constraint?.countingPolicyId ?? '未指定统计口径'}</p>
       {(row.constraint?.windowStart || row.constraint?.windowEnd) && <p>年份窗口：{row.constraint.windowStart}–{row.constraint.windowEnd}，含两端；比例分母为正文实际唯一引用。</p>}
+      {row.constraint?.sourceKinds && <p>按登记类别取并集：{row.constraint.sourceKinds.join('、')}；与年份窗口取交集，不代表来源身份或出版质量已经核验。</p>}
       <p>来源：{row.origin.type}{row.origin.materialId && ` · ${row.origin.materialId}`}</p>{row.origin.excerpt && <blockquote>{row.origin.excerpt}</blockquote>}
       <button disabled={busy} onClick={() => beginEdit(row)}>编辑要求 {row.id}</button>
       <button disabled={busy || !changeReason.trim()} onClick={() => setRequirementPreview({ action: 'remove', request: { context: context(), requirementId: row.id, reason: changeReason }, previous: structuredClone(row) })}>预览删除要求 {row.id}</button>
       {row.confirmation === 'proposed' && <button disabled={busy || (row.kind === 'length' && !confirmCount)} onClick={() => run(async () => {
         const policy = row.kind === 'length' ? row.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1' ? 'sf-body-han-plus-western-v1' : 'sf-body-han-western-v1' :
-          row.kind === 'references' && (row.constraint?.windowStart || row.constraint?.windowEnd || row.constraint?.operator === 'ratio') ? row.constraint.operator === 'ratio' ? 'sf-cited-year-window-ratio-v1' : 'sf-cited-year-window-v1' : undefined
+          row.kind === 'references' && row.constraint?.sourceKinds ? row.constraint.operator === 'ratio' ? 'sf-cited-filter-ratio-v1' : 'sf-cited-filter-v1' :
+            row.kind === 'references' && (row.constraint?.windowStart || row.constraint?.windowEnd || row.constraint?.operator === 'ratio') ? row.constraint.operator === 'ratio' ? 'sf-cited-year-window-ratio-v1' : 'sf-cited-year-window-v1' : undefined
         await api('requirements.confirm', { context: context(), requirementId: row.id, ...(policy && { countingPolicyId: policy }) }); await refresh()
       })}>确认要求 {row.id}</button>}
     </section>)}

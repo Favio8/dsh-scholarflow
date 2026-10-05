@@ -37,7 +37,7 @@ export async function prepareResearchBatch(io: FileStore, request: unknown, pare
     searches: input.searches.map(search => ({ queryId: newId('query'), search })), ...(parentRunId && { parentRunId }) }
   return batchPlanSchema.parse({ ...body, contentHash: digest(json(body)) })
 }
-function verifyPlan(plan: ResearchBatchPlan) {
+export function verifyPlan(plan: ResearchBatchPlan) {
   batchPlanSchema.parse(plan); const { contentHash, ...body } = plan
   invariant(digest(json(body)) === contentHash && plan.snapshot.stage === 'research' && plan.snapshot.networkScope === 'approved-providers',
     'RUN_CHECKPOINT_CHANGED', '冻结检索计划摘要或阶段不匹配。')
@@ -117,7 +117,7 @@ export async function closeResearchBatch(io: FileStore, action: ResearchBatchAct
 }
 export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPlan, provider: ResearchProvider, signal: AbortSignal,
   owner: RunState['owner'], ownerAlive: (owner: RunState['owner']) => boolean,
-  control: { pauseRequested: () => boolean; action?: ResearchBatchAction; executionSessionId?: string } = { pauseRequested: () => false }) {
+  control: { pauseRequested: () => boolean; action?: ResearchBatchAction; executionSessionId?: string; automaticChild?: import('../../shared/workflow-automatic.ts').AutomaticChildGrant } = { pauseRequested: () => false }) {
   verifyPlan(plan)
   invariant(provider.id === 'crossref' && provider.capabilities.search, 'RESEARCH_PROVIDER_UNAVAILABLE', '所选提供方不能检索。')
   signal.throwIfAborted()
@@ -140,7 +140,7 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
     stateHash = digest(text); checkpointHash = digest(progressText)
   })
   await io.lock(async () => {
-    await ensureNoAutomaticExecuting(io, plan.snapshot.projectId)
+    await ensureNoAutomaticExecuting(io, plan.snapshot.projectId, control.automaticChild)
     const current = await snapshot(io), active = await io.read(ACTIVE_RUN)
     invariant(!(await inspectRecovery(io, current.config.paths.manuscriptDir)).pending.length, 'RECOVERY_REQUIRED', '先恢复项目事务，再开始检索。')
     if (control.action?.action === 'resume') {
@@ -204,7 +204,7 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
       let failure: unknown
       try {
         const response = await workflowCall(io, plan.snapshot.workflowId, { callId: searchId, runId: state.runId, stage: 'research', kind: 'search',
-          candidateLimit: spec.limit, activeDurationMs: state.activeDurationMs ?? 0, owner }, AbortSignal.any([budgetSignal, AbortSignal.timeout(25000)]),
+          candidateLimit: spec.limit, activeDurationMs: state.activeDurationMs ?? 0, owner, automaticChild: control.automaticChild }, AbortSignal.any([budgetSignal, AbortSignal.timeout(25000)]),
           signal => provider.search(spec, signal), result => Math.min(spec.limit, result.records.length)); budgetSignal.throwIfAborted()
         record = searchRecordSchema.parse({ ...record, state: 'completed', records: response.records.slice(0, spec.limit), warnings: response.warnings, completedAt: new Date().toISOString() })
       } catch (error) {

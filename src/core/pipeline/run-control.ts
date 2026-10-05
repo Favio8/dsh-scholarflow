@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { id, hash } from '../../shared/schema.ts'
-import { generationRequest, runSnapshotSchema, generationCheckpointSchema, type RunState } from '../../shared/runs.ts'
+import { generationRequest, runSnapshotSchema, runStateSchema, generationCheckpointSchema, type RunState } from '../../shared/runs.ts'
 import { invariant } from '../../shared/errors.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { snapshot } from '../project/project.ts'
@@ -16,11 +16,19 @@ const frozenSchema = z.object({ id, contentHash: hash, snapshot: runSnapshotSche
   parentRunId: id.optional(), retryNotBefore: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), sectionTarget: z.object({ sectionId: id, title: z.string(), depth: z.number().int().min(1).max(6),
     mode: z.enum(['insert', 'replace-body']), startUtf16: z.number().int().min(0), endUtf16: z.number().int().min(0) }).strict().optional() }).strict()
 
+export function validateFrozenGeneration(plan: unknown): asserts plan is GenerationPlan {
+  const parsed = frozenSchema.parse(plan)
+  // Hash the unchanged producer representation, including its deliberate field
+  // order; schema parsing is validation, not rewriting immutable old inputs.
+  const { contentHash: originalHash, ...originalBody } = plan as GenerationPlan
+  invariant(digest(json(originalBody)) === originalHash && parsed.snapshot.projectId === parsed.input.context.projectId,
+    'RUN_CHECKPOINT_CHANGED', '冻结生成计划的摘要或项目身份不匹配。')
+}
 export async function readFrozenGeneration(io: FileStore, runId: string, projectId: string) {
   const file = await io.read(frozenPlanFile(runId))
   invariant(file && Buffer.byteLength(file.text) <= 20 * 1024 * 1024, 'RUN_CHECKPOINT_UNAVAILABLE', '该运行没有可验证的完整输入检查点；请结束中断记录后重新预览新任务。')
   const raw = JSON.parse(file.text)
-  frozenSchema.parse(raw)
+  validateFrozenGeneration(raw)
   const { contentHash, ...body } = raw
   invariant(digest(json(body)) === contentHash && raw.snapshot.projectId === projectId && raw.snapshot.runId === runId &&
     raw.input.context.projectId === projectId, 'RUN_CHECKPOINT_CHANGED', '冻结输入的摘要或身份不匹配，未恢复。')
@@ -97,7 +105,7 @@ export async function closeRun(io: FileStore, plan: RunActionPlan, ownerAlive: (
   invariant(plan.action === 'close', 'INVALID_APPROVAL', '此计划不是结束中断运行。')
   return io.lock(async () => {
     const { stored, active } = await validateRunAction(io, plan, ownerAlive)
-    const state = { ...stored.run, status: 'cancelled' as const, errorCode: 'USER_CLOSED_CHECKPOINT', updatedAt: new Date().toISOString() }
+    const state = runStateSchema.parse({ ...stored.run, status: 'cancelled', errorCode: 'USER_CLOSED_CHECKPOINT', updatedAt: new Date().toISOString() })
     await commit(io, [{ path: `.scholarflow/runs/${plan.runId}/control-history/${plan.id}.json`, before: undefined,
       after: json({ schemaVersion: 1, action: 'close', originalState: stored.file.text, approvedPlanHash: plan.contentHash }) },
       { path: stored.path, before: stored.file, after: json(state) }, { path: ACTIVE_RUN, before: active, after: json(state) }])

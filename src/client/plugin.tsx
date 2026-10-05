@@ -9,6 +9,7 @@ import { ReadonlyProject } from './readonly-project.tsx'
 import { ProjectIdentity } from './project-identity.tsx'
 import { SelectionCard, clearSelectionCard, invalidateSelectionCard } from './selection-card.tsx'
 import { WorkbenchLayout } from './workbench-layout.tsx'
+import { useConfirmationFocus } from './confirmation-focus.ts'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export'] as const
@@ -47,6 +48,8 @@ export function apply(ctx: Host) {
     </WorkbenchLayout>
   }
   function Project(props: Host) {
+    const confirmationRoot = useRef<HTMLElement>(null)
+    useConfirmationFocus(confirmationRoot)
     const workspaces = props.useWorkspaces((state: Host) => state.items)
     const workspace = workspaces.find((item: Host) => item.sessionIds.includes(props.sessionId))
     const [selectedWorkspace, setSelectedWorkspace] = useState('')
@@ -122,7 +125,7 @@ export function apply(ctx: Host) {
       ctx.uiWorkspace.openSession(sessionId)
       ctx.layout.selectPanel('scholarflow')
     })
-    return <section className="sf-project" aria-label="ScholarFlow 项目" data-sf-session-id={props.sessionId}>
+    return <section ref={confirmationRoot} className="sf-project" aria-label="ScholarFlow 项目" data-sf-session-id={props.sessionId} aria-busy={busy}>
       <label>DSH 工作区 <select aria-label="DSH 工作区" value={selectedWorkspace || workspace?.workspaceId || ''} onChange={e => setSelectedWorkspace(e.target.value)}><option value="">请选择</option>
         {workspaces.map((item: Host) => <option key={item.workspaceId} value={item.workspaceId}>{item.title}</option>)}</select></label>
       <button disabled={busy} onClick={startSession}>新建 ScholarFlow 会话</button>
@@ -169,6 +172,8 @@ export function apply(ctx: Host) {
     </section>
   }
   function Settings() {
+    const confirmationRoot = useRef<HTMLElement>(null)
+    useConfirmationFocus(confirmationRoot)
     const [row, setRow] = useState<Host>()
     const [message, setMessage] = useState('')
     useEffect(() => { let live = true; call('diagnostics').then(v => live && setRow(v.settings[0])).catch(e => live && setMessage(e.message)); return () => { live = false } }, [])
@@ -179,7 +184,7 @@ export function apply(ctx: Host) {
         setRow(result.value); setMessage('已保存，仅影响新项目默认值。')
       } catch (e) { setMessage((e as Error).message) }
     }
-    return <section className="sf-app sf-settings" style={{ overflow: 'auto' }}><style>{CSS + EXTRA_CSS}</style><h2>ScholarFlow 设置</h2>
+    return <section ref={confirmationRoot} className="sf-app sf-settings" style={{ overflow: 'auto' }}><style>{CSS + EXTRA_CSS}</style><h2>ScholarFlow 设置</h2>
       {row ? <><label>新项目默认类型 <select aria-label="新项目默认类型" value={row.value.defaultProjectType} onChange={e => save('defaultProjectType', e.target.value)}>
         <option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></label>
         <label>新项目默认语言 <select aria-label="新项目默认语言" value={row.value.language} onChange={e => save('language', e.target.value)}><option value="zh">中文</option><option value="en">英文</option></select></label>

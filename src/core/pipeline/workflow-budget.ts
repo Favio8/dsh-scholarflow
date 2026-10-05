@@ -63,7 +63,8 @@ export async function reserveWorkflowCall(io: FileStore, expected: string | unde
   return io.lock(async () => {
     const stored = await binding(io, expected)
     if (!stored) return undefined
-    invariant(!request.automaticChild || request.kind === 'model' && request.stage === 'review' && request.automaticChild.runId === request.runId && request.automaticChild.workflowId === expected,
+    invariant(!request.automaticChild || request.automaticChild.runId === request.runId && request.automaticChild.workflowId === expected &&
+      (request.kind === 'model' && ['drafting', 'revision', 'review'].includes(request.stage) || request.kind === 'search' && request.stage === 'research'),
       'AUTOMATIC_CHILD_INVALID', '调度授权不属于这个阶段或调用。')
     await ensureNoAutomaticExecuting(io, stored.input.projectId, request.automaticChild)
     invariant(request.owner, 'WORKFLOW_OWNER_REQUIRED', '累计请求须绑定可检查的实际执行进程；未发起请求。')

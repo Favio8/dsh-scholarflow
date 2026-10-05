@@ -34,7 +34,7 @@ export function GuidedWorkflow({ project, context, api, run, busy, refresh, navi
     </>}
     {workflow && <>
       <p role="status">{workflow.input.goal.researchQuestion} · {workflow.checkpoint.status} · 检查点 {workflow.checkpoint.revision}</p>
-      <AutomaticWorkflow key={`${workflow.input.workflowId}:${project.binding.sessionId}`} workflow={workflow} context={context} api={api} refresh={refresh} inspectWorkflow={inspect} run={run} busy={busy} />
+      <AutomaticWorkflow key={`${workflow.input.workflowId}:${project.binding.sessionId}`} project={project} workflow={workflow} context={context} api={api} refresh={refresh} inspectWorkflow={inspect} run={run} busy={busy} />
       {value.budget?.used && <p role="status" aria-label="引导累计预算">模型调用 {value.budget.used.modelCalls}/{value.budget.limits.maxModelCalls} · 查询 {value.budget.used.searchQueries}/{value.budget.limits.maxSearchQueries} · 候选及未知响应预留 {value.budget.used.candidates}/{value.budget.limits.maxCandidateSources} · 模型审查轮次 {value.budget.used.reviewRounds}/{value.budget.maxReviewRounds} · 执行 {Math.ceil(value.budget.used.durationMs / 1000)} 秒/{value.budget.limits.maxDurationMinutes} 分钟</p>}
       {value.budget?.pendingCalls.map((call: any) => <p key={call.callId}>未结算请求：{call.runId} · {labels[call.stage]} · {call.callId}
         <button disabled={busy || reason.trim().length < 10} onClick={() => action('close-unknown-call', undefined, call.callId)}>预览结束无应答请求 {call.callId}</button></p>)}

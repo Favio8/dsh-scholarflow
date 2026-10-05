@@ -19,3 +19,14 @@ test('mixed body counting is explicit and distinct from Chinese-only or Western-
   assert.equal(requirementCount(requirement({ operator: 'min', value: 20, unit: 'zh-characters', countingPolicyId: 'sf-body-han-western-v1' }, 'length'), count, []).actual, 20)
   assert.equal(requirementCount(requirement({ operator: 'min', value: 5, unit: 'words', countingPolicyId: 'sf-body-han-western-v1' }, 'length'), count, []).actual, 5)
 })
+test('reference categories form a union intersected with the inclusive year window; the denominator remains all actual sources', () => {
+  const rule = requirement({ operator: 'ratio', value: 60, unit: 'percent', sourceKinds: ['paper', 'book'],
+    countingPolicyId: 'sf-cited-filter-ratio-v1', windowStart: '2021', windowEnd: '2026' })
+  const cited = [reference(2021), { ...reference(2026), kind: 'book' as const }, { ...reference(2024), kind: 'web' as const }, reference(2020)]
+  assert.equal(requirementCount(rule, { chineseCharacters: 0, westernWords: 0 }, cited).actual, 50)
+  assert.equal(requirementCount(rule, { chineseCharacters: 0, westernWords: 0 }, [...cited, { ...reference(), kind: 'web' as const }]).actual, 40)
+  assert.equal(requirementCount(rule, { chineseCharacters: 0, westernWords: 0 }, [...cited, reference()]).actual, undefined)
+  const count = requirement({ operator: 'min', value: 2, unit: 'items', sourceKinds: ['paper', 'book'], countingPolicyId: 'sf-cited-filter-v1' })
+  assert.equal(requirementCount(count, { chineseCharacters: 0, westernWords: 0 }, cited).actual, 3)
+  assert.match(requirementCount(rule, { chineseCharacters: 0, westernWords: 0 }, cited).detail, /不推断语言、同行评审或出版真实性/u)
+})

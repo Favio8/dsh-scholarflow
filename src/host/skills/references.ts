@@ -10,6 +10,9 @@ import { invariant } from '../../shared/errors.ts'
 import { verifiedIdentityLineage } from '../../core/project/identity.ts'
 import { automaticInputSchema, automaticStateSchema } from '../../shared/workflow-automatic.ts'
 import { validateFrozenModelReview } from '../../core/review/model-run.ts'
+import { validateFrozenGeneration } from '../../core/pipeline/run-control.ts'
+import { batchPlanSchema } from '../../shared/research-batch.ts'
+import { verifyPlan as verifyResearchPlan } from '../../core/research/batch.ts'
 
 type Host = any
 export async function knownSkillReferences(ctx: Host, qualifiedId: string, resourceDigest: string, signal: AbortSignal) {
@@ -32,7 +35,7 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
     const read = async (path: string) => {
       const selected = await target(path), before = await ctx.fs.stat(selected, signal)
       if (!before) { observations.push({ rootFingerprint, path, hash: 'absent' }); return undefined }
-      const cap = /^\.scholarflow\/runs\/workflow_[\w]+\/automatic\/automatic_[\w]+\/review-plan\.json$/u.test(path) ? 20 * 1024 * 1024 :
+      const cap = /^\.scholarflow\/runs\/workflow_[\w]+\/automatic\/automatic_[\w]+\/(?:review|work)-plan\.json$/u.test(path) ? 20 * 1024 * 1024 :
         /^\.scholarflow\/identity\/history\/project_copy_[a-f0-9]{32}\.json$/u.test(path) ? 8 * 1024 * 1024 : 2 * 1024 * 1024
       invariant(before.type === 'file' && before.size <= cap, 'SKILL_REFERENCES_UNAVAILABLE', '已登记项目的引用记录类型或大小异常，未卸载。')
       const text = await ctx.fs.readText(selected, signal)
@@ -108,6 +111,19 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
                   review.dependencyHash === automatic.dependencyHash && json(review.snapshot.skillDigests) === json(automatic.modelReview.skillDigests),
                   'SKILL_REFERENCES_UNAVAILABLE', '固定审查说明身份或摘要改变，未卸载。')
                 if (automatic.modelReview.skillDigests.some(skill => skill.qualifiedId === qualifiedId && skill.digest === resourceDigest))
+                  references.push({ workspaceId: workspace.id, kind: 'run', recordId: automatic.automaticId })
+              }
+              if (automatic.work) {
+                const workText = await read(`${prefix}/work-plan.json`)
+                invariant(workText, 'SKILL_REFERENCES_UNAVAILABLE', '冻结阶段的说明快照缺失，未退休资源。')
+                const work = JSON.parse(workText), pin = automatic.work
+                if (pin.kind === 'generation') validateFrozenGeneration(work.plan)
+                else verifyResearchPlan(batchPlanSchema.parse(work.plan))
+                invariant(work.kind === pin.kind && work.plan.contentHash === pin.planHash && work.plan.snapshot.projectId === input.projectId &&
+                  work.plan.snapshot.workflowId === row.name && work.plan.snapshot.sessionId === automatic.sessionId && work.plan.snapshot.runId === pin.runId &&
+                  work.plan.snapshot.stage === pin.stage && json(work.plan.snapshot.skillDigests) === json(pin.skillDigests),
+                  'SKILL_REFERENCES_UNAVAILABLE', '固定阶段说明的身份或摘要改变，未退休资源。')
+                if (pin.skillDigests.some(skill => skill.qualifiedId === qualifiedId && skill.digest === resourceDigest))
                   references.push({ workspaceId: workspace.id, kind: 'run', recordId: automatic.automaticId })
               }
             }

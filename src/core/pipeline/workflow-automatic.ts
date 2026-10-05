@@ -10,6 +10,44 @@ import { reviewInput, runReview } from '../review/review.ts'
 import { prepareDelivery, createDelivery } from '../export/delivery.ts'
 import { validateFrozenModelReview } from '../review/model-run.ts'
 import type { ModelReviewPlan } from '../review/model.ts'
+import type { GenerationPlan } from './generation.ts'
+import { validateFrozenGeneration, readGenerationCheckpoint } from './run-control.ts'
+import { verifyPlan as verifyResearchPlan, readResearchBatch } from '../research/batch.ts'
+import { batchPlanSchema, type ResearchBatchPlan } from '../../shared/research-batch.ts'
+import { applyDraftSequenceAction, type DraftSequenceActionPlan } from './draft-sequence.ts'
+import { readRun } from './run-store.ts'
+import { proposalImage } from '../editing/proposals.ts'
+import type { SkillReader } from '../skills/bindings.ts'
+
+export type AutomaticWork = { kind: 'generation'; plan: GenerationPlan; sequenceAction?: DraftSequenceActionPlan } |
+  { kind: 'research'; plan: ResearchBatchPlan }
+function validateWork(work: AutomaticWork) {
+  if (work.kind === 'generation') {
+    validateFrozenGeneration(work.plan)
+    if (work.sequenceAction) {
+      const { contentHash, ...body } = work.sequenceAction
+      invariant(digest(json(body)) === contentHash && work.sequenceAction.action === 'next' &&
+        work.sequenceAction.generation?.contentHash === work.plan.contentHash && work.sequenceAction.sequenceId === work.plan.snapshot.draftSequenceId,
+        'AUTOMATIC_CHILD_INVALID', '按节操作不属于所列冻结生成计划。')
+    }
+  } else verifyResearchPlan(batchPlanSchema.parse(work.plan))
+}
+export async function readAutomaticWork(io: FileStore, workflowId: string, automaticId: string): Promise<AutomaticWork> {
+  const stored = await readAutomatic(io, workflowId, automaticId), pin = stored.input.work
+  invariant(pin, 'AUTOMATIC_CHILD_INVALID', '原推进未授权这个阶段。')
+  const file = await io.read(`${location(workflowId, automaticId)}/work-plan.json`)
+  invariant(file && Buffer.byteLength(file.text) <= 20 * 1024 * 1024, 'AUTOMATIC_CHILD_INVALID', '原阶段输入缺失或过大，没有重建。')
+  const work = JSON.parse(file.text) as AutomaticWork
+  invariant(work.kind === pin.kind, 'AUTOMATIC_CHILD_INVALID', '原阶段类型改变。')
+  validateWork(work)
+  const { plan } = work
+  invariant(plan.contentHash === pin.planHash && plan.snapshot.runId === pin.runId && plan.snapshot.projectId === stored.input.projectId &&
+    plan.snapshot.workflowId === workflowId && plan.snapshot.sessionId === stored.input.sessionId && plan.snapshot.stage === pin.stage &&
+    plan.snapshot.draftSequenceId === pin.draftSequenceId && json(plan.snapshot.modelDescriptor) === json(pin.modelDescriptor) &&
+    json(plan.snapshot.skillDigests) === json(pin.skillDigests) && (work.kind === 'generation' ? work.plan.inputBytes : Buffer.byteLength(json(work.plan.searches))) === pin.inputBytes,
+    'AUTOMATIC_CHILD_INVALID', '阶段身份、范围、模型或说明改变，没有调用。')
+  return work
+}
 
 const terminal = (state: AutomaticState) => ['failed', 'cancelled', 'succeeded', 'completed-with-issues'].includes(state.status)
 const pointerSchema = z.object({ schemaVersion: z.literal(1), automaticId: id, workflowId: id, projectId: id }).strict()
@@ -80,7 +118,7 @@ async function currentGoal(io: FileStore, workflowId: string, projectId: string)
   invariant(pointer?.schemaVersion === 1 && pointer.workflowId === workflowId && pointer.projectId === projectId,
     'WORKFLOW_BINDING_CHANGED', '当前引导目标改变或索引缺失，旧调度不会继续。')
 }
-export async function prepareAutomatic(io: FileStore, workflowId: string, sessionId: string, policy: AutomaticPolicy, reviewPlan?: ModelReviewPlan) {
+export async function prepareAutomatic(io: FileStore, workflowId: string, sessionId: string, policy: AutomaticPolicy, reviewPlan?: ModelReviewPlan, work?: AutomaticWork) {
   id.parse(sessionId); policy = automaticPolicySchema.parse(policy)
   const stored = await eligible(io, workflowId), previous = await inspectAutomatic(io, workflowId), pointer = await io.read(`${base(workflowId)}/current.json`)
   invariant(!previous.automatic || terminal(previous.automatic.state), 'AUTOMATIC_IN_PROGRESS', '先恢复或明确结束当前自动推进；不覆盖检查点。')
@@ -94,12 +132,21 @@ export async function prepareAutomatic(io: FileStore, workflowId: string, sessio
       reviewPlan.ledgerHash === stored.current.ledgerHash && reviewPlan.dependencyHash === observed.dependencyHash && reviewPlan.context.semanticScope === 'sf-cross-section-v1',
       'AUTOMATIC_CHILD_INVALID', '自动审查必须预览当前原目标、会话和完整五项同版范围。')
   }
+  if (work) {
+    validateWork(work)
+    invariant(!reviewPlan && work.plan.snapshot.workflowId === workflowId && work.plan.snapshot.projectId === stored.current.ledger.projectId &&
+      work.plan.snapshot.sessionId === sessionId && work.plan.snapshot.configHash === stored.current.configHash && work.plan.ledgerHash === stored.current.ledgerHash &&
+      work.plan.snapshot.documentHash === stored.current.document.contentHash, 'AUTOMATIC_CHILD_INVALID', '阶段须冻结当前原目标、会话和项目版本；不能同时把旧审查扩大到新正文。')
+  }
   const input = automaticInputSchema.parse({ schemaVersion: 1, automaticId: newId('automatic'), workflowId, projectId: stored.current.ledger.projectId, sessionId,
     workflowPlanHash: stored.plan.contentHash, dependencyHash: observed.dependencyHash, policy, createdAt: new Date().toISOString(),
     ...(reviewPlan && { modelReview: { runId: reviewPlan.snapshot.runId, planHash: reviewPlan.contentHash, inputBytes: reviewPlan.inputBytes,
-      modelDescriptor: reviewPlan.snapshot.modelDescriptor, skillDigests: reviewPlan.snapshot.skillDigests } }) })
+      modelDescriptor: reviewPlan.snapshot.modelDescriptor, skillDigests: reviewPlan.snapshot.skillDigests } }),
+    ...(work && { work: { kind: work.kind, stage: work.plan.snapshot.stage, runId: work.plan.snapshot.runId, planHash: work.plan.contentHash,
+      inputBytes: work.kind === 'generation' ? work.plan.inputBytes : Buffer.byteLength(json(work.plan.searches)), modelDescriptor: work.plan.snapshot.modelDescriptor,
+      skillDigests: work.plan.snapshot.skillDigests, draftSequenceId: work.plan.snapshot.draftSequenceId } }) })
   const body = { id: newId('automatic_plan'), input, checkpointHash: digest(stored.checkpointFile.text), ledgerHash: stored.current.ledgerHash,
-    pointerHash: pointer ? digest(pointer.text) : null, ...(reviewPlan && { reviewPlan }) }
+    pointerHash: pointer ? digest(pointer.text) : null, ...(reviewPlan && { reviewPlan }), ...(work && { work }) }
   return { ...body, contentHash: digest(json(body)) }
 }
 export type AutomaticPlan = Awaited<ReturnType<typeof prepareAutomatic>>
@@ -116,6 +163,7 @@ export async function prepareAutomaticAction(io: FileStore, workflowId: string, 
     await eligible(io, workflowId)
     invariant((await reviewInput(io)).dependencyHash === stored.input.dependencyHash, 'WORKFLOW_INPUT_CHANGED', '原范围已变化，不能恢复旧授权。')
     if (stored.input.modelReview) await readAutomaticReview(io, workflowId, automaticId)
+    if (stored.input.work) await readAutomaticWork(io, workflowId, automaticId)
   }
   const body = { id: newId('automatic_action'), action, workflowId, automaticId, projectId: stored.input.projectId, sessionId, reason: reason.trim(),
     stateHash: digest(stored.stateFile.text), checkpointHash: digest(stored.root.checkpointFile.text), pointerHash: digest(pointer.text) }
@@ -151,6 +199,17 @@ export async function startAutomatic(io: FileStore, plan: AutomaticPlan, owner: 
       'WORKFLOW_INPUT_CHANGED', '确认期间目标、事实、输入或自动推进改变；没有沿用旧授权。')
     const prefix = location(plan.input.workflowId, plan.input.automaticId), inputText = json(plan.input), checkpoint = structuredClone(stored.checkpoint)
     invariant(!!plan.reviewPlan === !!plan.input.modelReview, 'AUTOMATIC_CHILD_INVALID', '审查预览与冻结输入不一致。')
+    invariant(!!plan.work === !!plan.input.work, 'AUTOMATIC_CHILD_INVALID', '阶段预览与冻结输入不一致。')
+    if (plan.work) {
+      validateWork(plan.work)
+      const pin = plan.input.work!, child = plan.work.plan
+      invariant(child.contentHash === pin.planHash && child.snapshot.runId === pin.runId && child.snapshot.stage === pin.stage && plan.work.kind === pin.kind &&
+        child.snapshot.projectId === plan.input.projectId && child.snapshot.sessionId === plan.input.sessionId && child.snapshot.workflowId === plan.input.workflowId &&
+        child.ledgerHash === stored.current.ledgerHash && child.snapshot.documentHash === stored.current.document.contentHash && child.snapshot.configHash === stored.current.configHash &&
+        json(child.snapshot.modelDescriptor) === json(pin.modelDescriptor) && json(child.snapshot.skillDigests) === json(pin.skillDigests) &&
+        (plan.work.kind === 'generation' ? plan.work.plan.inputBytes : Buffer.byteLength(json(plan.work.plan.searches))) === pin.inputBytes,
+        'AUTOMATIC_CHILD_INVALID', '确认时冻结阶段或项目范围改变。')
+    }
     if (plan.reviewPlan) {
       validateFrozenModelReview(plan.reviewPlan)
       invariant(plan.reviewPlan.contentHash === plan.input.modelReview!.planHash && plan.reviewPlan.ledgerHash === stored.current.ledgerHash &&
@@ -170,9 +229,10 @@ export async function startAutomatic(io: FileStore, plan: AutomaticPlan, owner: 
     checkpoint.revision++; checkpoint.updatedAt = new Date().toISOString()
     const state = automaticStateSchema.parse({ schemaVersion: 1, automaticId: plan.input.automaticId, workflowId: plan.input.workflowId,
       projectId: plan.input.projectId, inputHash: digest(inputText), status: 'queued', revision: 0, owner,
-      startedAt: checkpoint.updatedAt, updatedAt: checkpoint.updatedAt, reason: plan.reviewPlan ? '操作者已确认当前事实推进及一次固定五项模型审查；修改仍须另行接受。' : '操作者已确认只推进当前已保存事实；不调用模型或新增网络请求。', steps: [] })
+      startedAt: checkpoint.updatedAt, updatedAt: checkpoint.updatedAt, reason: plan.work ? '操作者已确认当前事实推进和所列固定阶段；候选及检索结果另行审阅。' : plan.reviewPlan ? '操作者已确认当前事实推进及一次固定五项模型审查；修改仍须另行接受。' : '操作者已确认只推进当前已保存事实；不调用模型或新增网络请求。', steps: [] })
     await commit(io, [{ path: `${prefix}/input.json`, before: undefined, after: inputText }, { path: `${prefix}/run.json`, before: undefined, after: json(state) },
       ...(plan.reviewPlan ? [{ path: `${prefix}/review-plan.json`, before: undefined, after: json(plan.reviewPlan) }] : []),
+      ...(plan.work ? [{ path: `${prefix}/work-plan.json`, before: undefined, after: json(plan.work) }] : []),
       { path: `${base(plan.input.workflowId)}/current.json`, before: pointer, after: json({ schemaVersion: 1, automaticId: state.automaticId, workflowId: state.workflowId, projectId: state.projectId }) },
       ...workflowCheckpointMutations(stored, checkpoint)])
     return { automaticId: state.automaticId }
@@ -187,7 +247,10 @@ async function stateChange(io: FileStore, workflowId: string, automaticId: strin
   })
 }
 export type AutomaticWorkers = { rulesReview?: (io: FileStore, revision: number) => Promise<unknown>; workingDelivery?: (io: FileStore) => Promise<unknown>;
-  modelReview?: (plan: ModelReviewPlan, grant: AutomaticChildGrant, signal: AbortSignal, executionSessionId: string) => Promise<unknown> }
+  skillReader?: SkillReader;
+  modelReview?: (plan: ModelReviewPlan, grant: AutomaticChildGrant, signal: AbortSignal, executionSessionId: string) => Promise<unknown>;
+  generation?: (plan: GenerationPlan, grant: AutomaticChildGrant, signal: AbortSignal, executionSessionId: string) => Promise<unknown>;
+  research?: (plan: ResearchBatchPlan, grant: AutomaticChildGrant, signal: AbortSignal, executionSessionId: string) => Promise<unknown> }
 export type AutomaticControl = { pauseRequested: () => boolean }
 const confirmationReason = '按操作者确认的自动推进范围登记已保存阶段事实；待补、未知与未关闭问题全部保留，不接受建议或宣称可提交。'
 export async function driveAutomatic(io: FileStore, workflowId: string, automaticId: string, signal: AbortSignal, control: AutomaticControl,
@@ -229,11 +292,20 @@ export async function driveAutomatic(io: FileStore, workflowId: string, automati
         return await stop('completed-with-issues', 'WORKFLOW_BUDGET_EXHAUSTED', '原任务步骤或执行时间预算已耗尽；没有重置额度。')
       if (limits.noProgress >= limits.maxNoProgress) return await stop('completed-with-issues', 'AUTOMATIC_NO_PROGRESS', '没有新增有效事实或问题变化，已达到原无进展上限；保留卡点。')
       const needsModelReview = auto.input.modelReview && !auto.state.steps.some(row => row.operation === 'model-review' && row.state === 'settled')
-      const gate = needsModelReview && stored.gates.slice(0, 4).every(row => row.current) ? stored.gates.find(row => row.stage === 'review') : stored.gates.find(row => !row.current), policy = auto.input.policy
+      const needsWork = auto.input.work && !auto.state.steps.some(row => ['model-generation', 'research-batch'].includes(row.operation) && row.state === 'settled')
+      const workIndex = needsWork ? stored.gates.findIndex(row => row.stage === auto.input.work!.stage) : -1
+      const gate = needsWork && stored.gates.slice(0, workIndex).every(row => row.current) ? stored.gates[workIndex] :
+        needsModelReview && stored.gates.slice(0, 4).every(row => row.current) ? stored.gates.find(row => row.stage === 'review') : stored.gates.find(row => !row.current), policy = auto.input.policy
       let operation: AutomaticState['steps'][number]['operation'], action: 'complete-stage' | 'stop-revision' | 'finish' = 'complete-stage', reason = confirmationReason
       let reviewPlan: ModelReviewPlan | undefined
+      let work: AutomaticWork | undefined
       if (!gate) { operation = 'finish'; action = 'finish' }
-      else if (gate.stage === 'research' && gate.outcome === 'insufficient' && !policy.insufficientResearchReason)
+      else if (needsWork && gate.stage === auto.input.work!.stage) {
+        work = await readAutomaticWork(io, workflowId, automaticId)
+        invariant(work.plan.ledgerHash === stored.current.ledgerHash, 'WORKFLOW_INPUT_CHANGED', '阶段数据版本改变，请重新预览原范围。')
+        invariant(work.kind === 'generation' ? workers.generation : workers.research, 'UNSUPPORTED_DSH_CAPABILITY', '宿主没有此阶段的实际执行器。')
+        operation = work.kind === 'generation' ? 'model-generation' : 'research-batch'
+      } else if (gate.stage === 'research' && gate.outcome === 'insufficient' && !policy.insufficientResearchReason)
         return await stop('waiting-input', 'RESEARCH_INSUFFICIENT', gate.reasons.join(' '))
       else if (gate.stage === 'review' && auto.input.modelReview && !auto.state.steps.some(row => row.operation === 'model-review' && row.state === 'settled')) {
         invariant(workers.modelReview, 'UNSUPPORTED_DSH_CAPABILITY', '宿主没有提供已授权模型审查执行器，没有降级成规则通过。')
@@ -257,7 +329,8 @@ export async function driveAutomatic(io: FileStore, workflowId: string, automati
         const state = structuredClone(fresh.state)
         checkpoint.automaticBudget!.usedSteps++; checkpoint.revision++; checkpoint.updatedAt = startedAt
         state.steps.push({ stepId, number: checkpoint.automaticBudget!.usedSteps, ...(gate && { stage: gate.stage }), operation, beforeProgress, state: 'pending', startedAt,
-          ...(reviewPlan && { child: { runId: reviewPlan.snapshot.runId, planHash: reviewPlan.contentHash } }) })
+          ...(reviewPlan && { child: { runId: reviewPlan.snapshot.runId, planHash: reviewPlan.contentHash } }),
+          ...(work && { child: { runId: work.plan.snapshot.runId, planHash: work.plan.contentHash } }) })
         state.revision++; state.updatedAt = startedAt
         await commit(io, [...workflowCheckpointMutations(root, checkpoint),
           { path: `${location(workflowId, automaticId)}/run.json`, before: fresh.stateFile, after: json(automaticStateSchema.parse(state)) }])
@@ -279,6 +352,34 @@ export async function driveAutomatic(io: FileStore, workflowId: string, automati
             childElapsedMs += Math.min(Math.max(0, Date.now() - childBegan), Math.max(0, recorded - priorChildDuration))
           }
         }
+      } else if (work) {
+        const childRunId = work.plan.snapshot.runId, childBegan = Date.now()
+        const priorChildDuration = (await readWorkflowRecord(io, workflowId)).checkpoint.budget!.childDurationMs[childRunId] ?? 0
+        const grant = { workflowId, automaticId, stepId, runId: childRunId, planHash: work.plan.contentHash }
+        try {
+          if (work.kind === 'generation') {
+            if (work.sequenceAction) await applyDraftSequenceAction(io, work.sequenceAction, workers.skillReader)
+            await workers.generation!(work.plan, grant, signal, auto.state.executionSessionId ?? auto.input.sessionId)
+            const child = await readRun(io, childRunId, auto.input.projectId)
+            invariant(child.run.status === 'completed-with-issues' && child.run.planHash === grant.planHash && child.run.proposalId,
+              'AUTOMATIC_CHILD_INCOMPLETE', '冻结生成尚未保存候选；请查看原运行，不重放此步骤。')
+            const image = await proposalImage(io, child.run.proposalId), checkpoint = await readGenerationCheckpoint(io, child.run)
+            invariant(image.proposal.runId === childRunId && image.proposal.projectId === auto.input.projectId &&
+              image.proposal.baseDocumentHash === work.plan.snapshot.documentHash && checkpoint.checkpoint.proposal &&
+              json(image.proposal) === json(checkpoint.checkpoint.proposal), 'AUTOMATIC_CHILD_INCOMPLETE', '候选与原运行检查点不一致，不能据执行器回复宣称完成。')
+          } else {
+            await workers.research!(work.plan, grant, signal, auto.state.executionSessionId ?? auto.input.sessionId)
+            const actual = await readResearchBatch(io, childRunId)
+            invariant(['succeeded', 'completed-with-issues'].includes(actual.stored.run.status) && actual.plan.contentHash === grant.planHash &&
+              actual.checkpoint.queries.every(query => ['completed', 'failed'].includes(query.state)),
+              'AUTOMATIC_CHILD_INCOMPLETE', '检索尚未结束或未保存结果；成功记录保留，请从原运行恢复。')
+          }
+        } finally {
+          if (!await publicationPending()) {
+            const recorded = (await readWorkflowRecord(io, workflowId)).checkpoint.budget!.childDurationMs[childRunId] ?? priorChildDuration
+            childElapsedMs += Math.min(Math.max(0, Date.now() - childBegan), Math.max(0, recorded - priorChildDuration))
+          }
+        }
       } else if (operation === 'rules-review') await (workers.rulesReview ?? runReview)(io, stored.current.ledger.revision)
       else if (operation === 'working-delivery') {
         if (workers.workingDelivery) await workers.workingDelivery(io)
@@ -294,14 +395,19 @@ export async function driveAutomatic(io: FileStore, workflowId: string, automati
         invariant(state.status === 'running' && pending?.state === 'pending', 'AUTOMATIC_STATE_CHANGED', '步骤状态变化，未覆盖原检查点。')
         const afterProgress = progress(root)
         pending.state = 'settled'; pending.afterProgress = afterProgress; pending.completedAt = new Date().toISOString()
-        if (['rules-review', 'model-review', 'working-delivery'].includes(operation)) checkpoint.automaticBudget!.noProgress = afterProgress === beforeProgress ? checkpoint.automaticBudget!.noProgress + 1 : 0
+        if (['rules-review', 'model-review', 'working-delivery', 'model-generation', 'research-batch'].includes(operation)) checkpoint.automaticBudget!.noProgress = afterProgress === beforeProgress ? checkpoint.automaticBudget!.noProgress + 1 : 0
         checkpoint.automaticBudget!.progressHash = afterProgress; checkpoint.revision++; checkpoint.updatedAt = pending.completedAt
         state.revision++; state.updatedAt = pending.completedAt
         if (operation === 'finish') { state.status = root.checkpoint.status === 'succeeded' ? 'succeeded' : 'completed-with-issues'; state.reason = '七阶段事实已登记并保存同版交付；质量保持原标识，不宣称学术结果或可提交。' }
+        if (work) {
+          state.status = 'completed-with-issues'; state.code = 'AUTOMATIC_STAGE_REVIEW_REQUIRED'
+          state.reason = work.kind === 'generation' ? '本次冻结候选已保存，主稿保持原样。请审阅并明确接受／拒绝；接受后为实际新稿预览下一阶段，原任务预算继续累计。' :
+            '本次冻结检索已结束，成功与失败结果分别保留。请审阅候选、收录来源并定位证据；元数据不能直接成为论点依据，原任务预算继续累计。'
+        }
         await commit(io, [...workflowCheckpointMutations(root, checkpoint),
           { path: `${location(workflowId, automaticId)}/run.json`, before: fresh.stateFile, after: json(automaticStateSchema.parse(state)) }])
       })
-      if (operation === 'finish') return (await readAutomatic(io, workflowId, automaticId)).state
+      if (operation === 'finish' || work) return (await readAutomatic(io, workflowId, automaticId)).state
     }
   } catch (error) {
     const interrupted = signal.aborted && signal.reason === 'plugin-unload'

@@ -7,6 +7,7 @@ import { MEMORY_APPROVALS, memoryApprovalsSchema } from './memory.ts'
 import { builtinProjectProfile } from './profiles.ts'
 import { resourceLockSchema } from '../../shared/skills.ts'
 import { memoryEntryMutations, verifiedMemoryProjection } from './memory-entries.ts'
+import { projectTextImpact } from './text-impact.ts'
 
 export const CONFIG_PATH = '.scholarflow/project.yaml'
 export const LEDGER_PATH = '.scholarflow/data/ledger.json'
@@ -171,10 +172,14 @@ export function invalidateReviews(ledger: Ledger, categories?: string[]) {
 export async function updateProjectText(io: FileStore, path: string, text: string, expectedHash: string, expectedRevision: number, sourceSessionId?: string, changeReason?: string) {
   invariant(['.scholarflow/profiles/writing.md', '.scholarflow/profiles/review.md', '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md'].includes(path), 'PATH_OUTSIDE_ALLOWED_ROOT', '仅允许项目 Profile 和确认记忆。')
   invariant(Buffer.byteLength(text) <= 65536, 'CONTENT_TOO_LARGE', '项目指令最多 64 KiB。')
-  return mutateLedger(io, expectedRevision, async ledger => {
+  let impact: ReturnType<typeof projectTextImpact> | undefined
+  const result = await mutateLedger(io, expectedRevision, async (ledger, config) => {
     const file = await io.read(path)
     invariant(file && digest(file.text) === expectedHash, 'STALE_DOCUMENT_VERSION', '项目 Profile 或记忆已更新，请重新读取。')
-    invalidateReviews(ledger, path.endsWith('/review.md') ? undefined : path.includes('/profiles/') ? ['style'] : ['style', 'logic'])
+    const manuscript = await io.read(config.paths.mainDocument)
+    invariant(manuscript, 'DOCUMENT_UNAVAILABLE', '当前主稿无法读取，请重新打开项目。')
+    impact = projectTextImpact(ledger, manuscript.text, path, file.text, text)
+    if (impact.changed) invalidateReviews(ledger, path.endsWith('/review.md') ? undefined : path.includes('/profiles/') ? ['style'] : ['style', 'logic', 'structure'])
     const mutations: Mutation[] = [{ path, before: file, after: text }]
     if (path.includes('/profiles/') && file.text !== text) {
       const history = `.scholarflow/profiles/history/${newId('profile')}.json`
@@ -196,5 +201,6 @@ export async function updateProjectText(io: FileStore, path: string, text: strin
     }
     return mutations
   })
+  return { ...result, impact }
 }
 type MemoryEntries = ReturnType<typeof memoryApprovalsSchema.parse>['entries']

@@ -109,7 +109,7 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
 }
 
 export interface ModelCall { system: string; instruction: string; context: Record<string, unknown>; repair?: string; signal: AbortSignal; runId: string; maxTokens?: number }
-export interface GenerationControl { pauseRequested: () => boolean; resume?: RunActionPlan; retry?: RunActionPlan; executionSessionId?: string }
+export interface GenerationControl { pauseRequested: () => boolean; resume?: RunActionPlan; retry?: RunActionPlan; executionSessionId?: string; automaticChild?: import('../../shared/workflow-automatic.ts').AutomaticChildGrant }
 export async function executeGeneration(io: FileStore, plan: GenerationPlan, owner: RunState['owner'], signal: AbortSignal,
   modelCall: (request: ModelCall) => Promise<string>, ownerAlive: (owner: RunState['owner']) => boolean, control?: GenerationControl) {
   const { contentHash, ...body } = plan
@@ -159,7 +159,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
     expectedStateHash = digest(text); expectedCheckpointHash = digest(progressText)
   })
   await io.lock(async () => {
-    await ensureNoAutomaticExecuting(io, plan.snapshot.projectId)
+    await ensureNoAutomaticExecuting(io, plan.snapshot.projectId, control?.automaticChild)
     const latest = await snapshot(io), active = await io.read(ACTIVE)
     invariant(existingArtifact || latest.ledgerHash === plan.ledgerHash && latest.ledger.revision === plan.snapshot.ledgerRevision && latest.configHash === plan.snapshot.configHash && latest.document.contentHash === plan.snapshot.documentHash,
       'STALE_DOCUMENT_VERSION', '开始前项目发生变化。')
@@ -258,7 +258,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
       state.usedModelCalls++; checkpoint.pendingCall = true; await saveState()
       let raw: string
       try { raw = await workflowCall(io, plan.snapshot.workflowId, { callId: `${state.runId}.model.${state.usedModelCalls}`, runId: state.runId,
-        stage: plan.snapshot.stage, kind: 'model', activeDurationMs: state.activeDurationMs ?? 0, owner }, budgetSignal,
+        stage: plan.snapshot.stage, kind: 'model', activeDurationMs: state.activeDurationMs ?? 0, owner, automaticChild: control?.automaticChild }, budgetSignal,
         signal => modelCall({ system: SYSTEM, instruction: plan.input.instruction, context: plan.context, repair: checkpoint.repair, signal, runId: state.runId,
           maxTokens: plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096 })) }
       catch (error) {
@@ -274,7 +274,10 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
         const candidate = modelOutputSchema.parse(JSON.parse(raw)); validateOutput(candidate)
         output = candidate; checkpoint.output = candidate
       }
-      catch { checkpoint.repair = '上次输出不满足 JSON、范围、论点映射或引用合同。严格使用 context.citationContract 中的 [@sf_实际键] token，基础改写保留原选区引用。章节生成时必须按 context.sectionContract.output 返回同一 sectionId 和每段唯一的 paragraphClaims；只返回本节正文，不含大纲章节标题。其他动作仅返回 {"replacementText":"...","limitations":[]}。不要改写为执行命令。' }
+      catch (error) {
+        const cause = error instanceof ScholarError && /^(MODEL_CITATION_|SECTION_)/u.test(error.code) ? `合同错误 ${error.code}：${error.message.slice(0, 600)} ` : ''
+        checkpoint.repair = `${cause}上次输出不满足 JSON、范围、论点映射或引用合同。严格使用 context.citationContract 中的 [@sf_实际键] token，基础改写保留原选区引用。章节生成时必须按 context.sectionContract.output 返回同一 sectionId 和每段唯一的 paragraphClaims；只返回本节正文，不含大纲章节标题。其他动作仅返回 {"replacementText":"...","limitations":[]}。不要改写为执行命令。`
+      }
       await saveState()
       await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
     }

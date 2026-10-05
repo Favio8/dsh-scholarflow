@@ -261,7 +261,9 @@ try {
   await page.getByRole('button', { name: '预览初始化计划', exact: true }).click()
   await page.getByRole('dialog', { name: '初始化确认' }).waitFor()
   await assert.rejects(stat(join(projectRoot, '.scholarflow')), { code: 'ENOENT' })
-  await page.getByRole('button', { name: '取消', exact: true }).click()
+  await page.waitForFunction(() => document.activeElement?.getAttribute('role') === 'dialog' && document.activeElement?.getAttribute('aria-label') === '初始化确认')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => document.activeElement?.textContent === '预览初始化计划')
   await assert.rejects(stat(join(projectRoot, '.scholarflow')), { code: 'ENOENT' })
   await page.getByRole('button', { name: '预览初始化计划', exact: true }).click()
   await page.getByRole('dialog', { name: '初始化确认' }).getByText('类型：course-paper · 语言：zh-CN · 每次运行模型调用上限：40', { exact: true }).waitFor()
@@ -309,6 +311,36 @@ try {
   await projectSkillsUi.getByRole('button', { name: '确认 Skill 调用阶段', exact: true }).click()
   await page.getByText('项目已保存 · ledger 版本 2', { exact: false }).waitFor()
   const second = await rpc('session/create', { request: { workspaceId: projectWorkspace.value.workspace.workspaceId, agentPreset: 'scholarflow' } })
+  const ordinaryCatalog = await rpc('scholarflow.v1/verifyOrdinaryCatalog', { request: { sessionId: ordinary.value.sessionId } })
+  assert.equal(ordinaryCatalog.ok, true, ordinaryCatalog.error?.message?.replace(/[A-Z]:[\\/][^\n]*/giu, '[private path]'))
+  assert.equal(ordinaryCatalog.value.complete, true)
+  assert.ok(!JSON.stringify(ordinaryCatalog.value.entries).includes('TEST_ONLY-private-static'))
+  assert.ok(!JSON.stringify(ordinaryCatalog.value.entries).includes('TEST_ONLY-project-local'))
+  assert.ok(!JSON.stringify(ordinaryCatalog.value.entries).includes('selection-preserving-revision'))
+  const projectAConfigBeforeIsolation = await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8')
+  const projectALedgerBeforeIsolation = await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8')
+  const isolatedRoot = join(testHome, 'TEST_ONLY simultaneous project B')
+  await mkdir(isolatedRoot, { recursive: true })
+  const isolatedWorkspace = await rpc('workspace/create', { request: { path: isolatedRoot } })
+  const isolatedSession = await rpc('session/create', { request: { workspaceId: isolatedWorkspace.value.workspace.workspaceId, agentPreset: 'scholarflow' } })
+  const isolatedContext = { requestId: 'req_TEST_ONLY_B', workspaceId: isolatedWorkspace.value.workspace.workspaceId, sessionId: isolatedSession.value.sessionId }
+  const isolatedPreview = await rpc('scholarflow.v1/project.prepareInit', { request: { context: isolatedContext, input: { title: 'TEST_ONLY B', type: 'course-paper' } } })
+  assert.equal(isolatedPreview.value.ok, true)
+  const isolatedInit = await rpc('scholarflow.v1/project.initialize', { request: { context: isolatedContext, planId: isolatedPreview.value.data.planId, planHash: isolatedPreview.value.data.planHash } })
+  assert.equal(isolatedInit.value.ok, true)
+  const isolatedScope = await rpc('scholarflow.v1/verifySkillScope', { request: { sessionId: isolatedSession.value.sessionId, bindingId: boundLock.bindings[0].bindingId } })
+  assert.equal(isolatedScope.ok, true)
+  assert.equal(isolatedScope.value.skills.length, 0)
+  assert.equal(isolatedScope.value.readOk, false)
+  const isolatedInspect = await rpc('scholarflow.v1/project.inspect', { request: { context: isolatedContext } })
+  assert.equal(isolatedInspect.value.ok, true)
+  assert.notEqual(isolatedInspect.value.data.ledger.projectId, projectLedger.projectId)
+  assert.equal(Object.keys(isolatedInspect.value.data.ledger.materials).length, 0)
+  assert.equal(Object.keys(isolatedInspect.value.data.ledger.sources).length, 0)
+  const forgedScope = await rpc('scholarflow.v1/project.inspect', { request: { context: { ...isolatedContext, projectId: projectLedger.projectId } } })
+  assert.equal(forgedScope.value.ok, false)
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/project.yaml'), 'utf8'), projectAConfigBeforeIsolation)
+  assert.equal(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'), projectALedgerBeforeIsolation)
   const secondInspect = await rpc('scholarflow.v1/project.inspect', { request: { context: { requestId: 'req_TEST_ONLY', workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId, projectId: projectLedger.projectId } } })
   assert.equal(secondInspect.ok, true)
   assert.equal(secondInspect.value.ok, true, JSON.stringify(secondInspect.value))
@@ -1760,6 +1792,10 @@ try {
     nativeConfirmedIdentityCopyPartialPublicationRecoveryAndColdRestoreNeverReplayOldRequests: true,
     nativeUiPrivateSkillMultiCandidateImport: true, cancelledSkillPreviewDoesNotInstall: true,
     privateSkillOriginalBytesAndInertScriptsPreserved: true, globalSkillCatalogNotModified: true,
+    actualOrdinaryModelInvocableCatalogExcludesPrivateSkills: true,
+    simultaneousProjectBExcludesProjectASkillsAndMaterials: true,
+    forgedProjectAScopeFromProjectBRefused: true, projectABytesUnchangedByProjectB: true,
+    previewEscapeReturnsFocusToInitiatingButton: true,
     privateSkillVersionsSurviveReadOnlyHostRestart: true,
     nativeProjectStaticSkillBindingAndRead: true, changedProjectResourceDigestRejected: true,
     nativeProjectSkillBinaryCopyPreviewCustomizeCancelColdRestoreAndReadonlyDenial: true,

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { id } from '../../shared/schema.ts'
-import { runSnapshotSchema } from '../../shared/runs.ts'
+import { runSnapshotSchema, runStateSchema } from '../../shared/runs.ts'
 import { draftSequenceRequest, draftSequenceActionRequest, draftSequenceInputSchema, draftSequenceCheckpointSchema, draftSequencePlanSchema, draftSequenceRunSchema,
   type DraftSequenceInput, type DraftSequenceCheckpoint } from '../../shared/draft-sequence.ts'
 import { json, digest, newId, type FileStore } from '../store/files.ts'
@@ -43,7 +43,7 @@ async function scope(io: FileStore, skillReader?: SkillReader) {
 async function noStageRunning(io: FileStore, projectId: string) {
   const active = await io.read(ACTIVE_RUN)
   if (!active || await isDetachedProjectPointer(io, ACTIVE_RUN, active)) return
-  const projected = JSON.parse(active.text), stored = await readRun(io, projected.runId, projectId)
+  const projected = runStateSchema.parse(JSON.parse(active.text)), stored = await readRun(io, projected.runId, projectId)
   invariant(json(stored.run) === json(projected), 'RUN_STATE_CHANGED', '活动阶段投影与事实源不一致，未继续按节调度。')
   invariant(['failed', 'cancelled', 'succeeded', 'completed-with-issues'].includes(stored.run.status),
     'RUN_IN_PROGRESS', '先暂停并处理或恢复未结束的章节运行，再操作初稿顺序。')

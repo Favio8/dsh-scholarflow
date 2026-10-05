@@ -57,7 +57,8 @@ export const locator = z.discriminatedUnion('kind', [
 export const requirementSchema = z.object({ id, kind: z.enum(['length', 'references', 'section', 'topic', 'format', 'rubric', 'deadline', 'ai-policy', 'other']), description: z.string().min(1),
   origin: z.object({ type: z.enum(['user', 'material', 'inference']), materialId: id.optional(), locator: locator.optional(), excerpt: z.string().optional() }).strict(),
   confirmation: z.enum(['proposed', 'confirmed', 'conflicting']),
-  constraint: z.object({ operator: z.enum(['min', 'max', 'equals', 'contains', 'ratio']), value: z.union([z.number(), z.string()]), unit: z.enum(['zh-characters', 'words', 'items', 'percent']).optional(), countingPolicyId: z.string().optional(), windowStart: z.string().optional(), windowEnd: z.string().optional() }).strict().optional(),
+  constraint: z.object({ operator: z.enum(['min', 'max', 'equals', 'contains', 'ratio']), value: z.union([z.number(), z.string()]), unit: z.enum(['zh-characters', 'words', 'items', 'percent']).optional(), countingPolicyId: z.string().optional(), windowStart: z.string().optional(), windowEnd: z.string().optional(),
+    sourceKinds: z.array(z.enum(['paper', 'dataset', 'web', 'book', 'user-result', 'other'])).min(1).max(6).refine(kinds => new Set(kinds).size === kinds.length).optional() }).strict().optional(),
   verificationMethod: z.enum(['deterministic', 'model-assisted', 'manual']), confirmedAt: z.string().optional(),
 }).strict()
 export const materialSchema = z.object({ id, projectRelativePath: relativePath, role: z.enum(['assignment', 'rubric', 'paper', 'notes', 'slides', 'data', 'code', 'other']), mediaType: z.string(), sizeBytes: z.number().int().min(0), contentHash: hash.optional(),

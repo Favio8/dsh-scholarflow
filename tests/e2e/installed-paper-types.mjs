@@ -6,11 +6,16 @@ import { mkdir, readFile, writeFile, symlink, stat, readdir } from 'node:fs/prom
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
 import { chromium } from '@playwright/test'
-import { stringify } from 'yaml'
+import { stringify, parse as parseYaml } from 'yaml'
 import { digest } from '../../src/core/store/files.ts'
 import { semanticReviewChecks } from '../../src/shared/review.ts'
 
 const legacyRecovery = process.argv.includes('--legacy-recovery')
+const interruptModel = process.argv.includes('--interrupt-model')
+const longSequence = process.argv.includes('--long-sequence')
+const semanticFix = process.argv.includes('--semantic-fix')
+const originalModelLimit = longSequence || semanticFix ? 12 : 8
+const generatedSections = longSequence ? ['sec_TEST_ONLY_body', 'sec_TEST_ONLY_scope', 'sec_TEST_ONLY_limits', 'sec_TEST_ONLY_summary', 'sec_TEST_ONLY_conclusion'] : ['sec_TEST_ONLY_body', 'sec_TEST_ONLY_summary']
 assert.ok(process.argv.includes('--live-model') || legacyRecovery, 'Explicit --live-model is required for bounded actual provider calls')
 const tasks = JSON.parse(await readFile('examples/local-evidence/tasks.json', 'utf8'))
 const raw = Object.fromEntries(await Promise.all(['requirements.md', 'source-notes.md'].map(async name =>
@@ -19,9 +24,17 @@ raw['unselected.txt'] = 'TEST_ONLY_UNSELECTED_NATIVE_PAPER_TYPES'
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
 const credentialPath = join(homedir(), '.dsh/.credentials.yaml')
 const credentialHash = digest(await readFile(credentialPath))
+const privateCredentialValues = []
+function credentialValues(value, key = '') {
+  if (typeof value === 'string' && /key|token|password|secret/iu.test(key) && value.length >= 12) privateCredentialValues.push(value)
+  else if (value && typeof value === 'object') for (const [name, child] of Object.entries(value)) credentialValues(child, name)
+}
+credentialValues(parseYaml(await readFile(credentialPath, 'utf8')))
 const resume = process.argv.find(arg => arg.startsWith('--resume='))?.slice('--resume='.length)
 assert.ok(!resume || /^\.dsh-tmp[\\/]paper-types[\\/]\d+$/.test(resume), 'Resume is confined to an explicit teaching-test directory')
 assert.ok(!legacyRecovery || resume, 'Legacy recovery requires an explicit existing teaching-test directory')
+assert.ok(!interruptModel || !resume && !legacyRecovery, 'Interruption verification requires its own fresh teaching-test goal')
+assert.ok(!interruptModel || !longSequence && !semanticFix, 'The interruption case retains its separate original eight-call goal')
 const root = resume ? resolve(resume) : resolve('.dsh-tmp/paper-types', String(Date.now())), testHome = join(root, 'home')
 const profileName = 'scholarflow-paper-types', profile = join(testHome, 'profiles', profileName)
 if (!resume) {
@@ -43,7 +56,7 @@ const errors = [], evidence = resume ? await readFile(join(root, 'native-evidenc
 const exists = async path => stat(path).then(() => true).catch(error => { if (error.code !== 'ENOENT') throw error; return false })
 async function start() {
   child = spawn(join(install, 'DeepSeek Harness.exe'), ['--expose-internals',
-    join(install, 'resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'), profileName, '--no-open', '--port', '19350'], {
+    join(install, 'resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'), profileName, '--no-open', '--port', interruptModel ? '19353' : '19350'], {
     env: { ...process.env, DSH_HOME: testHome, ELECTRON_RUN_AS_NODE: '1', DSH_PERMISSION_MODE: 'workspace-write' },
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -102,13 +115,15 @@ async function auditSavedExample(task, row) {
   assert.equal(body.state, 'accepted'); assert.equal(summary.state, 'accepted')
   assert.equal(sequence.status, 'completed-with-issues')
   const summaryPlan = await readJson(`.scholarflow/runs/${summary.childRunId}/plan.json`)
-  assert.equal(summaryPlan.snapshot.documentHash, body.acceptedDocumentHash)
-  assert.equal(digest(summaryPlan.context.manuscript.actualSavedManuscriptForConsistency), body.acceptedDocumentHash)
+  const orderedAccepted = sequence.steps.filter(step => step.state === 'accepted')
+  const previousSummary = orderedAccepted[orderedAccepted.indexOf(summary) - 1]
+  assert.equal(summaryPlan.snapshot.documentHash, previousSummary.acceptedDocumentHash)
+  assert.equal(digest(summaryPlan.context.manuscript.actualSavedManuscriptForConsistency), previousSummary.acceptedDocumentHash)
   const currentBody = await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8')
-  assert.equal(digest(currentBody), summary.acceptedDocumentHash)
+  if (!row.semanticFixAccepted) assert.equal(digest(currentBody), orderedAccepted.at(-1).acceptedDocumentHash)
   assert.equal(digest(currentBody), row.documentHash)
   const originalInput = await readJson(`.scholarflow/runs/${row.workflowId}/input.json`)
-  assert.equal(originalInput.budget.maxModelCalls, 8)
+  assert.equal(originalInput.budget.maxModelCalls, originalModelLimit)
   const checkpoint = await readJson(`.scholarflow/runs/${row.workflowId}/checkpoint.json`)
   assert.equal(checkpoint.status, 'completed-with-issues')
   assert.equal(checkpoint.budget.calls.length, row.paidCalls)
@@ -119,7 +134,7 @@ async function auditSavedExample(task, row) {
     assert.ok(!JSON.stringify(plan.context).includes(raw['unselected.txt']))
     if (plan.context.semanticScope) {
       assert.equal(plan.context.semanticScope, 'sf-cross-section-v1')
-      assert.equal(plan.snapshot.documentHash, row.documentHash)
+      if (!row.semanticFixAccepted) assert.equal(plan.snapshot.documentHash, row.documentHash)
       const run = await readJson(`.scholarflow/runs/${runId}/run.json`)
       if (run.status === 'failed') failedReviewCalls += checkpoint.budget.calls.filter(call => call.runId === runId).length
     }
@@ -133,7 +148,7 @@ async function auditSavedExample(task, row) {
   for (const [name, text] of Object.entries(raw)) assert.equal(await readFile(join(projectRoot, name), 'utf8'), text)
   row.summaryUsesExactlyAcceptedBody = true
   row.unselectedMaterialAbsentFromEveryFrozenModelInput = true
-  row.originalGoalModelLimit = 8
+  row.originalGoalModelLimit = originalModelLimit
   row.failedReviewCallsPreserved = failedReviewCalls
 }
 async function verifyLegacyRecovery() {
@@ -200,6 +215,78 @@ async function verifyLegacyRecovery() {
     acceptedChapterRestored: true, nextSummaryPreviewValid: true, newProviderCalls: 0, originalPaidCalls: 1, credentialsUnchanged: true }, null, 2))
   console.log('PASS TEST_ONLY legacy Session refusal, same-workspace UI recovery and next-chapter preview; all project bytes and original call preserved')
 }
+async function verifyModelInterruption({ projectRoot, context, act, confirm, workflow, sequence, plan, before }) {
+  const prefix = join(projectRoot, '.scholarflow/runs', workflow.workflowId)
+  const readJson = async path => JSON.parse(await readFile(path, 'utf8'))
+  const rootFile = join(prefix, 'checkpoint.json')
+  const childFile = join(projectRoot, '.scholarflow/runs', plan.runId, 'run.json')
+  const rootInput = await readFile(join(prefix, 'input.json'), 'utf8')
+  const sequenceInputPath = join(projectRoot, '.scholarflow/runs', sequence.sequenceId, 'input.json')
+  const sequenceInput = await readFile(sequenceInputPath, 'utf8')
+  const lost = confirm('runs.start', plan).then(() => 'settled', () => 'lost')
+  let pendingCall
+  const deadline = Date.now() + 20000
+  while (Date.now() < deadline) {
+    const checkpoint = await readJson(rootFile)
+    pendingCall = checkpoint.budget.calls.find(call => call.runId === plan.runId && call.state === 'pending')
+    if (pendingCall && await exists(childFile)) break
+    await page.waitForTimeout(40)
+  }
+  assert.ok(pendingCall, 'A real native request must be registered before terminating the test-owned Host')
+  await page.waitForTimeout(300)
+  const inFlight = await readJson(rootFile), executing = await readJson(childFile)
+  assert.equal(inFlight.budget.calls.length, 1); assert.equal(inFlight.budget.calls[0].state, 'pending')
+  assert.equal(executing.status, 'running'); assert.equal(executing.usedModelCalls, 1)
+  assert.equal(executing.owner.pid, child.pid, 'Terminate only the exact test-owned executor process')
+  const liveDenied = await rpc('scholarflow.v1/runs.prepareAction', { request: { context: await context(), runId: plan.runId, action: 'close' } })
+  assert.equal(liveDenied.value.ok, false); assert.equal(liveDenied.value.error.code, 'RUN_IN_PROGRESS')
+  // Kill before closing the HTTP client. Closing its browser first would test
+  // cancellation settlement rather than an unanswered request after process loss.
+  const exited = new Promise(done => child.once('exit', done))
+  child.kill(); await exited
+  await page.context().close(); page = undefined
+  assert.equal(await lost, 'lost', 'The old browser must not receive a completed artifact')
+  const checkpointBeforeBoot = await readFile(rootFile, 'utf8')
+  await start()
+  assert.equal(await readFile(rootFile, 'utf8'), checkpointBeforeBoot)
+  assert.equal((await act('document.read')).document.text, before)
+  assert.equal((await act('edits.list')).states.length, 0)
+  const replayDenied = await rpc('scholarflow.v1/runs.start', { request: { context: await context(), planId: plan.planId, planHash: plan.planHash } })
+  assert.equal(replayDenied.value.ok, false); assert.equal(replayDenied.value.error.code, 'INVALID_APPROVAL')
+  const nextDenied = await rpc('scholarflow.v1/draftSequence.prepareAction', { request: { context: await context(), sequenceId: sequence.sequenceId, action: 'next' } })
+  assert.equal(nextDenied.value.ok, false); assert.equal(nextDenied.value.error.code, 'DRAFT_SEQUENCE_AWAITING_ACCEPTANCE')
+  assert.equal((await readJson(rootFile)).budget.calls.length, 1)
+  const closedRequest = await act('workflow.prepareAction', { workflowId: workflow.workflowId, action: 'close-unknown-call', callId: pendingCall.callId,
+    reason: 'TEST_ONLY 已确认原执行进程退出，保留未知请求及全部原额度，不把失联视为未发送，也不重放。' })
+  await confirm('workflow.confirm', closedRequest)
+  await confirm('runs.confirmAction', await act('runs.prepareAction', { runId: plan.runId, action: 'close' }))
+  assert.equal((await readJson(childFile)).usedModelCalls, 1)
+  await confirm('draftSequence.confirm', await act('draftSequence.prepareAction', { sequenceId: sequence.sequenceId, action: 'cancel',
+    reason: 'TEST_ONLY 结束未知章节顺序，保留原登记和收费请求，只重新预览当前未改变正文，不恢复旧调用。' }))
+  const nextSequence = await confirm('draftSequence.confirm', await act('draftSequence.prepare', {
+    instruction: 'TEST_ONLY 依据当前真实保存资料保留范围、引用、人工备注和未实施限制，只生成待审阅候选。', summarySectionIds: ['sec_TEST_ONLY_summary'],
+  }))
+  const preview = await act('draftSequence.prepareAction', { sequenceId: nextSequence.sequenceId, action: 'next' })
+  assert.equal(preview.sectionTarget.sectionId, 'sec_TEST_ONLY_body'); assert.notEqual(preview.runId, plan.runId)
+  await call('writing.dismiss', { planId: preview.planId })
+  const final = await readJson(rootFile)
+  assert.equal(final.budget.calls.length, 1); assert.equal(final.budget.calls[0].callId, pendingCall.callId)
+  assert.equal(final.budget.calls[0].state, 'interrupted')
+  assert.equal(await readFile(join(prefix, 'input.json'), 'utf8'), rootInput)
+  assert.equal(await readFile(sequenceInputPath, 'utf8'), sequenceInput)
+  assert.equal(JSON.parse(rootInput).budget.maxModelCalls, 8)
+  assert.equal((await act('document.read')).document.text, before)
+  assert.equal((await act('edits.list')).states.length, 0)
+  for (const [name, text] of Object.entries(raw)) assert.equal(await readFile(join(projectRoot, name), 'utf8'), text)
+  assert.equal(digest(await readFile(credentialPath)), credentialHash)
+  assert.deepEqual(errors, [])
+  await writeFile(resolve('.dsh-tmp/interrupted-model-recovery.json'), JSON.stringify({ date: new Date().toISOString(), testOnly: true,
+    nativeRequestRegisteredBeforeProcessLoss: true, originalPaidCalls: 1, originalGoalModelLimit: 8, bootDidNotReplayOrRefund: true,
+    liveOwnerCloseRefused: true, oldApprovalRefusedAfterBoot: true, unknownChapterNotRedispatched: true,
+    explicitUnknownClosurePreservesCall: true, nextFreshPreviewUsesSameOriginalBudget: true, originalInputsUnchanged: true,
+    bodyAndRawMaterialsUnchanged: true, noProposalsAutoPublished: true, credentialsUnchanged: true }, null, 2))
+  console.log('PASS TEST_ONLY in-flight native process loss, cold observation, explicit unknown closure and fresh preview; original request remains charged (1/8)')
+}
 try {
   if (legacyRecovery) await verifyLegacyRecovery()
   else {
@@ -229,12 +316,13 @@ try {
       const created = await rpc('workspace/create', { request: { path: projectRoot } })
       assert.equal(created.ok, true)
       workspace = created.value.workspace
+      if (!await page.locator('.sf-project').isVisible()) await page.locator('button[aria-label="ScholarFlow"]').click()
       await page.locator('.sf-project').getByRole('combobox', { name: 'DSH 工作区', exact: true }).selectOption(workspace.workspaceId)
       await page.getByRole('button', { name: '新建 ScholarFlow 会话', exact: true }).click()
       await page.getByText(`当前工作区：${workspace.title} · 尚未初始化`, { exact: true }).waitFor()
       await page.getByRole('combobox', { name: '论文类型', exact: true }).selectOption(task.type)
       await page.getByRole('combobox', { name: '论文语言', exact: true }).selectOption('zh-CN')
-      await page.getByRole('spinbutton', { name: '每次运行模型调用上限', exact: true }).fill('8')
+      await page.getByRole('spinbutton', { name: '每次运行模型调用上限', exact: true }).fill(String(originalModelLimit))
       await page.getByRole('textbox', { name: '项目标题', exact: true }).fill(task.title)
       await page.getByRole('button', { name: '预览初始化计划', exact: true }).click()
       await page.getByRole('dialog', { name: '初始化确认' }).waitFor()
@@ -272,23 +360,29 @@ try {
         evidenceLinks: [{ evidenceId: located.evidence.id, relation: 'supports', rationale: '所选原文直接列出这三层，仅确认教学说明自身的表述。' }],
       } })).claim
       const document = (await act('document.read')).document
-      await act('document.saveManual', { text: `# ${task.title}\n\n## 人工备注\n\n${human}\n`, baseHash: document.contentHash })
+      const repeated = semanticFix && task.type === 'course-paper' ? `\n\nTEST_ONLY 原文描述了身份、定位与支持范围，身份一致不能替代论点支持。[@${source.citeKey}]\n\nTEST_ONLY 原文描述了身份、定位与支持范围，身份一致不能替代论点支持。[@${source.citeKey}]` : ''
+      await act('document.saveManual', { text: `# ${task.title}\n\n## 人工备注\n\n${human}${repeated}\n`, baseHash: document.contentHash })
       await act('outline.confirm', { expectedOutlineVersion: 0, outline: { version: 0, title: task.title, researchQuestion: task.question,
         thesis: '区分证据层次并保留任务限制。', confirmation: 'confirmed', sections: [
           { id: 'sec_TEST_ONLY_summary', title: '摘要', purpose: '总结实际已接受讨论', claimIds: [claim.id], missingEvidence: [task.limitation] },
           { id: 'sec_TEST_ONLY_body', title: '证据讨论', purpose: '依据定位原文保留范围', claimIds: [claim.id], missingEvidence: task.type === 'research-paper' ? ['真实实验与结果'] : [] },
+          ...(longSequence ? [
+            { id: 'sec_TEST_ONLY_scope', title: '适用范围比较', purpose: '区分资料表述、作者推论和不能推广的范围', claimIds: [claim.id], missingEvidence: [task.limitation] },
+            { id: 'sec_TEST_ONLY_limits', title: '反例与限制', purpose: '讨论身份一致但仍不足以支持具体推论的边界，不编造来源', claimIds: [claim.id], missingEvidence: [task.limitation] },
+          ] : []),
           { id: 'sec_TEST_ONLY_human', title: '人工备注', purpose: '保留人工原文', claimIds: [], missingEvidence: [] },
+          ...(longSequence ? [{ id: 'sec_TEST_ONLY_conclusion', title: '结论', purpose: '只归纳实际已接受正文，不扩大证据和完成状态', claimIds: [claim.id], missingEvidence: [task.limitation] }] : []),
         ] } })
       workflow = await confirm('workflow.confirm', await act('workflow.prepare', { goal: { researchQuestion: task.question, minimumSources: 1, minimumLocatedEvidence: 1 } }))
       sequence = await confirm('draftSequence.confirm', await act('draftSequence.prepare', {
-        instruction: 'TEST_ONLY 教学练习：仅依定位原文讨论三层证据边界，180字以内，保留未核验与未实施实验限制。不要声称系统检索、出版资料或实测结果。摘要只总结实际保存正文。',
-        summarySectionIds: ['sec_TEST_ONLY_summary'],
+        instruction: longSequence ? 'TEST_ONLY 多节教学练习：依本节用途，仅依定位原文和实际已接受正文展开三个简短段落，每节约300–450汉字，区分资料表述与作者推论，保留未核验与未实施实验限制。不要虚称系统检索、出版资料或实测结果，不增添未提供的实验与数值。摘要和结论只能总结实际保存正文。' : 'TEST_ONLY 教学练习：仅依定位原文讨论三层证据边界，180字以内，保留未核验与未实施实验限制。不要声称系统检索、出版资料或实测结果。摘要只总结实际保存正文。',
+        summarySectionIds: longSequence ? ['sec_TEST_ONLY_summary', 'sec_TEST_ONLY_conclusion'] : ['sec_TEST_ONLY_summary'],
       }))
     }
     const checkpointPath = join(projectRoot, '.scholarflow/runs', workflow.workflowId, 'checkpoint.json')
     const checkpoint = async () => JSON.parse(await readFile(checkpointPath, 'utf8'))
     const childIds = []
-    for (const sectionId of ['sec_TEST_ONLY_body', 'sec_TEST_ONLY_summary']) {
+    for (const sectionId of generatedSections) {
       const observed = await act('draftSequence.inspect')
       assert.equal(observed.sequence.diagnostics.length, 0)
       const prior = observed.sequence.checkpoint.steps.find(row => row.sectionId === sectionId)
@@ -298,7 +392,22 @@ try {
       const plan = await act('draftSequence.prepareAction', { sequenceId: sequence.sequenceId, action: 'next' })
       assert.equal(plan.sectionTarget.sectionId, sectionId); assert.equal(plan.structuralGap, false)
       console.log(`START TEST_ONLY ${task.type}: actual ${sectionId === 'sec_TEST_ONLY_body' ? 'discussion' : 'summary'} candidate`)
-      const generated = await confirm('runs.start', plan)
+      if (interruptModel) {
+        await verifyModelInterruption({ projectRoot, context, act, confirm, workflow, sequence, plan, before })
+        break
+      }
+      // Long cases exercise the actual newly integrated stage scheduler, while
+      // still explicitly accepting every candidate through the operator API.
+      let generated
+      if (longSequence) {
+        await call('writing.dismiss', { planId: plan.planId })
+        const stage = await act('automatic.prepare', { workflowId: workflow.workflowId, draftSequenceId: sequence.sequenceId,
+          policy: { ruleReview: true, insufficientResearchReason: 'TEST_ONLY 保留教学资料不足，绝不编造出版与实测结果。' } })
+        const result = await confirm('automatic.confirm', stage)
+        assert.equal(result.state.code, 'AUTOMATIC_STAGE_REVIEW_REQUIRED')
+        const childRun = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', stage.input.work.runId, 'run.json'), 'utf8'))
+        generated = { run: childRun, ...await act('edits.read', { proposalId: childRun.proposalId }) }
+      } else generated = await confirm('runs.start', plan)
       assert.ok(generated.proposal, `Actual ${task.type} ${sectionId} did not produce a candidate`)
       childIds.push(generated.run.runId)
       assert.equal((await act('document.read')).document.text, before, 'Provider output cannot accept itself')
@@ -316,20 +425,77 @@ try {
         assert.equal(restored.sequence.diagnostics.length, 0)
       }
     }
+    if (interruptModel) break
     if ((await act('draftSequence.inspect')).sequence.checkpoint.status !== 'completed-with-issues')
       await confirm('draftSequence.confirm', await act('draftSequence.prepareAction', { sequenceId: sequence.sequenceId, action: 'next' }))
-    const accepted = (await act('document.read')).document.text
+    let accepted = (await act('document.read')).document.text
     console.log(`START TEST_ONLY ${task.type}: actual five-check review within original remaining quota`)
-    const auto = await confirm('automatic.confirm', await act('automatic.prepare', { workflowId: workflow.workflowId, modelReview: true,
-      policy: { ruleReview: true, workingDraftDelivery: true, stopRevisionReason: 'TEST_ONLY 练习结束，保留未知、未核验与未开展实验的限制，只交付工作草稿，不冒充正式学术成果。' } }))
-    assert.equal(auto.state.status, 'completed-with-issues')
+    const needsFix = semanticFix && task.type === 'course-paper'
+    let review = await act('review.inspect')
+    const reusableReview = existing && !review.stale && review.report?.documentHash === digest(accepted) &&
+      semanticReviewChecks.every(id => review.report.checks.some(row => row.id === id && row.method === 'model-assisted'))
+    const previousAuto = reusableReview ? (await act('automatic.inspect', { workflowId: workflow.workflowId })).automatic : undefined
+    let auto = reusableReview ? { automaticId: previousAuto.input.automaticId, state: previousAuto.state } : await confirm('automatic.confirm', await act('automatic.prepare', { workflowId: workflow.workflowId, modelReview: true,
+      policy: { ruleReview: true, workingDraftDelivery: !needsFix, ...(!needsFix && { stopRevisionReason: 'TEST_ONLY 练习结束，保留未知、未核验与未开展实验的限制，只交付工作草稿，不冒充正式学术成果。' }) } }))
+    if (!reusableReview) assert.equal(auto.state.status, needsFix ? 'waiting-input' : 'completed-with-issues')
     assert.equal((await act('document.read')).document.text, accepted)
-    const review = await act('review.inspect')
+    review = await act('review.inspect')
     assert.equal(review.stale, false)
     assert.ok(semanticReviewChecks.every(id => review.report.checks.some(row => row.id === id && row.method === 'model-assisted')))
     assert.ok(review.report.checks.some(row => row.status === 'unknown'))
     assert.equal(review.report.checks.find(row => row.id === 'own_research_results')?.status, task.type === 'research-paper' ? 'fail' : undefined)
     if (task.type === 'research-paper') assert.ok(review.report.issues.some(row => row.severity === 'B0' && row.state === 'open'))
+    let fixedIssueId, semanticRecheckResolved
+    if (needsFix) {
+      const restoredFix = existing ? (await act('review.fixes')).fixes.find(row => row.state === 'accepted') : undefined
+      if (restoredFix && reusableReview) {
+        fixedIssueId = restoredFix.issueId
+      } else {
+      const issue = review.report.issues.find(row => row.location && row.checkMethod === 'model-assisted' && row.category === 'style') ??
+        review.report.issues.find(row => row.location && row.checkMethod === 'model-assisted')
+      assert.ok(issue, 'The genuine report must identify a positioned semantic issue; a fixture cannot invent one')
+      fixedIssueId = issue.id
+      const before = accepted, parentReportId = review.report.id
+      // A completed review step can stop waiting at the revision gate. Closing
+      // the scheduler leaves the original whole-goal allowance unchanged.
+      if (auto.state.status === 'waiting-input') await confirm('automatic.confirm', await act('automatic.prepareAction', { workflowId: workflow.workflowId, automaticId: auto.automaticId,
+        action: 'close', reason: 'TEST_ONLY 明确转入当前问题修订，保留原审查和整体目标额度。' }))
+      const fixPreview = await act('automatic.prepare', { workflowId: workflow.workflowId, revision: { issueId: issue.id,
+        instruction: 'TEST_ONLY 修复此真实审查问题，把目标完整段落压缩为一两句具体、有边界的表述；不能删除整个段落，不能添加标题或章节字段。保留原段全部 [@sf_...] 引用 token 原样，只返回严格 JSON replacementText 和 limitations；不添加来源或实测结果。' }, policy: { ruleReview: true } })
+      const fixed = await confirm('automatic.confirm', fixPreview)
+      assert.equal(fixed.state.code, 'AUTOMATIC_STAGE_REVIEW_REQUIRED')
+      const run = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', fixPreview.input.work.runId, 'run.json'), 'utf8'))
+      const candidate = await act('edits.read', { proposalId: run.proposalId })
+      assert.equal((await act('document.read')).document.text, before)
+      const applied = await act('edits.apply', { proposalId: candidate.proposal.id, proposalHash: candidate.proposalHash })
+      assert.equal(applied.recheck.status, 'completed')
+      accepted = (await act('document.read')).document.text
+      assert.notEqual(accepted, before); assert.ok(accepted.includes(human))
+      assert.notEqual((await ledger()).reviewIssues[issue.id].state, 'resolved', 'Acceptance plus rule review cannot close a semantic finding')
+      const recheck = await act('review.prepareModel', { assessmentScope: 'cross-section' })
+      await confirm('review.startModel', recheck)
+      review = await act('review.inspect')
+      assert.equal(review.stale, false); assert.equal(review.report.documentHash, digest(accepted))
+      assert.ok(await exists(join(projectRoot, '.scholarflow/reviews', parentReportId, 'report.json')))
+      }
+      // Recheck is an assessment, not a promise of success: a local correction
+      // cannot silently close a genuine cross-section repetition finding.
+      let assessment
+      for (const runId of new Set((await checkpoint()).budget.calls.map(row => row.runId))) {
+        const run = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', runId, 'run.json'), 'utf8'))
+        if (run.reviewId !== review.report.id) continue
+        const childCheckpoint = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', runId, 'checkpoint.json'), 'utf8'))
+        assessment = childCheckpoint.output?.rechecks.find(row => row.issueId === fixedIssueId)
+      }
+      assert.ok(assessment, 'The actual provider report must explicitly reassess the accepted correction')
+      semanticRecheckResolved = assessment.status === 'pass'
+      const issueState = (await ledger()).reviewIssues[fixedIssueId].state
+      if (semanticRecheckResolved) assert.equal(issueState, 'resolved')
+      else assert.notEqual(issueState, 'resolved', 'A failed or unknown provider reassessment must retain the genuine finding')
+      auto = await confirm('automatic.confirm', await act('automatic.prepare', { workflowId: workflow.workflowId, policy: {
+        ruleReview: true, workingDraftDelivery: true, stopRevisionReason: 'TEST_ONLY 修复复查已完成，保留其他未知与未核验限制，仅交付工作草稿。' } }))
+      assert.equal(auto.state.status, 'completed-with-issues')
+    }
     const current = await ledger(), delivery = Object.values(current.deliveries)[0]
     assert.ok(delivery); assert.equal(delivery.reviewState, 'draft-incomplete')
     const exported = await act('export.read', { deliveryId: delivery.id })
@@ -338,14 +504,21 @@ try {
     assert.equal(delivery.documentHash, digest(accepted))
     assert.ok(exported.files.find(row => row.relativePath === 'references.bib').text.includes(source.citeKey))
     assert.ok(!JSON.stringify(exported).includes(raw['unselected.txt']))
+    const published = JSON.stringify(exported)
+    for (const secret of privateCredentialValues) assert.ok(!published.includes(secret), 'Export must not contain credential values')
+    for (const path of [projectRoot, credentialPath]) {
+      assert.ok(!published.includes(path))
+      assert.ok(!published.includes(path.replaceAll('\\', '/')))
+      assert.ok(!published.includes(JSON.stringify(path).slice(1, -1)))
+    }
     const preflight = await act('export.preflight'); assert.equal(preflight.reviewedAllowed, false)
     const refused = await rpc('scholarflow.v1/export.create', { request: { context: await context(), planId: preflight.planId, planHash: preflight.planHash, deliveryType: 'reviewed-draft' } })
     assert.equal(refused.value.ok, false); assert.equal(refused.value.error.code, 'REVIEW_NOT_READY')
     const rootCheckpoint = await checkpoint()
-    assert.ok(rootCheckpoint.budget.calls.length >= 3 && rootCheckpoint.budget.calls.length <= 8)
+    assert.ok(rootCheckpoint.budget.calls.length >= generatedSections.length + 1 && rootCheckpoint.budget.calls.length <= originalModelLimit)
     assert.ok(rootCheckpoint.budget.calls.every(row => row.kind === 'model' && row.state !== 'pending'))
     const uniqueChildRuns = new Set(rootCheckpoint.budget.calls.map(row => row.runId)).size
-    assert.ok(uniqueChildRuns >= 3 && uniqueChildRuns <= 4, 'At most two original-budget review attempts, including preserved failures')
+    assert.ok(uniqueChildRuns >= generatedSections.length + 1 && uniqueChildRuns <= originalModelLimit, 'All review attempts and explicit repairs remain in the original goal')
     assert.ok(childIds.every(id => rootCheckpoint.budget.calls.some(row => row.runId === id)))
     for (const [name, text] of Object.entries(raw)) assert.equal(await readFile(join(projectRoot, name), 'utf8'), text)
     assert.equal(digest(await readFile(credentialPath)), credentialHash)
@@ -353,13 +526,16 @@ try {
       uniqueChildRuns, actualHostColdRestore: true, candidateAcceptanceExplicit: true, originalMaterialsUnchanged: true,
       sourceUnverified: true, reviewedDraftRefused: true, sameVersionThreeFiles: true, documentHash: digest(accepted),
       automaticStatus: auto.state.status, unknownAndLimitationsPreserved: true })
+    Object.assign(evidence.at(-1), { generatedSectionCount: generatedSections.length, longSequence, semanticFixAccepted: !!fixedIssueId, fixedIssueId, semanticRecheckResolved })
     await writeFile(join(root, 'native-evidence.json'), JSON.stringify(evidence, null, 2))
-    console.log(`PASS TEST_ONLY ${task.type}: native chapters, cold restore, five-check review, honest delivery (${rootCheckpoint.budget.calls.length}/8 calls)`)
+    console.log(`PASS TEST_ONLY ${task.type}: native chapters, cold restore, five-check review, honest delivery (${rootCheckpoint.budget.calls.length}/${originalModelLimit} calls)`)
   }
   assert.deepEqual(errors, [])
+  if (!interruptModel) {
   for (const task of tasks) await auditSavedExample(task, evidence.find(row => row.type === task.type))
   await writeFile(join(root, 'native-evidence.json'), JSON.stringify(evidence, null, 2))
   await writeFile(resolve('.dsh-tmp/paper-types-latest.json'), JSON.stringify({ date: new Date().toISOString(), testOnly: true, actualProvider: true,
     credentialsUnchanged: digest(await readFile(credentialPath)) === credentialHash, examples: evidence }, null, 2))
+  }
   }
 } finally { await stop(); await browser.close() }
