@@ -18,6 +18,10 @@ await mkdir(profile, { recursive: true }); await mkdir(projectRoot, { recursive:
 await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'scholarflow-package-TEST_ONLY', private: true,
   dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } } }))
 await writeFile(join(profile, 'cordis.yml'), '[]\n')
+// The fixture is nested beneath the source workspace. Give pnpm its own real
+// workspace boundary so install/remove never adopt or rewrite the source lock.
+await writeFile(join(profile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n')
+const sourceLockHash = digest(await readFile('pnpm-lock.yaml'))
 await writeFile(join(projectRoot, '原始材料.txt'), 'TEST_ONLY 原资料，安装与卸载都不能改写。\r\n')
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness'), executable = join(install, 'DeepSeek Harness.exe')
 const env = { ...process.env, DSH_HOME: testHome, ELECTRON_RUN_AS_NODE: '1', DSH_PERMISSION_MODE: 'workspace-write' }
@@ -79,6 +83,8 @@ async function tree(directory, prefix = '') {
 try {
   const original = await tree(projectRoot)
   await command(['add', packagePath])
+  assert.equal(digest(await readFile('pnpm-lock.yaml')), sourceLockHash)
+  await readFile(join(profile, 'pnpm-lock.yaml'))
   assert.deepEqual(await tree(projectRoot), original)
   const manifest = JSON.parse(await readFile(join(profile, 'node_modules/dsh-scholarflow/package.json'), 'utf8'))
   assert.equal(manifest.name, 'dsh-scholarflow')
@@ -97,6 +103,7 @@ try {
   assert.equal(initialized.value.ok, true)
   const beforeUninstall = await tree(projectRoot)
   await stop(); await command(['remove', 'dsh-scholarflow'])
+  assert.equal(digest(await readFile('pnpm-lock.yaml')), sourceLockHash)
   assert.deepEqual(await tree(projectRoot), beforeUninstall)
   const after = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
   assert.ok(!after.dependencies?.['dsh-scholarflow'])
@@ -106,6 +113,7 @@ try {
   assert.deepEqual(await tree(projectRoot), beforeUninstall)
   await writeFile(resolve('.dsh-tmp/package-lifecycle-latest.json'), JSON.stringify({ date: new Date().toISOString(), testOnly: true,
     installedTarball: true, nativeClientBoot: true, pluginRemoved: true, postRemovalNativeBoot: true, preservedProjectFiles: beforeUninstall.length,
-    allProjectBytesUnchanged: true, originalMaterialsUnchanged: true, packageHash: digest(await readFile(packagePath)) }, null, 2))
+    allProjectBytesUnchanged: true, originalMaterialsUnchanged: true, standaloneProfileLock: true, sourceLockUnchanged: true,
+    packageHash: digest(await readFile(packagePath)) }, null, 2))
   console.log('PASS actual tarball install, native client boot, uninstall and unchanged complete project tree')
 } finally { await stop(); await browser.close() }

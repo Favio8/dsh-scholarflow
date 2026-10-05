@@ -116,6 +116,11 @@ async function auditSavedExample(task, row) {
   assert.equal(sequence.status, 'completed-with-issues')
   const summaryPlan = await readJson(`.scholarflow/runs/${summary.childRunId}/plan.json`)
   const orderedAccepted = sequence.steps.filter(step => step.state === 'accepted')
+  for (let index = 1; index < orderedAccepted.length; index++) {
+    const plan = await readJson(`.scholarflow/runs/${orderedAccepted[index].childRunId}/plan.json`)
+    assert.equal(plan.snapshot.documentHash, orderedAccepted[index - 1].acceptedDocumentHash)
+    assert.equal(digest(plan.context.manuscript.actualSavedManuscriptForConsistency), orderedAccepted[index - 1].acceptedDocumentHash)
+  }
   const previousSummary = orderedAccepted[orderedAccepted.indexOf(summary) - 1]
   assert.equal(summaryPlan.snapshot.documentHash, previousSummary.acceptedDocumentHash)
   assert.equal(digest(summaryPlan.context.manuscript.actualSavedManuscriptForConsistency), previousSummary.acceptedDocumentHash)
@@ -147,6 +152,7 @@ async function auditSavedExample(task, row) {
   assert.ok(Object.values(saved.evidence).every(item => item.kind === 'quotation'))
   for (const [name, text] of Object.entries(raw)) assert.equal(await readFile(join(projectRoot, name), 'utf8'), text)
   row.summaryUsesExactlyAcceptedBody = true
+  if (longSequence) row.conclusionUsesExactlyAcceptedBody = true
   row.unselectedMaterialAbsentFromEveryFrozenModelInput = true
   row.originalGoalModelLimit = originalModelLimit
   row.failedReviewCallsPreserved = failedReviewCalls

@@ -104,10 +104,6 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
-  .dsh-tmp/package-lifecycle/1791204117283/home/profiles/scholarflow-package-test: {}
-
-  .dsh-tmp/package-lifecycle/1791205109304/home/profiles/scholarflow-package-test: {}
-
 packages:
 
   '@citation-js/core@0.9.0':
