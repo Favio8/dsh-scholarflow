@@ -16,6 +16,7 @@ import type { ModelCall } from '../pipeline/generation.ts'
 import { workflowCall, syncWorkflowDuration } from '../pipeline/workflow-budget.ts'
 import { isDetachedProjectPointer } from '../project/identity.ts'
 import { ensureNoAutomaticExecuting } from '../pipeline/automatic-lease.ts'
+import type { AutomaticChildGrant } from '../../shared/workflow-automatic.ts'
 
 const frozenSchema = z.object({ kind: z.literal('model-review'), id, reportId: id, contentHash: hash, input: modelReviewRequest,
   snapshot: runSnapshotSchema.refine(value => value.stage === 'review'), dependencyHash: hash, ledgerHash: hash, inputBytes: z.number().int().min(0).max(20 * 1024 * 1024),
@@ -37,6 +38,7 @@ const checkpointSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal
   transientRetries: z.number().int().min(0).max(2), retryNotBefore: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(), lastTransientCode: z.string().max(64).optional(),
   output: modelReviewOutputSchema.optional(), published: z.object({ reviewId: id, reportHash: hash }).strict().optional() }).strict()
 type Checkpoint = z.infer<typeof checkpointSchema>
+export function validateFrozenModelReview(plan: unknown): asserts plan is ModelReviewPlan { frozenSchema.parse(plan); verifyModelReviewPlan(plan as ModelReviewPlan) }
 
 export async function readFrozenModelReview(io: FileStore, runId: string, projectId: string) {
   const file = await io.read(frozenPlanFile(runId))
@@ -98,12 +100,12 @@ export function linkModelReviewRetry(plan: ModelReviewPlan, action: ModelReviewA
 
 export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, owner: RunState['owner'], signal: AbortSignal,
   modelCall: (request: ModelCall) => Promise<string>, ownerAlive: (owner: RunState['owner']) => boolean,
-  control: { pauseRequested: () => boolean; resume?: ModelReviewAction; retry?: ModelReviewAction; executionSessionId?: string }) {
+  control: { pauseRequested: () => boolean; resume?: ModelReviewAction; retry?: ModelReviewAction; executionSessionId?: string; automaticChild?: AutomaticChildGrant } = { pauseRequested: () => false }) {
   const { contentHash, ...body } = plan
   frozenSchema.parse(plan); verifyModelReviewPlan(plan)
   let state: RunState = { schemaVersion: 1, runId: plan.snapshot.runId, projectId: plan.snapshot.projectId, sessionId: plan.snapshot.sessionId, stage: 'review', status: 'running',
     usedModelCalls: 0, owner, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), planHash: plan.contentHash, activeDurationMs: 0,
-    ...(plan.parentRunId && { parentRunId: plan.parentRunId }) }
+    ...(plan.parentRunId && { parentRunId: plan.parentRunId }), ...(control.executionSessionId && { executionSessionId: control.executionSessionId }) }
   let checkpoint: Checkpoint = { schemaVersion: 1, kind: 'model-review', runId: state.runId, projectId: state.projectId, planHash: plan.contentHash,
     formatAttempts: 0, pendingCall: false, transientRetries: 0, ...(plan.retryNotBefore && { retryNotBefore: plan.retryNotBefore }) }
   let expectedStateHash = '', expectedCheckpointHash = '', started = Date.now(), priorDuration = 0
@@ -122,7 +124,9 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
     expectedStateHash = digest(stateText); expectedCheckpointHash = digest(progressText)
   })
   await io.lock(async () => {
-    await ensureNoAutomaticExecuting(io, plan.snapshot.projectId)
+    invariant(!control.automaticChild || control.automaticChild.runId === plan.snapshot.runId && control.automaticChild.planHash === plan.contentHash && control.automaticChild.workflowId === plan.snapshot.workflowId,
+      'AUTOMATIC_CHILD_INVALID', '执行计划不是这个自动审查步骤的冻结输入。')
+    await ensureNoAutomaticExecuting(io, plan.snapshot.projectId, control.automaticChild)
     const active = await io.read(ACTIVE_RUN)
     if (control.retry) { invariant(control.retry.action === 'retry' && plan.parentRunId === control.retry.runId, 'INVALID_APPROVAL', '关联重试与原运行不符。'); await validateAction(io, control.retry, ownerAlive) }
     if (control.resume) {
@@ -169,7 +173,7 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
       delete checkpoint.retryNotBefore; await checkInputs(); state.usedModelCalls++; checkpoint.pendingCall = true; await save()
       let raw: string
       try { raw = await workflowCall(io, plan.snapshot.workflowId, { callId: `${state.runId}.model.${state.usedModelCalls}`, runId: state.runId,
-        stage: 'review', kind: 'model', activeDurationMs: state.activeDurationMs ?? 0, owner }, bounded,
+        stage: 'review', kind: 'model', activeDurationMs: state.activeDurationMs ?? 0, owner, ...(control.automaticChild && { automaticChild: control.automaticChild }) }, bounded,
         signal => modelCall({ system: modelReviewSystem(plan), instruction: '按冻结合同审查给定完整当前稿件，分别核对全部检查，保留未知与证据边界，只返回结构化结果。', context: plan.context, repair: checkpoint.repair, signal, runId: state.runId, maxTokens: plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096 })) }
       catch (error) { bounded.throwIfAborted(); const retry = transientRetry(error, checkpoint.transientRetries)
         if (!retry) throw error

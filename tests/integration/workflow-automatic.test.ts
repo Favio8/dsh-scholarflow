@@ -5,7 +5,7 @@ import { MemoryStore } from '../fixtures/memory-store.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { confirmOutline } from '../../src/core/evidence/evidence.ts'
 import { saveManual } from '../../src/core/editing/proposals.ts'
-import { prepareWorkflow, startWorkflow, readWorkflow, prepareWorkflowAction, applyWorkflowAction } from '../../src/core/pipeline/workflow.ts'
+import { prepareWorkflow, startWorkflow, readWorkflow, prepareWorkflowAction, applyWorkflowAction, workflowCheckpointMutations } from '../../src/core/pipeline/workflow.ts'
 import { prepareAutomatic, startAutomatic, driveAutomatic, readAutomatic, inspectAutomatic, prepareAutomaticAction, applyAutomaticAction } from '../../src/core/pipeline/workflow-automatic.ts'
 import { automaticPolicySchema } from '../../src/shared/workflow-automatic.ts'
 import { readDelivery } from '../../src/core/export/delivery.ts'
@@ -17,6 +17,10 @@ import { executeModelReview } from '../../src/core/review/model-run.ts'
 import { projectMarkdown, validateRange } from '../../src/core/editing/markdown.ts'
 import { reserveWorkflowCall } from '../../src/core/pipeline/workflow-budget.ts'
 import { recover } from '../../src/core/store/transactions.ts'
+import { semanticReviewChecks } from '../../src/shared/review.ts'
+import { digest, json } from '../../src/core/store/files.ts'
+import { readAutomaticReview } from '../../src/core/pipeline/workflow-automatic.ts'
+import { commit } from '../../src/core/store/transactions.ts'
 
 const sessionId = 'session_TEST_ONLY_automatic', owner = { pid: 1, bootInstance: 'TEST_ONLY_local_controller' }
 const goal = { researchQuestion: 'TEST_ONLY 怎样明确保留缺失实验？', minimumSources: 1, minimumLocatedEvidence: 1,
@@ -38,6 +42,129 @@ async function start(io: MemoryStore, workflowId: string, selected = policy) {
   return (await startAutomatic(io, await prepareAutomatic(io, workflowId, sessionId, selected), owner)).automaticId
 }
 const execute = (io: MemoryStore, workflowId: string, automaticId: string, workers = {}) => driveAutomatic(io, workflowId, automaticId, new AbortController().signal, { pauseRequested: () => false }, workers)
+async function modelPlan(io: MemoryStore) {
+  const current = await snapshot(io)
+  return prepareModelReview(io, { context: { requestId: 'request_TEST_ONLY_review', workspaceId: 'workspace_TEST_ONLY', sessionId,
+    projectId: current.ledger.projectId, expectedLedgerRevision: current.ledger.revision }, assessmentScope: 'cross-section' }, { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' })
+}
+const unknownReview = () => json({ checks: semanticReviewChecks.map(id => ({ id, status: 'unknown', detail: 'TEST_ONLY 固定响应保留未知，不能作为在线学术审查结果。' })),
+  findings: [], rechecks: [], limitations: ['TEST_ONLY provider seam, not a real model result.'] })
+
+test('explicit automatic five-check model review uses its exact registered child and original paid budget while preserving body, B0 issues and unselected material', async () => {
+  const { io, workflowId } = await setup(), frozen = await modelPlan(io), body = (await snapshot(io)).document.text
+  const automaticId = (await startAutomatic(io, await prepareAutomatic(io, workflowId, sessionId, policy, frozen), owner)).automaticId
+  let paid = 0, modelElapsed = 0; const began = Date.now()
+  const result = await execute(io, workflowId, automaticId, { modelReview: async (plan: typeof frozen, grant: any, signal: AbortSignal, actualSessionId: string) => {
+    assert.equal(plan.contentHash, frozen.contentHash); assert.equal(actualSessionId, sessionId)
+    const pending = (await readAutomatic(io, workflowId, automaticId)).state.steps.at(-1)!
+    assert.equal(pending.state, 'pending'); assert.equal(pending.child!.runId, plan.snapshot.runId)
+    const rejected = { ...grant, stepId: 'automatic_step_TEST_ONLY_wrong' }, before = io.writes
+    await assert.rejects(executeModelReview(io, plan, owner, signal, async () => { paid++; return unknownReview() }, () => true,
+      { pauseRequested: () => false, automaticChild: rejected }), { code: 'AUTOMATIC_CHILD_INVALID' })
+    assert.equal(io.writes, before)
+    const childBegan = Date.now()
+    const reviewed = await executeModelReview(io, plan, owner, signal, async request => {
+      paid++; assert.equal(request.context.manuscript, body); await new Promise(resolve => setTimeout(resolve, 150)); return unknownReview()
+    }, () => true, { pauseRequested: () => false, automaticChild: grant, executionSessionId: actualSessionId })
+    modelElapsed = Date.now() - childBegan; return reviewed
+  } })
+  assert.equal(result.status, 'completed-with-issues'); assert.equal(paid, 1)
+  assert.equal(result.steps.filter(row => row.operation === 'model-review').length, 1)
+  const root = await readWorkflow(io, workflowId), budget = root.checkpoint.budget!
+  assert.equal(budget.calls.length, 1); assert.equal(budget.calls[0].runId, frozen.snapshot.runId); assert.equal(budget.calls[0].state, 'succeeded')
+  assert.ok(budget.childDurationMs[automaticId]! <= Date.now() - began - modelElapsed + 50, 'scheduler control time excludes the separately charged child')
+  assert.equal((await snapshot(io)).document.text, body); assert.equal((await io.read('unselected.txt'))!.text, 'TEST_ONLY raw unchanged')
+  assert.ok(Object.values((await snapshot(io)).ledger.reviewIssues).some(row => row.severity === 'B0' && row.state === 'open'))
+  assert.equal((await readAutomaticReview(io, workflowId, automaticId)).contentHash, frozen.contentHash)
+})
+
+test('a false child success cannot settle an automatic review without its actual fixed report, and observation does not replay the unknown child', async () => {
+  const { io, workflowId } = await setup(), frozen = await modelPlan(io)
+  const automaticId = (await startAutomatic(io, await prepareAutomatic(io, workflowId, sessionId, policy, frozen), owner)).automaticId
+  let calls = 0
+  await assert.rejects(execute(io, workflowId, automaticId, { modelReview: async () => { calls++; return { succeeded: true } } }), { code: 'AUTOMATIC_CHILD_INCOMPLETE' })
+  const saved = await readAutomatic(io, workflowId, automaticId)
+  assert.equal(saved.state.status, 'failed'); assert.equal(saved.state.steps.at(-1)!.state, 'pending'); assert.equal(calls, 1)
+  const writes = io.writes; await inspectAutomatic(io, workflowId); assert.equal(io.writes, writes)
+  await assert.rejects(execute(io, workflowId, automaticId), { code: 'AUTOMATIC_RESUME_REQUIRED' })
+  assert.equal(saved.root.checkpoint.budget!.calls.length, 0)
+})
+
+test('model authorization refuses a changed frozen plan, changed body and caller-added child authorization before dispatch', async () => {
+  const { io, workflowId } = await setup(), frozen = await modelPlan(io), preview = await prepareAutomatic(io, workflowId, sessionId, policy, frozen)
+  const automaticId = (await startAutomatic(io, preview, owner)).automaticId, path = `.scholarflow/runs/${workflowId}/automatic/${automaticId}/review-plan.json`
+  const bytes = (await io.read(path))!.text
+  const changed = JSON.parse(bytes); changed.context.manuscript += '\nTEST_ONLY unauthorized'
+  io.externalEdit(path, json(changed)); await assert.rejects(readAutomaticReview(io, workflowId, automaticId), { code: 'INVALID_APPROVAL' })
+  io.externalEdit(path, bytes)
+  const current = await snapshot(io); await saveManual(io, current.document.text + '\nTEST_ONLY human edit\n', current.document.contentHash, current.ledger.revision)
+  let calls = 0
+  await assert.rejects(execute(io, workflowId, automaticId, { modelReview: async () => { calls++ } }), { code: 'WORKFLOW_INPUT_CHANGED' })
+  assert.equal(calls, 0); assert.equal((await readWorkflow(io, workflowId)).checkpoint.budget!.calls.length, 0)
+  await assert.rejects(reserveWorkflowCall(io, undefined, { callId: 'call_TEST_ONLY', runId: frozen.snapshot.runId, stage: 'review', kind: 'model', owner,
+    automaticChild: { workflowId, automaticId, stepId: 'automatic_step_TEST_ONLY', runId: frozen.snapshot.runId, planHash: digest(bytes) } }), { code: 'AUTOMATIC_CHILD_INVALID' })
+})
+
+test('automatic model cancellation propagates to the child and retains one charged request and pending step without editing or replaying', async () => {
+  const { io, workflowId } = await setup(), frozen = await modelPlan(io), body = (await snapshot(io)).document.text, controller = new AbortController()
+  const automaticId = (await startAutomatic(io, await prepareAutomatic(io, workflowId, sessionId, policy, frozen), owner)).automaticId
+  let calls = 0
+  await assert.rejects(driveAutomatic(io, workflowId, automaticId, controller.signal, { pauseRequested: () => false }, {
+    modelReview: (plan, grant, signal) => executeModelReview(io, plan, owner, signal, async () => {
+      calls++; controller.abort('operator-cancel'); throw new Error('TEST_ONLY cancelled provider')
+    }, () => true, { pauseRequested: () => false, automaticChild: grant }),
+  }))
+  const saved = await readAutomatic(io, workflowId, automaticId)
+  assert.equal(saved.state.status, 'cancelled'); assert.equal(saved.state.steps.at(-1)!.state, 'pending')
+  assert.equal(saved.root.checkpoint.budget!.calls.length, 1); assert.equal(saved.root.checkpoint.budget!.calls[0].state, 'failed')
+  assert.equal((await snapshot(io)).document.text, body); assert.equal(calls, 1)
+  await assert.rejects(execute(io, workflowId, automaticId), { code: 'AUTOMATIC_RESUME_REQUIRED' })
+})
+
+test('automatic pause waits for the finite model result, then explicit resume in another Session reuses it without another paid call or changing original input', async () => {
+  const { io, workflowId } = await setup(), frozen = await modelPlan(io)
+  const automaticId = (await startAutomatic(io, await prepareAutomatic(io, workflowId, sessionId, policy, frozen), owner)).automaticId
+  let pause = false, calls = 0
+  const paused = await driveAutomatic(io, workflowId, automaticId, new AbortController().signal, { pauseRequested: () => pause }, {
+    modelReview: (plan, grant, signal) => executeModelReview(io, plan, owner, signal, async () => { calls++; pause = true; return unknownReview() }, () => true,
+      { pauseRequested: () => false, automaticChild: grant }),
+  })
+  assert.equal(paused.status, 'paused'); assert.equal(paused.steps.at(-1)!.operation, 'model-review'); assert.equal(paused.steps.at(-1)!.state, 'settled')
+  const before = await readAutomatic(io, workflowId, automaticId), root = await readWorkflow(io, workflowId)
+  const cold = new MemoryStore(Object.fromEntries([...io.files].map(([path, file]) => [path, file.text])))
+  const action = await prepareAutomaticAction(cold, workflowId, automaticId, 'session_TEST_ONLY_actual_resume', 'resume', 'TEST_ONLY 原模型报告已核对，只恢复后续事实登记，原预算全部保留。', () => true)
+  await applyAutomaticAction(cold, action, { pid: 2, bootInstance: 'TEST_ONLY resumed' }, () => true)
+  const resumed = await execute(cold, workflowId, automaticId, { modelReview: async () => { calls++; throw new Error('TEST_ONLY must reuse actual settled report') } })
+  assert.equal(resumed.status, 'completed-with-issues'); assert.equal(calls, 1)
+  const after = await readAutomatic(cold, workflowId, automaticId)
+  assert.equal(after.inputFile.text, before.inputFile.text); assert.equal(after.state.executionSessionId, 'session_TEST_ONLY_actual_resume')
+  assert.equal(after.root.checkpoint.budget!.calls.length, root.checkpoint.budget!.calls.length)
+  assert.ok(after.root.checkpoint.stamps.filter(row => ['review', 'revision', 'delivery'].includes(row.stage)).every(row => row.sessionId === 'session_TEST_ONLY_actual_resume'))
+})
+
+test('the original total time deadline cancels a slow child preparation as well as model IO, without refunding time or replaying the registered step', async () => {
+  const { io, workflowId } = await setup(), frozen = await modelPlan(io), body = (await snapshot(io)).document.text
+  const automaticId = (await startAutomatic(io, await prepareAutomatic(io, workflowId, sessionId, policy, frozen), owner)).automaticId
+  const root = await readWorkflow(io, workflowId), checkpoint = structuredClone(root.checkpoint)
+  // TEST_ONLY represents already consumed original time; it is not a claim
+  // that the fixture actually ran for thirty minutes or made paid requests.
+  checkpoint.budget!.childDurationMs.run_TEST_ONLY_prior_time = root.input.budget!.maxDurationMinutes * 60000 - 1000
+  checkpoint.revision++; await io.lock(() => commit(io, workflowCheckpointMutations(root, checkpoint)))
+  let preparations = 0
+  await assert.rejects(execute(io, workflowId, automaticId, { modelReview: async (_plan: unknown, _grant: unknown, signal: AbortSignal) => {
+    preparations++; signal.throwIfAborted()
+    await new Promise((_, reject) => {
+      const deadline = setTimeout(() => reject(new Error('TEST_ONLY original time deadline was not enforced')), 5000)
+      signal.addEventListener('abort', () => { clearTimeout(deadline); reject(signal.reason) }, { once: true })
+    })
+  } }))
+  const saved = await readAutomatic(io, workflowId, automaticId)
+  assert.equal(preparations, 1); assert.equal(saved.state.status, 'completed-with-issues'); assert.equal(saved.state.code, 'WORKFLOW_BUDGET_EXHAUSTED')
+  assert.equal(saved.state.steps.at(-1)!.state, 'pending'); assert.equal(saved.root.checkpoint.budget!.calls.length, 0)
+  assert.equal(saved.root.checkpoint.budget!.childDurationMs.run_TEST_ONLY_prior_time, checkpoint.budget!.childDurationMs.run_TEST_ONLY_prior_time)
+  assert.ok(saved.root.checkpoint.budget!.childDurationMs[automaticId]! >= 1000)
+  assert.equal((await snapshot(io)).document.text, body)
+})
 
 test('SF-027: local automatic progression records seven real gates and a same-version working delivery, preserving missing results, original body and raw materials with zero paid calls', async () => {
   const { io, workflowId } = await setup(), body = (await snapshot(io)).document.text, before = io.writes

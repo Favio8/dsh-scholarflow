@@ -7,11 +7,12 @@ import { readWorkflowRecord, workflowCheckpointMutations, WORKFLOW_POINTER } fro
 import type { WorkflowCheckpoint } from '../../shared/workflow.ts'
 import { isDetachedProjectPointer } from '../project/identity.ts'
 import { ensureNoAutomaticExecuting } from './automatic-lease.ts'
+import { automaticChildGrantSchema } from '../../shared/workflow-automatic.ts'
 
 const pointerSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id }).strict()
 const requestSchema = z.object({ callId: id, runId: id, stage, kind: z.enum(['model', 'search', 'lookup']),
   owner: z.object({ pid: z.number().int().min(1), bootInstance: z.string().min(1).max(200) }).strict().optional(),
-  candidateLimit: z.number().int().min(0).max(80).default(0), activeDurationMs: z.number().int().nonnegative().default(0) }).strict()
+  candidateLimit: z.number().int().min(0).max(80).default(0), activeDurationMs: z.number().int().nonnegative().default(0), automaticChild: automaticChildGrantSchema.optional() }).strict()
 export type WorkflowCall = z.input<typeof requestSchema>
 function statistics(checkpoint: WorkflowCheckpoint, now = Date.now()) {
   const budget = checkpoint.budget!
@@ -58,10 +59,13 @@ export async function workflowAssociation(io: FileStore) {
 }
 export async function reserveWorkflowCall(io: FileStore, expected: string | undefined, input: WorkflowCall) {
   const request = requestSchema.parse(input)
+  invariant(!request.automaticChild || request.automaticChild.workflowId === expected, 'AUTOMATIC_CHILD_INVALID', '自动调用必须绑定原目标预算。')
   return io.lock(async () => {
     const stored = await binding(io, expected)
     if (!stored) return undefined
-    await ensureNoAutomaticExecuting(io, stored.input.projectId)
+    invariant(!request.automaticChild || request.kind === 'model' && request.stage === 'review' && request.automaticChild.runId === request.runId && request.automaticChild.workflowId === expected,
+      'AUTOMATIC_CHILD_INVALID', '调度授权不属于这个阶段或调用。')
+    await ensureNoAutomaticExecuting(io, stored.input.projectId, request.automaticChild)
     invariant(request.owner, 'WORKFLOW_OWNER_REQUIRED', '累计请求须绑定可检查的实际执行进程；未发起请求。')
     const checkpoint = structuredClone(stored.checkpoint), budget = checkpoint.budget!, limits = stored.input.budget!
     invariant(!budget.calls.some(row => row.callId === request.callId), 'WORKFLOW_CALL_ALREADY_CHARGED', '这个调用已经计入累计预算；未知响应不能重新发送同一次请求。')

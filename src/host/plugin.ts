@@ -172,10 +172,19 @@ export class ScholarFlowRemote extends TypertRemoteService {
       invariant(this.automaticPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有自动推进预览。')
       const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io)
       invariant(current.ledger.revision === input.context.expectedLedgerRevision, 'STALE_LEDGER_REVISION', '先重新读取项目，再预览自动推进。')
-      const plan = await prepareAutomatic(io, input.workflowId, input.context.sessionId, input.policy)
+      let reviewPlan: ModelReviewPlan | undefined
+      if (input.modelReview) {
+        const model = await selectedModel(this.ctx, input.context.sessionId, signal)
+        reviewPlan = await prepareModelReview(io, { context: input.context, assessmentScope: 'cross-section' },
+          { providerId: model.selected.provider, modelId: model.selected.model, ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }) }, binding => readPrivateSkill(binding, io))
+        invariant(reviewPlan.inputBytes + (reviewPlan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow,
+          'CONTEXT_WINDOW_EXCEEDED', '完整审查范围超过宿主模型上下文，没有隐式裁剪。')
+      }
+      const plan = await prepareAutomatic(io, input.workflowId, input.context.sessionId, input.policy, reviewPlan)
       this.automaticPlans.set(plan.id, { plan, action: false, context: input.context, peerId, expires: Date.now() + 600000 })
       return { planId: plan.id, planHash: plan.contentHash, input: plan.input,
-        risks: ['当前自动推进只确认已有事实、执行已授权规则审查及工作草稿交付，不调用模型或在线检索。',
+        risks: [reviewPlan ? '允许在审查阶段向所列固定宿主模型发送当前已保存全文、要求、相关定位证据、文风、批准记忆和固定 Skill；一次五项审查，格式修复和临时重试仍计入原预算。' : '当前自动推进只确认已有事实、执行已授权规则审查及工作草稿交付，不调用模型或在线检索。',
+          ...(reviewPlan ? ['宿主会话保留请求和结果；不发送未选资料全文，不自动接受正文差异。暂停等待当前有限调用保存后停止后续调度，取消传播到调用。'] : []),
           '要求冲突、大纲未确认、主稿缺章节和未授权缺口都会停止。不会接受 AI 建议、关闭语义问题或标记可提交。',
           '步骤、执行时间和无进展上限计入原引导目标；新尝试与恢复不重置原额度。',
           '资料、实际稿件、文风、记忆或目标改变会使旧授权停止；中断登记不会自动重放。'] }
@@ -203,6 +212,14 @@ export class ScholarFlowRemote extends TypertRemoteService {
         'SESSION_BINDING_CHANGED', '确认不属于原工作区、项目或会话。')
       signal.throwIfAborted(); const { io } = await resolveStore(this.ctx, row.context, new AbortController().signal)
       const owner = { pid: process.pid, bootInstance: this.bootInstance }, automaticId = row.action ? (row.plan as AutomaticActionPlan).automaticId : (row.plan as AutomaticPlan).input.automaticId
+      const originalInput = row.action ? (await readAutomatic(io, (row.plan as AutomaticActionPlan).workflowId, automaticId)).input : (row.plan as AutomaticPlan).input
+      const checkModel = async (sessionId: string, selectedSignal: AbortSignal) => {
+        const model = await selectedModel(this.ctx, sessionId, selectedSignal), descriptor = originalInput.modelReview!.modelDescriptor
+        invariant(model.selected.provider === descriptor.providerId && model.selected.model === descriptor.modelId && model.selected.reasoningEffort === descriptor.reasoningEffort,
+          'MODEL_SELECTION_CHANGED', '宿主模型选择改变，旧自动审查授权停止，请重新预览。')
+        return model
+      }
+      if (originalInput.modelReview && (!row.action || (row.plan as AutomaticActionPlan).action === 'resume')) await checkModel(input.context.sessionId, signal)
       invariant(!this.running.has(automaticId), 'RUN_IN_PROGRESS', '这个调度仍在执行。')
       if (row.action) {
         const result = await applyAutomaticAction(io, row.plan as AutomaticActionPlan, owner, candidate => this.ownerAlive(candidate))
@@ -211,7 +228,17 @@ export class ScholarFlowRemote extends TypertRemoteService {
       } else { await startAutomatic(io, row.plan as AutomaticPlan, owner); this.automaticPlans.delete(input.planId) }
       const workflowId = row.action ? (row.plan as AutomaticActionPlan).workflowId : (row.plan as AutomaticPlan).input.workflowId
       const active = { controller: new AbortController(), context: row.context, pauseRequested: false }; this.running.set(automaticId, active)
-      try { return { automaticId, state: await driveAutomatic(io, workflowId, automaticId, AbortSignal.any([signal, active.controller.signal]), { pauseRequested: () => active.pauseRequested }) } }
+      try { return { automaticId, state: await driveAutomatic(io, workflowId, automaticId, AbortSignal.any([signal, active.controller.signal]), { pauseRequested: () => active.pauseRequested }, {
+        modelReview: async (plan, grant, childSignal, executionSessionId) => {
+          const model = await checkModel(executionSessionId, childSignal)
+          invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow,
+            'CONTEXT_WINDOW_EXCEEDED', '宿主模型实际上下文限额改变，未发送旧范围。')
+          return executeModelReview(io, plan, owner, childSignal, async call => {
+            const currentModel = await checkModel(executionSessionId, call.signal)
+            return callStageModel(this.ctx, currentModel.session, currentModel.selected, call)
+          }, candidate => this.ownerAlive(candidate), { pauseRequested: () => false, automaticChild: grant, executionSessionId })
+        },
+      }) } }
       finally { this.running.delete(automaticId) }
     })
   }

@@ -1185,6 +1185,65 @@ try {
   }
   await page.getByRole('tab', { name: /^Overview ·/ }).click()
   const workflowUi = page.getByRole('region', { name: '七阶段引导任务', exact: true })
+  if (liveModel) {
+    // TEST_ONLY explicit operator fixture: complete the saved structure with
+    // honest gaps, then verify one authorized automatic semantic review.
+    const ledger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+    const body = '# TEST_ONLY 自动审查结构夹具\n\n' + ledger.outline.sections.map(section =>
+      `## ${section.title}\n\n[待补：TEST_ONLY 仅为宿主调度验证；尚无本节独立实验、结论或学术成果。]\n`).join('\n')
+    await page.getByRole('tab', { name: /^Draft ·/ }).click()
+    await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).fill(body)
+    await page.getByRole('button', { name: '保存手工稿', exact: true }).click()
+    await page.getByText('手工稿已保存，审查需按新版本重跑。', { exact: true }).waitFor()
+    await page.waitForFunction(() => !document.querySelector('textarea[aria-label="Markdown 手工编辑"]').disabled)
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), body)
+    let context = await paidWorkflowContext()
+    const prepared = await rpc('scholarflow.v1/workflow.prepare', { request: { context, goal: { researchQuestion: ledger.outline.researchQuestion,
+      minimumSources: 1, minimumLocatedEvidence: 1, noFormalRequirementsReason: 'TEST_ONLY 原正式要求仍然生效；结构夹具不冒充完成论文。' } } })
+    assert.equal(prepared.value.ok, true, JSON.stringify(prepared.value))
+    const started = await rpc('scholarflow.v1/workflow.confirm', { request: { context, planId: prepared.value.data.planId, planHash: prepared.value.data.planHash } })
+    assert.equal(started.value.ok, true, JSON.stringify(started.value))
+    const workflowId = started.value.data.workflowId, autoRoot = join(projectRoot, '.scholarflow/runs', workflowId, 'automatic')
+    await page.getByRole('tab', { name: /^Overview ·/ }).click(); await workflowUi.getByRole('button', { name: '刷新引导检查点', exact: true }).click()
+    const auto = workflowUi.getByRole('region', { name: '有限自动推进', exact: true })
+    await auto.getByRole('checkbox', { name: '授权自动五项模型审查', exact: true }).check()
+    await auto.getByRole('checkbox', { name: '明确保留检索不足继续', exact: true }).check()
+    await auto.getByRole('checkbox', { name: '明确保留问题结束修订', exact: true }).check()
+    await auto.getByRole('textbox', { name: '自动推进决定理由', exact: true }).fill('TEST_ONLY 本结构夹具保留证据缺口、未知检查与全部实际问题，不接受差异，不宣称可提交。')
+    const originalCheckpoint = await readFile(join(projectRoot, '.scholarflow/runs', workflowId, 'checkpoint.json'), 'utf8')
+    await auto.getByRole('button', { name: '预览自动推进已保存阶段', exact: true }).click()
+    const preview = auto.getByRole('dialog', { name: '自动推进确认', exact: true })
+    assert.match(await preview.innerText(), /deepseek-official \/ deepseek-flash/u); assert.match(await preview.innerText(), /五项检查/u)
+    await auto.getByRole('button', { name: '取消自动推进预览', exact: true }).click()
+    await assert.rejects(stat(autoRoot), { code: 'ENOENT' })
+    assert.equal(await readFile(join(projectRoot, '.scholarflow/runs', workflowId, 'checkpoint.json'), 'utf8'), originalCheckpoint)
+    await auto.getByRole('button', { name: '预览自动推进已保存阶段', exact: true }).click()
+    await auto.getByRole('button', { name: '确认执行有限自动推进', exact: true }).click()
+    await waitModelReviewOutcome(auto.getByRole('status', { name: '自动推进状态', exact: true }).filter({ hasText: 'AUTOMATIC_USER_INPUT_REQUIRED' }))
+    const pointer = JSON.parse(await readFile(join(autoRoot, 'current.json'), 'utf8')), state = JSON.parse(await readFile(join(autoRoot, pointer.automaticId, 'run.json'), 'utf8'))
+    const child = state.steps.filter(step => step.operation === 'model-review')
+    assert.equal(child.length, 1); assert.equal(child[0].state, 'settled')
+    const frozen = JSON.parse(await readFile(join(autoRoot, pointer.automaticId, 'review-plan.json'), 'utf8'))
+    const report = JSON.parse(await readFile(join(projectRoot, '.scholarflow/reviews', frozen.reportId, 'report.json'), 'utf8'))
+    assert.equal(report.modelRunId, child[0].child.runId); assert.equal(report.documentHash, digest(body))
+    assert.equal(report.checks.filter(check => check.method === 'model-assisted' && ['argument_assessment', 'style_assessment', 'terminology_consistency', 'contribution_consistency', 'summary_body_consistency'].includes(check.id)).length, 5)
+    const budget = JSON.parse(await readFile(join(projectRoot, '.scholarflow/runs', workflowId, 'checkpoint.json'), 'utf8')).budget
+    assert.ok(budget.calls.length >= 1 && budget.calls.length <= 5); assert.ok(budget.calls.every(call => call.kind === 'model' && call.runId === child[0].child.runId && call.state !== 'pending'))
+    assert.equal(await readFile(join(projectRoot, 'manuscript/paper.md'), 'utf8'), body)
+    context = await paidWorkflowContext()
+    const close = await rpc('scholarflow.v1/automatic.prepareAction', { request: { context, workflowId, automaticId: pointer.automaticId, action: 'close', reason: 'TEST_ONLY 已核对实际同版模型报告，保留原调用与问题，结束本次夹具推进。' } })
+    assert.equal(close.value.ok, true, JSON.stringify(close.value))
+    assert.equal((await rpc('scholarflow.v1/automatic.confirm', { request: { context, planId: close.value.data.planId, planHash: close.value.data.planHash } })).value.ok, true)
+    const cancel = await rpc('scholarflow.v1/workflow.prepareAction', { request: { context, workflowId, action: 'cancel', reason: 'TEST_ONLY 独立调度夹具已结束，保留全部模型额度和产物，不复用为下一项测试。' } })
+    assert.equal(cancel.value.ok, true, JSON.stringify(cancel.value))
+    assert.equal((await rpc('scholarflow.v1/workflow.confirm', { request: { context, planId: cancel.value.data.planId, planHash: cancel.value.data.planHash } })).value.ok, true)
+    await page.getByRole('tab', { name: /^Draft ·/ }).click()
+    await page.getByRole('textbox', { name: 'Markdown 手工编辑', exact: true }).fill(manualBody)
+    await page.getByRole('button', { name: '保存手工稿', exact: true }).click()
+    await page.getByText('手工稿已保存，审查需按新版本重跑。', { exact: true }).waitFor()
+    await page.waitForFunction(() => !document.querySelector('textarea[aria-label="Markdown 手工编辑"]').disabled)
+    await page.getByRole('tab', { name: /^Overview ·/ }).click()
+  }
   await workflowUi.getByRole('button', { name: '刷新引导检查点', exact: true }).click()
   const beforeWorkflowLedger = JSON.parse(await readFile(join(projectRoot, '.scholarflow/data/ledger.json'), 'utf8'))
   const beforeWorkflowPointer = await readFile(join(projectRoot, '.scholarflow/workflows/current.json'), 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
@@ -1685,6 +1744,7 @@ try {
     sixTabKeyboardNavigation: true, unsavedBufferPreservedAcrossTabs: true, narrowWorkbenchNoHorizontalOverflow: true,
     nativeAgentPanelKeyboardAndPointerResizeCollapseInputRetentionEscapeFocusAndNarrowSwitch: true,
     nativeLocalAutomaticPreviewCancelResearchStopBrowserReloadExplicitResumeAndClosePreserveFactsAndOriginalQuota: true,
+    realProviderAutomaticFiveCheckReviewPreviewCancelExactChildAndOriginalBudgetPreserveBodyAndGaps: liveModel,
     nativeExportPreflightRefusesUnbundledLinksPrivateDefinitionsAndCredentialUrlsWithoutChangingFactsOrArchivedDelivery: true,
     unsavedBufferRestoredAfterBrowserReload: true, explicitHostBufferRecoveryWithoutBrowserBackup: true,
     unsavedHostBufferColdRestartRestore: true,

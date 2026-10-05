@@ -10,14 +10,17 @@ import { applyBindings, prepareBindings } from '../../src/core/skills/bindings.t
 import { prepareWorkflow, startWorkflow } from '../../src/core/pipeline/workflow.ts'
 import { prepareDraftSequence, startDraftSequence } from '../../src/core/pipeline/draft-sequence.ts'
 import { confirmOutline } from '../../src/core/evidence/evidence.ts'
+import { prepareAutomatic, startAutomatic } from '../../src/core/pipeline/workflow-automatic.ts'
+import { automaticPolicySchema } from '../../src/shared/workflow-automatic.ts'
+import { prepareModelReview } from '../../src/core/review/model.ts'
 
 // TEST_ONLY Host seam; native installed tests separately exercise real fs APIs.
-async function fixture() {
+async function fixture(review = false) {
   const io = new MemoryStore(); await initialize(io, await prepareInit(io, { title: 'TEST_ONLY reference scan', type: 'course-paper' }))
   const bundle = packageSkill('local:TEST_ONLY:references', [{ relativePath: 'SKILL.md', bytes: new TextEncoder().encode('---\nname: TEST_ONLY\ndescription: TEST_ONLY scan fixture\n---\nStatic text.\n') }],
-    { kind: 'local', rootFingerprint: 'sha256:' + '0'.repeat(64), subpath: 'references' }, { capabilities: ['selection-transform'], suggestedStages: ['revision'] })
+    { kind: 'local', rootFingerprint: 'sha256:' + '0'.repeat(64), subpath: 'references' }, { capabilities: review ? ['review'] : ['selection-transform'], suggestedStages: review ? ['review'] : ['revision'] })
   const binding = { bindingId: 'binding_TEST_ONLY', qualifiedId: bundle.manifest.metadata.qualifiedId, digest: bundle.manifest.digest, scope: 'library' as const,
-    entryPath: 'TEST_ONLY/SKILL.md', enabledStages: ['revision' as const] }
+    entryPath: 'TEST_ONLY/SKILL.md', enabledStages: review ? ['review' as const] : ['revision' as const] }
   await applyBindings(io, await prepareBindings(io, [binding], async () => bundle))
   const path = (target: { path: string }) => target.path.replaceAll('\\', '/').replace(/^C:\/TEST_ONLY\//u, '')
   const host = { workspaceRegistry: { list: () => [{ id: 'workspace_TEST_ONLY', path: 'C:/TEST_ONLY' }] }, fs: {
@@ -29,6 +32,27 @@ async function fixture() {
   } }
   return { io, host, bundle }
 }
+
+test('an approved automatic review retains exact private Skill references before its child exists, including copied ancestry and corrupted-plan refusal', async () => {
+  const { io, host, bundle } = await fixture(true), sessionId = 'session_TEST_ONLY'
+  const { workflowId } = await startWorkflow(io, await prepareWorkflow(io, { researchQuestion: 'TEST_ONLY fixed automatic scope', minimumSources: 1, minimumLocatedEvidence: 1 }, sessionId))
+  const current = await snapshot(io), review = await prepareModelReview(io, { context: { requestId: 'req_TEST_ONLY', workspaceId: 'workspace_TEST_ONLY', sessionId,
+    projectId: current.ledger.projectId, expectedLedgerRevision: current.ledger.revision }, assessmentScope: 'cross-section' }, { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' }, async () => bundle)
+  const preview = await prepareAutomatic(io, workflowId, sessionId, automaticPolicySchema.parse({}), review)
+  await startAutomatic(io, preview, { pid: 1, bootInstance: 'TEST_ONLY' })
+  assert.equal(await io.read(`.scholarflow/runs/${review.snapshot.runId}/input.json`), undefined)
+  await applyBindings(io, await prepareBindings(io, [], async () => bundle))
+  const scan = await knownSkillReferences(host, bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, new AbortController().signal)
+  assert.deepEqual(scan.references, [{ workspaceId: 'workspace_TEST_ONLY', kind: 'run', recordId: preview.input.automaticId }])
+  assert.doesNotMatch(JSON.stringify(scan), /C:\/TEST_ONLY/u)
+  const latest = await snapshot(io), copy = await prepareProjectCopy(io, { expectedRevision: latest.ledger.revision, sourceSessionId: sessionId,
+    rootFingerprint: 'sha256:' + '0'.repeat(64), reason: 'TEST_ONLY copy retains original automatic fixed resource history' })
+  await applyProjectCopy(io, copy)
+  assert.deepEqual((await knownSkillReferences(host, bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, new AbortController().signal)).references, scan.references)
+  const path = `.scholarflow/runs/${workflowId}/automatic/${preview.input.automaticId}/review-plan.json`
+  const frozen = JSON.parse((await io.read(path))!.text); frozen.snapshot.skillDigests = []; io.externalEdit(path, json(frozen))
+  await assert.rejects(knownSkillReferences(host, bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, new AbortController().signal), { code: 'INVALID_APPROVAL' })
+})
 
 test('reference scans retain project and historical-run references and hash observations without returning root paths', async () => {
   const { io, host, bundle } = await fixture(), current = await snapshot(io)

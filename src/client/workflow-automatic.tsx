@@ -8,6 +8,7 @@ export function AutomaticWorkflow({ workflow, context, api, refresh, inspectWork
   const [value, setValue] = useState<any>(), [preview, setPreview] = useState<any>(), [active, setActive] = useState<any>(), [error, setError] = useState('')
   const [ruleReview, setRuleReview] = useState(true), [delivery, setDelivery] = useState(false), [insufficient, setInsufficient] = useState(false), [stopRevision, setStopRevision] = useState(false)
   const [reason, setReason] = useState(''), [steps, setSteps] = useState(32), [noProgress, setNoProgress] = useState(2)
+  const [modelReview, setModelReview] = useState(false)
   const inspect = async () => { const result = await api('automatic.inspect', { context: context(), workflowId }); setValue(result); setError('') }
   useEffect(() => { let live = true
     api('automatic.inspect', { context: context(), workflowId }).then(result => { if (live) { setValue(result); setError('') } }).catch(e => live && setError(e.message))
@@ -18,7 +19,7 @@ export function AutomaticWorkflow({ workflow, context, api, refresh, inspectWork
   const action = (action: string) => run(async () => setPreview(await api('automatic.prepareAction', { context: context(), workflowId,
     automaticId: state.automaticId, action, reason })))
   return <section aria-label="有限自动推进"><h4>有限自动推进</h4>
-    <p>当前支持按已保存事实自动推进、规则审查和工作草稿交付；模型生成与在线检索仍由各阶段的明确计划执行。未确认大纲、缺章节、证据不足或输入变化会停止。</p>
+    <p>按已保存事实自动推进，可另外授权一次固定模型的完整五项审查；章节生成与在线检索仍由各阶段计划执行。未确认大纲、缺章节、证据不足或输入变化会停止。</p>
     <button disabled={busy} onClick={() => run(inspect)}>刷新自动推进检查点</button>
     {error && <p role="alert">{error}</p>}
     {state && <><p role="status" aria-label="自动推进状态">{state.automaticId} · {state.status} · {state.code ?? ''} · {state.reason}</p>
@@ -28,13 +29,14 @@ export function AutomaticWorkflow({ workflow, context, api, refresh, inspectWork
     {limits && <p role="status" aria-label="自动推进原任务额度">步骤 {limits.usedSteps}/{limits.maxSteps} · 无进展 {limits.noProgress}/{limits.maxNoProgress}；新尝试不重置上限。</p>}
     {!taskEnded && (!state || ended(state)) && <>
       <label><input type="checkbox" aria-label="授权自动规则审查" checked={ruleReview} disabled={busy} onChange={e => setRuleReview(e.target.checked)} />自动运行缺少的同版规则审查</label>
+      <label><input type="checkbox" aria-label="授权自动五项模型审查" checked={modelReview} disabled={busy} onChange={e => setModelReview(e.target.checked)} />在审查阶段发送当前已保存全文、要求和相关证据，执行一次五项模型审查（预览固定宿主模型）</label>
       <label><input type="checkbox" aria-label="授权自动工作草稿交付" checked={delivery} disabled={busy} onChange={e => setDelivery(e.target.checked)} />自动创建同版工作草稿交付（不标记已审查）</label>
       <label><input type="checkbox" aria-label="明确保留检索不足继续" checked={insufficient} disabled={busy} onChange={e => setInsufficient(e.target.checked)} />未达证据数量时，按以下理由保留不足继续；不允许编造正文</label>
       <label><input type="checkbox" aria-label="明确保留问题结束修订" checked={stopRevision} disabled={busy} onChange={e => setStopRevision(e.target.checked)} />没有可执行修复时，按以下理由保留问题结束修订</label>
       <label>整份目标步骤上限<input aria-label="自动推进步骤上限" type="number" min={7} max={64} value={limits?.maxSteps ?? steps} disabled={busy || !!limits} onChange={e => setSteps(Number(e.target.value))} /></label>
       <label>连续无进展上限<input aria-label="自动推进无进展上限" type="number" min={1} max={3} value={limits?.maxNoProgress ?? noProgress} disabled={busy || !!limits} onChange={e => setNoProgress(Number(e.target.value))} /></label>
       <button disabled={busy || workflow.configChanged || workflow.checkpoint.status !== 'waiting-input' || (insufficient || stopRevision) && reason.trim().length < 10}
-        onClick={() => run(async () => setPreview(await api('automatic.prepare', { context: context(), workflowId, policy: { ruleReview, workingDraftDelivery: delivery,
+        onClick={() => run(async () => setPreview(await api('automatic.prepare', { context: context(), workflowId, modelReview, policy: { ruleReview, workingDraftDelivery: delivery,
           maxSteps: limits?.maxSteps ?? steps, maxNoProgress: limits?.maxNoProgress ?? noProgress,
           ...(insufficient && { insufficientResearchReason: reason }), ...(stopRevision && { stopRevisionReason: reason }) } })))}>预览自动推进已保存阶段</button>
     </>}
@@ -44,13 +46,16 @@ export function AutomaticWorkflow({ workflow, context, api, refresh, inspectWork
     </>}
     {!taskEnded && <label>自动推进保留缺口／恢复／结束理由<textarea aria-label="自动推进决定理由" maxLength={4000} value={reason} disabled={busy || !!preview} onChange={e => setReason(e.target.value)} /></label>}
     {active && <div aria-label="正在自动推进"><p role="status">已开始有限调度，按原预算保存结果。</p>
+      <p>暂停等待当前有限调用完成保存后停止后续调度；取消会传到正在执行的调用。已消耗额度与未知响应记录保留。</p>
       {(['pause', 'cancel'] as const).map(action => <button key={action} onClick={() => api('automatic.control', { context: active.context, workflowId, automaticId: active.automaticId, action }).catch(e => setError(e.message))}>{action === 'pause' ? '暂停自动推进' : '取消自动推进'}</button>)}</div>}
     {preview && <section role="dialog" aria-label="自动推进确认"><h4>{preview.action ? '确认恢复／结束' : '确认有限推进范围'}</h4>
       {preview.input && <><p>只推进当前已保存事实；规则审查 {preview.input.policy.ruleReview ? '允许' : '不允许'} · 工作草稿交付 {preview.input.policy.workingDraftDelivery ? '允许' : '不允许'}。</p>
         <p>原步骤上限 {preview.input.policy.maxSteps} · 无进展上限 {preview.input.policy.maxNoProgress}。</p>
         {preview.input.policy.insufficientResearchReason && <p>保留检索不足：{preview.input.policy.insufficientResearchReason}</p>}
         {preview.input.policy.stopRevisionReason && <p>保留问题结束修订：{preview.input.policy.stopRevisionReason}</p>}
-        <p>当前输入指纹 {preview.input.dependencyHash}。不调用模型或在线检索，不接受正文修改。</p></>}
+        {preview.input.modelReview ? <><p>模型 {preview.input.modelReview.modelDescriptor.providerId} / {preview.input.modelReview.modelDescriptor.modelId} · 当前范围 {preview.input.modelReview.inputBytes} 字节 · 五项检查：论证、文风、术语、贡献项、摘要／结论与实际正文。</p>
+          <p>向此宿主模型发送当前已保存全文、要求、相关定位证据、批准记忆、文风与固定 Skill；不发送未选资料全文。原模型调用与审查轮次预算不重置。</p></> : <p>不调用模型。</p>}
+        <p>当前输入指纹 {preview.input.dependencyHash}。不新增在线检索，不接受正文修改。</p></>}
       {preview.action && <p>{preview.action} · {preview.reason}</p>}
       {preview.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy} onClick={() => run(async () => {

@@ -8,6 +8,8 @@ import { workflowInputSchema, workflowPlanSchema, workflowRunSchema } from '../.
 import { workflowCheckpointSchema } from '../../shared/workflow.ts'
 import { invariant } from '../../shared/errors.ts'
 import { verifiedIdentityLineage } from '../../core/project/identity.ts'
+import { automaticInputSchema, automaticStateSchema } from '../../shared/workflow-automatic.ts'
+import { validateFrozenModelReview } from '../../core/review/model-run.ts'
 
 type Host = any
 export async function knownSkillReferences(ctx: Host, qualifiedId: string, resourceDigest: string, signal: AbortSignal) {
@@ -30,7 +32,8 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
     const read = async (path: string) => {
       const selected = await target(path), before = await ctx.fs.stat(selected, signal)
       if (!before) { observations.push({ rootFingerprint, path, hash: 'absent' }); return undefined }
-      const cap = /^\.scholarflow\/identity\/history\/project_copy_[a-f0-9]{32}\.json$/u.test(path) ? 8 * 1024 * 1024 : 2 * 1024 * 1024
+      const cap = /^\.scholarflow\/runs\/workflow_[\w]+\/automatic\/automatic_[\w]+\/review-plan\.json$/u.test(path) ? 20 * 1024 * 1024 :
+        /^\.scholarflow\/identity\/history\/project_copy_[a-f0-9]{32}\.json$/u.test(path) ? 8 * 1024 * 1024 : 2 * 1024 * 1024
       invariant(before.type === 'file' && before.size <= cap, 'SKILL_REFERENCES_UNAVAILABLE', '已登记项目的引用记录类型或大小异常，未卸载。')
       const text = await ctx.fs.readText(selected, signal)
       invariant((await ctx.fs.stat(selected, signal))?.version === before.version, 'SKILL_REFERENCES_CHANGED', '引用检查期间项目记录改变，未卸载。')
@@ -81,8 +84,34 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
             plan.inputHash === digest(text) && contentHash === digest(json(body)) && state.planHash === contentHash && checkpoint.planHash === contentHash &&
             state.checkpointHash === digest(checkpointText) && state.status === checkpoint.status,
             'SKILL_REFERENCES_UNAVAILABLE', '引导目标身份或摘要改变，引用状态未知，未卸载。')
-          // The goal record declares no fixed Skill versions; actual stage
-          // snapshots retain their own references and are scanned separately.
+          const automaticPath = `.scholarflow/runs/${row.name}/automatic`, automaticRoot = await target(automaticPath), automaticInfo = await ctx.fs.stat(automaticRoot, signal)
+          if (automaticInfo) {
+            invariant(automaticInfo.type === 'directory', 'SKILL_REFERENCES_UNAVAILABLE', '自动推进目录类型异常，未卸载。')
+            const attempts = await ctx.fs.listDir(automaticRoot, signal)
+            invariant(attempts.length <= 1000, 'SKILL_REFERENCE_SCAN_LIMIT', '自动推进记录过多，未卸载。')
+            observations.push({ rootFingerprint, path: automaticPath, hash: digest(json(attempts.map((attempt: Host) => ({ name: attempt.name, type: attempt.type })).sort((a: Host, b: Host) => a.name.localeCompare(b.name)))) })
+            for (const attempt of attempts) {
+              if (attempt.type === 'file' && attempt.name === 'current.json') continue
+              invariant(attempt.type === 'directory' && /^automatic_[\w]+$/u.test(attempt.name) && ++checkedRuns <= 1000,
+                'SKILL_REFERENCES_UNAVAILABLE', '自动推进包含未知记录，未卸载。')
+              const prefix = `${automaticPath}/${attempt.name}`, [automaticText, automaticStateText] = await Promise.all([read(`${prefix}/input.json`), read(`${prefix}/run.json`)])
+              invariant(automaticText && automaticStateText, 'SKILL_REFERENCES_UNAVAILABLE', '自动推进快照不完整，未卸载。')
+              const automatic = automaticInputSchema.parse(JSON.parse(automaticText)), automaticState = automaticStateSchema.parse(JSON.parse(automaticStateText))
+              invariant([automatic, automaticState].every(value => value.projectId === input.projectId && value.workflowId === row.name && value.automaticId === attempt.name) &&
+                automatic.workflowPlanHash === contentHash && automaticState.inputHash === digest(automaticText), 'SKILL_REFERENCES_UNAVAILABLE', '自动推进摘要或身份改变，未卸载。')
+              if (automatic.modelReview) {
+                const reviewText = await read(`${prefix}/review-plan.json`)
+                invariant(reviewText, 'SKILL_REFERENCES_UNAVAILABLE', '固定审查说明快照缺失，未卸载。')
+                const review: unknown = JSON.parse(reviewText); validateFrozenModelReview(review)
+                invariant(review.contentHash === automatic.modelReview.planHash && review.snapshot.projectId === input.projectId && review.snapshot.workflowId === row.name &&
+                  review.snapshot.sessionId === automatic.sessionId && review.snapshot.runId === automatic.modelReview.runId &&
+                  review.dependencyHash === automatic.dependencyHash && json(review.snapshot.skillDigests) === json(automatic.modelReview.skillDigests),
+                  'SKILL_REFERENCES_UNAVAILABLE', '固定审查说明身份或摘要改变，未卸载。')
+                if (automatic.modelReview.skillDigests.some(skill => skill.qualifiedId === qualifiedId && skill.digest === resourceDigest))
+                  references.push({ workspaceId: workspace.id, kind: 'run', recordId: automatic.automaticId })
+              }
+            }
+          }
         } else {
           const input = draftSequenceInputSchema.parse(JSON.parse(text)), plan = draftSequencePlanSchema.parse(JSON.parse(planText)), state = draftSequenceRunSchema.parse(JSON.parse(stateText))
           const checkpoint = draftSequenceCheckpointSchema.parse(JSON.parse(checkpointText)), { contentHash, ...body } = plan
