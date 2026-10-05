@@ -25,7 +25,7 @@ Desktop client/Host connection both pass. No DSH core files were patched.
 | Native request killed while pending | One original charged call retained; no replay, refund or body change |
 | Actual Electron Desktop | ScholarFlow client loaded and Host connected |
 | Tarball install/remove/reboot | Passed; complete 18-file project tree preserved |
-| Three real model teaching projects, five generated sections each | Final research-paper run pending |
+| Three real model teaching projects, five generated sections each | Passed: course 10/12, literature 6/12, research 9/12 original calls |
 
 Reproduction scripts are `tests/e2e/installed-host-smoke.mjs`,
 `installed-paper-types.mjs` and `installed-package-lifecycle.mjs`.
@@ -37,7 +37,8 @@ opt-in and incur bounded actual calls; fixture adapters are separately labelled.
 The long cases use the original twelve-call allowance, frozen at initialization.
 Course-paper used 10/12, including a refused two-attempt correction. The actual
 accepted correction was reassessed by the provider; repetition in other sections
-still failed, so the finding remains open. Literature-review used 6/12. Resume
+still failed, so the finding remains open. Literature-review used 6/12 and
+research-paper 9/12, retaining two calls from its failed review run. Resume
 reuses accepted chapters and same-version reports; failed calls remain charged.
 
 Delivery is a same-version Markdown/BibTeX/quality-report working draft.
@@ -53,4 +54,8 @@ The private library never registers an ordinary global Skill provider.
 
 The source-map paths are relative, build/dependency/test data are excluded from
 Git, and the tarball includes its README-linked explanatory documentation.
-Final package SHA-256 and the remaining native case will be recorded at signoff.
+The source implementation checkpoint is `e6c2ade`. All three cases completed,
+their frozen summary inputs matched the actually accepted preceding body, and
+all frozen model inputs excluded unselected teaching material. Credential bytes
+remained unchanged. Package SHA-256 is recorded outside the tarball in the parent
+acceptance record to avoid a self-referential archive hash.
