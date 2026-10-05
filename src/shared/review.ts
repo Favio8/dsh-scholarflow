@@ -15,10 +15,12 @@ export const manualAssessmentSchema = z.object({ checkId: id, status: z.enum(['p
   reason: z.string().trim().min(10).max(4000), evidenceIds: z.array(id).max(100), claimIds: z.array(id).max(100), requirementIds: z.array(id).max(100) }).strict()
 export const manualReviewRequest = z.object({ context: requestContext, reviewId: id, assessments: z.array(manualAssessmentSchema).min(1).max(100) }).strict()
 const semanticStatus = z.enum(['pass', 'fail', 'unknown'])
-export const modelReviewRequest = z.object({ context: requestContext }).strict()
-export const modelReviewOutputSchema = z.object({ checks: z.array(z.object({ id: z.enum(['argument_assessment', 'style_assessment']), status: semanticStatus,
-  detail: z.string().min(10).max(4000) }).strict()).length(2),
+export const semanticReviewChecks = ['argument_assessment', 'style_assessment', 'terminology_consistency', 'contribution_consistency', 'summary_body_consistency'] as const
+export const modelReviewRequest = z.object({ context: requestContext, assessmentScope: z.enum(['cross-section', 'argument-style']).default('cross-section') }).strict()
+export const modelReviewOutputSchema = z.object({ checks: z.array(z.object({ id: z.enum(semanticReviewChecks), status: semanticStatus,
+  detail: z.string().min(10).max(4000) }).strict()).min(2).max(5),
   findings: z.array(z.object({ category: z.enum(['citation', 'evidence', 'logic', 'structure', 'requirement', 'style', 'integrity']), severity: z.enum(['B0', 'B1', 'B2']),
+    assessmentId: z.enum(semanticReviewChecks).optional(),
     title: z.string().min(1).max(500), explanation: z.string().min(10).max(4000), suggestedFix: z.string().min(1).max(4000), blockId: id, quote: z.string().min(1).max(4000),
     claimIds: z.array(id).max(100), evidenceIds: z.array(id).max(100), requirementIds: z.array(id).max(100) }).strict()).max(100),
   rechecks: z.array(z.object({ issueId: id, status: semanticStatus, reason: z.string().min(10).max(4000), blockId: id, quote: z.string().min(1).max(4000) }).strict()).max(100),

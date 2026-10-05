@@ -33,10 +33,11 @@ export function ModelReview({ project, context, api, refresh, run, busy, onRevie
   const rows = history?.runs.filter((row: any) => row.stage === 'review') ?? []
   const preview = actionPlan ?? plan
   return <section aria-label="模型辅助审查"><h4>模型辅助审查</h4>
-    <p>按当前全部已保存正文执行论证和文风审查；未保存编辑不进入本轮。问题须有真实源码位置，模型结果不能替代人工核对或实验记录。</p>
+    <p>按当前全部已保存正文分别审查论证、文风、跨节术语、贡献项及摘要／结论与正文的一致性。未保存编辑不进入本轮；缺项和无法判断保持未知。问题须有真实源码位置，修复另行生成建议并由你接受。</p>
     <button disabled={busy || project.document.externalChange || !!preview} onClick={() => run(async () => setPlan(await api('review.prepareModel', { context: context() })))}>预览模型辅助审查</button>
     {preview && <section role="dialog" aria-label="模型审查确认"><h4>{actionPlan ? actionPlan.action === 'resume' ? '确认恢复原审查' : '确认关联新审查' : '确认模型审查范围'}</h4>
       <p>{preview.model.providerId} / {preview.model.modelId}{preview.model.reasoningEffort ? ` · ${preview.model.reasoningEffort}` : ''} · 段落 {preview.blocks} · 输入约 {preview.inputBytes} bytes</p>
+      <p>本次冻结检查：{preview.assessments?.join('、')}</p>
       <p>正文版本：{preview.documentHash} · 证据 {preview.evidenceIds.length} · 实际引用来源 {preview.sourceIds.length} · 调用上限 {preview.budget.maxModelCalls} · {preview.budget.maxDurationMinutes} 分钟</p>
       {preview.workflowId && <p>计入引导任务 {preview.workflowId} 的原累计预算与模型审查轮次；未知响应不推定未计费。</p>}
       <p>每次调用输出上限：{preview.model.maxOutputTokens ?? 4096} tokens，包含提供方计费的推理输出；达到上限会停止并保留失败记录。</p>

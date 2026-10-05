@@ -8,6 +8,7 @@ import { runReview, inspectReview } from '../../src/core/review/review.ts'
 import { prepareManualReview, submitManualReview } from '../../src/core/review/manual.ts'
 import { prepareDelivery, createDelivery, readDelivery } from '../../src/core/export/delivery.ts'
 import { digest } from '../../src/core/store/files.ts'
+import { semanticReviewChecks } from '../../src/shared/review.ts'
 
 async function setup(type = 'course-paper') {
   const io = new MemoryStore({ 'raw.txt': 'TEST_ONLY unchanged source' })
@@ -57,7 +58,7 @@ test('manual review cannot certify missing experiments, deterministic failures, 
 test('AT-20/21/22: same-version completed checks permit an honest reviewed draft and a later adverse manual assessment reopens its issue', async () => {
   const { io, review } = await setup()
   const input = await request(io, review.report.id)
-  input.assessments.push({ ...input.assessments[0], checkId: 'style_assessment' })
+  input.assessments.push(...semanticReviewChecks.slice(1).map(checkId => ({ ...input.assessments[0], checkId })))
   const assessed = await submitManualReview(io, await prepareManualReview(io, input), 'session_TEST_ONLY')
   const plan = await prepareDelivery(io)
   assert.equal(plan.reviewedAllowed, true); assert.equal(plan.reviewState, 'draft-reviewed')
@@ -67,5 +68,16 @@ test('AT-20/21/22: same-version completed checks permit an honest reviewed draft
   const negative = await submitManualReview(io, await prepareManualReview(io, await request(io, assessed.report.id, 'style_assessment', 'fail')), 'session_TEST_ONLY')
   const issue = negative.ledger.reviewIssues[`issue_${digest('style_assessment').slice(7, 31)}`]
   assert.equal(issue.state, 'open'); assert.equal(issue.checkMethod, 'manual')
+  assert.equal((await prepareDelivery(io)).reviewedAllowed, false)
+})
+
+test('SF-013/025: checking argument and style alone never marks unperformed cross-section checks as passed or permits a reviewed delivery', async () => {
+  const { io, review } = await setup(), input = await request(io, review.report.id)
+  input.assessments.push({ ...input.assessments[0], checkId: 'style_assessment' })
+  const partial = await submitManualReview(io, await prepareManualReview(io, input), 'session_TEST_ONLY')
+  for (const checkId of semanticReviewChecks.slice(2)) {
+    assert.equal(partial.report.checks.find(check => check.id === checkId)!.status, 'unknown')
+    assert.equal(partial.ledger.reviewIssues[`issue_${digest(checkId).slice(7, 31)}`].state, 'open')
+  }
   assert.equal((await prepareDelivery(io)).reviewedAllowed, false)
 })

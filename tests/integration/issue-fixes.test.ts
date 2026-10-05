@@ -21,7 +21,8 @@ async function setup() {
     sections: [{ id: 'section_TEST_ONLY', title: 'TEST_ONLY 正文', purpose: 'TEST_ONLY 有限审查', claimIds: [], missingEvidence: [] }] }, 0, 0)
   await saveManual(io, `# TEST_ONLY 主稿\n\n## TEST_ONLY 正文\n\n${quote}\n\n${quote}\n`, initial.document.contentHash, 1)
   let current = await snapshot(io)
-  const plan = await prepareModelReview(io, { context: context(current) }, { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' })
+  // Preserve coverage of the explicitly bounded legacy two-check contract.
+  const plan = await prepareModelReview(io, { context: context(current), assessmentScope: 'argument-style' }, { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' })
   const result = await publishModelReview(io, plan, { checks: [{ id: 'argument_assessment', status: 'fail', detail: 'TEST_ONLY 第二段断言的支持范围尚未给出依据。' },
     { id: 'style_assessment', status: 'pass', detail: 'TEST_ONLY 本轮仅核对所列正文的表达形式。' }], findings: [{ category: 'logic', severity: 'B1', title: 'TEST_ONLY 第二段缺少范围',
       explanation: 'TEST_ONLY 此段没有说明证据来源和适用边界。', suggestedFix: 'TEST_ONLY 保留待核对状态并收窄范围。', blockId: plan.context.blocks.at(-1)!.id, quote, claimIds: [], evidenceIds: [], requirementIds: [] }], rechecks: [], limitations: ['TEST_ONLY 固定响应。'] })
@@ -72,7 +73,7 @@ test('SF-024: issue fix uses the second exact paragraph, checkpoints its cause a
   assert.equal((await io.read('raw.txt'))!.text, 'TEST_ONLY original bytes\r\n')
   const revision = after.ledger.revision, again = await acceptAndRecheck(io, result.proposal!.id, revision, result.proposalHash!)
   assert.equal(again.alreadyApplied, true); assert.equal((await snapshot(io)).ledger.revision, revision)
-  const next = await prepareModelReview(io, { context: context(await snapshot(io)) }, { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' })
+  const next = await prepareModelReview(io, { context: context(await snapshot(io)), assessmentScope: 'argument-style' }, { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' })
   await publishModelReview(io, next, { checks: [{ id: 'argument_assessment', status: 'pass', detail: 'TEST_ONLY 已针对新稿的范围逐项复核。' }, { id: 'style_assessment', status: 'pass', detail: 'TEST_ONLY 已核对当前新稿的表达形式。' }], findings: [],
     rechecks: [{ issueId: issue.id, status: 'pass', reason: 'TEST_ONLY 修订后保留待核对状态并收窄判断范围，原问题已针对当前稿件复查。', blockId: next.context.blocks.at(-1)!.id, quote: replacement }], limitations: ['TEST_ONLY 固定复查。'] })
   assert.equal((await snapshot(io)).ledger.reviewIssues[issue.id].state, 'resolved')

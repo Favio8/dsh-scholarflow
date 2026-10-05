@@ -2,16 +2,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
-import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
+import { initialize, prepareInit, snapshot, updateProjectText } from '../../src/core/project/project.ts'
 import { confirmOutline } from '../../src/core/evidence/evidence.ts'
 import { saveManual } from '../../src/core/editing/proposals.ts'
-import { prepareModelReview, validateModelReview, publishModelReview, type ModelReviewPlan } from '../../src/core/review/model.ts'
+import { prepareModelReview, validateModelReview, publishModelReview, verifyModelReviewPlan, type ModelReviewPlan } from '../../src/core/review/model.ts'
 import { executeModelReview, readModelReviewCheckpoint, readFrozenModelReview, prepareModelReviewAction, linkModelReviewRetry } from '../../src/core/review/model-run.ts'
 import { readRun, runFile, ACTIVE_RUN } from '../../src/core/pipeline/run-store.ts'
 import { checkpointFile, prepareRunAction, closeRun } from '../../src/core/pipeline/run-control.ts'
 import { digest, json } from '../../src/core/store/files.ts'
 import { inspectReview } from '../../src/core/review/review.ts'
 import { ScholarError } from '../../src/shared/errors.ts'
+import { semanticReviewChecks } from '../../src/shared/review.ts'
 const owner = { pid: 12345, bootInstance: 'TEST_ONLY-review' }
 const quote = 'TEST_ONLY 声称没有依据的普遍结论。'
 async function setup(type = 'course-paper') {
@@ -31,11 +32,83 @@ async function prepare(io: MemoryStore) {
 }
 function output(plan: ModelReviewPlan, findings = true) {
   return { checks: [{ id: 'argument_assessment', status: findings ? 'fail' : 'pass', detail: 'TEST_ONLY 当前文字的论证范围已经按给定上下文检查。' },
-    { id: 'style_assessment', status: 'pass', detail: 'TEST_ONLY 本轮只核对给定段落的文风，不提供接收概率。' }],
-    findings: findings ? [{ category: 'logic', severity: 'B1', title: 'TEST_ONLY 缺少依据', explanation: 'TEST_ONLY 当前断言未提供普遍适用的证据，应保留适用范围。', suggestedFix: 'TEST_ONLY 补充真实依据或收窄结论。',
+    { id: 'style_assessment', status: 'pass', detail: 'TEST_ONLY 本轮只核对给定段落的文风，不提供接收概率。' },
+    ...(plan.context.semanticScope ? semanticReviewChecks.slice(2).map(id => ({ id, status: 'unknown', detail: 'TEST_ONLY 本夹具没有摘要、结论和贡献声明，保留跨节检查限制。' })) : [])],
+    findings: findings ? [{ category: 'logic', severity: 'B1', ...(plan.context.semanticScope && { assessmentId: 'argument_assessment' }), title: 'TEST_ONLY 缺少依据', explanation: 'TEST_ONLY 当前断言未提供普遍适用的证据，应保留适用范围。', suggestedFix: 'TEST_ONLY 补充真实依据或收窄结论。',
       blockId: plan.context.blocks.at(-1)!.id, quote, claimIds: [], evidenceIds: [], requirementIds: [] }] : [], rechecks: [], limitations: ['TEST_ONLY 模拟审查不是提供方结果。'] }
 }
 const execute = (io: MemoryStore, plan: ModelReviewPlan, call: any, pauseRequested = () => false) => executeModelReview(io, plan, owner, new AbortController().signal, call, () => true, { pauseRequested })
+
+test('SF-013/023: full saved chapters and confirmed terminology are frozen for distinct cross-section checks; a false summary stays positioned and never edits the body', async () => {
+  const { io } = await setup('research-paper')
+  let current = await snapshot(io)
+  await confirmOutline(io, { ...current.ledger.outline, sections: ['摘要', '方法', '结论'].map((title, index) => ({
+    id: `section_TEST_ONLY_${index}`, title, purpose: 'TEST_ONLY 跨节审查', claimIds: [], missingEvidence: [] })) }, current.ledger.revision, current.ledger.outline.version)
+  current = await snapshot(io)
+  const body = '# TEST_ONLY 全文\r\n\r\n## 摘要\r\n\r\nTEST_ONLY 提出两项贡献，并报告实验已经取得改善。\r\n\r\n## 方法\r\n\r\nTEST_ONLY 只设计了一项方法，实验尚未执行。\r\n\r\n## 结论\r\n\r\nTEST_ONLY 实验已经取得改善。\r\n'
+  await saveManual(io, body, current.document.contentHash, current.ledger.revision)
+  current = await snapshot(io)
+  const path = '.scholarflow/context/terminology.md', original = await io.read(path)
+  await updateProjectText(io, path, '# TEST_ONLY 已确认术语\n\nTEST_ONLY 方法：尚未执行实验的计划。\n', digest(original!.text), current.ledger.revision, 'session_TEST_ONLY')
+  const plan = await prepare(io), result = output(plan, false)
+  result.checks[0].status = 'fail'; result.checks.find(check => check.id === 'summary_body_consistency')!.status = 'fail'
+  const summaryQuote = 'TEST_ONLY 实验已经取得改善。'
+  result.findings.push({ category: 'integrity', severity: 'B0', assessmentId: 'summary_body_consistency', title: 'TEST_ONLY 总结越过真实结果',
+    explanation: 'TEST_ONLY 方法明确表示实验未执行，结论却宣称取得改善；这是固定测试响应，不是在线模型判断。', suggestedFix: 'TEST_ONLY 生成待补结果的修订建议，保留方法与人工稿。',
+    blockId: plan.context.blocks.at(-1)!.id, quote: summaryQuote, claimIds: [], evidenceIds: [], requirementIds: [] } as any)
+  const reviewed = await execute(io, plan, async request => {
+    assert.equal(request.context.manuscript, body); assert.equal(request.context.outline.sections.length, 3)
+    assert.match(request.context.approvedMemory.terminology, /尚未执行实验/u)
+    assert.match(request.system, /摘要.*实际已保存正文/u); assert.match(request.system, /贡献项数量/u)
+    return json(result)
+  })
+  assert.equal(reviewed.report!.checks.filter(check => (semanticReviewChecks as readonly string[]).includes(check.id) && check.method === 'model-assisted').length, 5)
+  const issue = reviewed.report!.issues.find(row => row.location && row.category === 'integrity')!
+  assert.equal(issue.location!.sourceRange.startUtf16, body.lastIndexOf(summaryQuote)); assert.equal(issue.severity, 'B0'); assert.equal(issue.state, 'open')
+  assert.equal((await snapshot(io)).document.text, body)
+})
+
+test('cross-section contracts refuse omitted checks, duplicate identities, missing finding attribution and scope downgrade', async () => {
+  const { plan } = await setup(), omitted = output(plan); omitted.checks.pop()
+  assert.throws(() => validateModelReview(plan, omitted), { code: 'MODEL_REVIEW_INVALID' })
+  const duplicated = output(plan); duplicated.checks[4] = duplicated.checks[3]
+  assert.throws(() => validateModelReview(plan, duplicated), { code: 'MODEL_REVIEW_INVALID' })
+  const unattributed = output(plan); delete unattributed.findings[0].assessmentId
+  assert.throws(() => validateModelReview(plan, unattributed), { code: 'MODEL_REVIEW_INVALID' })
+  const contradictory = output(plan); contradictory.findings[0].assessmentId = 'summary_body_consistency'; contradictory.checks[4].status = 'pass'
+  assert.throws(() => validateModelReview(plan, contradictory), { code: 'MODEL_REVIEW_INVALID' })
+  const narrowed = structuredClone(plan); delete narrowed.context.semanticScope
+  const { contentHash: _hash, ...body } = narrowed; narrowed.contentHash = digest(json(body))
+  assert.throws(() => verifyModelReviewPlan(narrowed), { code: 'INVALID_APPROVAL' })
+})
+
+test('distinct cross-section problems can reference one real paragraph without merging independent assessment identities', async () => {
+  const { io, plan } = await setup(), result = output(plan)
+  result.findings[0].assessmentId = 'contribution_consistency'
+  result.checks.find(check => check.id === 'contribution_consistency')!.status = 'fail'
+  result.checks.find(check => check.id === 'summary_body_consistency')!.status = 'fail'
+  result.findings.push({ ...result.findings[0], assessmentId: 'summary_body_consistency', title: 'TEST_ONLY 另一项具体一致性问题' })
+  const reviewed = await publishModelReview(io, plan, result as any), positioned = reviewed.report.issues.filter(issue => issue.location)
+  assert.equal(positioned.length, 2); assert.notEqual(positioned[0].id, positioned[1].id)
+  assert.deepEqual(positioned[0].location, positioned[1].location)
+})
+
+test('old two-check frozen scope resumes its exact output without invented consistency passes or another charged request', async () => {
+  const { io } = await setup(), current = await snapshot(io)
+  const basic = await prepareModelReview(io, { context: { requestId: 'req_TEST_ONLY_legacy', workspaceId: 'workspace_TEST_ONLY', sessionId: 'session_TEST_ONLY',
+    projectId: current.ledger.projectId, expectedLedgerRevision: current.ledger.revision }, assessmentScope: 'argument-style' }, { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' })
+  // TEST_ONLY archived shape before scope existed. Its hash covers the exact
+  // old input; validation must not inject a new default into the saved bytes.
+  delete (basic.input as any).assessmentScope
+  const { contentHash: _old, ...body } = basic; basic.contentHash = digest(json(body))
+  let calls = 0, pause = false
+  const first = await execute(io, basic, async request => { calls++; assert.match(request.system, /checks 恰好含 argument_assessment 和 style_assessment/u); pause = true; return json(output(basic, false)) }, () => pause)
+  const action = await prepareModelReviewAction(io, first.run.runId, 'resume', () => true)
+  const resumed = await executeModelReview(io, action.frozen, owner, new AbortController().signal, async () => { calls++; throw new Error('TEST_ONLY no replay') }, () => true,
+    { pauseRequested: () => false, resume: action })
+  assert.equal(calls, 1); assert.equal(resumed.run.usedModelCalls, 1)
+  assert.equal(resumed.report!.checks.find(check => check.id === 'summary_body_consistency')!.status, 'unknown')
+})
 
 test('SF-023: model review checkpoints inputs before I/O, locates the second identical paragraph, and keeps raw source and manuscript bytes unchanged', async () => {
   const { io, plan } = await setup(), original = (await snapshot(io)).document.text

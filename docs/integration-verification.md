@@ -1131,6 +1131,16 @@ host Service.listService  { service: "agentPresets" }      # 精确签名与引�
 
 ## 附录 A：G0 期间产生的副作用与清理
 
+2026-10-05 跨节审查补充：302/302 独立测试、类型检查和真实宿主
+`--live-model` 回归通过。实际模型报告含论证、文风、术语、贡献项、
+摘要／结论与实际正文五项独立结果，暂停恢复复用已计费输出，正文和
+来源保持原样，客户端错误为零。证据字段：
+`realProviderFiveDistinctChecksIncludeTermsContributionsAndSummaryAgainstSavedBody`。
+这是当前短稿的提供方合同验证；不等于三类长篇样例语义质量已签收。
+新 evaluator 摘要使旧报告过期，旧冻结两项范围及所有旧产物保留，
+不补写三项 pass 或重放付费请求；见
+[跨节审查 ADR](./decisions/cross-section-review-scope.md)。
+
 2026-10-05 编辑缓冲补充：297/297 独立测试及真实安装宿主零模型调用回归
 通过。术语未提交编辑在 Tab 切换与移除浏览器备份后可从 Host 明确恢复；
 主稿、术语原文、approvals 和 ledger 均逐字保持原状。正文在断线状态下

@@ -7,7 +7,8 @@ import { invariant, ScholarError } from '../../shared/errors.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
 import { reviewInput } from './review.ts'
-import { MODEL_REVIEW_SYSTEM, validateModelReview, verifyModelReviewPlan, existingModelReview, publishModelReview, type ModelReviewPlan } from './model.ts'
+import { modelReviewSystem, validateModelReview, verifyModelReviewPlan, existingModelReview, publishModelReview, type ModelReviewPlan } from './model.ts'
+import { semanticReviewChecks } from '../../shared/review.ts'
 import { ACTIVE_RUN, readRun, readRunInput, runFile, inputFile } from '../pipeline/run-store.ts'
 import { frozenPlanFile, checkpointFile } from '../pipeline/run-control.ts'
 import { transientRetry, waitRetrySlice } from '../pipeline/retry.ts'
@@ -28,7 +29,7 @@ const frozenSchema = z.object({ kind: z.literal('model-review'), id, reportId: i
     approvedMemory: z.partialRecord(z.enum(['decisions', 'terminology', 'writing-memory']), z.string().max(65536)),
     academicSkills: z.array(z.object({ priority: z.number().int().min(1), bindingId: id, qualifiedId: z.string(), digest: hash, metadata: skillMetadataSchema,
       instructions: z.string().max(65536), references: z.array(z.object({ relativePath: z.string(), content: z.string().max(65536), hash }).strict()).max(200), warnings: z.array(z.string()).max(300) }).strict()).max(30),
-    scope: z.string(), knownLimitations: z.array(z.object({ id, status: z.enum(['pass', 'fail', 'unknown']), detail: z.string() }).strict()) }).strict(),
+    scope: z.string(), semanticScope: z.literal('sf-cross-section-v1').optional(), knownLimitations: z.array(z.object({ id, status: z.enum(['pass', 'fail', 'unknown']), detail: z.string() }).strict()) }).strict(),
 }).strict()
 const checkpointSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('model-review'), runId: id, projectId: id, planHash: hash,
   formatAttempts: z.number().int().min(0).max(2), pendingCall: z.boolean(), repair: z.string().max(2000).optional(),
@@ -167,13 +168,13 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
       let raw: string
       try { raw = await workflowCall(io, plan.snapshot.workflowId, { callId: `${state.runId}.model.${state.usedModelCalls}`, runId: state.runId,
         stage: 'review', kind: 'model', activeDurationMs: state.activeDurationMs ?? 0, owner }, bounded,
-        signal => modelCall({ system: MODEL_REVIEW_SYSTEM, instruction: '按合同审查给定当前稿件，保留未知与证据边界，只返回结构化结果。', context: plan.context, repair: checkpoint.repair, signal, runId: state.runId, maxTokens: plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096 })) }
+        signal => modelCall({ system: modelReviewSystem(plan), instruction: '按冻结合同审查给定完整当前稿件，分别核对全部检查，保留未知与证据边界，只返回结构化结果。', context: plan.context, repair: checkpoint.repair, signal, runId: state.runId, maxTokens: plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096 })) }
       catch (error) { bounded.throwIfAborted(); const retry = transientRetry(error, checkpoint.transientRetries)
         if (!retry) throw error
         checkpoint.pendingCall = false; checkpoint.transientRetries = retry.retry; checkpoint.retryNotBefore = retry.notBefore; checkpoint.lastTransientCode = retry.code; await save(); continue }
       bounded.throwIfAborted(); checkpoint.pendingCall = false; checkpoint.formatAttempts++
       try { checkpoint.output = validateModelReview(plan, JSON.parse(raw)) }
-      catch { checkpoint.repair = '返回严格 JSON，checks 必须是数组 [{"id":"argument_assessment","status":"unknown","detail":"实际论证判断至少10字符。"},{"id":"style_assessment","status":"unknown","detail":"实际文风判断至少10字符。"}]，status 替换为实际 pass/fail/unknown，不能返回以检查名为键的对象。findings、rechecks、limitations 必须是数组；findings 和 rechecks 使用给定身份、实际源码块及其唯一连续原样 quote，关联 ID 只取本次范围。detail/explanation/reason 至少10字符。不能重复位置、制造引用或同时宣称有问题且通过。没有问题／复查时返回空数组，无法判断时明确 unknown。' }
+      catch { checkpoint.repair = `返回严格 JSON。checks 恰好包含以下不同检查名的数组，status 必须按实际依据填写 pass/fail/unknown，不能是以检查名为键的对象：${JSON.stringify((plan.context.semanticScope ? semanticReviewChecks : semanticReviewChecks.slice(0, 2)).map(id => ({ id, status: 'unknown', detail: '实际检查依据或无法判定的原因，至少10字符。' })))}。findings、rechecks、limitations 必须是数组；问题和复查使用给定身份、实际源码块及其唯一连续原样 quote，关联 ID 只取本次范围。${plan.context.semanticScope ? '每项 finding 必須有对应 assessmentId，关联的具体检查与论证／文风总检查不能同时 pass。' : ''}detail/explanation/reason 至少10字符。不能重复位置、制造引用或同时宣称有问题且通过。没有问题／复查时返回空数组，无法判断明确 unknown。` }
       await save()
       await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
     }

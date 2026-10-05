@@ -1366,6 +1366,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       workflowId: plan.snapshot.workflowId,
       documentHash: plan.snapshot.documentHash, evidenceIds: plan.context.evidence.map(item => item.id), sourceIds: plan.context.sources.map(source => source.id),
       blocks: plan.context.blocks.length, budget: plan.snapshot.budget, skillDigests: plan.snapshot.skillDigests,
+      assessments: plan.context.semanticScope ? ['论证', '文风', '跨节术语', '贡献项', '摘要／结论与实际正文'] : ['论证', '文风（旧冻结范围，跨节检查未执行）'],
       risks: ['向所列宿主模型发送当前全部已保存主稿、项目要求、相关论点、有效已选定位证据、已确认记忆、文风与本审查阶段固定 Skill 说明；本地模式不代表模型离线处理。',
         '只生成同版审查与问题，不修改正文或升级来源身份；未知项和未关闭问题保持可见。暂停／恢复保留调用预算，已有产物不重放。',
         '宿主会话保存模型请求与结果以供追溯，项目诊断不另存完整 Prompt；阶段最多一次格式修复和两次临时错误重试。'] }

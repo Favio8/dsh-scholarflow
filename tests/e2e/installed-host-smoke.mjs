@@ -907,6 +907,7 @@ try {
     const actualReport = JSON.parse(await readFile(join(projectRoot, '.scholarflow/reviews', actualReviewRun.reviewId, 'report.json'), 'utf8'))
     assert.equal(actualReport.modelRunId, pausedReview.runId); assert.equal(actualReport.documentHash, digest(manualBody))
     assert.equal(actualReport.checks.filter(row => ['argument_assessment', 'style_assessment'].includes(row.id) && row.method === 'model-assisted').length, 2)
+    assert.equal(actualReport.checks.filter(row => ['terminology_consistency', 'contribution_consistency', 'summary_body_consistency'].includes(row.id) && row.method === 'model-assisted').length, 3)
     for (const issue of actualReport.issues.filter(row => row.location)) {
       const range = issue.location.sourceRange
       assert.equal(manualBody.slice(range.startUtf16, range.endUtf16), issue.location.quote)
@@ -1531,6 +1532,7 @@ try {
     nativeUiDeterministicReview: true, nativeUiWorkingDraftExportDownload: true, exportDoesNotMutateBody: true,
     nativeUiManualReviewPreviewCancelConfirmAndVersionedHistory: true,
     realProviderModelReviewWithFixedSkillAndExactIssuePositions: liveModel,
+    realProviderFiveDistinctChecksIncludeTermsContributionsAndSummaryAgainstSavedBody: liveModel,
     realProviderModelReviewPauseResumeKeepsChargedCallsAndBody: liveModel,
     realProviderIssueFixLocatePreviewCancelAndRejectKeepsBody: liveModel,
     nativeCandidateEditCancelPublishRejectKeepsParentAndBody: liveModel,
