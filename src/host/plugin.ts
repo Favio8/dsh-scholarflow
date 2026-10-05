@@ -58,6 +58,7 @@ import { modelReviewRequest } from '../shared/review.ts'
 import { locateIssue, issueFixSelection } from '../core/review/issue-fixes.ts'
 import { acceptAndRecheck } from '../core/review/fix-workflow.ts'
 import { id } from '../shared/schema.ts'
+import { prepareSourceRegistration, confirmSourceRegistration, type SourceRegistrationPlan } from '../core/research/source-registration.ts'
 
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
@@ -94,6 +95,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private modelReviewPlans = new Map<string, { plan: ModelReviewPlan; peerId: string; expires: number; selected: { provider: string; model: string; reasoningEffort?: string } }>()
   private modelReviewActions = new Map<string, { action: ModelReviewAction; plan: ModelReviewPlan; context: RequestContext; peerId: string; expires: number; selected?: { provider: string; model: string; reasoningEffort?: string } }>()
   private proposalRevisionPlans = new Map<string, { plan: ProposalRevisionPlan; peerId: string; expires: number }>()
+  private sourceRegistrationPlans = new Map<string, { plan: SourceRegistrationPlan; peerId: string; expires: number }>()
   private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
   private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
   private skillPlans = new Map<string, { resource: { kind: 'local'; bundle: SkillBundle } | { kind: 'github'; preview: GithubSkillPreview }; hash: string; peerId: string; expires: number }>()
@@ -107,6 +109,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     this.researchProvider = crossrefProvider(ctx.web)
     this.githubProvider = githubSkills(ctx.web)
     ctx.effect(() => () => this.proposalRevisionPlans.clear(), 'scholarflow: clear operator candidate previews')
+    ctx.effect(() => () => this.sourceRegistrationPlans.clear(), 'scholarflow: clear source registration previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
     ctx.effect(() => {
       const timer = setInterval(() => this.pruneSkills(), 60000)
@@ -274,6 +277,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   }
 
   private pruneSkills() {
+    for (const [key, row] of this.sourceRegistrationPlans) if (row.expires < Date.now()) this.sourceRegistrationPlans.delete(key)
     for (const [key, row] of this.proposalRevisionPlans) if (row.expires < Date.now()) this.proposalRevisionPlans.delete(key)
     for (const [key, row] of this.modelReviewPlans) if (row.expires < Date.now()) this.modelReviewPlans.delete(key)
     for (const [key, row] of this.modelReviewActions) if (row.expires < Date.now()) this.modelReviewActions.delete(key)
@@ -1220,6 +1224,40 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => { this.requireOperator(); const input = readMaterialRequest.parse(request)
       const { io } = await resolveStore(this.ctx, input.context, signal)
       return readParsed(io, input.materialId) })
+  }
+
+  @Remote('sources.prepareRegistration')
+  async sourcesPrepareRegistration(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = registerSourceRequest.parse(request); mutationRevision(input.context); this.pruneSkills()
+      invariant(this.sourceRegistrationPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有来源登记预览。')
+      const { io } = await resolveStore(this.ctx, input.context, signal), plan = await prepareSourceRegistration(io, input)
+      this.sourceRegistrationPlans.set(plan.id, { plan, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, source: plan.input.source, matches: plan.matches,
+        risks: ['仅登记所列来源元数据，不查询网络、不核验出版身份、不迁移证据或合并正文引用。', '无版本号的 arXiv 标识指向最新版本，不能据此把不同本地文本视为相同。'] }
+    })
+  }
+
+  @Remote('sources.confirmRegistration')
+  async sourcesConfirmRegistration(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = runStartRequest.extend({ reason: z.string().trim().max(4000).default('') }).parse(request), row = this.sourceRegistrationPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请确认有效的来源登记预览。')
+      const expected = row.plan.input.context
+      invariant(input.context.workspaceId === expected.workspaceId && input.context.sessionId === expected.sessionId && input.context.projectId === expected.projectId && input.context.expectedLedgerRevision === expected.expectedLedgerRevision,
+        'SESSION_BINDING_CHANGED', '来源确认的项目、会话或版本改变。')
+      const { io } = await resolveStore(this.ctx, expected, signal), result = await confirmSourceRegistration(io, row.plan, input.reason, expected.sessionId)
+      this.sourceRegistrationPlans.delete(input.planId); return result
+    })
+  }
+
+  @Remote('sources.dismissRegistration')
+  async sourcesDismissRegistration(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ planId: id }).strict().parse(request), row = this.sourceRegistrationPlans.get(input.planId)
+      signal.throwIfAborted(); invariant(row && row.peerId === peerId, 'INVALID_APPROVAL', '来源预览不属于当前用户。')
+      this.sourceRegistrationPlans.delete(input.planId); return { dismissed: true }
+    })
   }
 
   @Remote('sources.register')

@@ -16,6 +16,8 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
   const [sourceTitle, setSourceTitle] = useState('')
   const [sourceAuthors, setSourceAuthors] = useState('')
   const [sourceDoi, setSourceDoi] = useState('')
+  const [sourceArxiv, setSourceArxiv] = useState(''), [sourceKind, setSourceKind] = useState('paper'), [sourceYear, setSourceYear] = useState('')
+  const [sourcePlan, setSourcePlan] = useState<any>(), [sourceReason, setSourceReason] = useState('')
   const [sourceId, setSourceId] = useState('')
   const [claimText, setClaimText] = useState('')
   const [scope, setScope] = useState('')
@@ -63,10 +65,26 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
     <label>来源标题<input aria-label="来源标题" value={sourceTitle} onChange={e => setSourceTitle(e.target.value)} /></label>
     <label>作者（每行一位）<textarea aria-label="来源作者" value={sourceAuthors} onChange={e => setSourceAuthors(e.target.value)} /></label>
     <label>DOI（可留空）<input aria-label="来源 DOI" value={sourceDoi} onChange={e => setSourceDoi(e.target.value)} /></label>
+    <label>arXiv 标识（保留版本号，可留空）<input aria-label="来源 arXiv 标识" value={sourceArxiv} maxLength={1000} onChange={e => setSourceArxiv(e.target.value)} /></label>
+    <label>来源类型<select aria-label="来源类型" value={sourceKind} onChange={e => setSourceKind(e.target.value)}>
+      <option value="paper">论文</option><option value="dataset">数据集</option><option value="web">网页</option><option value="book">书籍</option><option value="user-result">用户实际结果</option><option value="other">其他资料</option></select></label>
+    <label>来源年份（未知留空）<input aria-label="来源年份" type="number" min={1} max={9999} value={sourceYear} onChange={e => setSourceYear(e.target.value)} /></label>
     <button disabled={busy || !sourceTitle.trim() || !parsed?.blocks.length} onClick={() => run(async () => {
-      const result = await api('sources.register', { context: context(), source: { title: sourceTitle.trim(), kind: 'paper', authors: sourceAuthors.split('\n').filter(name => name.trim()).map(name => ({ literal: name.trim() })), identifiers: sourceDoi ? { doi: sourceDoi } : {}, materialId } })
-      setSourceId(result.source.id); await refresh()
+      setSourceReason(''); setSourcePlan(await api('sources.prepareRegistration', { context: context(), source: { title: sourceTitle.trim(), kind: sourceKind,
+        authors: sourceAuthors.split('\n').filter(name => name.trim()).map(name => ({ literal: name.trim() })), identifiers: { ...(sourceDoi && { doi: sourceDoi }), ...(sourceArxiv && { arxiv: sourceArxiv }) },
+        ...(sourceYear && { year: Number(sourceYear) }), materialId } }))
     })}>登记该资料的来源</button>
+    {sourcePlan && <section role="dialog" aria-label="来源登记确认"><h4>核对来源与具体文本</h4><p>{sourcePlan.source.title} · {({ paper: '论文', dataset: '数据集', web: '网页', book: '书籍', 'user-result': '用户实际结果', other: '其他资料' } as Record<string, string>)[sourcePlan.source.kind]} · {sourcePlan.source.year ?? '年份未知'}</p>
+      <p>DOI {sourcePlan.source.identifiers.doi ?? '无'} · arXiv {sourcePlan.source.identifiers.arxiv ?? '无'} · 本地资料 {project.ledger.materials[sourcePlan.source.materialId]?.projectRelativePath}</p>
+      {sourcePlan.matches.map((match: any) => <section key={match.sourceId}><p>{match.title} · {match.citeKey} · {({ 'same-arxiv-reference': '相同 arXiv 标识', 'same-arxiv-work': '同一 arXiv 作品的版本关联', 'similar-title': '标题疑似重复' } as Record<string, string>)[match.kind]} · {match.arxiv ?? '未提供 arXiv 标识'}</p><p>{match.warning}</p>
+        <button disabled={busy} onClick={() => run(async () => { await api('sources.dismissRegistration', { planId: sourcePlan.planId }); setSourceId(match.sourceId); setSourcePlan(undefined) })}>沿用已有来源 {match.sourceId}</button></section>)}
+      {!!sourcePlan.matches.length && <label>保留独立来源理由<textarea aria-label="保留独立来源理由" value={sourceReason} maxLength={4000} disabled={busy} onChange={e => setSourceReason(e.target.value)} /></label>}
+      {sourcePlan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
+      <button disabled={busy || sourcePlan.matches.length > 0 && !sourceReason.trim()} onClick={() => run(async () => {
+        const result = await api('sources.confirmRegistration', { context: context(), planId: sourcePlan.planId, planHash: sourcePlan.planHash, reason: sourceReason })
+        setSourceId(result.source.id); setSourcePlan(undefined); await refresh()
+      })}>确认登记独立来源</button>
+      <button disabled={busy} onClick={() => run(async () => { await api('sources.dismissRegistration', { planId: sourcePlan.planId }); setSourcePlan(undefined) })}>取消来源登记预览</button></section>}
     <label>来源<select aria-label="来源" value={sourceId} onChange={e => setSourceId(e.target.value)}><option value="">请选择</option>{sources.map(source => <option key={source.id} value={source.id}>{source.title} · {source.identity.status} · [@{source.citeKey}]</option>)}</select></label>
     <OnlineResearch project={project} sourceId={sourceId} context={context} api={api} refresh={refresh} run={run} busy={busy} />
     <button disabled={busy || !block || !sourceId || project.ledger.sources[sourceId]?.materialId !== materialId} onClick={() => run(async () => {

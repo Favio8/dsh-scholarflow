@@ -1,4 +1,5 @@
 import { test } from 'node:test'
+import { prepareSourceRegistration, confirmSourceRegistration } from '../../src/core/research/source-registration.ts'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
@@ -90,7 +91,10 @@ test('recent-reference ratio needs an explicit year window and denominator polic
 test('actual review reports recent ratio, mixed counting and missing-year unknowns from the saved manuscript', async () => {
   const { io } = await setup()
   const a = await registerSource(io, { title: 'TEST_ONLY metadata 2021', authors: [], kind: 'paper', identifiers: {}, year: 2021 }, 2)
-  const b = await registerSource(io, { title: 'TEST_ONLY metadata 2026', authors: [], kind: 'paper', identifiers: {}, year: 2026 }, a.revision)
+  const sourceCurrent = await snapshot(io)
+  const duplicatePlan = await prepareSourceRegistration(io, { context: { requestId: 'req_TEST_ONLY', workspaceId: 'ws_TEST_ONLY', sessionId: 'ses_TEST_ONLY',
+    projectId: sourceCurrent.ledger.projectId, expectedLedgerRevision: a.revision }, source: { title: 'TEST_ONLY metadata 2026', authors: [], kind: 'paper', identifiers: {}, year: 2026 } })
+  const b = await confirmSourceRegistration(io, duplicatePlan, 'TEST_ONLY 这两条独立测试元数据仅用于不同年份计数。', 'ses_TEST_ONLY')
   const unknown = await registerSource(io, { title: 'TEST_ONLY metadata without year', authors: [], kind: 'paper', identifiers: {} }, b.revision)
   const current = await snapshot(io)
   const changed = await saveManual(io, `中文 Test words [@${a.source.citeKey}; @${b.source.citeKey}].\n\n\`\`\`\n排除代码 excluded code\n\`\`\`\n`, current.document.contentHash, unknown.revision)

@@ -1,29 +1,40 @@
 import { z } from 'zod'
 import { sourceSchema, evidenceSchema, claimSchema, outlineSchema, type Claim, type Evidence } from '../../shared/schema.ts'
 import { proposalSchema } from '../../shared/editing.ts'
-import { sourceInput, confirmEvidenceRequest, upsertClaimRequest } from '../../shared/research.ts'
+import { sourceInput, duplicateSourceReview, confirmEvidenceRequest, upsertClaimRequest } from '../../shared/research.ts'
+import { normalizeArxiv, sourceMatches } from '../research/source-matching.ts'
 import { newId, digest, json, type FileStore } from '../store/files.ts'
-import { mutateLedger, invalidateReviews } from '../project/project.ts'
+import { mutateLedger, invalidateReviews, snapshot } from '../project/project.ts'
 import { readParsed, MAX_MATERIAL_BYTES } from '../materials/materials.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, ScholarError } from '../../shared/errors.ts'
 
-export async function registerSource(io: FileStore, input: z.infer<typeof sourceInput>, revision: number) {
+export async function registerSource(io: FileStore, input: z.infer<typeof sourceInput>, revision: number, duplicateReview?: z.infer<typeof duplicateSourceReview>, sourceSessionId?: string, expected?: { configHash: string; ledgerHash: string }) {
   input = sourceInput.parse(input)
   const sourceId = newId('src')
   const result = await mutateLedger(io, revision, async ledger => {
+    if (expected) { const current = await snapshot(io); invariant(current.configHash === expected.configHash && current.ledgerHash === expected.ledgerHash,
+      'STALE_LEDGER_REVISION', '来源提交前项目输入改变，未沿用旧预览。') }
     const material = input.materialId ? ledger.materials[input.materialId] : undefined
     invariant(!input.materialId || material?.contentHash, 'MATERIAL_NOT_PARSED', '请先解析关联的本地资料。')
     if (material) await readParsed(io, material.id)
     const doi = input.identifiers.doi?.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').toLowerCase()
+    const arxiv = input.identifiers.arxiv ? normalizeArxiv(input.identifiers.arxiv) : undefined
+    const matches = sourceMatches(input, ledger.sources), review = duplicateReview && duplicateSourceReview.parse(duplicateReview)
     invariant(!doi || /^10\.\d{4,9}\/\S+$/.test(doi), 'SOURCE_IDENTIFIER_INVALID', 'DOI 格式无效。')
     invariant(!Object.values(ledger.sources).some(source => (doi && source.identifiers.doi?.toLowerCase() === doi) ||
-      (material && source.materialId === material.id)), 'SOURCE_ALREADY_REGISTERED', '该 DOI 或资料已有来源记录，请沿用稳定引用标识。')
-    ledger.sources[sourceId] = sourceSchema.parse({ ...input, id: sourceId, identifiers: { ...input.identifiers, ...(doi && { doi }) },
+      (material && source.materialId === material.id)) && (material || !matches.some(row => row.kind === 'same-arxiv-reference')), 'SOURCE_ALREADY_REGISTERED', '该 DOI、具体 arXiv 元数据或资料已有来源记录，请沿用稳定引用标识。')
+    if (matches.length && (!review || json(review.matches) !== json(matches.map(({ sourceId, sourceHash }) => ({ sourceId, sourceHash })))))
+      throw new ScholarError('SOURCE_DUPLICATE_REVIEW_REQUIRED', '来源与已有记录疑似重复，请预览并明确沿用原来源或说明为什么保留独立文本记录。', { sourceIds: matches.map(row => row.sourceId) })
+    invariant(!review || matches.length && sourceSessionId, 'INVALID_APPROVAL', '疑似重复确认需要实际来源观察和用户会话。')
+    ledger.sources[sourceId] = sourceSchema.parse({ ...input, id: sourceId, identifiers: { ...input.identifiers, ...(doi && { doi }), ...(arxiv && { arxiv }) },
       citeKey: `sf_${sourceId.slice(4, 16)}`, provenance: [{ provider: material ? 'local-material' : 'user-metadata', retrievedAt: new Date().toISOString() }],
       identity: { status: 'unverified', method: 'none', reason: '已登记用户元数据，尚未独立核验出版身份。' },
       textAccess: material ? 'fulltext' : 'metadata', ...(material?.contentHash && { contentHash: material.contentHash }), publicationState: 'unknown' })
     if (material && material.parseStatus !== 'ready') ledger.sources[sourceId].textAccess = 'excerpt'
     invalidateReviews(ledger, ['citation', 'evidence'])
+    if (review) return [{ path: `.scholarflow/research/source-decisions/${newId('decision')}.json`, before: undefined,
+      after: json({ schemaVersion: 1, projectId: ledger.projectId, sourceId, sourceSessionId, decision: review.decision, reason: review.reason,
+        matches, confirmedAt: new Date().toISOString(), statement: '仅记录用户保留独立来源的决定；未合并来源、迁移证据、核验身份或升级支持。' }) }]
   })
   return { source: result.ledger.sources[sourceId], revision: result.revision }
 }
