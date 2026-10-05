@@ -9,6 +9,7 @@ import { invariant } from '../../shared/errors.ts'
 import { ACTIVE_RUN } from './run-store.ts'
 import { readRun } from './run-store.ts'
 import { runStateSchema, runSnapshotSchema } from '../../shared/runs.ts'
+import { isDetachedProjectPointer } from '../project/identity.ts'
 
 export const WORKFLOW_POINTER = '.scholarflow/workflows/current.json'
 const POINTER = WORKFLOW_POINTER
@@ -19,7 +20,7 @@ const root = (workflowId: string) => {
 const terminal = (status: WorkflowCheckpoint['status']) => ['cancelled', 'succeeded', 'completed-with-issues'].includes(status)
 async function ensureNoStageExecuting(io: FileStore, projectId: string, allowDeadRun?: { runId: string; ownerAlive: (owner: { pid: number; bootInstance: string }) => boolean }) {
   const active = await io.read(ACTIVE_RUN)
-  if (!active) return
+  if (!active || await isDetachedProjectPointer(io, ACTIVE_RUN, active)) return
   let parsed
   try { parsed = runStateSchema.safeParse(JSON.parse(active.text)) } catch { /* Damaged active ownership is never ignored. */ }
   invariant(parsed?.success, 'RUN_STATE_CHANGED', '活动阶段记录无法校验，先检查原记录。')
@@ -84,7 +85,7 @@ export function workflowCheckpointMutations(stored: Awaited<ReturnType<typeof re
 }
 export async function currentWorkflow(io: FileStore) {
   const current = await snapshot(io), file = await io.read(POINTER)
-  if (!file) return { workflow: undefined }
+  if (!file || await isDetachedProjectPointer(io, POINTER, file)) return { workflow: undefined }
   const pointer = pointerSchema.parse(JSON.parse(file.text))
   invariant(pointer.projectId === current.ledger.projectId, 'PROJECT_ID_CONFLICT', '引导任务索引不属于当前项目。')
   const stored = await readWorkflow(io, pointer.workflowId)
@@ -94,7 +95,7 @@ export async function currentWorkflow(io: FileStore) {
 export async function prepareWorkflow(io: FileStore, goal: WorkflowGoal, sessionId: string) {
   goal = workflowGoalSchema.parse(goal); id.parse(sessionId)
   const facts = await workflowGates(io, goal), active = await io.read(POINTER)
-  if (active) {
+  if (active && !await isDetachedProjectPointer(io, POINTER, active)) {
     const pointer = pointerSchema.parse(JSON.parse(active.text)), previous = await readWorkflow(io, pointer.workflowId)
     invariant(terminal(previous.checkpoint.status), 'WORKFLOW_IN_PROGRESS', '当前引导任务尚未结束；请恢复或明确取消。')
   }

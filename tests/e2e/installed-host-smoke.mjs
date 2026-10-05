@@ -2,8 +2,8 @@
 // using the Host credential service; keys never enter this script or test output.
 import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile, symlink, stat, readdir } from 'node:fs/promises'
-import { resolve, join } from 'node:path'
+import { mkdir, readFile, writeFile, symlink, stat, readdir, cp } from 'node:fs/promises'
+import { resolve, join, relative } from 'node:path'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
 import { prepareInit } from '../../src/core/project/project.ts'
@@ -1347,6 +1347,15 @@ try {
   assert.ok(!JSON.stringify(conflict.value.data).includes('TEST_ONLY unselected copy material'))
   const copyDenied = await rpc('scholarflow.v1/document.saveManual', { request: { context: copyContext, text: 'TEST_ONLY copied project must not write', baseHash: digest(copyOriginals.get(copyConfig.paths.mainDocument)) } })
   assert.equal(copyDenied.value.ok, false); assert.equal(copyDenied.value.error.code, 'PROJECT_ID_CONFLICT')
+  const readonlyCopy = page.getByRole('region', { name: '项目副本身份', exact: true })
+  await readonlyCopy.getByRole('textbox', { name: '绑定副本理由', exact: true }).fill('TEST_ONLY 明确选择当前工作区作为副本，保留原身份记录和未知请求。')
+  await readonlyCopy.getByRole('button', { name: '预览绑定为副本', exact: true }).click()
+  await page.getByRole('dialog', { name: '绑定为副本确认', exact: true }).waitFor()
+  await readonlyCopy.getByRole('button', { name: '取消绑定副本', exact: true }).click()
+  for (const [path, text] of copyOriginals) assert.equal(await readFile(join(copyRoot, path), 'utf8'), text)
+  await readonlyCopy.getByRole('button', { name: '预览绑定为副本', exact: true }).click()
+  await readonlyCopy.getByRole('button', { name: '确认绑定当前工作区为副本', exact: true }).click()
+  await page.getByRole('alert').filter({ hasText: 'FS_SANDBOX_DENIED' }).waitFor()
   await assert.rejects(stat(join(copyRoot, '.scholarflow/tmp')), { code: 'ENOENT' })
   const unregisterCopy = await rpc('workspace/delete', { request: { workspaceId: copyWorkspace.value.workspace.workspaceId } })
   assert.equal(unregisterCopy.ok, true); assert.equal(unregisterCopy.value.deleted, true)
@@ -1355,6 +1364,104 @@ try {
   }
   const originalAfterConflict = await rpc('scholarflow.v1/project.inspect', { request: { context: { ...copyContext, workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId } } })
   assert.equal(originalAfterConflict.value.ok, true); assert.equal(originalAfterConflict.value.data.initialized, true)
+  await stop()
+  const fullCopyRoot = resolve(`.dsh-tmp/完整项目副本 TEST_ONLY ${Date.now()}`)
+  await cp(projectRoot, fullCopyRoot, { recursive: true, force: false, errorOnExist: true, filter: source => {
+    const path = relative(projectRoot, source).replaceAll('\\', '/')
+    return path !== '.scholarflow/tmp' && !path.startsWith('.scholarflow/tmp/')
+  } })
+  const originalTreeHashes = new Map()
+  const collectOriginal = async (directory, prefix = '') => {
+    for (const row of await readdir(directory, { withFileTypes: true })) {
+      const path = prefix ? `${prefix}/${row.name}` : row.name
+      if (path === '.scholarflow/tmp' || path.startsWith('.scholarflow/tmp/')) continue
+      if (row.isDirectory()) await collectOriginal(join(directory, row.name), path)
+      else { assert.ok(row.isFile(), 'TEST_ONLY copy fixture contains only regular files'); originalTreeHashes.set(path, digest(await readFile(join(directory, row.name)))) }
+    }
+  }
+  await collectOriginal(projectRoot)
+  errors = await start('workspace-write')
+  const fullCopyWorkspace = await rpc('workspace/create', { request: { path: fullCopyRoot } }); assert.equal(fullCopyWorkspace.ok, true)
+  await page.locator('.sf-project').getByRole('combobox', { name: 'DSH 工作区', exact: true }).selectOption(fullCopyWorkspace.value.workspace.workspaceId)
+  await page.getByRole('button', { name: '新建 ScholarFlow 会话', exact: true }).click()
+  const fullCopyUi = page.getByRole('region', { name: '项目副本身份', exact: true }); await fullCopyUi.waitFor()
+  const fullCopySessionId = await page.locator('.sf-project').getAttribute('data-sf-session-id')
+  await fullCopyUi.getByRole('textbox', { name: '绑定副本理由', exact: true }).fill('TEST_ONLY 当前完整工作区副本独立绑定，保留正文和旧运行历史，不重放请求。')
+  await fullCopyUi.getByRole('button', { name: '预览绑定为副本', exact: true }).click()
+  await page.getByRole('dialog', { name: '绑定为副本确认', exact: true }).waitFor()
+  await fullCopyUi.getByRole('button', { name: '取消绑定副本', exact: true }).click()
+  await assert.rejects(stat(join(fullCopyRoot, '.scholarflow/identity')), { code: 'ENOENT' })
+  await fullCopyUi.getByRole('button', { name: '预览绑定为副本', exact: true }).click()
+  await fullCopyUi.getByRole('button', { name: '确认绑定当前工作区为副本', exact: true }).click()
+  await page.getByText('项目已保存', { exact: false }).waitFor()
+  const fullCopyConfig = parseYaml(await readFile(join(fullCopyRoot, '.scholarflow/project.yaml'), 'utf8'))
+  const fullCopyLedger = JSON.parse(await readFile(join(fullCopyRoot, '.scholarflow/data/ledger.json'), 'utf8'))
+  assert.notEqual(fullCopyConfig.project.id, projectLedger.projectId); assert.equal(fullCopyConfig.project.id, fullCopyLedger.projectId)
+  assert.deepEqual(fullCopyLedger.sources, JSON.parse(copyOriginals.get('.scholarflow/data/ledger.json')).sources)
+  for (const [path, hash] of originalTreeHashes) {
+    assert.equal(digest(await readFile(join(projectRoot, path))), hash, `TEST_ONLY original retained: ${path}`)
+    if (!['.scholarflow/project.yaml', '.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json', '.scholarflow/context/approvals.json',
+      '.scholarflow/profiles/writing-source.json', '.scholarflow/skills/current-stage.json', '.scholarflow/runs/active.json', '.scholarflow/workflows/current.json',
+      '.scholarflow/drafting/current.json', '.scholarflow/reviews/current.json'].includes(path))
+      assert.equal(digest(await readFile(join(fullCopyRoot, path))), hash, `TEST_ONLY copied content/history retained: ${path}`)
+  }
+  const fullCopyContext = { requestId: 'req_TEST_ONLY_full_copy', workspaceId: fullCopyWorkspace.value.workspace.workspaceId, sessionId: fullCopySessionId, projectId: fullCopyConfig.project.id }
+  // Live review confirms a later binding set, which intentionally replaces
+  // binding IDs. Verify the copied final lock, not the early setup snapshot.
+  const finalOriginalLock = JSON.parse(await readFile(join(projectRoot, '.scholarflow/resources.lock.json'), 'utf8'))
+  const finalCopiedLock = JSON.parse(await readFile(join(fullCopyRoot, '.scholarflow/resources.lock.json'), 'utf8'))
+  assert.deepEqual(finalCopiedLock.bindings, finalOriginalLock.bindings)
+  const copiedProjectBinding = finalCopiedLock.bindings.find(row => row.scope === 'project' && row.qualifiedId === projectBinding.qualifiedId && row.digest === projectBinding.digest)
+  assert.ok(copiedProjectBinding, 'the final explicitly confirmed project Skill survives identity copying')
+  const copiedSkillScope = await rpc('scholarflow.v1/verifySkillScope', { request: { sessionId: fullCopySessionId, bindingId: copiedProjectBinding.bindingId } })
+  assert.equal(copiedSkillScope.ok, true, JSON.stringify(copiedSkillScope))
+  assert.equal(copiedSkillScope.value.readOk, copiedProjectBinding.enabledStages.includes(copiedSkillScope.value.stage), `copied tool reads retain the explicitly selected stage: ${JSON.stringify(copiedSkillScope.value)}`)
+  const copiedStaticSkill = await rpc('scholarflow.v1/skills.readVersion', { request: { context: fullCopyContext,
+    selection: { qualifiedId: projectBinding.qualifiedId, digest: projectBinding.digest, scope: 'project' } } })
+  assert.equal(copiedStaticSkill.value.ok, true, JSON.stringify(copiedStaticSkill.value)); assert.equal(copiedStaticSkill.value.data.instructions, projectInstructions)
+  assert.equal((await rpc('scholarflow.v1/workflow.inspect', { request: { context: fullCopyContext } })).value.data.workflow, undefined)
+  const identityPointer = JSON.parse(await readFile(join(fullCopyRoot, '.scholarflow/identity/current.json'), 'utf8'))
+  const identityRecord = JSON.parse(await readFile(join(fullCopyRoot, `.scholarflow/identity/history/${identityPointer.operationId}.json`), 'utf8'))
+  assert.equal(identityRecord.sourceSessionId, fullCopySessionId); assert.equal(identityRecord.oldProjectId, projectLedger.projectId)
+  const identityHistoryUi = page.getByRole('region', { name: '副本身份历史', exact: true })
+  await identityHistoryUi.getByRole('button', { name: '读取副本身份历史', exact: true }).click()
+  await identityHistoryUi.locator('summary').first().waitFor(); await identityHistoryUi.locator('summary').first().click()
+  const identityDownload = page.waitForEvent('download')
+  await identityHistoryUi.getByRole('button', { name: '下载身份原始档案', exact: true }).click()
+  assert.equal(await readFile(await (await identityDownload).path(), 'utf8'), JSON.stringify(identityRecord, null, 2) + '\n')
+  const foreignIdentityArchive = await rpc('scholarflow.v1/project.identityArchive', { request: { context: fullCopyContext, operationId: `project_copy_${'a'.repeat(32)}` } })
+  assert.equal(foreignIdentityArchive.value.ok, false); assert.equal(foreignIdentityArchive.value.error.code, 'PROJECT_COPY_ARCHIVE_INVALID')
+  // TEST_ONLY restore selected pre-publication images of the genuinely confirmed
+  // Host transaction, leaving its immutable archive and new pointer published.
+  // The real gateway must recover only this fixed journal under a fresh Session.
+  const copyJournals = []
+  for (const row of await readdir(join(fullCopyRoot, '.scholarflow/transactions'), { withFileTypes: true })) if (row.isDirectory()) {
+    const path = join(fullCopyRoot, '.scholarflow/transactions', row.name, 'manifest.json'), value = JSON.parse(await readFile(path, 'utf8'))
+    if (value.changes.some(change => change.path === `.scholarflow/identity/history/${identityPointer.operationId}.json`)) copyJournals.push({ path, value })
+  }
+  assert.equal(copyJournals.length, 1)
+  for (const change of copyJournals[0].value.changes) if (change.before) {
+    assert.ok(change.path.startsWith('.scholarflow/') && !change.path.split('/').includes('..'))
+    const target = resolve(fullCopyRoot, change.path); assert.equal(relative(fullCopyRoot, target).replaceAll('\\', '/'), change.path)
+    await writeFile(target, change.before.text)
+  }
+  await writeFile(copyJournals[0].path, JSON.stringify({ ...copyJournals[0].value, state: 'prepared' }, null, 2) + '\n')
+  await page.getByRole('button', { name: '新建 ScholarFlow 会话', exact: true }).click()
+  const identityRecoveryUi = page.getByRole('region', { name: '副本身份事务恢复', exact: true }); await identityRecoveryUi.waitFor()
+  await identityRecoveryUi.getByRole('button', { name: '确认恢复副本身份事务', exact: true }).click()
+  await page.getByText('项目已保存', { exact: false }).waitFor()
+  assert.equal(parseYaml(await readFile(join(fullCopyRoot, '.scholarflow/project.yaml'), 'utf8')).project.id, fullCopyConfig.project.id)
+  assert.equal(await readFile(join(fullCopyRoot, `.scholarflow/identity/history/${identityPointer.operationId}.json`), 'utf8'), JSON.stringify(identityRecord, null, 2) + '\n')
+  for (const [path, hash] of originalTreeHashes) assert.equal(digest(await readFile(join(projectRoot, path))), hash)
+  await stop(); errors = await start('read-only')
+  const coldCopy = await rpc('scholarflow.v1/project.inspect', { request: { context: fullCopyContext } })
+  assert.equal(coldCopy.value.ok, true, JSON.stringify(coldCopy.value)); assert.equal(coldCopy.value.data.ledger.projectId, fullCopyConfig.project.id)
+  assert.equal(coldCopy.value.data.document.text, copyOriginals.get(copyConfig.paths.mainDocument))
+  assert.equal((await rpc('scholarflow.v1/workflow.inspect', { request: { context: fullCopyContext } })).value.data.workflow, undefined)
+  const coldIdentityHistory = await rpc('scholarflow.v1/project.identityHistory', { request: { context: fullCopyContext } })
+  assert.equal(coldIdentityHistory.value.ok, true); assert.equal(coldIdentityHistory.value.data.records[0].sourceSessionId, fullCopySessionId)
+  const finalOriginalInspect = await rpc('scholarflow.v1/project.inspect', { request: { context: { ...copyContext, workspaceId: projectWorkspace.value.workspace.workspaceId, sessionId: second.value.sessionId } } })
+  assert.equal(finalOriginalInspect.value.ok, true); assert.equal(finalOriginalInspect.value.data.ledger.projectId, projectLedger.projectId)
   const reset = await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: originalType, ...originalDefaults }, expectedRevision: restored.value.settings[0].revision })
   assert.equal(reset.ok, true)
   assert.deepEqual(errors, [])
@@ -1399,6 +1506,8 @@ try {
     realMultiQueryPreviewCancelPauseResumeAndStableDoi: liveResearch,
     damagedConfigLedgerResourceLockAndTransactionOriginalsReadonly: true,
     duplicateProjectIdentityReadonlyOriginalsMutationDenialAndRegistrationRemovalKeepBytes: true,
+    nativeExplicitProjectCopyPreviewCancelReadonlyDenyRetainsAllOriginalAndCopiedContentIdsHistoryAndSkillBytes: true,
+    nativeConfirmedIdentityCopyPartialPublicationRecoveryAndColdRestoreNeverReplayOldRequests: true,
     nativeUiPrivateSkillMultiCandidateImport: true, cancelledSkillPreviewDoesNotInstall: true,
     privateSkillOriginalBytesAndInertScriptsPreserved: true, globalSkillCatalogNotModified: true,
     privateSkillVersionsSurviveReadOnlyHostRestart: true,

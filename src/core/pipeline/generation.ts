@@ -16,6 +16,7 @@ import { transientRetry, waitRetrySlice } from './retry.ts'
 import { validateIssueFix } from '../review/issue-fixes.ts'
 import { workflowAssociation, workflowCall, syncWorkflowDuration } from './workflow-budget.ts'
 import { draftSequenceCheckpointSchema } from '../../shared/draft-sequence.ts'
+import { isDetachedProjectPointer } from '../project/identity.ts'
 
 export { modelOutputSchema } from '../../shared/runs.ts'
 export interface GenerationPlan { id: string; contentHash: string; snapshot: z.infer<typeof runSnapshotSchema>; input: z.infer<typeof generationRequest>;
@@ -188,7 +189,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
       expectedStateHash = digest(text); expectedCheckpointHash = digest(progressText)
       return
     }
-    if (active) {
+    if (active && !await isDetachedProjectPointer(io, ACTIVE, active)) {
       const previous = runStateSchema.parse(JSON.parse(active.text))
       const authoritative = await readRun(io, previous.runId, current.ledger.projectId)
       invariant(json(authoritative.run) === json(previous), 'RUN_STATE_CHANGED', '活动运行投影与实际运行事实源不同；请检查运行记录，不会据此开始并行写作。')

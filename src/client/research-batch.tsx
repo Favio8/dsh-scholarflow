@@ -43,10 +43,11 @@ export function ResearchBatch({ search, context, api, run, busy, onSearch, refre
     <button disabled={busy} onClick={() => setSequence(n => n + 1)}>刷新检索批次历史</button>
     {history?.diagnostics.map((warning: string, index: number) => <p key={index} role="alert">{warning}</p>)}
     {history?.runs.map((row: any) => <section key={row.runId} aria-label={`检索批次 ${row.runId}`}><p>{row.runId} · {labels[row.status] ?? row.status}{row.errorCode ? ` · ${row.errorCode}` : ''}{row.parentRunId ? ` · 重试来源 ${row.parentRunId}` : ''}</p>
-      <button disabled={busy} onClick={() => run(async () => setView(await api('research.batchRead', { context: context(), runId: row.runId })))}>查看检索批次 {row.runId}</button>
-      {['paused', 'interrupted', 'running', 'queued', 'waiting-input'].includes(row.status) && <><button disabled={busy} onClick={() => action(row.runId, 'resume')}>预览恢复检索 {row.runId}</button>
+      {row.inheritedArchive && <p>副本来源历史，只读；旧身份 {row.projectId}，结果档案保留，不接管或重放请求。</p>}
+      {!row.inheritedArchive && <button disabled={busy} onClick={() => run(async () => setView(await api('research.batchRead', { context: context(), runId: row.runId })))}>查看检索批次 {row.runId}</button>}
+      {!row.inheritedArchive && ['paused', 'interrupted', 'running', 'queued', 'waiting-input'].includes(row.status) && <><button disabled={busy} onClick={() => action(row.runId, 'resume')}>预览恢复检索 {row.runId}</button>
         <button disabled={busy} onClick={() => action(row.runId, 'close')}>预览结束检索 {row.runId}</button></>}
-      {['failed', 'cancelled'].includes(row.status) && <button disabled={busy} onClick={() => action(row.runId, 'retry')}>预览关联检索重试 {row.runId}</button>}
+      {!row.inheritedArchive && ['failed', 'cancelled'].includes(row.status) && <button disabled={busy} onClick={() => action(row.runId, 'retry')}>预览关联检索重试 {row.runId}</button>}
     </section>)}
     {view && <section aria-label="检索批次结果"><p role="status">批次 {view.run.runId} · {labels[view.run.status] ?? view.run.status} · 已用 {view.checkpoint.queriesUsed} 次查询 · 已保存 {view.checkpoint.candidatesReceived} 个候选</p>
       {view.checkpoint.queries.map((query: any) => <section key={query.queryId}><p>{view.searches?.find((item: any) => item.queryId === query.queryId)?.search.query ?? query.queryId} · {labels[query.state]}</p>

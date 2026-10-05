@@ -4,6 +4,7 @@ import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { invariant } from '../../shared/errors.ts'
 import { projectMarkdown, textOf, walk } from '../editing/markdown.ts'
 import type { Mutation } from '../store/transactions.ts'
+import { verifiedIdentityLineage } from './identity.ts'
 
 const kinds = { '.scholarflow/context/decisions.md': 'decision', '.scholarflow/context/terminology.md': 'terminology',
   '.scholarflow/context/writing-memory.md': 'writing-preference' } as const
@@ -80,13 +81,13 @@ export async function memoryHistory(io: FileStore, projectId: string, path: stri
   if (!await io.stat(root)) return { operations: [] }
   const rows = await io.list(root)
   invariant(rows.length <= 1000, 'MEMORY_HISTORY_LIMIT', '记忆历史超过读取限额；原记录保留。')
-  const operations = []
+  const operations = [], lineage = await verifiedIdentityLineage(io, projectId)
   for (const row of rows) {
     invariant(row.type === 'file' && /^memory_change_[\w]+\.json$/.test(row.path.split('/').at(-1)!), 'MEMORY_HISTORY_INVALID', '记忆历史含未知记录，未猜测来源。')
     const file = await io.read(row.path)
     invariant(file && Buffer.byteLength(file.text) <= 4 * 1024 * 1024, 'MEMORY_HISTORY_LIMIT', '记忆更正记录缺失或超过读取限额。')
     const operation = historySchema.parse(JSON.parse(file.text))
-    invariant(operation.projectId === projectId && `${operation.id}.json` === row.path.split('/').at(-1) &&
+    invariant(lineage.projectIds.includes(operation.projectId) && `${operation.id}.json` === row.path.split('/').at(-1) &&
       digest(operation.previousText) === operation.previousHash && digest(operation.text) === operation.contentHash && operation.metadata.contentHash === operation.contentHash &&
       operation.metadata.operationId === operation.id, 'MEMORY_HISTORY_INVALID', '记忆更正身份或原文摘要不一致，原记录保留。')
     if (operation.path === path) operations.push(operation)
@@ -100,11 +101,12 @@ export async function verifiedMemoryProjection(io: FileStore, ledger: Ledger, pa
   const sourceIds = [...new Set(projection.entries.map(entry => entry.sourceOperationId))]
   if (sourceIds.length > 64) return { current: false, entries: [], diagnostics: ['条目来源超过单次 64 个操作的校验限额；保留原文与全部历史，可以重新明确确认本次用户操作，不猜测旧来源。'] }
   try {
+    const lineage = await verifiedIdentityLineage(io, ledger.projectId)
     for (const operationId of sourceIds) {
       const file = await io.read(`.scholarflow/context/history/${operationId}.json`)
       invariant(file && Buffer.byteLength(file.text) <= 4 * 1024 * 1024, 'MEMORY_HISTORY_INVALID', '条目来源快照缺失或超限。')
       const source = historySchema.parse(JSON.parse(file.text))
-      invariant(source.id === operationId && source.projectId === ledger.projectId && source.path === path &&
+      invariant(source.id === operationId && lineage.projectIds.includes(source.projectId) && source.path === path &&
         digest(source.text) === source.contentHash && digest(source.previousText) === source.previousHash && source.metadata.contentHash === source.contentHash &&
         source.metadata.operationId === operationId, 'MEMORY_HISTORY_INVALID', '条目来源的身份或原文摘要改变。')
       for (const entry of projection.entries.filter(entry => entry.sourceOperationId === operationId)) {

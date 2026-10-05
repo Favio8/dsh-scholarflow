@@ -15,6 +15,7 @@ import { ACTIVE_RUN, readRun } from './run-store.ts'
 import { readFrozenGeneration, readGenerationCheckpoint } from './run-control.ts'
 import { workflowAssociation } from './workflow-budget.ts'
 import { resolveStageSkills, type SkillReader } from '../skills/bindings.ts'
+import { isDetachedProjectPointer } from '../project/identity.ts'
 
 export const DRAFT_SEQUENCE_POINTER = '.scholarflow/drafting/current.json'
 const pointerSchema = z.object({ schemaVersion: z.literal(1), sequenceId: id, projectId: id }).strict()
@@ -38,7 +39,7 @@ async function scope(io: FileStore, skillReader?: SkillReader) {
 }
 async function noStageRunning(io: FileStore, projectId: string) {
   const active = await io.read(ACTIVE_RUN)
-  if (!active) return
+  if (!active || await isDetachedProjectPointer(io, ACTIVE_RUN, active)) return
   const projected = JSON.parse(active.text), stored = await readRun(io, projected.runId, projectId)
   invariant(json(stored.run) === json(projected), 'RUN_STATE_CHANGED', '活动阶段投影与事实源不一致，未继续按节调度。')
   invariant(['failed', 'cancelled', 'succeeded', 'completed-with-issues'].includes(stored.run.status),
@@ -125,7 +126,7 @@ async function acceptedChild(io: FileStore, stored: Awaited<ReturnType<typeof re
 }
 export async function inspectDraftSequence(io: FileStore) {
   const file = await io.read(DRAFT_SEQUENCE_POINTER)
-  if (!file) return { sequence: undefined }
+  if (!file || await isDetachedProjectPointer(io, DRAFT_SEQUENCE_POINTER, file)) return { sequence: undefined }
   const pointer = pointerSchema.parse(JSON.parse(file.text)), stored = await readDraftSequence(io, pointer.sequenceId)
   invariant(pointer.projectId === stored.input.projectId, 'PROJECT_ID_CONFLICT', '初稿顺序不属于当前项目。')
   let observation: Awaited<ReturnType<typeof acceptedChild>> | undefined, diagnostic: string | undefined
@@ -140,7 +141,7 @@ export async function prepareDraftSequence(io: FileStore, request: z.infer<typeo
   invariant(current.ledger.projectId === request.context.projectId && current.ledger.revision === request.context.expectedLedgerRevision,
     'STALE_LEDGER_REVISION', '先重新读取当前项目再预览初稿顺序。')
   invariant(!current.document.externalChange && current.ledger.outline.confirmation === 'confirmed', 'OUTLINE_CONFIRMATION_REQUIRED', '先确认大纲和实际保存正文。')
-  if (pointer) invariant(terminal((await readDraftSequence(io, pointerSchema.parse(JSON.parse(pointer.text)).sequenceId)).checkpoint),
+  if (pointer && !await isDetachedProjectPointer(io, DRAFT_SEQUENCE_POINTER, pointer)) invariant(terminal((await readDraftSequence(io, pointerSchema.parse(JSON.parse(pointer.text)).sequenceId)).checkpoint),
     'DRAFT_SEQUENCE_IN_PROGRESS', '先恢复或明确取消已有初稿顺序。')
   const ordered = outlineOrder(current.ledger.outline), summaries = new Set(request.summarySectionIds)
   invariant(summaries.size === request.summarySectionIds.length && request.summarySectionIds.every(value => ordered.some(row => row.id === value)) &&

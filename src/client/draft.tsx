@@ -224,13 +224,14 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       {history?.diagnostics.map((warning: string, index: number) => <p role="alert" key={index}>{warning}</p>)}
       {history?.runs.map((row: any) => <p key={row.runId}>{row.runId} · {row.status} · 已调用模型 {row.usedModelCalls} 次{row.errorCode ? ` · ${row.errorCode}` : ''}
         {row.parentRunId && <span> · 重试来源 {row.parentRunId}</span>}
-        {['paused', 'interrupted', 'running', 'queued', 'waiting-input'].includes(row.status) && <>
+        {row.inheritedArchive && <span> · 副本来源历史，只读；旧身份 {row.projectId}，不接管或重放请求。</span>}
+        {!row.inheritedArchive && ['paused', 'interrupted', 'running', 'queued', 'waiting-input'].includes(row.status) && <>
           {!row.legacyStorage && !['review', 'research'].includes(row.stage) && <button disabled={busy || dirty} onClick={() => run(async () => setActionPlan(await api('runs.prepareAction', { context: context(), runId: row.runId, action: 'resume' })))}>预览恢复运行 {row.runId}</button>}
           <button disabled={busy} onClick={() => run(async () => setActionPlan(await api('runs.prepareAction', { context: context(), runId: row.runId, action: 'close' })))}>预览结束未完成运行 {row.runId}</button></>}
-        {!row.legacyStorage && row.planHash && !['review', 'research'].includes(row.stage) && ['failed', 'cancelled'].includes(row.status) && <button disabled={busy || dirty} onClick={() => run(async () => setActionPlan(await api('runs.prepareAction', { context: context(), runId: row.runId, action: 'retry' })))}>预览关联重试 {row.runId}</button>}
+        {!row.inheritedArchive && !row.legacyStorage && row.planHash && !['review', 'research'].includes(row.stage) && ['failed', 'cancelled'].includes(row.status) && <button disabled={busy || dirty} onClick={() => run(async () => setActionPlan(await api('runs.prepareAction', { context: context(), runId: row.runId, action: 'retry' })))}>预览关联重试 {row.runId}</button>}
         {row.stage === 'review' && <span> · 在审查页面查看与恢复模型审查。</span>}
         {row.stage === 'research' && <span> · 在资料与研究页面查看、恢复或重试检索。</span>}
-        {row.legacyStorage && <button disabled={busy} onClick={() => run(async () => setMigrationPlan(await api('runs.prepareMigration', { context: context(), runId: row.runId })))}>预览迁移旧运行记录 {row.runId}</button>}</p>)}
+        {!row.inheritedArchive && row.legacyStorage && <button disabled={busy} onClick={() => run(async () => setMigrationPlan(await api('runs.prepareMigration', { context: context(), runId: row.runId })))}>预览迁移旧运行记录 {row.runId}</button>}</p>)}
       {history && !history.runs.length && <p>本项目暂无写作运行记录。</p>}</section>
     {actionPlan && <section role="dialog" aria-label="运行操作确认"><h4>确认{actionPlan.action === 'resume' ? '恢复' : actionPlan.action === 'retry' ? '关联重试' : '结束未完成运行'}</h4>
       <p>原运行 {actionPlan.previousRunId} · 已调用模型 {actionPlan.usedModelCalls} 次{actionPlan.action === 'retry' ? `；新运行 ${actionPlan.runId}` : ''}</p>

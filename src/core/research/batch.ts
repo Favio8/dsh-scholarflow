@@ -10,6 +10,7 @@ import { frozenPlanFile, checkpointFile } from '../pipeline/run-control.ts'
 import { transientRetry, waitRetrySlice } from '../pipeline/retry.ts'
 import { readSearch } from './online.ts'
 import { workflowAssociation, workflowCall, syncWorkflowDuration } from '../pipeline/workflow-budget.ts'
+import { isDetachedProjectPointer } from '../project/identity.ts'
 
 const terminal = (status: RunState['status']) => ['failed', 'cancelled', 'succeeded', 'completed-with-issues'].includes(status)
 const searchPath = (searchId: string) => `.scholarflow/research/${searchId}.json`
@@ -151,7 +152,7 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
     if (control.action) { invariant(control.action.action === 'retry' && plan.parentRunId === control.action.runId && plan.contentHash === control.action.retryPlanHash,
       'INVALID_APPROVAL', '重试计划没有关联原失败运行。'); await validateAction(io, control.action, ownerAlive) }
     invariant(current.configHash === plan.snapshot.configHash && current.ledgerHash === plan.ledgerHash, 'STALE_LEDGER_REVISION', '确认后项目输入改变，请重新预览。')
-    if (active) {
+    if (active && !await isDetachedProjectPointer(io, ACTIVE_RUN, active)) {
       const previous = runStateSchema.parse(JSON.parse(active.text)), stored = await readRun(io, previous.runId, state.projectId)
       invariant(json(stored.run) === json(previous), 'RUN_STATE_CHANGED', '活动运行与事实源不同。')
       invariant(terminal(previous.status), ownerAlive(previous.owner) ? 'RUN_IN_PROGRESS' : 'RUN_INTERRUPTED', '项目已有未结束运行，请先明确恢复或结束。')

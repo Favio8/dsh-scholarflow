@@ -4,6 +4,7 @@ import { ProjectSkills } from './project-skills.tsx'
 import { ProjectWritingProfile } from './writing-profiles.tsx'
 import { GuidedWorkflow } from './workflow.tsx'
 import { MemoryEntries } from './memory-entries.tsx'
+import { ProjectIdentityHistory } from './project-identity.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean; navigate?: (page: string) => void }
 export function Overview({ project, context, api, refresh, run, busy, navigate }: Props) {
@@ -30,6 +31,7 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
     setYearStart(row.constraint?.windowStart ?? ''); setYearEnd(row.constraint?.windowEnd ?? ''); setMixedCount(row.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1'); setChangeReason(''); setRequirementPreview(undefined) }
   return <section aria-label="项目概览"><h3>项目概览与要求确认</h3>
     <GuidedWorkflow project={project} context={context} api={api} run={run} busy={busy} navigate={navigate} />
+    <ProjectIdentityHistory context={context} api={api} run={run} busy={busy} />
     <p>{project.config.project.type} · {project.config.project.language} · 要求 {requirements.length} · 已登记材料 {Object.keys(project.ledger.materials).length}</p>
     <p>资料中的要求先作为候选。老师要求与用户输入不一致时，保留双方并由你明确选择；插件不擅自采用最大值或最新值。</p>
     <label>要求资料<select aria-label="要求资料" value={materialId} onChange={e => setMaterialId(e.target.value)}><option value="">选择已解析资料</option>

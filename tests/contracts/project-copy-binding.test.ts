@@ -4,6 +4,10 @@ import { resolve, relative, isAbsolute } from 'node:path'
 import { MemoryStore } from '../fixtures/memory-store.ts'
 import { initialize, prepareInit, CONFIG_PATH } from '../../src/core/project/project.ts'
 import { inspectProject, resolveStore } from '../../src/host/bridge/project-api.ts'
+import { prepareProjectCopy, applyProjectCopy, copyPlanTransition } from '../../src/core/project/identity.ts'
+import { digest } from '../../src/core/store/files.ts'
+import { snapshot } from '../../src/core/project/project.ts'
+import { parse, stringify } from 'yaml'
 
 // TEST_ONLY Host registry/reader seam. No real session, policy or duplicate
 // workspace registration is claimed; installed-host-smoke covers the real SDK.
@@ -61,4 +65,54 @@ test('multiple registrations of one canonical root remain one project; removing 
   assert.equal(result.initialized, true); assert.equal(result.readonly, undefined); assert.equal(result.identityConflict, undefined)
   assert.equal((await b.read(CONFIG_PATH))!.text, originalConfig)
   await assert.rejects(inspectProject(host, { context: { ...context, projectId: 'prj_TEST_ONLY_other' } }, signal), { code: 'PROJECT_ID_CONFLICT' })
+})
+
+test('a safely readable newer-schema copy identity still conflicts without adopting its unknown policies', async () => {
+  const { a, b, host, context, signal } = await fixture(), future = parse((await a.read(CONFIG_PATH))!.text)
+  future.schemaVersion = 99; future.futureOnly = { TEST_ONLY: 'unknown policy must not be applied' }
+  a.externalEdit(CONFIG_PATH, stringify(future)); const beforeA = [...a.files], beforeB = [...b.files]
+  const result = await inspectProject(host, { context }, signal)
+  assert.equal(result.readonly?.reason.code, 'PROJECT_ID_CONFLICT'); assert.equal(result.identityConflict?.copies.length, 1)
+  await assert.rejects(resolveStore(host, context, signal), { code: 'PROJECT_ID_CONFLICT' })
+  assert.deepEqual([...a.files], beforeA); assert.deepEqual([...b.files], beforeB)
+})
+
+test('the internal identity transition is confined to one root and two exact configs; third-party config edits stop further gateway writes', async () => {
+  const { a, b, host, context, signal, roots } = await fixture(), beforeA = [...a.files]
+  const rootFingerprint = (await resolveStore(host, context, signal, undefined, true)).binding.rootFingerprint
+  const plan = await prepareProjectCopy(b, { sourceSessionId: context.sessionId, rootFingerprint, expectedRevision: (await snapshot(b)).ledger.revision,
+    reason: 'TEST_ONLY explicit current-root copy confirmation' }), transition = copyPlanTransition(plan)
+  await assert.rejects(resolveStore(host, context, signal, undefined, false, { ...transition, rootFingerprint: digest('TEST_ONLY another root') }), { code: 'SESSION_BINDING_CHANGED' })
+  const ctx: any = host
+  ctx.sessionController.resolveAgent = async () => ({ agent: { session: { header: { cwd: roots[1] } } } })
+  ctx.sandboxPolicy = { resolve: () => ({ mode: 'workspace-write', workspaceRoot: roots[1] }) }
+  let writes = 0
+  ctx.fs.writeText = async (target: any, text: string, expected: any, _signal: AbortSignal, policy: any) => {
+    assert.equal(policy.workspaceRoot, roots[1]); const path = relative(roots[1], target.path).replaceAll('\\', '/')
+    const previous = await b.read(path)
+    assert.equal(expected.kind, 'replaceIfVersion'); assert.equal(expected.version, previous!.version)
+    writes++; return b.write(path, text, previous)
+  }
+  const { io } = await resolveStore(host, { ...context, projectId: plan.oldProjectId }, signal, undefined, false, transition)
+  await io.write(CONFIG_PATH, plan.newConfigText, await io.read(CONFIG_PATH)); assert.equal(writes, 1)
+  b.externalEdit(CONFIG_PATH, plan.newConfigText + '# TEST_ONLY unapproved external edit\n')
+  await assert.rejects(io.write(CONFIG_PATH, plan.newConfigText, await io.read(CONFIG_PATH)), { code: 'SESSION_BINDING_CHANGED' })
+  assert.equal(writes, 1); assert.deepEqual([...a.files], beforeA)
+})
+
+test('a confirmed copy journal can be inspected read-only while duplicate identity still exists; an injected transaction target loses the exemption', async () => {
+  const { b, host, context, signal } = await fixture()
+  const rootFingerprint = (await resolveStore(host, context, signal, undefined, true)).binding.rootFingerprint
+  const plan = await prepareProjectCopy(b, { sourceSessionId: context.sessionId, rootFingerprint, expectedRevision: (await snapshot(b)).ledger.revision,
+    reason: 'TEST_ONLY explicitly confirmed copy transaction recovery' }), write = b.write.bind(b)
+  b.write = async (...args) => { const result = await write(...args); if (args[0].startsWith('.scholarflow/transactions/')) throw new Error('TEST_ONLY interruption before config'); return result }
+  await assert.rejects(applyProjectCopy(b, plan), /TEST_ONLY interruption/); b.write = write
+  const result = await inspectProject(host, { context }, signal)
+  assert.equal(result.readonly?.reason.code, 'PROJECT_ID_CONFLICT'); assert.equal(result.recovery?.copyIdentity, true)
+  assert.ok(result.recovery?.transactions[0].files.some(row => row.relativePath === CONFIG_PATH))
+  const path = [...b.files.keys()].find(path => path.startsWith('.scholarflow/transactions/') && JSON.parse(b.files.get(path)!.text).state === 'prepared')!
+  const journal = JSON.parse((await b.read(path))!.text); journal.changes.push({ path: '.scholarflow/TEST_ONLY-extra.json', before: null,
+    after: { text: '{}', hash: digest('{}') } }); b.externalEdit(path, JSON.stringify(journal))
+  const before = [...b.files], invalid = await inspectProject(host, { context }, signal)
+  assert.equal(invalid.recovery, undefined); assert.equal(invalid.readonly?.reason.code, 'PROJECT_ID_CONFLICT'); assert.deepEqual([...b.files], before)
 })

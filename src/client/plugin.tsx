@@ -6,6 +6,7 @@ import { Overview } from './overview.tsx'
 import { AcademicSkills } from './academic-skills.tsx'
 import { WritingProfiles } from './writing-profiles.tsx'
 import { ReadonlyProject } from './readonly-project.tsx'
+import { ProjectIdentity } from './project-identity.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export'] as const
@@ -120,6 +121,8 @@ export function apply(ctx: Host) {
       {error && <p role="alert" className="sf-error">{error}</p>}
       {!project && <p>选择 DSH 工作区并创建专属会话，切换 Mode 本身不会创建论文目录。</p>}
       {project?.readonly && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId && <ReadonlyProject value={project.readonly} />}
+      {project?.identityConflict && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId &&
+        <ProjectIdentity key={`copy_${project.binding.projectId}`} project={project} workspaceTitle={workspace.title} workspaces={workspaces} context={context} api={api} publish={publish} run={act} busy={busy} />}
       {project && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId && !project.initialized && !project.readonly && <>
         <p>当前工作区：{workspace.title} · 尚未初始化</p>
         {project.recovery ? <section aria-label="事务恢复确认"><h3>检测到未完成的项目事务</h3>

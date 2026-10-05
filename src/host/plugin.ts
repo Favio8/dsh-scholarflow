@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { applicationResult, inspectProject, inspectRequest, prepareInitRequest, initializeRequest, resolveStore, type StoredInitPlan } from './bridge/project-api.ts'
 import { prepareInit, initialize, snapshot, updateProjectText } from '../core/project/project.ts'
 import { verifiedMemoryProjection, memoryHistory } from '../core/project/memory-entries.ts'
+import { prepareProjectCopy, applyProjectCopy, copyPlanTransition, pendingCopyTransition, verifiedIdentityLineage, type ProjectCopyPlan } from '../core/project/identity.ts'
 import { recover } from '../core/store/transactions.ts'
 import { newId, digest, json } from '../core/store/files.ts'
 import { invariant } from '../shared/errors.ts'
@@ -99,6 +100,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private runActionPlans = new Map<string, { plan: RunActionPlan; generation?: GenerationPlan; selected?: { provider: string; model: string; reasoningEffort?: string }; context: RequestContext; peerId: string; expires: number }>()
   private exportPlans = new Map<string, { plan: DeliveryPlan; context: RequestContext; peerId: string; expires: number }>()
   private manuscriptPlans = new Map<string, { plan: ManuscriptAdoptionPlan; context: RequestContext; peerId: string; expires: number }>()
+  private identityPlans = new Map<string, { plan: ProjectCopyPlan; context: RequestContext; peerId: string; expires: number }>()
   private bootInstance = randomUUID()
   private researchProvider: ResearchProvider
   private searchPlans = new Map<string, { plan: SearchPlan; context: RequestContext; peerId: string; expires: number }>()
@@ -132,6 +134,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => () => this.workflowPlans.clear(), 'scholarflow: clear workflow previews')
     ctx.effect(() => () => this.skillCopyPlans.clear(), 'scholarflow: clear project Skill copy previews')
     ctx.effect(() => () => this.manuscriptPlans.clear(), 'scholarflow: clear manuscript import previews')
+    ctx.effect(() => () => this.identityPlans.clear(), 'scholarflow: clear project identity previews')
     ctx.effect(() => () => { this.draftSequencePlans.clear(); this.generationPlans.clear() }, 'scholarflow: clear draft previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
     ctx.effect(() => {
@@ -217,10 +220,96 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const plan = this.recoveryPlans.get(parsed.planId)
       invariant(plan && plan.peerId === peerId && plan.hash === parsed.planHash && plan.expires > Date.now(), 'INVALID_APPROVAL', '请重新检查并确认宿主生成的恢复计划。')
       invariant(parsed.context.workspaceId === plan.context.workspaceId && parsed.context.sessionId === plan.context.sessionId, 'SESSION_BINDING_CHANGED', '恢复确认的会话或工作区发生变化。')
-      const { io, manuscriptDir } = await resolveStore(this.ctx, plan.context, signal)
+      const diagnostic = await resolveStore(this.ctx, plan.context, signal, undefined, true)
+      const transition = await pendingCopyTransition(diagnostic.io)
+      if (transition) await this.ensureNoCopyExecution(plan.context, transition.rootFingerprint, signal)
+      const { io, manuscriptDir } = await resolveStore(this.ctx, plan.context, signal, undefined, false, transition)
       await io.lock(() => recover(io, manuscriptDir, plan.hash))
       this.recoveryPlans.delete(parsed.planId)
-      return inspectProject(this.ctx, { context: plan.context }, signal)
+      return inspectProject(this.ctx, { context: { ...plan.context, ...(transition && { projectId: transition.projectId }) } }, signal)
+    })
+  }
+
+  private async ensureNoCopyExecution(context: RequestContext, rootFingerprint: string, signal: AbortSignal) {
+    const host: any = this.ctx
+    for (const row of this.running.values()) {
+      const observed = await host.sessionController.inspect(row.context.sessionId, signal)
+      invariant(observed?.meta, 'RUN_IN_PROGRESS', '当前尚有无法核对绑定的执行请求；先停止调度并处理原会话。')
+      const target = await host.fs.resolve(observed.meta.cwd, { signal }), path = host.fs.processPath(target)
+      invariant(digest(process.platform === 'win32' ? path.toLowerCase() : path) !== rootFingerprint,
+        'RUN_IN_PROGRESS', '当前实际工作区有执行中的请求；先在原会话结束执行，再改变身份。其他根目录的原请求不会被取消。')
+    }
+    // The actual Session/Workspace authorization is revalidated by the gateway.
+    invariant(context.sessionId && context.workspaceId, 'SESSION_BINDING_CHANGED', '副本确认需要当前宿主会话。')
+  }
+
+  @Remote('project.prepareCopy')
+  async projectPrepareCopy(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = z.object({ context: inspectRequest.shape.context, reason: z.string().trim().min(10).max(4000) }).strict().parse(request)
+      const { io, binding } = await resolveStore(this.ctx, input.context, signal, undefined, true), current = await snapshot(io)
+      await this.ensureNoCopyExecution(input.context, binding.rootFingerprint, signal)
+      for (const [key, row] of this.identityPlans) if (row.expires < Date.now()) this.identityPlans.delete(key)
+      invariant(this.identityPlans.size < 4, 'TOO_MANY_PENDING_PLANS', '请先处理已有副本身份预览。')
+      const plan = await prepareProjectCopy(io, { expectedRevision: current.ledger.revision, sourceSessionId: input.context.sessionId,
+        rootFingerprint: binding.rootFingerprint, reason: input.reason })
+      invariant([...this.identityPlans.values()].reduce((sum, row) => sum + Buffer.byteLength(json(row.plan)), Buffer.byteLength(json(plan))) <= 32 * 1024 * 1024,
+        'PROJECT_COPY_HISTORY_LIMIT', '待确认副本预览合计超过 32 MiB，请先处理已有预览。')
+      this.identityPlans.set(plan.id, { plan, context: { ...input.context, projectId: plan.oldProjectId }, peerId, expires: Date.now() + 600000 })
+      return { planId: plan.id, planHash: plan.contentHash, workspaceId: binding.workspaceId, oldProjectId: plan.oldProjectId, projectId: plan.projectId,
+        expectedRevision: plan.expectedRevision, title: current.config.project.title, reason: plan.reason, oldConfigText: plan.originals.find(row => row.path === '.scholarflow/project.yaml')!.text,
+        newConfigText: plan.newConfigText, originals: plan.originals.filter(row => row.text !== null).map(row => ({ relativePath: row.path, contentHash: row.contentHash })),
+        detachedPointers: plan.originals.filter(row => row.path.endsWith('/current.json') || row.path.endsWith('/active.json')).filter(row => row.path !== '.scholarflow/identity/current.json' && row.text !== null).map(row => row.path),
+        risks: ['仅为当前实际工作区建立新身份，保留原项目与原始材料、正文、参考文件和内容 ID。',
+          '原会话 ID 只保留为历史来源，不会成为副本的宿主会话绑定。旧待接受建议变为过期，旧运行和已计费／未知响应预算只归档，不取消、不退款、不重放。',
+          '原审查结论保留为过期历史；副本须重新审查。新引导目标和模型额度须另行预览确认。', '写入前重新核对完整身份文件与实际会话权限；中断后仅可确认恢复这份固定事务。'] }
+    })
+  }
+
+  @Remote('project.applyCopy')
+  async projectApplyCopy(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), input = initializeRequest.parse(request), row = this.identityPlans.get(input.planId)
+      invariant(row && row.peerId === peerId && row.expires > Date.now() && row.plan.contentHash === input.planHash, 'INVALID_APPROVAL', '请重新预览副本身份变更。')
+      invariant(input.context.workspaceId === row.context.workspaceId && input.context.sessionId === row.context.sessionId &&
+        input.context.projectId === row.plan.oldProjectId, 'SESSION_BINDING_CHANGED', '副本确认的会话、工作区或原项目身份改变。')
+      const transition = copyPlanTransition(row.plan)
+      await this.ensureNoCopyExecution(row.context, transition.rootFingerprint, signal)
+      const { io } = await resolveStore(this.ctx, row.context, signal, undefined, false, transition)
+      this.identityPlans.delete(input.planId)
+      await applyProjectCopy(io, row.plan)
+      return inspectProject(this.ctx, { context: { ...row.context, projectId: row.plan.projectId } }, signal)
+    })
+  }
+
+  @Remote('project.dismissCopy')
+  async projectDismissCopy(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      const peerId = this.requireOperator(), { planId } = z.object({ planId: z.string().max(200) }).strict().parse(request)
+      signal.throwIfAborted(); invariant(this.identityPlans.get(planId)?.peerId === peerId, 'INVALID_APPROVAL', '只能取消当前用户自己的副本预览。')
+      this.identityPlans.delete(planId); return { dismissed: true }
+    })
+  }
+
+  @Remote('project.identityHistory')
+  async projectIdentityHistory(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = inspectRequest.parse(request), { io } = await resolveStore(this.ctx, input.context, signal, undefined, true)
+      const current = await snapshot(io), lineage = await verifiedIdentityLineage(io, current.ledger.projectId)
+      return { records: lineage.records.map(row => ({ operationId: row.operationId, oldProjectId: row.oldProjectId, projectId: row.projectId,
+        sourceSessionId: row.sourceSessionId, confirmedAt: row.confirmedAt, reason: row.reason,
+        originals: row.originals.filter(file => file.text !== null).map(file => ({ relativePath: file.path, contentHash: file.contentHash })) })) }
+    })
+  }
+
+  @Remote('project.identityArchive')
+  async projectIdentityArchive(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator(); const input = inspectRequest.extend({ operationId: z.string().regex(/^project_copy_[a-f0-9]{32}$/u) }).parse(request)
+      const { io } = await resolveStore(this.ctx, input.context, signal, undefined, true), current = await snapshot(io)
+      const row = (await verifiedIdentityLineage(io, current.ledger.projectId)).records.find(record => record.operationId === input.operationId)
+      invariant(row, 'PROJECT_COPY_ARCHIVE_INVALID', '只能下载当前实际项目已校验身份链中的不可变原始档案。')
+      const text = json(row); return { operationId: row.operationId, text, contentHash: digest(text) }
     })
   }
 

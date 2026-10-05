@@ -5,6 +5,7 @@ import { type FileStore } from '../store/files.ts'
 import { commit } from '../store/transactions.ts'
 import { readWorkflowRecord, workflowCheckpointMutations, WORKFLOW_POINTER } from './workflow.ts'
 import type { WorkflowCheckpoint } from '../../shared/workflow.ts'
+import { isDetachedProjectPointer } from '../project/identity.ts'
 
 const pointerSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id }).strict()
 const requestSchema = z.object({ callId: id, runId: id, stage, kind: z.enum(['model', 'search', 'lookup']),
@@ -27,7 +28,7 @@ function statistics(checkpoint: WorkflowCheckpoint, now = Date.now()) {
 }
 async function binding(io: FileStore, expected?: string) {
   const image = await io.read(WORKFLOW_POINTER)
-  if (!image) { invariant(!expected, 'WORKFLOW_BINDING_CHANGED', '原引导任务索引缺失；未调用提供方。'); return }
+  if (!image || await isDetachedProjectPointer(io, WORKFLOW_POINTER, image)) { invariant(!expected, 'WORKFLOW_BINDING_CHANGED', '原引导任务索引缺失或已归档为副本历史；未调用提供方。'); return }
   const pointer = pointerSchema.parse(JSON.parse(image.text)), stored = await readWorkflowRecord(io, pointer.workflowId)
   invariant(stored.current.ledger.projectId === pointer.projectId, 'PROJECT_ID_CONFLICT', '引导预算不属于当前项目。')
   const terminal = ['cancelled', 'succeeded', 'completed-with-issues'].includes(stored.checkpoint.status)
@@ -40,7 +41,7 @@ async function binding(io: FileStore, expected?: string) {
 }
 export async function workflowBudgetInfo(io: FileStore) {
   const image = await io.read(WORKFLOW_POINTER)
-  if (!image) return
+  if (!image || await isDetachedProjectPointer(io, WORKFLOW_POINTER, image)) return
   const pointer = pointerSchema.parse(JSON.parse(image.text)), stored = await readWorkflowRecord(io, pointer.workflowId)
   invariant(pointer.projectId === stored.current.ledger.projectId, 'PROJECT_ID_CONFLICT', '累计预算索引不属于当前项目。')
   if (['cancelled', 'succeeded', 'completed-with-issues'].includes(stored.checkpoint.status)) return

@@ -1,6 +1,7 @@
 # Duplicate project identity diagnostics
 
-2026-10-05. Implemented; explicit identity reassignment remains in development.
+2026-10-05. Implemented. Explicit reassignment subsequently implemented in
+[project identity transactions](./project-identity-transactions.md).
 
 SPEC §4 requires explicit copy binding when two registered canonical roots share
 one project identity. Read-only inspection previously failed before it could show

@@ -9,13 +9,14 @@ import { initInputSchema } from '../../shared/project-defaults.ts'
 import { readonlyEnvelope, inspectCompatibility, schemaVersionOf } from '../../core/project/compatibility.ts'
 import { inspectDamagedProject } from '../../core/project/diagnostics.ts'
 import { readBindings } from '../../core/skills/bindings.ts'
+import { pendingCopyTransition, type IdentityTransition } from '../../core/project/identity.ts'
 type Host = any
 export const inspectRequest = z.object({ context: requestContext }).strict()
 export const prepareInitRequest = z.object({ context: requestContext, input: initInputSchema }).strict()
 export const initializeRequest = z.object({ context: requestContext, planId: z.string(), planHash: hash }).strict()
 export interface StoredInitPlan { plan: InitPlan; context: RequestContext; peerId: string; expires: number }
 
-export async function resolveStore(ctx: Host, context: RequestContext, signal: AbortSignal, output?: string, readonlyFuture = false) {
+export async function resolveStore(ctx: Host, context: RequestContext, signal: AbortSignal, output?: string, readonlyFuture = false, identityTransition?: IdentityTransition) {
   signal.throwIfAborted()
   const workspace = ctx.workspaceRegistry.get(context.workspaceId)
   invariant(workspace, 'SESSION_BINDING_CHANGED', '宿主工作区不存在，请重新选择。')
@@ -23,6 +24,8 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
   invariant(observation?.meta, 'SESSION_BINDING_CHANGED', '宿主会话不存在。')
   const target = await ctx.fs.resolve(workspace.path, { signal })
   const root = ctx.fs.processPath(target)
+  const rootFingerprint = digest(process.platform === 'win32' ? root.toLowerCase() : root)
+  invariant(!identityTransition || identityTransition.rootFingerprint === rootFingerprint, 'SESSION_BINDING_CHANGED', '副本身份确认不属于当前实际工作区。')
   invariant(!root.startsWith('\\\\'), 'PATH_OUTSIDE_ALLOWED_ROOT', '当前版本尚未验证 UNC 工作区。')
   const sessionTarget = await ctx.fs.resolve(observation.meta.cwd, { signal })
   invariant(ctx.fs.processPath(sessionTarget) === root && workspace.sessionIds.includes(context.sessionId), 'SESSION_BINDING_CHANGED', '会话不属于当前工作区。')
@@ -44,13 +47,20 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
       const otherPath = ctx.fs.processPath(otherRoot)
       if (process.platform === 'win32' ? otherPath.toLowerCase() === root.toLowerCase() : otherPath === root) continue
       const otherConfig = await ctx.fs.resolve(`${other.path}/.scholarflow/project.yaml`, { signal })
-      if (!ctx.fs.contains(otherRoot, otherConfig) || !await ctx.fs.stat(otherConfig, signal)) continue
+      const otherInfo = await ctx.fs.stat(otherConfig, signal)
+      if (!ctx.fs.contains(otherRoot, otherConfig) || !otherInfo || otherInfo.type !== 'file' || otherInfo.size > 2 * 1024 * 1024) continue
       let candidate
-      try { candidate = parseConfig(await ctx.fs.readText(otherConfig, signal)) } catch { continue }
+      let otherText: string
+      try { otherText = await ctx.fs.readText(otherConfig, signal) } catch (error) { if (signal.aborted) throw error; continue }
+      try { candidate = parseConfig(otherText) } catch {
+        // A safely validated identity envelope still conflicts when its policy
+        // schema is newer; it never supplies effective settings or permissions.
+        try { candidate = readonlyEnvelope(otherText) } catch { continue }
+      }
       if (candidate.project.id === identity) copies.push({ workspaceId: other.id,
         rootFingerprint: digest(process.platform === 'win32' ? otherPath.toLowerCase() : otherPath) })
     }
-    invariant(readonlyFuture || !copies.length, 'PROJECT_ID_CONFLICT', '同一宿主存在项目身份相同的副本，请先为副本建立独立身份。')
+    invariant(readonlyFuture || identityTransition?.oldProjectId === identity || !copies.length, 'PROJECT_ID_CONFLICT', '同一宿主存在项目身份相同的副本，请先为副本建立独立身份。')
     identityCopies.splice(0, identityCopies.length, ...copies)
     if (copies.length) bindingDiagnostic = { code: 'PROJECT_ID_CONFLICT', message: '同一宿主注册了身份相同的另一份项目。当前工作区仅可查看原文件；须明确选择要绑定为副本的工作区，再建立独立身份。' }
   }
@@ -67,7 +77,11 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
         bindingDiagnostic = { code: 'PROJECT_CONFIG_INVALID', message: '项目配置无法安全解释，原文件保留。' }
     }
     projectId = config.project?.id; manuscriptDir = config.paths.manuscriptDir
-    invariant(!projectId || !context.projectId || context.projectId === projectId, 'PROJECT_ID_CONFLICT', '请求项目与当前会话项目不同。')
+    invariant(!projectId || !context.projectId || context.projectId === projectId || identityTransition &&
+      context.projectId === identityTransition.oldProjectId && projectId === identityTransition.projectId, 'PROJECT_ID_CONFLICT', '请求项目与当前会话项目不同。')
+    if (identityTransition) invariant(projectId === identityTransition.oldProjectId && digest(configText) === identityTransition.oldConfigHash ||
+      projectId === identityTransition.projectId && digest(configText) === identityTransition.newConfigHash,
+      'PROJECT_COPY_CHANGED', '副本身份过渡配置不是已确认的原始或目标字节。')
     // Detect copies among Host registrations, without traversing raw material trees.
     if (projectId) await checkCopies(projectId)
   } else {
@@ -89,7 +103,7 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
       }
     }
   }
-  const binding = { workspaceId: workspace.id, sessionId: context.sessionId, projectId, modeId: 'scholarflow', rootFingerprint: digest(process.platform === 'win32' ? root.toLowerCase() : root) }
+  const binding = { workspaceId: workspace.id, sessionId: context.sessionId, projectId, modeId: 'scholarflow', rootFingerprint }
   const revalidate = async () => {
     const current = await ctx.sessionController.inspect(context.sessionId, signal)
     const rootNow = await ctx.fs.resolve(workspace.path, { signal })
@@ -101,15 +115,19 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
     if (projectId) {
       const file = await ctx.fs.resolve(`${root}/.scholarflow/project.yaml`, { signal })
       invariant(ctx.fs.contains(rootNow, file), 'PATH_OUTSIDE_ALLOWED_ROOT', '配置链接发生变化。')
-      const currentConfig = parseConfig(await ctx.fs.readText(file, signal))
-      invariant(currentConfig.project.id === projectId && currentConfig.paths.manuscriptDir === manuscriptDir, 'SESSION_BINDING_CHANGED', '项目身份或输出范围已改变。')
+      const currentText = await ctx.fs.readText(file, signal), currentConfig = parseConfig(currentText)
+      const identityMatches = identityTransition
+        ? currentConfig.project.id === identityTransition.oldProjectId && digest(currentText) === identityTransition.oldConfigHash ||
+          currentConfig.project.id === identityTransition.projectId && digest(currentText) === identityTransition.newConfigHash
+        : currentConfig.project.id === projectId
+      invariant(identityMatches && currentConfig.paths.manuscriptDir === manuscriptDir, 'SESSION_BINDING_CHANGED', '项目身份或输出范围已改变。')
       if (!readonlyFuture) for (const path of ['.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json']) {
         const headerTarget = await ctx.fs.resolve(`${root}/${path}`, { signal })
         invariant(ctx.fs.contains(rootNow, headerTarget), 'PATH_OUTSIDE_ALLOWED_ROOT', '项目版本记录链接发生变化。')
         if (await ctx.fs.stat(headerTarget, signal)) invariant((schemaVersionOf(await ctx.fs.readText(headerTarget, signal)) ?? 1) <= 1,
           'PROJECT_SCHEMA_TOO_NEW', '提交前项目记录或资源锁升级，当前插件已停止写入。')
       }
-      await checkCopies(projectId)
+      await checkCopies(currentConfig.project.id)
     }
   }
   const io = new HostFileStore(ctx, { canonicalRoot: root, manuscriptDir, sessionId: context.sessionId, revalidate, readOnly: readonlyFuture }, signal)
@@ -135,9 +153,20 @@ export async function applicationResult<T>(operation: () => Promise<T>) {
 export async function inspectProject(ctx: Host, request: unknown, signal: AbortSignal) {
   const { context } = inspectRequest.parse(request)
   const { io, binding, manuscriptDir, bindingDiagnostic, identityCopies } = await resolveStore(ctx, context, signal, undefined, true)
-  if (bindingDiagnostic) return { binding, initialized: false, metadataExists: true,
-    ...(identityCopies.length && { identityConflict: { projectId: binding.projectId, workspaceId: binding.workspaceId, copies: identityCopies } }),
-    readonly: await inspectDamagedProject(io, bindingDiagnostic) }
+  if (bindingDiagnostic) {
+    let recovery: Awaited<ReturnType<typeof inspectRecovery>> | undefined
+    if (identityCopies.length) {
+      try { const transition = await pendingCopyTransition(io)
+        if (transition && transition.rootFingerprint === binding.rootFingerprint) recovery = await inspectRecovery(io, manuscriptDir)
+      } catch { /* Damaged copy journals remain diagnostic originals, never write exemptions. */ }
+    }
+    return { binding, initialized: false, metadataExists: true,
+      ...(identityCopies.length && { identityConflict: { projectId: binding.projectId, workspaceId: binding.workspaceId, copies: identityCopies } }),
+      ...(recovery?.pending.length && { recovery: { planHash: recovery.contentHash, copyIdentity: true,
+        transactions: recovery.pending.map(row => ({ id: row.txn.id, createdAt: row.txn.createdAt,
+          files: row.txn.changes.map((change, i) => ({ relativePath: change.path, status: row.images[i] && digest(row.images[i]!.text) === change.after?.hash ? 'published' : 'pending' })) })) } }),
+      readonly: await inspectDamagedProject(io, bindingDiagnostic) }
+  }
   try {
     const compatibility = await inspectCompatibility(io)
     if (compatibility) return { binding, initialized: false, metadataExists: true, readonly: compatibility }

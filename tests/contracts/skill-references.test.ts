@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { knownSkillReferences } from '../../src/host/skills/references.ts'
+import { prepareProjectCopy, applyProjectCopy, IDENTITY_CURRENT } from '../../src/core/project/identity.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { MemoryStore } from '../fixtures/memory-store.ts'
 import { json } from '../../src/core/store/files.ts'
@@ -50,6 +51,30 @@ test('unknown or missing reference state cannot be treated as unreferenced', asy
   const { io, host, bundle } = await fixture()
   io.externalEdit('.scholarflow/resources.lock.json', json({ schemaVersion: 99, projectId: 'TEST_ONLY' }))
   await assert.rejects(knownSkillReferences(host, bundle.manifest.metadata.qualifiedId, bundle.manifest.digest, new AbortController().signal), { code: 'SKILL_REFERENCES_UNAVAILABLE' })
+})
+
+test('copied historical runs retain pinned resources through verified ancestry without blocking unrelated retirement or accepting unrelated project IDs', async () => {
+  const { io, host, bundle } = await fixture(), current = await snapshot(io), qualifiedId = bundle.manifest.metadata.qualifiedId
+  await startWorkflow(io, await prepareWorkflow(io, { researchQuestion: 'TEST_ONLY copied reference history', minimumSources: 1, minimumLocatedEvidence: 1 }, 'session_TEST_ONLY_original'))
+  const path = '.scholarflow/runs/run_TEST_ONLY/snapshot.json', input = { schemaVersion: 1, runId: 'run_TEST_ONLY', projectId: current.ledger.projectId,
+    sessionId: 'session_TEST_ONLY_original', stage: 'revision', configHash: current.configHash, ledgerRevision: current.ledger.revision,
+    documentHash: current.document.contentHash, outlineVersion: 0, materialHashes: {}, sourceHashes: {}, profileHash: current.configHash,
+    skillDigests: [{ qualifiedId, digest: bundle.manifest.digest }], modelDescriptor: { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' },
+    budget: current.config.workflow.budget, networkScope: 'local-only', createdAt: new Date().toISOString() }
+  io.externalEdit(path, json(input))
+  const copy = await prepareProjectCopy(io, { expectedRevision: (await snapshot(io)).ledger.revision, sourceSessionId: 'session_TEST_ONLY_copy',
+    rootFingerprint: 'sha256:' + '0'.repeat(64), reason: 'TEST_ONLY explicitly confirmed copied reference ancestry' })
+  await applyProjectCopy(io, copy); await applyBindings(io, await prepareBindings(io, [], async () => bundle))
+  const scan = await knownSkillReferences(host, qualifiedId, bundle.manifest.digest, new AbortController().signal)
+  assert.deepEqual(scan.references, [{ workspaceId: 'workspace_TEST_ONLY', kind: 'run', recordId: 'run_TEST_ONLY' }])
+  assert.equal((await knownSkillReferences(host, qualifiedId, 'sha256:' + '0'.repeat(64), new AbortController().signal)).references.length, 0)
+  assert.equal((await io.read(path))!.text, json(input))
+  io.externalEdit(path, json({ ...input, projectId: 'prj_TEST_ONLY_unrelated' }))
+  await assert.rejects(knownSkillReferences(host, qualifiedId, bundle.manifest.digest, new AbortController().signal), { code: 'SKILL_REFERENCES_UNAVAILABLE' })
+  io.externalEdit(path, json(input))
+  const pointer = JSON.parse((await io.read(IDENTITY_CURRENT))!.text), archive = `.scholarflow/identity/history/${pointer.operationId}.json`
+  io.externalEdit(archive, (await io.read(archive))!.text + ' ')
+  await assert.rejects(knownSkillReferences(host, qualifiedId, bundle.manifest.digest, new AbortController().signal), { code: 'PROJECT_COPY_ARCHIVE_INVALID' })
 })
 test('known guided goals without fixed resources do not mask unrelated retirement; corrupt parent records remain unknown', async () => {
   const { io, host, bundle } = await fixture()

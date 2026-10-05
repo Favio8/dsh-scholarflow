@@ -6,6 +6,7 @@ import { projectMarkdown, walk, textOf, wordStats, citationMarkers } from '../ed
 import type { Ledger } from '../../shared/schema.ts'
 import { requirementCount } from '../requirements/counting.ts'
 import type { Mutation } from '../store/transactions.ts'
+import { isDetachedProjectPointer } from '../project/identity.ts'
 
 type Issue = Ledger['reviewIssues'][string]
 const CURRENT = '.scholarflow/reviews/current.json'
@@ -31,7 +32,7 @@ export async function reviewInput(io: FileStore) {
 
 export async function inspectReview(io: FileStore, observedInput?: Awaited<ReturnType<typeof reviewInput>>) {
   const reference = await io.read(CURRENT)
-  if (!reference) return { report: undefined, stale: true }
+  if (!reference || await isDetachedProjectPointer(io, CURRENT, reference)) return { report: undefined, stale: true }
   const pointer = JSON.parse(reference.text)
   invariant(typeof pointer.reviewId === 'string' && /^review_[\w]+$/.test(pointer.reviewId), 'REVIEW_INVALID', '当前审查索引损坏。')
   const file = await io.read(`.scholarflow/reviews/${pointer.reviewId}/report.json`)

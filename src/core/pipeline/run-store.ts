@@ -4,6 +4,7 @@ import { invariant } from '../../shared/errors.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
 import { snapshot } from '../project/project.ts'
+import { verifiedIdentityLineage } from '../project/identity.ts'
 
 export const ACTIVE_RUN = '.scholarflow/runs/active.json'
 export const runFile = (runId: string) => `.scholarflow/runs/${id.parse(runId)}/run.json`
@@ -25,13 +26,19 @@ export async function readRunInput(io: FileStore, runId: string, projectId: stri
   return { snapshot: row, file: (primary ?? legacy)!, legacy: !primary }
 }
 export async function inspectRuns(io: FileStore) {
-  const current = await snapshot(io), rows: (RunState & { legacyStorage: boolean })[] = [], diagnostics: string[] = [], root = '.scholarflow/runs'
+  const current = await snapshot(io), rows: (RunState & { legacyStorage: boolean; inheritedArchive: boolean })[] = [], diagnostics: string[] = [], root = '.scholarflow/runs'
+  const lineage = await verifiedIdentityLineage(io, current.ledger.projectId)
   if (!await io.stat(root)) return { runs: rows, diagnostics }
   const entries = await io.list(root)
   invariant(entries.length <= 1000, 'RUN_HISTORY_TOO_LARGE', '运行历史超过当前读取限额，请缩小历史范围。')
   for (const entry of entries.filter(row => row.type === 'directory' && /^run_[\w.-]+$/u.test(row.path.split('/').at(-1)!))) {
-    try { const stored = await readRun(io, entry.path.split('/').at(-1)!, current.ledger.projectId)
-      rows.push({ ...stored.run, legacyStorage: stored.legacy }) }
+    try {
+      const runId = entry.path.split('/').at(-1)!, image = await io.read(runFile(runId)) ?? await io.read(`.scholarflow/runs/${runId}/state.json`)
+      invariant(image, 'RUN_NOT_FOUND', '历史运行缺失。')
+      const identity = runStateSchema.parse(JSON.parse(image.text)).projectId
+      invariant(lineage.projectIds.includes(identity), 'PROJECT_ID_CONFLICT', '历史运行不属于当前项目或已校验的副本来源。')
+      const stored = await readRun(io, runId, identity)
+      rows.push({ ...stored.run, legacyStorage: stored.legacy, inheritedArchive: identity !== current.ledger.projectId }) }
     catch { diagnostics.push('一个运行记录缺失、不合法或身份不匹配，未采用其状态。') }
   }
   return { runs: rows.sort((a, b) => b.startedAt.localeCompare(a.startedAt)), diagnostics: [...new Set(diagnostics)] }

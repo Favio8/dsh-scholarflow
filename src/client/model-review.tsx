@@ -55,8 +55,9 @@ export function ModelReview({ project, context, api, refresh, run, busy, onRevie
     {history?.diagnostics.map((warning: string, index: number) => <p role="alert" key={index}>{warning}</p>)}
     {rows.map((row: any) => <section aria-label={`模型审查运行 ${row.runId}`} key={row.runId}><p>{row.runId} · {row.status} · 模型调用 {row.usedModelCalls}{row.parentRunId ? ` · 重试来源 ${row.parentRunId}` : ''}{row.errorCode ? ` · ${row.errorCode}` : ''}</p>
       {row.reviewId && <p>审查产物：{row.reviewId}</p>}
-      {['paused', 'interrupted', 'running', 'queued', 'waiting-input'].includes(row.status) && <button disabled={busy || !!preview} onClick={() => run(async () => setActionPlan(await api('review.prepareAction', { context: context(), runId: row.runId, action: 'resume' })))}>预览恢复模型审查 {row.runId}</button>}
-      {['failed', 'cancelled'].includes(row.status) && <button disabled={busy || !!preview} onClick={() => run(async () => setActionPlan(await api('review.prepareAction', { context: context(), runId: row.runId, action: 'retry' })))}>预览关联模型审查重试 {row.runId}</button>}
+      {row.inheritedArchive && <p>副本来源历史，只读；旧身份 {row.projectId}，不接管或重放请求。</p>}
+      {!row.inheritedArchive && ['paused', 'interrupted', 'running', 'queued', 'waiting-input'].includes(row.status) && <button disabled={busy || !!preview} onClick={() => run(async () => setActionPlan(await api('review.prepareAction', { context: context(), runId: row.runId, action: 'resume' })))}>预览恢复模型审查 {row.runId}</button>}
+      {!row.inheritedArchive && ['failed', 'cancelled'].includes(row.status) && <button disabled={busy || !!preview} onClick={() => run(async () => setActionPlan(await api('review.prepareAction', { context: context(), runId: row.runId, action: 'retry' })))}>预览关联模型审查重试 {row.runId}</button>}
     </section>)}
     {!rows.length && <p>本项目尚无模型审查运行；未知检查不能冒充已执行。</p>}
     <p role="status">{message}</p>

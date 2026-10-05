@@ -13,6 +13,7 @@ import { frozenPlanFile, checkpointFile } from '../pipeline/run-control.ts'
 import { transientRetry, waitRetrySlice } from '../pipeline/retry.ts'
 import type { ModelCall } from '../pipeline/generation.ts'
 import { workflowCall, syncWorkflowDuration } from '../pipeline/workflow-budget.ts'
+import { isDetachedProjectPointer } from '../project/identity.ts'
 
 const frozenSchema = z.object({ kind: z.literal('model-review'), id, reportId: id, contentHash: hash, input: modelReviewRequest,
   snapshot: runSnapshotSchema.refine(value => value.stage === 'review'), dependencyHash: hash, ledgerHash: hash, inputBytes: z.number().int().min(0).max(20 * 1024 * 1024),
@@ -135,7 +136,7 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
       expectedStateHash = digest(stateText); expectedCheckpointHash = digest(progressText); return
     }
     await checkInputs()
-    if (active) {
+    if (active && !await isDetachedProjectPointer(io, ACTIVE_RUN, active)) {
       const previous = runStateSchema.parse(JSON.parse(active.text)), authoritative = await readRun(io, previous.runId, state.projectId)
       invariant(authoritative.file.text === active.text, 'RUN_STATE_CHANGED', '活动投影与运行事实源不同。')
       invariant(!['running', 'queued', 'paused', 'waiting-input', 'interrupted'].includes(previous.status), ownerAlive(previous.owner) ? 'RUN_IN_PROGRESS' : 'RUN_INTERRUPTED', '本项目有未结束运行，请先处理检查点。')

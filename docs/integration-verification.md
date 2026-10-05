@@ -1137,7 +1137,26 @@ host Service.listService  { service: "agentPresets" }      # 精确签名与引�
 通过官方 `workspace/delete` 移除测试注册后，原项目恢复正常读取，两个根
 目录的所有已检查文件保持逐字一致。此动作只移除注册，不删除文件或会话。
 对应证据字段：`duplicateProjectIdentityReadonlyOriginalsMutationDenialAndRegistrationRemovalKeepBytes`。
-这项验证不代表“绑定为副本”已实现；身份变更和旧运行归档仍在开发中。
+这项只读验证本身不覆盖身份变更；其后的副本事务验证见以下补充。
+
+2026-10-05 后续补充：已实现显式“绑定为副本”的预览、取消、确认、
+身份历史下载和中断恢复。真实安装宿主在独立 TEST_ONLY home 验证完整
+项目复制后的操作：原项目全部文件摘要保持一致；副本正文、引用、原资料、
+证据及内容 ID、固定 Skill 字节和历史记录保留；只更新必要身份头和当前
+执行指针。旧付费运行作为只读档案保留，不取消、不退款、不重放请求。
+从实际已确认事务还原选定前镜像后，通过真实 SDK 明确恢复并冷启动重读。
+这是标记的 TEST_ONLY 故障注入，不是实际观察到的应用崩溃。
+对应证据字段：
+`nativeExplicitProjectCopyPreviewCancelReadonlyDenyRetainsAllOriginalAndCopiedContentIdsHistoryAndSkillBytes`、
+`nativeConfirmedIdentityCopyPartialPublicationRecoveryAndColdRestoreNeverReplayOldRequests`。
+领域与契约覆盖十三个发布中断位置、篡改目标拒绝、未知付费计数保留、
+多代记忆来源及历史资源引用。两次带模型回归在末尾因测试引用了早期已被
+重新确认替换的 Skill bindingId 而失败；复用失败夹具的真实只读 RPC 验证
+最终锁中的编号可读取说明、拒绝脚本，随后测试改为核对最终锁的完整绑定。
+当前独立测试集为 290/290。完整 V1 签收仍以父目录需求覆盖记录为准。
+修正后的 `--live-model` 完整回归已通过，客户端错误为零，两项副本证据
+字段均为 true；此运行不启用真实 Crossref 或 GitHub 检索，相应 false
+字段表示未在这次运行执行，并非把模拟结果计作在线验证。
 
 | 副作用 | 处置 |
 |---|---|

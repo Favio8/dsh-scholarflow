@@ -7,6 +7,7 @@ import { draftSequenceInputSchema, draftSequencePlanSchema, draftSequenceRunSche
 import { workflowInputSchema, workflowPlanSchema, workflowRunSchema } from '../../core/pipeline/workflow.ts'
 import { workflowCheckpointSchema } from '../../shared/workflow.ts'
 import { invariant } from '../../shared/errors.ts'
+import { verifiedIdentityLineage } from '../../core/project/identity.ts'
 
 type Host = any
 export async function knownSkillReferences(ctx: Host, qualifiedId: string, resourceDigest: string, signal: AbortSignal) {
@@ -29,7 +30,8 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
     const read = async (path: string) => {
       const selected = await target(path), before = await ctx.fs.stat(selected, signal)
       if (!before) { observations.push({ rootFingerprint, path, hash: 'absent' }); return undefined }
-      invariant(before.type === 'file' && before.size <= 2 * 1024 * 1024, 'SKILL_REFERENCES_UNAVAILABLE', '已登记项目的引用记录类型或大小异常，未卸载。')
+      const cap = /^\.scholarflow\/identity\/history\/project_copy_[a-f0-9]{32}\.json$/u.test(path) ? 8 * 1024 * 1024 : 2 * 1024 * 1024
+      invariant(before.type === 'file' && before.size <= cap, 'SKILL_REFERENCES_UNAVAILABLE', '已登记项目的引用记录类型或大小异常，未卸载。')
       const text = await ctx.fs.readText(selected, signal)
       invariant((await ctx.fs.stat(selected, signal))?.version === before.version, 'SKILL_REFERENCES_CHANGED', '引用检查期间项目记录改变，未卸载。')
       observations.push({ rootFingerprint, path, hash: digest(text) })
@@ -38,6 +40,14 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
     const configText = await read('.scholarflow/project.yaml')
     if (!configText) continue
     const config = parseConfig(configText), lockText = await read('.scholarflow/resources.lock.json')
+    // This adapter supplies content versions for readonly lineage observation;
+    // it has no Session identity, writer or execution capability.
+    const lineage = await verifiedIdentityLineage({ read: async path => {
+      const text = await read(path); return text === undefined ? undefined : { text, version: digest(text) }
+    }, stat: async path => {
+      const info = await ctx.fs.stat(await target(path), signal); return info && { path, type: info.type, size: info.size }
+    } }, config.project.id)
+    const historicalIdentity = (identity: string) => lineage.projectIds.includes(identity)
     invariant(lockText, 'SKILL_REFERENCES_UNAVAILABLE', '一个已登记项目缺少资源锁，不能确认其引用状态。')
     const raw = JSON.parse(lockText), parsed = resourceLockSchema.safeParse(raw)
     if (parsed.success) {
@@ -67,7 +77,7 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
         if (row.name.startsWith('workflow_')) {
           const input = workflowInputSchema.parse(JSON.parse(text)), plan = workflowPlanSchema.parse(JSON.parse(planText)), state = workflowRunSchema.parse(JSON.parse(stateText))
           const checkpoint = workflowCheckpointSchema.parse(JSON.parse(checkpointText)), { contentHash, ...body } = plan
-          invariant([input, plan, state, checkpoint].every(value => value.projectId === config.project.id && value.workflowId === row.name) &&
+          invariant(historicalIdentity(input.projectId) && [input, plan, state, checkpoint].every(value => value.projectId === input.projectId && value.workflowId === row.name) &&
             plan.inputHash === digest(text) && contentHash === digest(json(body)) && state.planHash === contentHash && checkpoint.planHash === contentHash &&
             state.checkpointHash === digest(checkpointText) && state.status === checkpoint.status,
             'SKILL_REFERENCES_UNAVAILABLE', '引导目标身份或摘要改变，引用状态未知，未卸载。')
@@ -76,7 +86,7 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
         } else {
           const input = draftSequenceInputSchema.parse(JSON.parse(text)), plan = draftSequencePlanSchema.parse(JSON.parse(planText)), state = draftSequenceRunSchema.parse(JSON.parse(stateText))
           const checkpoint = draftSequenceCheckpointSchema.parse(JSON.parse(checkpointText)), { contentHash, ...body } = plan
-          invariant(input.skillDigests && [input, plan, state, checkpoint].every(value => value.projectId === config.project.id && value.sequenceId === row.name) &&
+          invariant(input.skillDigests && historicalIdentity(input.projectId) && [input, plan, state, checkpoint].every(value => value.projectId === input.projectId && value.sequenceId === row.name) &&
             plan.inputHash === digest(text) && state.inputHash === plan.inputHash && checkpoint.inputHash === plan.inputHash && contentHash === digest(json(body)) &&
             state.planHash === contentHash && checkpoint.planHash === contentHash && state.checkpointHash === digest(checkpointText) && state.status === checkpoint.status,
             'SKILL_REFERENCES_UNAVAILABLE', '初稿顺序缺少固定 Skill 清单、身份或摘要不一致，引用状态未知，未卸载。')
@@ -85,7 +95,7 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
         continue
       }
       const run = runSnapshotSchema.parse(JSON.parse(text))
-      invariant(run.projectId === config.project.id && run.runId === row.name, 'SKILL_REFERENCES_UNAVAILABLE', '历史运行快照的身份不同，未卸载。')
+      invariant(historicalIdentity(run.projectId) && run.runId === row.name, 'SKILL_REFERENCES_UNAVAILABLE', '历史运行快照的身份不同，未卸载。')
       if (run.skillDigests.some(skill => skill.qualifiedId === qualifiedId && skill.digest === resourceDigest)) references.push({ workspaceId: workspace.id, kind: 'run', recordId: run.runId })
     }
   }
