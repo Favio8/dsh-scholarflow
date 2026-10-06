@@ -104,10 +104,13 @@ must keep the input.
 |---|---|
 | V1 | Resolved by contract inspection; fallback chosen and recorded above |
 | V2 | Verified (isolated probe) |
-| V3a/V3b/V3c | Source facts recorded; prototype ran but could not reach the capability — see below |
+| V3a | **Verified** — the host serves only the native OS chooser; no in-app browser, no single-file chooser |
 | V4 | Outstanding |
-| V5 | Source review complete; end-to-end outstanding |
-| V6 | Outstanding |
+| V5 | **Verified** — all three deliveries agree on the numbered style, including the Word list |
+| V6a | **Verified** — selecting the mode writes nothing into the workspace |
+| V6b | **Verified** — opening a session does not re-initialise the project |
+| V3b | **No verified channel** — see below |
+| V3c | Outstanding — no single-file chooser exists, so this needs a decision, not a prototype |
 
 ## Prototype run (2026-10-06, `tests/e2e/g0-probe.mjs`)
 
@@ -137,9 +140,20 @@ Calling `pick` itself was deliberately not attempted: it opens a modal OS dialog
 headless probe cannot answer. Confirming it needs a real Desktop session with a person
 present, and that is where the external-source feature stays until it happens.
 
-**V3b:** not established beyond the refusal above. The picker cannot enumerate outside the
-workspace on this host, so reading an external source would have to go through whatever the
-OS chooser returns plus the host's own file service — neither has been exercised.
+**V3b (no verified channel):** every read method of the host's workspace-files API takes a
+workspace file scope and the package also exposes `confine(root, workspaceRoot, path)`, so
+that surface is bounded by the workspace by construction. The directory picker refuses to
+enumerate outside the workspace (native-only, see V3a). The only remaining theoretical route
+is the raw `ctx.fs` service, which `dsh-fs-sandbox` documents as confining writes while
+preserving reads — but no concrete read entry point could be established from the installed
+bundle, and no prototype exercised it.
+
+**Consequence, and the reason this is recorded as a finding rather than a task:** the
+external requirement source ("电脑其他位置") cannot be implemented on verified ground today.
+The design already behaves correctly in that situation — the wizard states the capability is
+unverified instead of offering a control that cannot work — so nothing is silently broken.
+D-01/SF-039 need re-scoping with the user: today only a workspace source is reachable, and a
+single external *file* has no chooser at all.
 
 **V5 (verified):** `tests/integration/export-citation-order.test.ts`
 registers two sources, cites them in the reverse of their registration order, and delivers
