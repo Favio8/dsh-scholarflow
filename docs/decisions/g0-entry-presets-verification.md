@@ -269,5 +269,17 @@ The rename and remove paths were previously only exercised against the library c
 integration tests; they now have evidence through the operator-only Remote surface the UI
 calls.
 
+**AT-43 — verified: an old project is read in place.** The probe rewrites a created project's
+`requirements.json` into the pre-change shape (a single `assignmentPath`, no
+`requirementSources`), hashes it, then calls `project.inspect`:
+
+| Check | Result |
+|---|---|
+| The old shape is still readable | **PASS** — `initialized: true` |
+| Opening it does not migrate or rewrite it | **PASS** — the file's SHA-256 is unchanged |
+
+That is the compatibility promise from SPEC v1.1 §13 ("打开不写迁移") holding on the installed
+host rather than only in the domain tests.
+
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.

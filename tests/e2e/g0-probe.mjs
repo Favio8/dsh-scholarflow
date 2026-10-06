@@ -248,6 +248,17 @@ try {
       const listed = payload((await rpc('scholarflow.v1/presets.list', { request: {} })).body)
       record('AT-38 删除经宿主生效', removed?.removed === true && !(listed?.all ?? []).some(row => row.id === savedForManage?.id) ? 'PASS' : 'FAIL',
         'removed=' + String(removed?.removed) + ' 仍在列表=' + String((listed?.all ?? []).some(row => row.id === savedForManage?.id)))
+      // AT-43: an old project is read in place — opening it must not migrate or rewrite it.
+      const legacyPath = join(freshRoot, '.scholarflow', 'writing', 'requirements.json')
+      const legacy = JSON.parse(await readFile(legacyPath, 'utf8'))
+      delete legacy.spec.requirementSources
+      legacy.spec.assignmentPath = 'TEST_ONLY 原始资料.txt'
+      await writeFile(legacyPath, JSON.stringify(legacy))
+      const legacyHash = createHash('sha256').update(await readFile(legacyPath)).digest('hex')
+      const inspected = payload((await rpc('scholarflow.v1/project.inspect', { request: { context: creationContext } })).body)
+      const afterHash = createHash('sha256').update(await readFile(legacyPath)).digest('hex')
+      record('AT-43 旧项目只读不迁移', inspected?.initialized === true && legacyHash === afterHash ? 'PASS' : 'FAIL',
+        'initialized=' + String(inspected?.initialized) + ' 文件字节未变=' + String(legacyHash === afterHash))
       record('AT-34 预设随创建记录', row.preset?.id === 'course-argumentative' && row.sections?.length === 2 ? 'PASS' : 'FAIL',
         '预设=' + String(row.preset?.id) + ' 章节=' + String(row.sections?.length))
     }
