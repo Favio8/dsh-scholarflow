@@ -142,20 +142,19 @@ workspace on this host, so reading an external source would have to go through w
 OS chooser returns plus the host's own file service — neither has been exercised.
 
 **V5 (partially verified):** a project was created through the public RPCs
-( → ) and all three exports ran through the installed
-host, delivering to :
+(`project.prepareInit` then `project.initialize`) and all three exports ran through the
+installed host, each delivering into `manuscript/exports/delivery_*/`:
 
 | Check | Result |
 |---|---|
-| Word delivery | **PASS** — real OOXML bytes ( header, 9717 bytes) |
-| LaTeX delivery | produced, uses ; the numbered bibliography block is absent because the fixture has no citations, and the exporter emits it only when citations exist |
+| Word delivery | **PASS** — real OOXML bytes (`PK` header, 9717 bytes) |
+| LaTeX delivery | produced and uses `ctexart`; the numbered bibliography block is absent because the fixture has no citations, and the exporter emits it only when citations exist |
 | Markdown delivery | produced |
-| Three deliveries in one project | **PASS** — each plan is built on a freshly read ledger revision |
+| Three deliveries in one project | **PASS** — every plan is built on a freshly read ledger revision |
 
-Two things the probe itself taught, both correct product behaviour rather than defects:
-a project context must carry , and every delivery advances the
-ledger so the next plan needs a fresh read ( otherwise).
-
+Two behaviours the probe itself surfaced, both correct rather than defects: a project
+context must carry `expectedLedgerRevision`, and each delivery advances the ledger, so the
+next plan needs a fresh read (`STALE_LEDGER_REVISION` otherwise).
 **Not yet exercised:** the numbered citation style itself, which needs a project with a
 registered source and a cited paragraph. That is the remaining part of V5.
 
