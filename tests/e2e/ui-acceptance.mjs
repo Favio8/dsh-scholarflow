@@ -480,6 +480,108 @@ try {
     '可见控件=' + zoomed.count + ' 最小高度=' + Math.round(zoomed.smallest) + 'px')
   await page.setViewportSize({ width: 1440, height: 900 })
   record('AT-65～69 交互期间无客户端错误', clientErrors.length === 0, clientErrors.slice(0, 3).join(' | ') || 'none')
+
+  // ── AT-67/68/59 · these need a real project: the overlay, the candidate and the draft only
+  // exist once one does. Created and cancelled at once, so no generation is paid for.
+  const projectWorkspace = await workspaceOf(projectRoot)
+  const createdSession = payload((await rpc('session/create', { request: { workspaceId: projectWorkspace, agentPreset: 'scholarflow' } })).body)?.sessionId
+  const projectContext = { requestId: `req_at67_${Date.now()}`, workspaceId: projectWorkspace, sessionId: createdSession }
+  const projectSpec = { title: 'TEST_ONLY 交互验收', type: 'course-paper', language: 'zh-CN', format: 'markdown',
+    requirements: 'TEST_ONLY 交互验收用要求。', requirementSources: [], materials: [], online: false, targetLength: 1500,
+    countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
+    sections: [{ id: 'section_1', title: '第一节', purpose: '', targetLength: 1500, allocationMode: 'auto' }],
+    manuscriptDir: 'manuscript', overrides: [] }
+  let workbench = 0
+  try {
+    const plan = payload((await rpc('scholarflow.v1/creation.prepare', { request: { context: projectContext, spec: projectSpec } })).body)
+    const started = payload((await rpc('scholarflow.v1/creation.start', { request: { context: projectContext, planId: plan.planId, planHash: plan.planHash } })).body)
+    record('AT-68 项目已创建以便驱动工作台', Boolean(started?.taskId), 'task=' + String(started?.taskId))
+    await rpc('scholarflow.v1/writingTask.action', { request: { context: { ...projectContext, projectId: started.projectId },
+      taskId: started.taskId, action: 'cancel' } })
+    await page.waitForTimeout(2000)
+    await page.locator('[class*="_sessionRow"]').first().click().catch(() => undefined)
+    await page.waitForTimeout(2500)
+    workbench = await page.locator('.sf-middle-column').count()
+  } catch (error) {
+    record('AT-68 项目已创建以便驱动工作台', 'FAIL', error.message)
+  }
+  record('AT-67 正文工作台在真实客户端挂载', workbench > 0, 'middle columns=' + workbench)
+  if (workbench > 0) {
+    const box = () => page.evaluate(() => {
+      const column = document.querySelector('.sf-middle-column')
+      const overlay = document.querySelector('.sf-overlay')
+      const scroller = document.querySelector('.sf-editor-scroll')
+      const right = document.querySelector('[class*="_sidebarRight"], [class*="sidebar-right"], aside')
+      return { overlay: overlay ? overlay.getBoundingClientRect().toJSON() : undefined,
+        column: column ? column.getBoundingClientRect().toJSON() : undefined,
+        rightLeft: right ? right.getBoundingClientRect().left : undefined,
+        padBottom: scroller ? parseFloat(getComputedStyle(scroller).paddingBottom) : 0 }
+    })
+    const idle = await box()
+    record('AT-67 浮层未打开时滚动区没有多余留白', (idle.padBottom ?? 0) === 0 && !idle.overlay,
+      'padBottom=' + idle.padBottom + ' overlay=' + Boolean(idle.overlay))
+    const selected = await page.evaluate(() => {
+      const block = document.querySelector('.sf-paper-page p')
+      if (!block?.firstChild) return false
+      const range = document.createRange(); range.setStart(block.firstChild, 0)
+      range.setEnd(block.firstChild, Math.min(20, block.firstChild.textContent.length))
+      const list = window.getSelection(); list.removeAllRanges(); list.addRange(range)
+      block.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+      return true
+    })
+    await page.waitForTimeout(700)
+    const menu = await page.locator('.sf-selection-menu').count()
+    record('AT-56 选区菜单在真实客户端出现', selected && menu > 0, '选中=' + selected + ' 菜单=' + menu)
+    await page.locator('.sf-selection-menu button').first().click().catch(() => undefined)
+    await page.waitForTimeout(700)
+    const opened = await box()
+    record('AT-67 浮层在中栏之内且不达右栏',
+      opened.overlay && opened.column && opened.overlay.left >= opened.column.left - 1 && opened.overlay.right <= opened.column.right + 1 &&
+        (opened.rightLeft === undefined || opened.overlay.right <= opened.rightLeft + 1),
+      JSON.stringify({ overlayRight: Math.round(opened.overlay?.right ?? 0), columnRight: Math.round(opened.column?.right ?? 0),
+        rightLeft: opened.rightLeft === undefined ? null : Math.round(opened.rightLeft) }))
+    record('AT-67 浮层打开时滚动区获得留白', (opened.padBottom ?? 0) > 0, 'padBottom=' + Math.round(opened.padBottom ?? 0))
+    for (let index = 0; index < 6; index++) {
+      await page.locator('.sf-overlay button:has-text("收起"), .sf-overlay-head button').first().click().catch(() => undefined)
+      await page.waitForTimeout(90)
+      await page.locator('.sf-selection-menu button').first().click().catch(() => undefined)
+      await page.waitForTimeout(90)
+    }
+    await page.waitForTimeout(500)
+    const toggled = await box()
+    record('AT-67 反复开合后浮层仍在边界内',
+      !toggled.overlay || (toggled.overlay.left >= toggled.column.left - 1 && toggled.overlay.right <= toggled.column.right + 1),
+      'overlay=' + Boolean(toggled.overlay) + ' padBottom=' + Math.round(toggled.padBottom ?? 0))
+    const before = await page.evaluate(() => document.querySelector('.sf-source-input')?.value ?? '')
+    await page.locator('.sf-overlay button:has-text("提交")').first().click().catch(() => undefined)
+    const generating = await page.evaluate(async () => {
+      const deadline = Date.now() + 8000
+      while (Date.now() < deadline) {
+        if (document.querySelector('.sf-rewrite')?.dataset.state === 'generating') return true
+        await new Promise(done => setTimeout(done, 100))
+      }
+      return false
+    })
+    record('AT-57 提交后真实进入生成状态', generating, 'generating=' + generating)
+    await page.locator('.sf-rewrite button:has-text("停止")').first().click().catch(() => undefined)
+    await page.waitForTimeout(2000)
+    const afterStop = await page.evaluate(() => ({ state: document.querySelector('.sf-rewrite')?.dataset.state,
+      text: document.querySelector('.sf-source-input')?.value ?? '', accept: Boolean(document.querySelector('[data-sf-accept]')) }))
+    record('AT-68 停止后进入停止状态且没有可接受候选', afterStop.state === 'stopped' && afterStop.accept === false,
+      JSON.stringify({ state: afterStop.state, accept: afterStop.accept }))
+    record('AT-67 停止后正文不变', afterStop.text === before, '文本一致=' + (afterStop.text === before))
+    const urlBefore = page.url()
+    for (let index = 0; index < 4; index++) {
+      await page.locator('[class*="right"], [title*="右栏"], [title*="侧边"]').first().click().catch(() => undefined)
+      await page.waitForTimeout(160)
+    }
+    await page.waitForTimeout(700)
+    const afterPane = await box()
+    record('AT-59 右栏反复开合不重建会话', page.url() === urlBefore, 'url 不变=' + (page.url() === urlBefore))
+    record('AT-59 右栏开合后浮层边界仍正确',
+      !afterPane.overlay || afterPane.overlay.right <= afterPane.column.right + 1,
+      JSON.stringify({ overlayRight: Math.round(afterPane.overlay?.right ?? 0), columnRight: Math.round(afterPane.column?.right ?? 0) }))
+  }
 } catch (error) {
   record('acceptance run', 'FAIL', error.message)
 } finally {
