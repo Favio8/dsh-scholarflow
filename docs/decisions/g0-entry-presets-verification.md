@@ -105,12 +105,12 @@ must keep the input.
 | V1 | Resolved by contract inspection; fallback chosen and recorded above |
 | V2 | Verified (isolated probe) |
 | V3a | **Verified** — the host serves only the native OS chooser; no in-app browser, no single-file chooser |
-| V4 | Outstanding |
+| V4 | **Awaiting the user's decision** — image recognition needs one real model call, which costs money, so it is not run without explicit approval |
 | V5 | **Verified** — all three deliveries agree on the numbered style, including the Word list |
 | V6a | **Verified** — selecting the mode writes nothing into the workspace |
 | V6b | **Verified** — opening a session does not re-initialise the project |
 | V3b | **No verified channel** — see below |
-| V3c | Outstanding — no single-file chooser exists, so this needs a decision, not a prototype |
+| V3c | **Awaiting the user's decision** — no single-file chooser exists, so only a person can say how an external file should be reached |
 
 ## Prototype run (2026-10-06, `tests/e2e/g0-probe.mjs`)
 
