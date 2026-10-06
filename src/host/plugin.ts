@@ -1208,6 +1208,32 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async creationPrepare(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.prepare(request, this.requireOperator(), signal, this.projectDefaults())) }
   @Remote('creation.start')
   async creationStart(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.create(request, this.requireOperator(), signal)) }
+  // v1.2 requirement chain: read every member, structure what was read, propose an outline,
+  // and adopt field by field. Reads are jobs, so the wizard sees real per-member progress.
+  @Remote('creation.readRequirements')
+  async creationReadRequirements(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.readRequirements(request, this.requireOperator(), signal)) }
+  @Remote('creation.readStatus')
+  async creationReadStatus(request: unknown) { return applicationResult(async () => this.writingController.readStatus(request, this.requireOperator())) }
+  @Remote('creation.stopRead')
+  async creationStopRead(request: unknown) { return applicationResult(async () => this.writingController.stopRead(request, this.requireOperator())) }
+  @Remote('creation.retryMember')
+  async creationRetryMember(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.retryMember(request, this.requireOperator(), signal)) }
+  @Remote('creation.imageModels')
+  async creationImageModels(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.imageModels(request, signal) }) }
+  @Remote('creation.structure')
+  async creationStructure(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.structure(request, this.requireOperator(), signal)) }
+  @Remote('outline.suggest')
+  async outlineSuggest(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.suggestOutline(request, this.requireOperator(), signal)) }
+  @Remote('candidates.list')
+  async candidatesList(request: unknown) { return applicationResult(async () => { this.requireOperator(); return this.writingController.candidateList(request) }) }
+  @Remote('candidates.adopt')
+  async candidatesAdopt(request: unknown) { return applicationResult(async () => this.writingController.adoptCandidate(request, this.requireOperator())) }
+  @Remote('candidates.discard')
+  async candidatesDiscard(request: unknown) { return applicationResult(async () => this.writingController.discardCandidate(request)) }
+  @Remote('task.issues')
+  async taskIssues(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.taskIssues(request, signal) }) }
+  @Remote('typography.update')
+  async typographyUpdate(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.preferencesTypography(request, signal)) }
   @Remote('writingTask.inspect')
   async writingTaskInspect(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.inspect(request, signal) }) }
   @Remote('document.versions')

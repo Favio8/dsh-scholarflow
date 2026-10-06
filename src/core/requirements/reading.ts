@@ -49,7 +49,7 @@ export function planRead(sources: RequirementSource[]): { members: PlannedMember
 export function startRead(input: { readId: string; projectId: string; sessionId: string; members: PlannedMember[]; at: string }): RequirementRead {
   return { schemaVersion: 1, readId: input.readId, projectId: input.projectId, sessionId: input.sessionId,
     members: input.members.map(member => ({ name: member.name, sourceId: member.sourceId, kind: member.kind, state: 'pending' as const, bytes: 0 })),
-    state: 'reading', phase: '', done: 0, total: input.members.length,
+    state: 'reading', phase: '', done: 0, total: input.members.length, skipped: 0,
     startedAt: input.at, updatedAt: input.at, elapsedMs: 0 }
 }
 

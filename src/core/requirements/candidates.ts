@@ -17,8 +17,8 @@ export type OutlineCoverage = z.infer<typeof outlineCoverage>
 type Section = CreationSpec['sections'][number]
 
 /** The fields whose change invalidates a requirements candidate. */
-export function requirementsBasis(input: { spec: CreationSpec; specHash: string; requirementsHash: string; readsHash: string }): CandidateBasis {
-  return { specHash: input.specHash, requirementsHash: input.requirementsHash, readsHash: input.readsHash }
+export function requirementsBasis(input: { spec: CreationSpec; specHash: string; requirementsHash: string; readsHash?: string }): CandidateBasis {
+  return { specHash: input.specHash, requirementsHash: input.requirementsHash, ...(input.readsHash && { readsHash: input.readsHash }) }
 }
 
 export function outlineBasis(input: { spec: CreationSpec; specHash: string; requirementsHash: string; outlineHash: string; readsHash?: string }): CandidateBasis {
@@ -185,4 +185,20 @@ export function outlineGaps(sections: Section[], coverage: OutlineCoverage[], in
   if (!sections.some(section => /实验|结果|results?|evaluation/i.test(section.title + section.purpose)))
     gaps.push('没有章节负责分析实验结果；如果任务要求分析原论文的实验部分，需要补上对应章节。')
   return gaps
+}
+
+/**
+ * Where each brief field came from (SPEC v1.2 §4.2). A value that appears in the requirement
+ * files is the teacher's; one that only appears in the user's own description is theirs; the
+ * rest is the model's suggestion and is shown as such until it is adopted.
+ */
+export function originsOf(brief: RequirementBrief, input: { readText: string; userText: string }): Record<string, 'teacher' | 'user' | 'suggestion'> {
+  const origins: Record<string, 'teacher' | 'user' | 'suggestion'> = {}
+  for (const row of flattenBrief(brief)) {
+    if (!row.value.trim()) continue
+    const probe = row.value.replace(/\s+/g, '')
+    const contains = (haystack: string) => haystack.replace(/\s+/g, '').includes(probe) || probe.length > 8 && haystack.replace(/\s+/g, '').includes(probe.slice(0, 8))
+    origins[row.path] = contains(input.readText) ? 'teacher' : contains(input.userText) ? 'user' : 'suggestion'
+  }
+  return origins
 }

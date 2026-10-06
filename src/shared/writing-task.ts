@@ -84,6 +84,7 @@ export const requirementRead = z.object({ schemaVersion: z.literal(1), readId: i
   members: z.array(requirementReadMember).max(500), state: z.enum(['reading', 'ready', 'stopped', 'failed']),
   phase: z.string().max(200), done: z.number().int().nonnegative(), total: z.number().int().nonnegative(),
   startedAt: z.string(), updatedAt: z.string(), elapsedMs: z.number().nonnegative(),
+  skipped: z.number().int().nonnegative().default(0),
   model: z.string().max(200).optional(), recognitionModel: z.string().max(200).optional(), error: z.string().max(1000).optional() }).strict()
 export type RequirementRead = z.infer<typeof requirementRead>
 
