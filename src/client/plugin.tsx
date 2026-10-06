@@ -19,6 +19,7 @@ import { CAPTION_CSS, CHAT_CSS, WorkbenchIcon } from './workbench-chrome.tsx'
 import { PAPER_CSS, MATH_CSS, ProjectSettings, TYPE_LABELS, FORMAT_LABELS, type PaperView, type DraftController } from './paper-workspace.tsx'
 import type { ExportFormat } from '../shared/presentation.ts'
 import { CHAT_ID, CHAT_KIND, NATIVE_DOCK_CSS, NativeTools, createNativeHeader, createWorkbenchNavigation, connectPresetEntry, openExistingChat } from './native-dock.tsx'
+import { SurfaceBoundary, SURFACE_BOUNDARY_CSS } from './surface-boundary.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export', 'Settings', 'Changes', 'History'] as const
@@ -53,7 +54,7 @@ export function apply(ctx: Host) {
   function WorkspaceSurface(props: Host) { return props.renderFactorySlot('scholarflow.workspace', {}) }
   // The settings surface for platforms whose top entry is a sidebar row rather than a
   // caption button; it renders the same Settings component as the global section.
-  function SettingsSurface() { return <div className="sf-app"><style>{CSS + EXTRA_CSS + SETTINGS_CSS}</style><Settings /></div> }
+  function SettingsSurface() { return <div className="sf-app"><style>{CSS + EXTRA_CSS + SETTINGS_CSS + SURFACE_BOUNDARY_CSS}</style><SurfaceBoundary label="设置面"><Settings /></SurfaceBoundary></div> }
   function ChatViews(props: Host) { return props.renderSlot('conversation.session', { view: 'chat' }) }
   function DockChat(props: Host) {
     const scope = useSyncExternalStore(navigation.source.subscribe, navigation.source.getSnapshot, navigation.source.getSnapshot)
@@ -75,8 +76,10 @@ export function apply(ctx: Host) {
   }
   function Agent(props: Host) {
     const session = props.useSession((s: Host) => s)
-    const workspaces = props.useWorkspaces((s: Host) => s.items)
-    const workspace = workspaces.find((item: Host) => item.sessionIds.includes(props.sessionId))
+    // The Host's catalog can be momentarily empty (a workspace was removed, a profile is
+    // still loading). Reading it defensively keeps a transient gap from blanking the surface.
+    const workspaces = props.useWorkspaces((s: Host) => s.items) ?? []
+    const workspace = workspaces.find((item: Host) => (item?.sessionIds ?? []).includes(props.sessionId))
     const [busy, setBusy] = useState(false), [error, setError] = useState('')
     const newSession = async () => {
       setBusy(true); setError('')
@@ -130,18 +133,20 @@ export function apply(ctx: Host) {
     </div></>
   }
   function Workspace(props: Host) {
-    return <div className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS}</style>
+    // This surface replaces the Host's conversation slot, so an error inside it would otherwise
+    // leave an empty pane with nothing to report; the boundary renders the failure instead.
+    return <div className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS}</style>
       <SelectionReferenceDetails sessionId={props.sessionId} />
-      <main className="sf-body">{props.renderSlot('scholarflow.project', {
+      <main className="sf-body"><SurfaceBoundary label="项目面" onEscape={() => navigation.ordinary()}>{props.renderSlot('scholarflow.project', {
         renderNativeTools: (extra: React.ReactNode) => <NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} extra={extra} />,
-      })}</main></div>
+      })}</SurfaceBoundary></main></div>
   }
 
   function Project(props: Host) {
     const confirmationRoot = useRef<HTMLElement>(null)
     useConfirmationFocus(confirmationRoot)
-    const workspaces = props.useWorkspaces((state: Host) => state.items)
-    const workspace = workspaces.find((item: Host) => item.sessionIds.includes(props.sessionId))
+    const workspaces = props.useWorkspaces((state: Host) => state.items) ?? []
+    const workspace = workspaces.find((item: Host) => (item?.sessionIds ?? []).includes(props.sessionId))
     const [selectedWorkspace, setSelectedWorkspace] = useState('')
     const [project, setProject] = useState<Host>()
     const [error, setError] = useState('')
