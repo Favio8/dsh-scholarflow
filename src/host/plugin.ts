@@ -180,7 +180,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       if (input.modelReview) {
         const model = await selectedModel(this.ctx, input.context.sessionId, signal)
         reviewPlan = await prepareModelReview(io, { context: input.context, assessmentScope: 'cross-section' },
-          { providerId: model.selected.provider, modelId: model.selected.model, ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }) }, binding => readPrivateSkill(binding, io))
+          { providerId: model.selected.provider, modelId: model.selected.model, ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }), maxOutputTokens: model.maxOutputTokens }, binding => readPrivateSkill(binding, io))
         invariant(reviewPlan.inputBytes + (reviewPlan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow,
           'CONTEXT_WINDOW_EXCEEDED', '完整审查范围超过宿主模型上下文，没有隐式裁剪。')
       }
@@ -1096,7 +1096,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       invariant(this.draftSequencePlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理初稿顺序预览。')
       const { io } = await resolveStore(this.ctx, input.context, signal), model = await selectedModel(this.ctx, input.context.sessionId, signal)
       const plan = await prepareDraftSequence(io, input, { providerId: model.selected.provider, modelId: model.selected.model,
-        ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }), maxOutputTokens: 16384 }, binding => readPrivateSkill(binding, io))
+        ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }), maxOutputTokens: model.maxOutputTokens ?? 16384 }, binding => readPrivateSkill(binding, io))
       this.draftSequencePlans.set(plan.id, { plan, context: input.context, peerId, expires: Date.now() + 600000 })
       return { planId: plan.id, planHash: plan.contentHash, action: 'start', input: plan.input,
         risks: ['顺序只调度缺失或空白章节；已有正文原样保留。每节另行预览资料发送范围并审阅接受，主稿不会自动被覆盖。',
@@ -1193,7 +1193,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       mutationRevision(input.context)
       const { io } = await resolveStore(this.ctx, input.context, signal)
       const model = await selectedModel(this.ctx, input.context.sessionId, signal)
-      const plan = await prepareGeneration(io, input, { providerId: model.selected.provider, modelId: model.selected.model }, binding => readPrivateSkill(binding, io))
+      const plan = await prepareGeneration(io, input, { providerId: model.selected.provider, modelId: model.selected.model, maxOutputTokens: model.maxOutputTokens }, binding => readPrivateSkill(binding, io))
       invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '选定范围超过模型上下文预算；请缩小章节和证据范围，未截掉关键证据继续生成。')
       for (const [key, row] of this.generationPlans) if (row.expires < Date.now()) this.generationPlans.delete(key)
       invariant(this.generationPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有生成计划。')
@@ -1545,7 +1545,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       invariant(this.modelReviewPlans.size < 8, 'TOO_MANY_PENDING_PLANS', '请先处理已有模型审查预览。')
       const { io } = await resolveStore(this.ctx, input.context, signal), model = await selectedModel(this.ctx, input.context.sessionId, signal)
       const plan = await prepareModelReview(io, input, { providerId: model.selected.provider, modelId: model.selected.model,
-        ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }) }, binding => readPrivateSkill(binding, io))
+        ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }), maxOutputTokens: model.maxOutputTokens }, binding => readPrivateSkill(binding, io))
       invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '完整审查范围超过模型上下文预算，请缩小稿件；未隐式删掉关键证据。')
       this.modelReviewPlans.set(plan.id, { plan, peerId, selected: model.selected, expires: Date.now() + 600000 })
       return this.reviewPreview(plan)

@@ -27,15 +27,21 @@ export async function selectedModel(ctx: Host, sessionId: string, signal: AbortS
   invariant(selected?.provider && selected.model, 'MODEL_NOT_SELECTED', '请先在 DSH 中选择当前会话模型。')
   const info = await ctx.llm.resolveModelInfo(selected.provider, selected.model, signal)
   invariant(info.context?.contextWindow, 'UNSUPPORTED_DSH_CAPABILITY', '宿主没有返回该模型的上下文限额，无法安全规划输入范围。')
-  return { selected, contextWindow: info.context.contextWindow as number, session: agent.session }
+  // The provider's own per-request cap decides how much a stage may write; 32768
+  // is only the frozen run-schema ceiling, not a writing limit.
+  const reported = info.defaultMaxTokens
+  const maxOutputTokens = Number.isSafeInteger(reported) && (reported as number) > 0 ? Math.min(32768, reported as number) : undefined
+  return { selected, contextWindow: info.context.contextWindow as number, maxOutputTokens, session: agent.session }
 }
 
 export async function callStageModel(ctx: Host, session: Host, selected: { provider: string; model: string; reasoningEffort?: string }, call: ModelCall) {
   const messages = [createSystemMessage(call.system), createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text',
     text: JSON.stringify({ instruction: call.instruction, ...(call.repair && { formatRepair: call.repair }), researchData: call.context }) }] })]
-  const maxTokens = call.maxTokens ?? 4096
-  invariant(Number.isInteger(maxTokens) && maxTokens >= 1 && maxTokens <= 32768, 'MODEL_OUTPUT_BUDGET_INVALID', '阶段输出预算不合法，未发送模型请求。')
-  const request = { ...selected, sessionId: session.id, maxTokens, temperature: 0.3, messages }
+  const maxTokens = call.maxTokens
+  if (maxTokens !== undefined) invariant(Number.isInteger(maxTokens) && maxTokens >= 1 && maxTokens <= 32768, 'MODEL_OUTPUT_BUDGET_INVALID', '阶段输出预算不合法，未发送模型请求。')
+  // Without an explicit budget the provider applies its own configured cap, so a
+  // long section is never cut short by a number this plugin invented.
+  const request = { ...selected, sessionId: session.id, ...(maxTokens === undefined ? {} : { maxTokens }), temperature: 0.3, messages }
   // The SDK requires every model-visible input to be reconstructable from the
   // owning session log. No raw prompt is duplicated into project diagnostic logs.
   logStage(session, call.runId, 'request', request)
@@ -51,7 +57,7 @@ export async function callStageModel(ctx: Host, session: Host, selected: { provi
   logStage(session, call.runId, 'result', { text, finish: finish?.kind ?? 'missing', ...(usage && { usage }) })
   invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认结果日志持久化；未发布正文建议。')
   if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '宿主模型调用已取消。')
-  if (finish?.kind === 'max-tokens') throw new ScholarError('MODEL_OUTPUT_LIMIT_REACHED', '模型消耗了本次输出预算但未完整返回结果；已保留计费次数，请预览新的运行。')
+  if (finish?.kind === 'max-tokens') throw new ScholarError('MODEL_OUTPUT_LIMIT_REACHED', '模型输出达到提供方上限而未完整返回；本次调用已计费，请重试或缩小范围。')
   if (finish?.kind === 'error') {
     const code = /^[A-Z_]{1,64}$/.test(finish.failure?.code ?? '') ? finish.failure.code : 'MODEL_CALL_FAILED'
     const facts: Record<string, number> = {}, failure = finish.failure
