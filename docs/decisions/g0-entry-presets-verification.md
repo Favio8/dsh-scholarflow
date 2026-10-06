@@ -222,21 +222,19 @@ person opens the session normally. The substance that can be checked without a p
 already recorded above: V6a/V6b for the session behaviour, AT-29 for the shared settings
 document, AT-36 for preset reuse and library isolation.
 
-**Rendered-UI presence — investigated, not dependable in the probe.** Two diagnostic runs
-established what the client actually shows after an RPC-created session:
+**Rendered-UI presence — two things observed in the real client, the full flow not driven.**
+Dumping the client's buttons after an RPC-created session showed that **the top entry renders as
+`ScholarFlow 设置`**, and that the mode chip renders showing the *current* mode
+(`标准模式` on a fresh session) rather than the target. So both surfaces of item 1 exist in the
+real client, and item 2's entry point exists too.
 
-- the page settles on a **blank new session** (`新会话`), not on the created one, and no
-  workbench renders (`sf-app` count 0);
-- the sidebar's row keys are `workspace:<id>` and `session:<sessionId>`; one run listed the
-  created session, the next found the row count at 0 for its own session, so the row is not
-  reliably present after a reload;
-- clicking it therefore times out, and the screenshots kept in `.dsh-tmp/ui-review/` show the
-  ordinary client rather than the workbench.
-
-Conclusion: driving the client to a ScholarFlow session from a probe is not dependable here, so
-the interface confirmation of items 2-5 stays with the real Desktop, where a person opens the
-session normally. Phase 0 §2.1's visual review has the same answer — with the implementation
-already built, the artifact worth reviewing is the real page, not a mockup of it.
+Driving the rest did not work from the probe: a session created over RPC settles the client on a
+blank session with no workbench, its sidebar row is present in one run and absent in the next,
+and opening the chip and selecting ScholarFlow did not complete inside the probe. Reaching the
+workbench this way is therefore not dependable here, and the interface confirmation of items 2-5
+plus the Phase 0 §2.1 visual review stay with the real Desktop, where a person opens the session
+normally. With the implementation already built, the artifact worth reviewing is the real page,
+not a mockup of it.
 
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.

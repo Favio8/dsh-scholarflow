@@ -147,15 +147,19 @@ try {
     await page.reload(); await page.waitForTimeout(2500)
     const shots = resolve('.dsh-tmp/ui-review')
     await mkdir(shots, { recursive: true })
-    const rows = await page.locator('[data-row-key]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-row-key')))
-    console.log('侧栏行键:', JSON.stringify(rows).slice(0, 300))
-    console.log('页面标记: sf-app=' + await page.locator('.sf-app').count() + ' sf-wizard=' + await page.locator('.sf-wizard').count() + ' 会话区=' + await page.locator('[data-composer-input]').count())
-    console.log('页面文字前 200:', (await page.locator('body').innerText()).replace(/s+/g, ' ').slice(0, 200))
-    const row = page.locator('[data-row-key="session:' + sessionId + '"]')
-    console.log('目标行数:', await row.count())
-    await row.first().click({ timeout: 8000 })
-    await page.waitForTimeout(3000)
-    console.log('点击后: sf-app=' + await page.locator('.sf-app').count() + ' sf-wizard=' + await page.locator('.sf-wizard').count() + ' 文字=' + (await page.locator('body').innerText()).replace(/s+/g, ' ').slice(0, 160))
+    // The real path for item 2: choose the mode in a new conversation, which is what the
+    // hero chip does. A session created over RPC never renders the workbench on its own.
+    // The chip shows the CURRENT mode (标准模式 on a fresh session), so open it and pick
+    // ScholarFlow from the list — this is the real path for item 2.
+    const mode = page.getByRole('button', { name: /模式/ }).first()
+    console.log('模式芯片:', await mode.count(), await mode.innerText().catch(() => ''))
+    if (await mode.count()) {
+      await mode.click(); await page.waitForTimeout(1200)
+      const option = page.getByText('ScholarFlow', { exact: true }).first()
+      console.log('列表里的 ScholarFlow 选项:', await option.count())
+      if (await option.count()) { await option.click(); await page.waitForTimeout(4000) }
+    }
+    console.log('选模式后: sf-wizard=' + await page.locator('.sf-wizard').count() + ' sf-app=' + await page.locator('.sf-app').count())
     await page.screenshot({ path: join(shots, 'wizard-wide.png') })
     await page.setViewportSize({ width: 420, height: 900 }); await page.waitForTimeout(1200)
     await page.screenshot({ path: join(shots, 'wizard-narrow.png') })
