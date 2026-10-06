@@ -139,7 +139,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const moveSection = (index: number, direction: number) => {
     const sections = [...spec.sections], target = index + direction
     if (target < 0 || target >= sections.length) return
-    ;[sections[index], sections[target]] = [sections[target], sections[index]]; update({ sections })
+    ;[sections[index], sections[target]] = [sections[target], sections[index]]; editSections(sections)
   }
   // Applying is atomic: the type (when the preset belongs to another one) and the
   // structure change together, after the caller confirmed once (design 02 §7).
@@ -159,6 +159,24 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     allocationMode: section.allocationMode ?? 'manual', ...(section.allocationWeight === undefined ? {} : { allocationWeight: section.allocationWeight }) })),
     spec.targetLength, { abstractLength: 200, includeAbstract: spec.countingPolicy.includeAbstract })
   const reallocate = () => update({ sections: allocationPlan.sections.map(row => ({ ...spec.sections.find(section => section.id === row.id)!, targetLength: row.targetLength })) })
+  // Editing a chapter is a structural edit: it marks the paper as derived from the preset
+  // rather than equal to it, and keeps a short history so undo costs no model call.
+  const [history, setHistory] = useState<CreationSpec['sections'][]>([])
+  const editSections = (next: CreationSpec['sections']) => {
+    setHistory(rows => [...rows.slice(-9), spec.sections])
+    update({ sections: next, ...(spec.preset ? { preset: { ...spec.preset, modified: true } } : {}) })
+  }
+  const undoStructure = () => { const previous = history.at(-1); if (!previous) return
+    setHistory(rows => rows.slice(0, -1)); update({ sections: previous }) }
+  // What this run may actually read, shown in full before creation (design 02 §8).
+  const approvedPaths = [...new Set([...spec.materials, ...spec.requirementSources.flatMap(source =>
+    source.kind === 'folder' ? source.members.map(member => member.name) : source.path ? [source.path] : [])])]
+  const capabilityGaps = [
+    '引用样式只支持顺序编号，作者—年份尚未实现',
+    '排版要求（字体、行距、页数、封面）暂未支持',
+    ...(spec.requirementSources.some(source => requirementKind(source.path ?? '') === 'image') ? ['图片文字识别尚未验证，需要手动补充'] : []),
+    ...(spec.requirementSources.some(source => source.origin === 'external') ? ['工作区外来源的读取尚未验证'] : []),
+  ]
   return <div className="sf-wizard-scroll"><section className="sf-wizard" aria-label="创建论文向导">
     <header><span className="sf-wizard-eyebrow">{workspaceTitle}</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p></header>
     <nav className="sf-wizard-steps" aria-label="创建步骤">{['写作要求', '资料范围', '行文结构'].map((title, index) => <button key={title} disabled={busy || index > step} aria-current={step === index ? 'step' : undefined}
@@ -223,16 +241,17 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <div className="sf-structure-list">{spec.sections.map((section, index) => <div className="sf-structure-section" key={section.id}>
           <span className="sf-section-index">{index + 1}</span>
           <div className="sf-section-text">
-            <input className="sf-section-title" aria-label={`第${index + 1}章标题`} placeholder="章节标题" value={section.title} onChange={e => update({ sections: spec.sections.map(row => row.id === section.id ? { ...row, title: e.target.value } : row) })} />
-            <input className="sf-section-purpose" aria-label={`第${index + 1}章写作内容`} placeholder="本节写什么（可选）" value={section.purpose} onChange={e => update({ sections: spec.sections.map(row => row.id === section.id ? { ...row, purpose: e.target.value } : row) })} />
+            <input className="sf-section-title" aria-label={`第${index + 1}章标题`} placeholder="章节标题" value={section.title} onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, title: e.target.value } : row))} />
+            <input className="sf-section-purpose" aria-label={`第${index + 1}章写作内容`} placeholder="本节写什么（可选）" value={section.purpose} onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, purpose: e.target.value } : row))} />
           </div>
           <div className="sf-section-length"><input aria-label={`第${index + 1}章篇幅`} type="number" min={50} value={section.targetLength}
-            onChange={e => update({ sections: spec.sections.map(row => row.id === section.id ? { ...row, targetLength: Number(e.target.value), allocationMode: 'manual' } : row) })} />
+            onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, targetLength: Number(e.target.value), allocationMode: 'manual' } : row))} />
             <span>{spec.language === 'en' ? '词' : '字'} · {section.allocationMode === 'auto' ? '自动' : '手工'}</span></div>
-          <div className="sf-section-actions"><button aria-label="上移章节" disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label="下移章节" disabled={index === spec.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button><button aria-label="删除章节" disabled={spec.sections.length === 1} onClick={() => update({ sections: spec.sections.filter(row => row.id !== section.id) })}>×</button></div>
+          <div className="sf-section-actions"><button aria-label="上移章节" disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label="下移章节" disabled={index === spec.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button><button aria-label="删除章节" disabled={spec.sections.length === 1} onClick={() => editSections(spec.sections.filter(row => row.id !== section.id))}>×</button></div>
         </div>)}</div>
         <div className="sf-structure-actions" style={{ marginTop: 14 }}>
-          <button onClick={() => update({ sections: [...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500, allocationMode: 'auto' }] })}>＋ 添加章节</button>
+          <button onClick={() => editSections([...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500, allocationMode: 'auto' }])}>+ 添加章节</button>
+          <button disabled={busy || !history.length} onClick={undoStructure}>撤销结构编辑</button>
           <button disabled={busy || !spec.sections.every(section => section.title.trim())} onClick={() => act(async () => {
             const name = window.prompt('预设名称', spec.title.trim() || '我的结构'); if (!name?.trim()) return
             await api('presets.save', { ...structureForPreset(), title: name.trim() }) })}>保存为我的预设</button>
@@ -240,7 +259,24 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
             if (!window.confirm('用当前结构更新这个预设？已有论文不受影响。')) return
             await api('presets.update', { ...structureForPreset(), id: spec.preset!.id, expectedVersion: spec.preset!.version }) })}>更新此预设</button>}
         </div>
-        <p className="sf-wizard-summary">{TYPE_LABELS[spec.type]} · {FORMAT_LABELS[spec.format]} · {spec.materials.length} 份资料{spec.online && ' · 联网补充'}<br />创建 {spec.manuscriptDir}/ 与 .scholarflow/，并开始撰写。</p>
+        <section className="sf-confirm" aria-label="创建前确认">
+          <h4>创建前确认</h4>
+          <dl>
+            <div><dt>论文与结构</dt><dd>{spec.title.trim() || '（创建前必须填写题目）'} · {TYPE_LABELS[spec.type]} · {spec.language === 'en' ? 'English' : '中文'} ·
+              {spec.targetLength} {spec.language === 'en' ? '词' : '汉字'}（正文{spec.countingPolicy.includeAbstract ? '含摘要' : '不含摘要'}） ·
+              {spec.sections.length} 章 · 计划合计 {allocationPlan.total} · 预设 {spec.preset ? `${spec.preset.id}${spec.preset.modified ? '（已修改）' : ''}` : '未选择'}</dd></div>
+            <div><dt>资料</dt><dd>要求来源 {spec.requirementSources.length} · 参考材料 {spec.materials.length}
+              <details><summary>查看实际授权集合（{approvedPaths.length} 项）</summary>
+                <ul>{approvedPaths.map(path => <li key={path}>{path}</li>)}</ul>
+                {spec.requirementSources.some(source => source.origin === 'external') && <p>外部来源按句柄记录，不写入项目相对路径。</p>}</details></dd></div>
+            <div><dt>输出</dt><dd>将新增 {spec.manuscriptDir}/ 与 .scholarflow/；已有同名文件时会在提交前提示，不会覆盖。</dd></div>
+            <div><dt>外部处理</dt><dd>模型：当前会话在输入框中选择的模型 · 联网：{spec.online ? '开启（Crossref 核验元数据，必要时取公开全文）' : '关闭'}。
+              本地保存不等于本地模型：联网与模型调用都会把选定范围发送出去。</dd></div>
+            <div><dt>预算</dt><dd>模型调用上限 {defaults?.maxModelCalls ?? '按插件设置'}（来自插件设置，可在「ScholarFlow 设置」中修改）；检索次数与时限按项目默认。</dd></div>
+            <div><dt>文风与能力</dt><dd>使用项目默认的写作 Profile 与已启用 Skill；可在项目概览中查看与调整生效项。</dd></div>
+            <div><dt>能力缺口</dt><dd>{capabilityGaps.join('；')}。这些会作为要求保留，不会被当作已满足。</dd></div>
+          </dl>
+        </section>
         {conflict && <label>论文输出目录<input value={spec.manuscriptDir} onChange={e => update({ manuscriptDir: e.target.value })} /><small>此处已有文件，请选择新的输出目录。</small></label>}
       </>}
     </div>
@@ -352,6 +388,17 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard .sf-picker-modes button{height:32px;padding:0 10px;border:1px solid #8884;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}
 .sf-wizard .sf-picker-modes button[aria-pressed=true]{background:#4475e714;border-color:#4475e7;color:#4475e7}
 .sf-wizard .sf-picker-note{margin:0;padding:8px 12px;border-top:1px solid #8882;font-size:11.5px;color:#8b9099}
+/* Creation confirmation, merged into step 3 rather than a fourth step (design 02 §8). */
+.sf-wizard .sf-confirm{margin-top:22px;padding:16px 18px;border:1px solid #8882;border-radius:10px;background:#8881}
+.sf-wizard .sf-confirm h4{margin:0 0 10px;font-size:13px;font-weight:600}
+.sf-wizard .sf-confirm dl{margin:0;display:flex;flex-direction:column;gap:10px}
+.sf-wizard .sf-confirm dl>div{display:flex;gap:12px;align-items:flex-start}
+.sf-wizard .sf-confirm dt{flex:0 0 88px;font-size:12.5px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-confirm dd{flex:1 1 auto;min-width:0;margin:0;font-size:12.5px;line-height:1.6}
+.sf-wizard .sf-confirm details{margin-top:4px}
+.sf-wizard .sf-confirm summary{cursor:pointer;font-size:12px;color:#8b9099}
+.sf-wizard .sf-confirm ul{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-confirm p{margin:6px 0 0;font-size:12px;color:#8b9099}
 .sf-online-choice{flex-direction:row!important;align-items:center;padding:15px;border-radius:9px;background:#4475e708;margin-top:18px!important}
 .sf-online-choice span{display:flex;flex-direction:column;gap:4px}
 .sf-online-choice small{color:#888}
