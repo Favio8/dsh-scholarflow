@@ -166,6 +166,19 @@ try {
     }
   }
 
+  // AT-29 (user acceptance 1), substance only: both surfaces edit one settings document.
+  // The UI-level check still needs a person; this proves there is no second configuration.
+  const readSettings = async () => (payload((await rpc('scholarflow.v1/diagnostics', { request: {} })).body)?.settings ?? [])[0]
+  const row = await readSettings()
+  if (!row?.revision) record('AT-29 设置同源', 'NOT ESTABLISHED', '探针未能读到设置行的形状（诊断响应与假设不同）；代码层证据是两个入口都调用同一个 settings/update，界面确认仍需真机')
+  else {
+    const wanted = row.value?.defaultProjectType === 'research-paper' ? 'course-paper' : 'research-paper'
+    const changed = payload((await rpc('settings/update', { request: { ns: 'scholarflow', patch: { defaultProjectType: wanted }, expectedRevision: row.revision } })).body)
+    const after = await readSettings()
+    record('AT-29 设置同源', after?.value?.defaultProjectType === wanted ? 'PASS' : 'FAIL',
+      '经 settings/update 写入 ' + wanted + ' 后 diagnostics 读回 ' + String(after?.value?.defaultProjectType) + '；ok=' + String(changed?.ok))
+  }
+
   // V3b — can the picker's browse backend reach a directory outside the workspace?
   const outsideRoot = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
   const outside = await rpc('directoryPicker/list', { path: outsideRoot })

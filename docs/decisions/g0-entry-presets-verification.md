@@ -193,5 +193,12 @@ across projects, and editing a paper never writes to the global library.
 One API detail the probe surfaced: a Remote with no arguments still needs an explicit
 `request` object, because the handler parses it strictly.
 
+**AT-29 substance — not established by the probe.** The intent was to show that one settings
+document serves both surfaces by writing through `settings/update` and reading the change
+back through the plugin's diagnostics RPC. The probe could not read the diagnostics response
+shape, so this stays unproven at runtime; the code-level evidence is that the global settings
+section and the top entry render the same component and call the same
+`settings/update` with the same namespace and revision. The interface check needs the user.
+
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.
