@@ -116,6 +116,8 @@ pnpm typecheck
 pnpm test
 # 可选：真实安装环境，独立 DSH_HOME，不改 desktop profile
 node tests/e2e/installed-host-smoke.mjs
+# G0 与验收项的宿主层检查：隔离 profile、不调用模型、不产生费用
+node tests/e2e/g0-probe.mjs
 # 可选：使用现有 Host 凭据服务发起有限真实模型测试（会产生提供方费用）
 node tests/e2e/installed-host-smoke.mjs --live-model
 # 可选：三类 TEST_ONLY 教学论文，真实模型、每目标最多8次调用、模型会话重启恢复
