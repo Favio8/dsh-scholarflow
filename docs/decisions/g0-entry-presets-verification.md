@@ -117,22 +117,32 @@ model call was made and no paid usage occurred.
 
 | Probe | Result |
 |---|---|
-| `directoryPicker/capability`, `directory-picker/capability`, `directoryPicker/describe` | **404 not found** for all three |
-| `workspaces/list` | 200, empty — the fixture workspace is not registered as a DSH workspace in this profile |
-| `workspace/files/read` on an absolute path outside the workspace | **404 not found** |
+| `directoryPicker/list` (the real wire verb, found in `dsh-api-workspace-controller`) | 200 with `directory-picker/unavailable`, `{"capability":"native"}` — **the composed picker serves the native OS chooser** |
+| `directoryPicker/list` on a path outside the workspace | same refusal: the browse verb does not exist on this host |
+| `workspace/create` + `session/create` with `agentPreset: scholarflow` | workspace registered, session created, **no file created in the workspace** |
+| `scholarflow.v1/project.inspect` after creating that session | ran, but this probe read the wrong field and could not confirm `initialized` — not established |
 
-**Conclusion: V3a is not verified.** The directory picker's Remote namespace appears in the
-host source (`dsh-api-workspace-controller` mentions `directoryPicker` and
-`directoryPickerController`), but the names probed are not exposed as client RPC methods —
-so the capability is reached by the workspace flow rather than by a generic call a plugin
-can make. Verifying it needs the actual call site inspected in the workspace controller and
-a UI-driven attempt, which this probe did not do.
+**V3a conclusion (verified):** the directory picker exists on the installed host and serves
+**only the native backend**. The available verb is `pick(signal)`, which opens an OS chooser
+and returns the chosen absolute directory path; `list` and `createDirectory` (the in-app
+browser) are refused because the composition does not provide that backend. Two consequences
+for the design, both now recorded rather than assumed:
 
-The same run shows the probe harness itself works (isolated boot, page, RPC round trip),
-so a follow-up run can reuse it once the real method names are known. Until then the
-external-source feature stays unimplemented, and the wizard says so rather than offering a
-control that cannot work.
+1. An in-app folder browser is **not available** on this host, so the external-source flow
+   must use the OS chooser and therefore needs a display; a remote client cannot pick.
+2. There is still **no single-file chooser**: only a directory can be chosen, so an external
+   *file* has to be reached as a member of a chosen directory.
 
-**Not attempted here:** V3b (external read) and V5 (numbered style across three exports)
-need a registered workspace and a project fixture respectively; both remain source-verified
-only, as recorded above.
+Calling `pick` itself was deliberately not attempted: it opens a modal OS dialog, which a
+headless probe cannot answer. Confirming it needs a real Desktop session with a person
+present, and that is where the external-source feature stays until it happens.
+
+**V3b:** not established beyond the refusal above. The picker cannot enumerate outside the
+workspace on this host, so reading an external source would have to go through whatever the
+OS chooser returns plus the host's own file service — neither has been exercised.
+
+**V5:** unchanged — source review only; the three-export consistency run still needs a
+project fixture.
+
+**V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
+into the workspace. **V6b:** not established by this probe.

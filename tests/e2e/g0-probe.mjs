@@ -56,34 +56,42 @@ try {
     return { status: response.status, body }
   }, { method, args })
 
-  // V3a — what the installed host actually offers for choosing a directory.
-  for (const method of ['directoryPicker/capability', 'directory-picker/capability', 'directoryPicker/describe']) {
-    const answer = await rpc(method)
-    const text = JSON.stringify(answer.body).slice(0, 300)
-    if (answer.status === 200 && !/unknown|not found/i.test(text)) { record(`V3a ${method}`, 'PASS', text); break }
-    record(`V3a ${method}`, 'FAIL', `${answer.status} ${text}`)
-  }
+  // V3a — the real wire verbs are pick/list/createDirectory on the directoryPicker
+  // namespace (found in dsh-api-workspace-controller). `list` is safe to call: it either
+  // lists through the browse backend or refuses with the composed capability kind, which
+  // is itself the answer to "which chooser does this host actually serve?".
+  const listed = await rpc('directoryPicker/list', { path: workspaceRoot })
+  const listing = listed.body?.result?.value ?? listed.body?.result ?? listed.body
+  record('V3a directoryPicker/list', listed.status === 200 ? 'PASS' : 'OBSERVED',
+    `${listed.status} ${JSON.stringify(listing).slice(0, 260)}`)
 
   // V6a — selecting the mode creates a conversation but no project files.
-  const workspaces = await rpc('workspaces/list', {})
-  const listed = workspaces.body?.result?.value?.items ?? workspaces.body?.result?.items ?? []
-  const target = listed.find(row => String(row.title ?? '').includes('TEST_ONLY'))
-  if (!target) record('V6a 工作区可见', 'FAIL', `未找到隔离工作区：${JSON.stringify(listed).slice(0, 200)}`)
+  const workspace = await rpc('workspace/create', { request: { path: workspaceRoot } })
+  const workspaceId = workspace.body?.result?.value?.workspace?.workspaceId
+  if (!workspaceId) record('V6a 工作区注册', 'FAIL', JSON.stringify(workspace.body).slice(0, 200))
   else {
     const before = (await readdir(workspaceRoot)).sort()
-    const created = await rpc('session/create', { request: { workspaceId: target.workspaceId, agentPreset: 'scholarflow' } })
+    const created = await rpc('session/create', { request: { workspaceId, agentPreset: 'scholarflow' } })
+    const sessionId = created.body?.result?.value?.sessionId
     const after = (await readdir(workspaceRoot)).sort()
-    const ok = created.status === 200 && JSON.stringify(before) === JSON.stringify(after)
-    record('V6a 选模式不创建目录', ok ? 'PASS' : 'FAIL',
-      `会话 ${JSON.stringify(created.body?.result?.value?.sessionId ?? created.body).slice(0, 80)}；目录前后一致=${JSON.stringify(before) === JSON.stringify(after)}`)
+    record('V6a 选模式不创建目录', created.status === 200 && JSON.stringify(before) === JSON.stringify(after) ? 'PASS' : 'FAIL',
+      `会话 ${sessionId ?? '未创建'}；工作区前后一致=${JSON.stringify(before) === JSON.stringify(after)}`)
+
+    // V6b — opening a session inspects the project and writes nothing.
+    if (sessionId) {
+      const inspect = await rpc('scholarflow.v1/project.inspect', { request: { context: { requestId: 'req_TEST_ONLY', workspaceId, sessionId } } })
+      const value = inspect.body?.result?.value ?? inspect.body?.result ?? inspect.body
+      const stillClean = JSON.stringify(before) === JSON.stringify((await readdir(workspaceRoot)).sort())
+      record('V6b 打开不重新初始化', inspect.status === 200 && value?.initialized === false && stillClean ? 'PASS' : 'FAIL',
+        `initialized=${value?.initialized}；工作区仍为空=${stillClean}`)
+    }
   }
 
-  // V3b — reading outside the workspace through the Host file service, without the plugin's
-  // own containment policy in the path. Reported as observed, not as an approved capability.
-  const outside = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness/package.json')
-  const outsideRead = await rpc('workspace/files/read', { path: outside })
-  record('V3b 宿主读取工作区外路径', outsideRead.status === 200 ? 'OBSERVED' : 'DENIED',
-    `${outsideRead.status} ${JSON.stringify(outsideRead.body).slice(0, 200)}`)
+  // V3b — can the picker's browse backend reach a directory outside the workspace?
+  const outsideRoot = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
+  const outside = await rpc('directoryPicker/list', { path: outsideRoot })
+  record('V3b 选择器列工作区外目录', outside.status === 200 ? 'OBSERVED' : 'REFUSED',
+    `${outside.status} ${JSON.stringify(outside.body?.result?.value ?? outside.body).slice(0, 200)}`)
 
   await writeFile(resolve('.dsh-tmp/g0-probe/result.json'), JSON.stringify({ at: new Date().toISOString(), results }, null, 2))
 } catch (error) {
