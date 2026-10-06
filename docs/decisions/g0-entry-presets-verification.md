@@ -141,7 +141,7 @@ present, and that is where the external-source feature stays until it happens.
 workspace on this host, so reading an external source would have to go through whatever the
 OS chooser returns plus the host's own file service — neither has been exercised.
 
-**V5 (verified for Markdown and LaTeX; Word open):** `tests/integration/export-citation-order.test.ts`
+**V5 (verified):** `tests/integration/export-citation-order.test.ts`
 registers two sources, cites them in the reverse of their registration order, and delivers
 the project. Verified:
 
@@ -152,7 +152,7 @@ the project. Verified:
 | BibTeX entries follow the citation order, not the registration order | **PASS** |
 | Markdown keeps the machine keys in the same order | **PASS** |
 | Both deliveries carry the same manuscript bytes | **PASS** |
-| Word numbered list | **not covered** — `MemoryStore` has no create-only binary capability (`BINARY_EXPORT_UNAVAILABLE`); the installed-host run produced real OOXML bytes but for a citation-free manuscript |
+| Word numbered list | **PASS** — real OOXML whose reference list is numbered `[1]`/`[2]` in the same order as the citations |
 
 **BibTeX title truncation — found by this check, fixed.** The entry used to be produced by a
 CSL formatter, which dropped every non-ASCII character: `TEST_ONLY 来源乙` arrived as

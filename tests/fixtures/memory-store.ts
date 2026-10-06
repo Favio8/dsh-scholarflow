@@ -37,6 +37,19 @@ export class MemoryStore implements FileStore {
     this.tail = result
     return result
   }
+  // Create-only binary delivery, mirroring the gateway: bytes are never replaced, and the
+  // same size ceiling applies. Kept apart from `files` so text assertions stay readable.
+  binaries = new Map<string, { bytes: Uint8Array; version: string }>()
+  async readExportBytes(path: string) {
+    const row = this.binaries.get(path)
+    return row && { bytes: row.bytes, version: row.version }
+  }
+  async createExportBytes(path: string, bytes: Uint8Array) {
+    if (this.binaries.has(path)) throw new ScholarError('EXPORT_TARGET_EXISTS', 'TEST_ONLY create-only target already exists')
+    if (bytes.byteLength > 32 * 1024 * 1024) throw new ScholarError('CONTENT_TOO_LARGE', 'TEST_ONLY delivery exceeds 32 MiB')
+    const version = `export-${++this.writes}`
+    this.binaries.set(path, { bytes, version }); return { version }
+  }
   // Simulates a separate editor ignoring the plugin lock.
   externalEdit(path: string, text: string) { this.files.set(path, { text, version: `external-${++this.writes}` }) }
 }
