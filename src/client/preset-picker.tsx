@@ -12,6 +12,7 @@ export const PRESET_CSS = `
 .sf-preset-dialog>header{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #8882}
 .sf-preset-dialog>header strong{font-size:15px}
 .sf-preset-dialog>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:18px;cursor:pointer}
+.sf-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .sf-preset-tabs{display:flex;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid #8882;flex-wrap:wrap}
 .sf-preset-tabs button{height:32px;padding:0 12px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .sf-preset-tabs button[aria-pressed=true]{background:#4475e714;border-color:#4475e7;color:#4475e7}
@@ -112,7 +113,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
       <header><strong>结构预设</strong>
         <button className="sf-preset-new" disabled={busy} onClick={() => { setDetail(false)
           setDraft({ title: '', sections: [{ key: 'k-section-1', title: '引言', focus: '', targetLength: 1000 }] }) }}>新建我的预设</button>
-        <button aria-label="关闭" onClick={onClose}>×</button></header>
+        <button aria-label="关闭" onClick={onClose}><span className="sf-visually-hidden">关闭</span><span aria-hidden="true">×</span></button></header>
       <div className="sf-preset-tabs" role="group" aria-label="论文类型">
         {(['course-paper', 'research-paper', 'literature-review'] as const).map(name => <button key={name} aria-pressed={tab === name}
           onClick={() => setTab(name)}>{name === 'course-paper' ? '课程论文' : name === 'research-paper' ? '研究论文' : '文献综述'}</button>)}

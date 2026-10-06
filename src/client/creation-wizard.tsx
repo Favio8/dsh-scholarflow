@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { useConfirmationFocus } from './confirmation-focus.ts'
 import { creationSpec, presetSections, type CreationSpec } from '../shared/writing-task.ts'
 import { allocate } from '../core/presets/allocation.ts'
 import { sectionsFromPreset, selectionFromPreset } from '../core/presets/apply.ts'
@@ -79,6 +80,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const [presetOpen, setPresetOpen] = useState(false)
   const [issues, setIssues] = useState<string[]>([])
   const [narrow, setNarrow] = useState(false)
+  const root = useRef<HTMLElement>(null)
+  useConfirmationFocus(root)
   useEffect(() => {
     const query = window.matchMedia('(max-width: 720px)')
     const sync = () => setNarrow(query.matches)
@@ -191,7 +194,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     ...(spec.requirementSources.some(source => requirementKind(source.path ?? '') === 'image') ? ['图片文字识别尚未验证，需要手动补充'] : []),
     ...(spec.requirementSources.some(source => source.origin === 'external') ? ['工作区外来源的读取尚未验证'] : []),
   ]
-  return <div className="sf-wizard-scroll"><section className="sf-wizard" aria-label="创建论文向导">
+  return <div className="sf-wizard-scroll"><section ref={root} className="sf-wizard" aria-label="创建论文向导">
     <header><span className="sf-wizard-eyebrow">{workspaceTitle}</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p>
       <button className="sf-wizard-clear" disabled={busy} onClick={clearDraft}>清除草稿</button></header>
     <p className="sf-wizard-step-compact" aria-current="step">第 {step + 1} 步 / 共 3 步 · {["写作要求", "资料范围", "行文结构"][step]}</p>
