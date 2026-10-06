@@ -60,12 +60,16 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
       fresh.dependencyHash === plan.dependencyHash && fresh.reviewId === plan.reviewId && fresh.reviewState === plan.reviewState,
       'EXPORT_PLAN_STALE', '导出确认期间稿件、审查、资料或项目数据改变，请重新预检。')
     const current = await snapshot(io), review = await inspectReview(io), deliveryId = newId('delivery')
+    const writingSpec = await readWritingSpec(io)
     const reviewState = deliveryType === 'working-draft' ? (plan.reviewState === 'review-stale' ? 'review-stale' : 'draft-incomplete') : 'draft-reviewed'
     const currentIssues = Object.values(ledger.reviewIssues).filter(issue => issue.state !== 'resolved')
     const report = [ '# ScholarFlow 质量报告', '', `交付：${deliveryId}`, `项目：${ledger.projectId}`, `稿件修订：${plan.revisionId}`,
       `稿件 SHA-256：${plan.documentHash}`, `数据版本：${plan.ledgerRevision}`, `审查：${plan.reviewId ?? '未执行'}`, `状态：${reviewState}`, '',
       '## 本次检查范围', '', '正文、实际引用的来源记录和已登记的所选资料；不包含完整会话、原始资料副本或模型推理。', '',
-      ...(review.report ? [`统计口径：${review.report.statistics.countingPolicyId}；${review.report.statistics.chineseCharacters} 汉字，${review.report.statistics.westernWords} 西文词元，${review.report.statistics.uniqueReferences} 个实际引用。`, '',
+      ...(review.report ? [`统计口径：${review.report.statistics.countingPolicyId}；${review.report.statistics.chineseCharacters} 汉字，${review.report.statistics.westernWords} 西文词元，${review.report.statistics.uniqueReferences} 个实际引用。`,
+        // The confirmed length sits beside the actual count: a report whose length was asked for
+        // has to state the deviation itself rather than leave the reader to measure it.
+        ...(writingSpec ? [`篇幅：实际 ${review.report.statistics.chineseCharacters} 汉字／已确认要求 ${writingSpec.targetLength} ${writingSpec.language === 'en' ? '词' : '汉字'}${writingSpec.brief?.length?.approximate ? '（来源写为「约」）' : ''}；偏差 ${review.report.statistics.chineseCharacters - writingSpec.targetLength >= 0 ? '+' : ''}${review.report.statistics.chineseCharacters - writingSpec.targetLength}。`] : []), '',
         '## 检查结果', '', ...review.report.checks.map(check => `- ${check.status} · ${check.method} · ${check.id} · ${reportText(check.detail)}`), ''] : ['尚未执行审查；没有可宣称通过的检查结果。', '']),
       '## 尚未关闭的问题与接受的风险', '', ...currentIssues.map(issue => `- ${issue.id} · ${issue.severity} · ${issue.state}${issue.stale ? ' · 过期' : ''} · ${reportText(issue.explanation)}${issue.resolutionReason ? `；理由：${reportText(issue.resolutionReason)}` : ''}`), '',
       '## 资料获取限制', '', ...plan.sourceIds.map(id => { const source = ledger.sources[id]; return `- ${id} · identity=${source.identity.status} · textAccess=${source.textAccess}` }), '',
