@@ -154,11 +154,15 @@ the project. Verified:
 | Both deliveries carry the same manuscript bytes | **PASS** |
 | Word numbered list | **not covered** — `MemoryStore` has no create-only binary capability (`BINARY_EXPORT_UNAVAILABLE`); the installed-host run produced real OOXML bytes but for a citation-free manuscript |
 
-**Anomaly observed while checking, not yet explained:** the BibTeX entry keeps only the ASCII
-part of a Chinese source title — `TEST_ONLY 来源乙` becomes `TEST\textunderscore{}{ONLY} `, with
-the Chinese characters dropped and a trailing space left behind. Keys, order and the escaping
-of the underscore are correct; the title text is not. Recorded as a finding for the user to
-decide on, and asserted around rather than encoded as expected behaviour.
+**BibTeX title truncation — found by this check, fixed.** The entry used to be produced by a
+CSL formatter, which dropped every non-ASCII character: `TEST_ONLY 来源乙` arrived as
+`TEST\textunderscore{}{ONLY} `, losing the Chinese text and leaving a trailing space. The
+project now writes the entry itself from the fields the ledger actually holds, escaping only
+the LaTeX specials and keeping non-ASCII text as UTF-8. The same title now arrives whole as
+`TEST\textunderscore{}ONLY 来源乙`.
+
+The check covers it: the two citations carry Chinese titles, both must arrive complete with
+the underscore escaped and no trailing space, in citation order.
 
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.

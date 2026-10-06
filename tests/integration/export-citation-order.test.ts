@@ -46,8 +46,11 @@ test('V5: Markdown, LaTeX and Word deliver the same numbered citation order', as
   const bib = deliveries.latex!['references.bib']!
   assert.ok(bib.includes(keyB) && bib.includes(keyA), 'BibTeX 提供被引来源')
   assert.ok(bib.indexOf(keyB) < bib.indexOf(keyA), 'BibTeX 顺序与引用顺序一致')
-  // Observed 2026-10-06 and recorded in the G0 notes: the BibTeX title keeps only the
-  // ASCII part of a Chinese source title. Order and keys are correct; the title text is not.
+  // The entry is written by this project, not by a formatter: a Chinese title must arrive
+  // whole, with only the LaTeX specials escaped.
+  assert.ok(bib.includes('TEST\\textunderscore{}ONLY 来源乙'), 'BibTeX 保留中文标题并转义下划线')
+  assert.ok(bib.includes('TEST\\textunderscore{}ONLY 来源甲'), '两个来源都保留完整标题')
+  assert.ok(!/\},[\s]*$/.test(bib.trim().slice(-2)), '标题不留尾随空格')
 
 
   // All three deliveries belong to one project revision and carry the same manuscript.
