@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "id": "research-theoretical",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "research-paper",
+  "order": 4,
+  "title": {
+    "zh-CN": "理论/概念研究",
+    "en": "Theoretical / Conceptual"
+  },
+  "summary": {
+    "zh-CN": "综合既有理论、构建概念框架并提出可检验命题，不需要新的一手数据。",
+    "en": "Synthesises existing theory, builds a conceptual framework and states testable propositions; no new primary data is needed."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "贡献落在概念本身而不是数据",
+      "en": "The contribution is conceptual rather than empirical"
+    },
+    {
+      "zh-CN": "需要整合分散的理论或提出新的分类与模型",
+      "en": "Scattered theory must be integrated, or a new typology or model proposed"
+    },
+    {
+      "zh-CN": "没有条件做实证研究但需要推进理论讨论",
+      "en": "Empirical work is not feasible but the theoretical discussion should advance"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "明确要回答的概念问题，说明为什么现有理解不足。",
+        "en": "State the conceptual question and why current understanding falls short."
+      },
+      "share": 0.12,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "review",
+      "title": {
+        "zh-CN": "理论梳理",
+        "en": "Theoretical Review"
+      },
+      "focus": {
+        "zh-CN": "围绕一条主线梳理所选理论，说明每个理论在论证中扮演什么角色，避免写成互不相关的小综述。",
+        "en": "Review the chosen theories along one line of argument, saying what role each plays; avoid unrelated mini-reviews."
+      },
+      "share": 0.3,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "framework",
+      "title": {
+        "zh-CN": "框架建构",
+        "en": "Framework Development"
+      },
+      "focus": {
+        "zh-CN": "展示概念之间的逻辑联系，给出框架或类型学；用可检验的形式表达关系。",
+        "en": "Show the logical links between concepts and present the framework or typology in a testable form."
+      },
+      "share": 0.33,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "discussion",
+      "title": {
+        "zh-CN": "讨论与命题",
+        "en": "Discussion and Propositions"
+      },
+      "focus": {
+        "zh-CN": "说明推论过程、边界条件与可检验方向；有数据时才用假设，否则用命题。",
+        "en": "Explain the reasoning, boundary conditions and how the propositions could be tested; use hypotheses only with data."
+      },
+      "share": 0.17,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "conclusion",
+      "title": {
+        "zh-CN": "结论",
+        "en": "Conclusion"
+      },
+      "focus": {
+        "zh-CN": "概括理论贡献，不把推论表述为实证结果。",
+        "en": "Summarise the conceptual contribution; never present propositions as empirical results."
+      },
+      "share": 0.08,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要",
+        "en": "Abstract"
+      },
+      "suggestedLength": 200
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词",
+        "en": "Keywords"
+      }
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "概念论文有理论综合、理论适配、类型学与模型四种常见变体；本预设按理论综合排列，其余变体可在此基础上调整章节。",
+    "en": "Conceptual papers come in four common forms (theory synthesis, adaptation, typology, model); this preset follows theory synthesis and can be adapted."
+  },
+  "references": [
+    {
+      "label": "Jaakkola 2020 · Designing conceptual articles",
+      "url": "https://link.springer.com/article/10.1007/s13162-020-00161-0"
+    }
+  ]
+}

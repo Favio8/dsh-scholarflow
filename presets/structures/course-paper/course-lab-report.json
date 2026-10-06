@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "id": "course-lab-report",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "course-paper",
+  "order": 2,
+  "title": {
+    "zh-CN": "实验/实证型",
+    "en": "Lab Report / Empirical"
+  },
+  "summary": {
+    "zh-CN": "按方法、结果、讨论分开报告自己采集或指定的数据，适合实验课作业。",
+    "en": "Reports self-collected or assigned data with methods, results and discussion kept apart; suited to lab coursework."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "有实验、测量或调查得到的原始数据",
+      "en": "There is raw data from an experiment, measurement or survey"
+    },
+    {
+      "zh-CN": "要求写明实验过程以便复现",
+      "en": "The procedure must be reproducible"
+    },
+    {
+      "zh-CN": "老师要求按报告格式提交",
+      "en": "A report format is required"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "说明实验目的与相关背景，给出假设及其依据，写清自变量与因变量的关系；背景只写与本次实验相关的内容。",
+        "en": "State the purpose and relevant background, then the hypothesis and its basis, including how the variables relate."
+      },
+      "share": 0.14,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "method",
+      "title": {
+        "zh-CN": "材料与方法",
+        "en": "Materials and Methods"
+      },
+      "focus": {
+        "zh-CN": "按时间顺序交代材料、步骤、对照与分析方式，使他人可以复现；不写原理推导与结果。",
+        "en": "Describe materials, procedure, controls and analysis in chronological order so it can be reproduced; no results here."
+      },
+      "share": 0.2,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "results",
+      "title": {
+        "zh-CN": "结果",
+        "en": "Results"
+      },
+      "focus": {
+        "zh-CN": "如实报告观测与计算得到的数值，用表格呈现精确数据、用图呈现趋势；只呈现不解释，图表编号、题注并注明单位。",
+        "en": "Report observed and computed values factually; tables for precision, figures for trends, numbered with units. No interpretation."
+      },
+      "share": 0.25,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "discussion",
+      "title": {
+        "zh-CN": "讨论",
+        "en": "Discussion"
+      },
+      "focus": {
+        "zh-CN": "说明数据是否支持假设，分析误差来源（不写空泛的「人为误差」），与既有研究比较，并说明本次实验的限制。",
+        "en": "State whether the data supports the hypothesis, analyse error sources concretely, compare with existing work and state limitations."
+      },
+      "share": 0.35,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "conclusion",
+      "title": {
+        "zh-CN": "结论",
+        "en": "Conclusion"
+      },
+      "focus": {
+        "zh-CN": "概括已被数据支持的发现即可，通常很短；不重复讨论中的推测。",
+        "en": "Summarise only what the data supports; usually brief, without repeating speculation from the discussion."
+      },
+      "share": 0.06,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要",
+        "en": "Abstract"
+      },
+      "suggestedLength": 200
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    },
+    {
+      "kind": "appendix",
+      "description": {
+        "zh-CN": "附录（原始记录、代码等）",
+        "en": "Appendix (raw records, code)"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "没有实际数据时，结果与讨论按待补处理，不编造数值或实验现象。",
+    "en": "Without real data, results and discussion stay marked as pending; never invent values or observations."
+  },
+  "references": [
+    {
+      "label": "UNC Writing Center · Scientific Reports",
+      "url": "https://writingcenter.unc.edu/tips-and-tools/scientific-reports/"
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scholarflow.local/presets/structures/presets.schema.json",
+  "title": "ScholarFlow structure preset",
+  "description": "Contract for one structure preset resource. Built-ins ship in presets/structures/<paperType>/<id>.json; user copies live under <DSH_HOME>/scholarflow/presets/user/. The loading directory decides `source`, never this document.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "version", "updatedAt", "paperType", "title", "summary", "sections"],
+  "properties": {
+    "schemaVersion": { "const": 1, "description": "Higher versions are read-only; never guess a meaning for them." },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,79}$", "description": "Must equal the file name. Stable once created; rename only changes the title." },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "paperType": { "enum": ["course-paper", "research-paper", "literature-review"] },
+    "order": {
+      "type": "integer", "minimum": 0, "maximum": 1000,
+      "description": "Ascending display order inside one paper type; the lowest value is that type's default. Required and unique for built-ins."
+    },
+    "title": { "$ref": "#/$defs/localizedText" },
+    "summary": { "$ref": "#/$defs/localizedText" },
+    "whenToUse": {
+      "type": "array", "maxItems": 4,
+      "description": "One entry per situation, carrying both languages together so the counts cannot drift. Built-ins provide 2-4.",
+      "items": { "$ref": "#/$defs/localizedText" }
+    },
+    "sections": {
+      "type": "array", "minItems": 1, "maxItems": 40,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["key", "title", "focus", "share"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "Stable and unique inside this preset; used to compare against the paper's snapshot." },
+          "title": { "$ref": "#/$defs/localizedText" },
+          "focus": { "$ref": "#/$defs/localizedText" },
+          "share": { "type": "number", "exclusiveMinimum": 0, "description": "Body share. Stored normalised: the section shares sum to 1 within 1e-6." },
+          "shareSource": { "enum": ["heuristic"], "default": "heuristic", "description": "Widening this to 'sourced' requires a contract update (SPEC v1.1 §5.1)." }
+        }
+      }
+    },
+    "supplementalParts": {
+      "type": "array", "maxItems": 12,
+      "description": "Abstract, keywords, references, appendix and publication details. These never take a share of the body target.",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["kind", "description"],
+        "properties": {
+          "kind": { "enum": ["abstract", "keywords", "references", "appendix", "publication-info"] },
+          "description": { "$ref": "#/$defs/localizedText" },
+          "suggestedLength": { "type": "integer", "minimum": 1, "maximum": 100000 }
+        }
+      }
+    },
+    "methodNotes": { "$ref": "#/$defs/localizedText", "description": "Conditional method hints. Not a record that any method was carried out." },
+    "references": {
+      "type": "array", "maxItems": 20,
+      "description": "Where the structure comes from. Required for built-ins.",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["label", "url"],
+        "properties": { "label": { "type": "string", "minLength": 1, "maxLength": 200 }, "url": { "type": "string", "format": "uri", "maxLength": 2000 } }
+      }
+    },
+    "derivedFrom": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,79}$", "description": "User copies only. A derived entry keeps its own id and never overwrites the source." },
+    "basedOnVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "tags": { "type": "array", "maxItems": 20, "items": { "type": "string", "minLength": 1, "maxLength": 40 }, "description": "Free text for searching. User entries only; built-ins keep the controlled paperType." }
+  },
+  "$defs": {
+    "localizedText": {
+      "description": "A plain string, or a Chinese entry with an optional English one. Built-ins carry both; user entries may carry one and are shown literally.",
+      "oneOf": [
+        { "type": "string", "minLength": 1, "maxLength": 2000 },
+        {
+          "type": "object", "additionalProperties": false, "required": ["zh-CN"],
+          "properties": { "zh-CN": { "type": "string", "minLength": 1, "maxLength": 2000 }, "en": { "type": "string", "minLength": 1, "maxLength": 2000 } }
+        }
+      ]
+    }
+  }
+}

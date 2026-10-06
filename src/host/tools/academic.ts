@@ -31,7 +31,8 @@ async function boundStore(ctx: Host, exec: Host) {
   invariant(sessionId, 'SESSION_BINDING_CHANGED', '学术工具必须在真实绑定的 ScholarFlow Agent 中执行。')
   const workspaces = ctx.workspaceRegistry.list().filter((workspace: Host) => workspace.sessionIds.includes(sessionId))
   invariant(workspaces.length === 1, 'SESSION_BINDING_CHANGED', '当前会话没有唯一工作区绑定。')
-  return resolveStore(ctx, { requestId: newId('req'), sessionId, workspaceId: workspaces[0].id }, exec.signal)
+  // Returning the validated session keeps callers from reaching into exec.agent again.
+  return { ...await resolveStore(ctx, { requestId: newId('req'), sessionId, workspaceId: workspaces[0].id }, exec.signal), sessionId }
 }
 export function academicDefinitions(ctx: Host) {
   const make = (name: typeof academicToolNames[number], allowed: readonly string[], description: string, parameters: any,
@@ -42,7 +43,7 @@ export function academicDefinitions(ctx: Host) {
     async execute(args, exec) {
       return JSON.parse(JSON.stringify(await applicationResult(async () => {
         const input = schema.parse(args), bound = await boundStore(ctx, exec)
-        return execute(input, bound.io, { sessionId: exec.agent.session.id })
+        return execute(input, bound.io, { sessionId: bound.sessionId })
       })))
     },
   })

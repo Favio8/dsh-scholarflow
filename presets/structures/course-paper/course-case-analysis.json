@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "id": "course-case-analysis",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "course-paper",
+  "order": 3,
+  "title": {
+    "zh-CN": "案例分析型",
+    "en": "Case Analysis"
+  },
+  "summary": {
+    "zh-CN": "给定情境，诊断问题、比较备选方案并给出可执行的建议，适合商科、管理与法学课程。",
+    "en": "Diagnoses a given situation, compares options and recommends action; suited to business, management and law courses."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "老师提供一个组织或事件的情境材料",
+      "en": "The teacher provides an organisational or event-based situation"
+    },
+    {
+      "zh-CN": "要求给出决策建议而不是研究结论",
+      "en": "A recommendation is required rather than a research finding"
+    },
+    {
+      "zh-CN": "需要用到课程中的分析框架",
+      "en": "Course frameworks are expected to be applied"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "说明分析目标、所用框架与行文路线；不预告最终建议，也不写研究意义。",
+        "en": "State the analytical objective, the framework used and the roadmap; do not preview the recommendation."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "background",
+      "title": {
+        "zh-CN": "背景分析",
+        "en": "Background"
+      },
+      "focus": {
+        "zh-CN": "筛选与问题相关的情境事实，聚焦利益相关方的诉求、假设与矛盾。",
+        "en": "Select the situation facts that matter, focusing on stakeholders, their claims and tensions."
+      },
+      "share": 0.18,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "problem",
+      "title": {
+        "zh-CN": "问题识别",
+        "en": "Problem Identification"
+      },
+      "focus": {
+        "zh-CN": "区分现象与原因，按紧迫性和影响给问题分级，指出真正需要决策的那一个。",
+        "en": "Separate symptoms from causes, rank the issues by urgency and impact, and name the decision that matters."
+      },
+      "share": 0.2,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "options",
+      "title": {
+        "zh-CN": "备选方案",
+        "en": "Options"
+      },
+      "focus": {
+        "zh-CN": "给出具体、现实的备选方案，比较各自的依据、代价与风险。",
+        "en": "Present concrete, realistic options and compare their basis, cost and risk."
+      },
+      "share": 0.15,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "recommendation",
+      "title": {
+        "zh-CN": "行动建议",
+        "en": "Recommendation"
+      },
+      "focus": {
+        "zh-CN": "写明行动步骤、风险评估、成本收益、可衡量的判断标准与责任方，并回应可能的质疑。",
+        "en": "Specify steps, risks, cost and benefit, measurable criteria and owners, and answer the obvious objection."
+      },
+      "share": 0.3,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "conclusion",
+      "title": {
+        "zh-CN": "结论",
+        "en": "Conclusion"
+      },
+      "focus": {
+        "zh-CN": "简短回扣课程概念，不做发现总结与未来研究建议。",
+        "en": "Briefly tie back to course concepts; no findings summary or future-research agenda."
+      },
+      "share": 0.07,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "课程案例分析不是正式的案例研究：它服务于决策训练，不需要研究设计与数据三角验证。",
+    "en": "A course case analysis is not formal case-study research: it trains decision making and needs no research design."
+  },
+  "references": [
+    {
+      "label": "USC Libraries · Writing a Case Analysis Paper",
+      "url": "https://libguides.usc.edu/writingguide/assignments/caseanalysis"
+    }
+  ]
+}

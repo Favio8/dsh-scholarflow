@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "id": "course-argumentative",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "course-paper",
+  "order": 1,
+  "title": {
+    "zh-CN": "论述/分析型",
+    "en": "Argumentative / Analytical"
+  },
+  "summary": {
+    "zh-CN": "围绕一个中心观点组织证据并回应反方，适合文史哲社类课程作业。",
+    "en": "Organises evidence around one defensible claim and answers counter-arguments; suited to humanities and social-science coursework."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "老师给了议题或问题，要求表态并论证",
+      "en": "The assignment names a topic and asks for a position"
+    },
+    {
+      "zh-CN": "没有自己采集的数据，材料以文本与文献为主",
+      "en": "No self-collected data; sources are texts and literature"
+    },
+    {
+      "zh-CN": "需要呈现对反方观点的理解",
+      "en": "Counter-arguments must be acknowledged"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "交代议题背景，给出可被辩护的中心观点，并说明为什么这个问题值得讨论。",
+        "en": "Set up the topic, state a defensible thesis, and explain why it matters."
+      },
+      "share": 0.12,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "argument",
+      "title": {
+        "zh-CN": "主题论证",
+        "en": "Argument"
+      },
+      "focus": {
+        "zh-CN": "按分论点组织段落，每段先给主题句再给证据与解释，与中心观点形成一条线；需要时可拆成多章重新分配篇幅。",
+        "en": "One claim per paragraph: topic sentence, evidence, interpretation, each tied back to the thesis. Split into several chapters if needed."
+      },
+      "share": 0.65,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "counterargument",
+      "title": {
+        "zh-CN": "反方观点与回应",
+        "en": "Counter-arguments and Replies"
+      },
+      "focus": {
+        "zh-CN": "选择有代表性的反对意见，公平陈述后说明为何不推翻本文观点；不是宣布对方错误。",
+        "en": "State a representative opposing view fairly, then explain why it does not overturn the thesis."
+      },
+      "share": 0.13,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "conclusion",
+      "title": {
+        "zh-CN": "结论",
+        "en": "Conclusion"
+      },
+      "focus": {
+        "zh-CN": "回到最初的问题，说明证据支持到什么程度；不引入未经论证的新结论。",
+        "en": "Return to the original question and state how far the evidence carries it; introduce no new claims."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "论证型作业通常不要求方法与数据章节；若老师另有规定，以老师要求为准。",
+    "en": "Argumentative assignments usually have no methods or data chapters; the teacher's requirements take precedence."
+  },
+  "references": [
+    {
+      "label": "Purdue OWL · Argumentative Essays",
+      "url": "https://owl.purdue.edu/owl/general_writing/academic_writing/essay_writing/argumentative_essays.html"
+    }
+  ]
+}

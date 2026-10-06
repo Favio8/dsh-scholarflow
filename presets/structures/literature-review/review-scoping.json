@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "id": "review-scoping",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "literature-review",
+  "order": 3,
+  "title": {
+    "zh-CN": "范围综述",
+    "en": "Scoping Review"
+  },
+  "summary": {
+    "zh-CN": "为摸清一个领域的边界与缺口而做的图谱式梳理，重图表化而不是效果合并。",
+    "en": "Maps the boundaries and gaps of a field; charting matters more than pooling effects."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "想知道某领域有哪些类型的研究、概念如何界定",
+      "en": "The aim is to see what kinds of studies exist and how concepts are defined"
+    },
+    {
+      "zh-CN": "文献异质，无法合并为一个效果结论",
+      "en": "The literature is too heterogeneous to pool"
+    },
+    {
+      "zh-CN": "为后续系统综述确定范围与问题",
+      "en": "A systematic review will follow and needs scoping first"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "界定概念与映射目的，说明为什么采用范围综述而不是系统综述。",
+        "en": "Define the concepts and the mapping objective, and why scoping rather than systematic review."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "method",
+      "title": {
+        "zh-CN": "方法",
+        "en": "Methods"
+      },
+      "focus": {
+        "zh-CN": "记录纳入排除标准、信息来源、检索、证据来源选择与图表化过程；说明是否做了质量评价及理由。",
+        "en": "Record eligibility, sources, search, selection and the charting process; state whether quality appraisal was done and why."
+      },
+      "share": 0.25,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "results",
+      "title": {
+        "zh-CN": "证据呈现",
+        "en": "Evidence Mapping"
+      },
+      "focus": {
+        "zh-CN": "按研究特征与主题制图，用表格与流程图呈现分布；不合并效应量。",
+        "en": "Chart by study characteristics and themes with tables and a flow diagram; do not pool effects."
+      },
+      "share": 0.43,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "discussion",
+      "title": {
+        "zh-CN": "讨论与结论",
+        "en": "Discussion and Conclusion"
+      },
+      "focus": {
+        "zh-CN": "总结研究分布、缺口与限制；不擅自推断干预效果。",
+        "en": "Summarise the distribution, gaps and limitations; infer no intervention effects."
+      },
+      "share": 0.22,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "结构化摘要",
+        "en": "Structured abstract"
+      },
+      "suggestedLength": 250
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词",
+        "en": "Keywords"
+      }
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    },
+    {
+      "kind": "appendix",
+      "description": {
+        "zh-CN": "附录（图表化模板、检索式）",
+        "en": "Appendix (charting template, search strings)"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "PRISMA-ScR 为 20 项必备加 2 项可选；范围综述通常不做偏倚风险评估、不合并效应量，但检索与筛选流程仍须报告。",
+    "en": "PRISMA-ScR has 20 required and 2 optional items; scoping reviews normally skip risk-of-bias and pooling but still report search and selection."
+  },
+  "references": [
+    {
+      "label": "PRISMA-ScR",
+      "url": "https://www.prisma-statement.org/scoping"
+    }
+  ]
+}

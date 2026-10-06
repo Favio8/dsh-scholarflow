@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "id": "research-case-study",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "research-paper",
+  "order": 3,
+  "title": {
+    "zh-CN": "案例研究",
+    "en": "Case Study"
+  },
+  "summary": {
+    "zh-CN": "现象与情境不可分离时，围绕案例边界与命题做深度解释，多案例再做跨案例比较。",
+    "en": "When phenomenon and context cannot be separated, explains a bounded case against propositions; multiple cases add cross-case comparison."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "研究问题问的是如何与为什么",
+      "en": "The question asks how or why"
+    },
+    {
+      "zh-CN": "能进入一个或多个有明确边界的案例",
+      "en": "One or more clearly bounded cases can be accessed"
+    },
+    {
+      "zh-CN": "需要保留情境而不是剥离变量",
+      "en": "Context must be preserved rather than stripped away"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "确定研究问题与案例的初步范围，说明为什么适合用案例研究回答。",
+        "en": "Fix the question and the provisional case boundary, and why a case design answers it."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "framework",
+      "title": {
+        "zh-CN": "理论框架与命题",
+        "en": "Framework and Propositions"
+      },
+      "focus": {
+        "zh-CN": "说明理论视角，给出先于分析的命题；若走归纳路径则明确交代归纳方式。",
+        "en": "State the theoretical lens and the propositions that precede analysis, or make the inductive route explicit."
+      },
+      "share": 0.15,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "design",
+      "title": {
+        "zh-CN": "研究设计",
+        "en": "Research Design"
+      },
+      "focus": {
+        "zh-CN": "解释案例选择与边界（单案例或多案例、嵌入式或整体式）、资料来源与三角验证、分析策略与证据链。",
+        "en": "Explain case selection and bounding (single or multiple, embedded or holistic), data sources, triangulation, analysis strategy and the chain of evidence."
+      },
+      "share": 0.15,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "description",
+      "title": {
+        "zh-CN": "案例描述",
+        "en": "Case Description"
+      },
+      "focus": {
+        "zh-CN": "呈现可核查的情境事实，与阐释分开写，不堆砌资料。",
+        "en": "Present verifiable situational facts, kept separate from interpretation and not a pile of material."
+      },
+      "share": 0.2,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "analysis",
+      "title": {
+        "zh-CN": "案例分析",
+        "en": "Analysis"
+      },
+      "focus": {
+        "zh-CN": "把材料与命题连接起来；多案例先做案例内分析，再做跨案例比较。",
+        "en": "Connect material to propositions; with multiple cases analyse within each before comparing across."
+      },
+      "share": 0.25,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "discussion",
+      "title": {
+        "zh-CN": "讨论与结论",
+        "en": "Discussion and Conclusion"
+      },
+      "focus": {
+        "zh-CN": "评估解释能覆盖到哪、与既有理论的关系与限制；不宣称统计外推。",
+        "en": "Assess how far the explanation reaches, its relation to existing theory and its limits; claim no statistical generalisation."
+      },
+      "share": 0.15,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要",
+        "en": "Abstract"
+      },
+      "suggestedLength": 200
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词",
+        "en": "Keywords"
+      }
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    },
+    {
+      "kind": "appendix",
+      "description": {
+        "zh-CN": "附录（访谈提纲、文件清单）",
+        "en": "Appendix (interview guide, document list)"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "缺少实际案例材料时，案例描述与分析标为待补，不虚构成情境或访谈内容。",
+    "en": "Without real case material, description and analysis stay pending; never invent situations or interviews."
+  },
+  "references": [
+    {
+      "label": "Baxter & Jack 2008 · Qualitative Case Study Methodology",
+      "url": "https://nsuworks.nova.edu/tqr/vol13/iss4/2/"
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "id": "review-systematic",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "literature-review",
+  "order": 2,
+  "title": {
+    "zh-CN": "系统综述",
+    "en": "Systematic Review"
+  },
+  "summary": {
+    "zh-CN": "有明确问题与透明检索筛选流程，按 PRISMA 报告；强调可复核而不是篇幅。",
+    "en": "Answers a defined question with a transparent search and selection process reported per PRISMA; reproducibility over length."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "问题可以明确表述（如对象、干预、对照、结果）",
+      "en": "The question can be stated precisely (population, intervention, comparator, outcome)"
+    },
+    {
+      "zh-CN": "需要穷尽某个时间窗内的证据",
+      "en": "Evidence within a time window should be exhausted"
+    },
+    {
+      "zh-CN": "结论要用于指南、政策或决策依据",
+      "en": "The conclusion will inform guidance or decisions"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "写明综述的理由与目的，给出可回答的研究问题。",
+        "en": "State the rationale and objective, and give an answerable question."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "method",
+      "title": {
+        "zh-CN": "方法",
+        "en": "Methods"
+      },
+      "focus": {
+        "zh-CN": "如实记录纳入排除标准、信息来源、完整检索策略、筛选过程、数据提取、偏倚风险评估、效应指标与综合方法；写明方案注册情况与对方案的偏离。",
+        "en": "Report eligibility criteria, sources, the full search strategy, selection process, data extraction, risk-of-bias assessment, effect measures and synthesis; record registration and any deviation."
+      },
+      "share": 0.28,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "results",
+      "title": {
+        "zh-CN": "结果",
+        "en": "Results"
+      },
+      "focus": {
+        "zh-CN": "对应实际纳入的资料：研究选择与筛选流程图、研究特征、偏倚风险、各项结果与综合结果；没有执行记录的部分标为待补。",
+        "en": "Report what was actually included: selection with a flow diagram, study characteristics, risk of bias, individual and synthesised results; mark anything not carried out as pending."
+      },
+      "share": 0.38,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "discussion",
+      "title": {
+        "zh-CN": "讨论",
+        "en": "Discussion"
+      },
+      "focus": {
+        "zh-CN": "解释结果的意义、证据确定性、适用边界与限制，并说明与其他综述的差异。",
+        "en": "Interpret the findings, certainty of evidence, applicability and limits, and how this review differs from earlier ones."
+      },
+      "share": 0.24,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "结构化摘要",
+        "en": "Structured abstract"
+      },
+      "suggestedLength": 250
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词",
+        "en": "Keywords"
+      }
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    },
+    {
+      "kind": "appendix",
+      "description": {
+        "zh-CN": "附录（完整检索式、排除清单）",
+        "en": "Appendix (full search strings, excluded studies)"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "PRISMA 2020 是报告规范，不是完成证明：它规定必须报告什么，不证明综述流程已执行。方案注册不是所有综述的硬性前提，未注册时如实说明。",
+    "en": "PRISMA 2020 is a reporting standard, not proof the review was done; registration is not a universal prerequisite and its absence should simply be stated."
+  },
+  "references": [
+    {
+      "label": "PRISMA 2020 expanded checklist",
+      "url": "https://www.prisma-statement.org/s/PRISMA_2020_expanded_checklist-w7ra.pdf"
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "id": "research-empirical-imrad",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "research-paper",
+  "order": 1,
+  "title": {
+    "zh-CN": "实证研究（IMRaD）",
+    "en": "Empirical Study (IMRaD)"
+  },
+  "summary": {
+    "zh-CN": "有假设、变量可量化、可抽样与统计检验的量研究，按问题、方法、结果、讨论组织。",
+    "en": "Quantitative research with hypotheses, measurable variables and statistical testing, organised as question, method, results, discussion."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "有明确的研究问题或假设",
+      "en": "There is an explicit research question or hypothesis"
+    },
+    {
+      "zh-CN": "变量可测量，能做抽样与统计检验",
+      "en": "Variables are measurable and can be sampled and tested"
+    },
+    {
+      "zh-CN": "数据来自实验、准实验、问卷量表或二手数据",
+      "en": "Data comes from experiments, quasi-experiments, surveys or secondary sources"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "按领域、缺口、目的、研究问题或假设的顺序收拢，说明本研究补上的是哪一个缺口。",
+        "en": "Funnel from field to gap to purpose to question or hypothesis, naming the gap this study fills."
+      },
+      "share": 0.15,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "method",
+      "title": {
+        "zh-CN": "研究方法",
+        "en": "Methods"
+      },
+      "focus": {
+        "zh-CN": "交代样本与抽样、工具与信效度、实施程序与分析策略，使他人可复现；区分验证性与探索性分析。",
+        "en": "Report sampling, instruments and validity, procedure and analysis strategy so the study can be reproduced; distinguish confirmatory from exploratory analysis."
+      },
+      "share": 0.2,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "results",
+      "title": {
+        "zh-CN": "结果",
+        "en": "Results"
+      },
+      "focus": {
+        "zh-CN": "按研究问题的顺序客观呈现结果，报告统计量、效应量与区间估计；不加解释与因果推断。",
+        "en": "Present results in question order with statistics, effect sizes and interval estimates; no interpretation."
+      },
+      "share": 0.3,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "discussion",
+      "title": {
+        "zh-CN": "讨论",
+        "en": "Discussion"
+      },
+      "focus": {
+        "zh-CN": "按主要发现、与文献比较、理论与实践意义、局限、后续问题的顺序展开。",
+        "en": "Cover main findings, comparison with the literature, implications, limitations and next questions."
+      },
+      "share": 0.28,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "conclusion",
+      "title": {
+        "zh-CN": "结论",
+        "en": "Conclusion"
+      },
+      "focus": {
+        "zh-CN": "概括贡献与适用边界，不重复讨论细节，不越过数据下结论。",
+        "en": "Summarise the contribution and its boundary; do not repeat the discussion or overreach the data."
+      },
+      "share": 0.07,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要",
+        "en": "Abstract"
+      },
+      "suggestedLength": 200
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词",
+        "en": "Keywords"
+      }
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    },
+    {
+      "kind": "appendix",
+      "description": {
+        "zh-CN": "附录（量表、变量说明等）",
+        "en": "Appendix (instruments, variable tables)"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "假设写不写、效应量与统计检验是否适用，取决于实际研究设计；没有数据时结果标为待补，不生成数值。",
+    "en": "Whether hypotheses, effect sizes or significance tests apply depends on the design; without data, results stay pending."
+  },
+  "references": [
+    {
+      "label": "APA JARS (quantitative reporting standards)",
+      "url": "https://apastyle.apa.org/jars"
+    },
+    {
+      "label": "UNC Writing Center · Scientific Reports",
+      "url": "https://writingcenter.unc.edu/tips-and-tools/scientific-reports/"
+    }
+  ]
+}

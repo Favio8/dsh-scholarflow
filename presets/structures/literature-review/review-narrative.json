@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "id": "review-narrative",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "literature-review",
+  "order": 1,
+  "title": {
+    "zh-CN": "叙述性综述",
+    "en": "Narrative Review"
+  },
+  "summary": {
+    "zh-CN": "按主题脉络整合一个领域的研究，指出共识、争议与缺口；检索不追求穷尽。",
+    "en": "Integrates a field's research along thematic lines and names the consensus, disputes and gaps; retrieval is not exhaustive."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "为跨学科读者梳理一个领域的发展与争论",
+      "en": "Introduction to a field for a cross-disciplinary reader"
+    },
+    {
+      "zh-CN": "研究问题较宽泛或文献高度异质",
+      "en": "The question is broad or the literature is heterogeneous"
+    },
+    {
+      "zh-CN": "需要提出新的概念脉络而不是回答单一效果问题",
+      "en": "A new conceptual thread is wanted rather than a single effect estimate"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "界定主题与范围，直接声明本综述的组织原则（编年、主题、方法学或理论）。",
+        "en": "Define the topic and scope, and state the organising principle up front."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "synthesis",
+      "title": {
+        "zh-CN": "主题综合",
+        "en": "Thematic Synthesis"
+      },
+      "focus": {
+        "zh-CN": "按主题分组比较研究，指出共识、分歧与演变；不做逐篇摘要堆叠。",
+        "en": "Group and compare studies by theme, naming agreement, disagreement and how the field moved; never a pile of one-study summaries."
+      },
+      "share": 0.65,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "discussion",
+      "title": {
+        "zh-CN": "讨论",
+        "en": "Discussion"
+      },
+      "focus": {
+        "zh-CN": "辨析争议、解释结论差异的可能来源，指出研究缺口。",
+        "en": "Analyse disputes, explain likely sources of divergent conclusions and name the gaps."
+      },
+      "share": 0.15,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "conclusion",
+      "title": {
+        "zh-CN": "结论与展望",
+        "en": "Conclusion and Outlook"
+      },
+      "focus": {
+        "zh-CN": "总结当前认识并给出后续问题；不把叙述性综述表述为穷尽检索。",
+        "en": "Summarise current understanding and next questions; do not present it as an exhaustive search."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要",
+        "en": "Abstract"
+      },
+      "suggestedLength": 200
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词",
+        "en": "Keywords"
+      }
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "叙述性综述没有强制的检索条款，但建议给出最低限度的检索说明（数据库、年限、检索词），以便复核。",
+    "en": "A narrative review has no mandatory search reporting, but a minimal statement (databases, years, terms) improves reviewability."
+  },
+  "references": [
+    {
+      "label": "UNC Writing Center · Literature Reviews",
+      "url": "https://writingcenter.unc.edu/tips-and-tools/literature-reviews/"
+    }
+  ]
+}

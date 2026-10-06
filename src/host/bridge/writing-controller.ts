@@ -186,7 +186,7 @@ export class WritingController {
           state.usedModelCalls++; await saveWritingTask(io, state)
           return callStageModel(this.ctx, model.session, model.selected, call)
         }, candidate => candidate.bootInstance === this.owner)
-        invariant(result.proposal, 'WRITING_PROPOSAL_MISSING', '本节没有完整生成建议。')
+        invariant('proposal' in result && result.proposal, 'WRITING_PROPOSAL_MISSING', '本节没有完整生成建议。')
         return { proposalId: result.proposal.id }
       },
     }).finally(() => this.active.delete(task.id))

@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "id": "course-book-review",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "course-paper",
+  "order": 4,
+  "title": {
+    "zh-CN": "读书报告/书评型",
+    "en": "Book Report / Review"
+  },
+  "summary": {
+    "zh-CN": "先概述再评价，评价必须落到具体文本；适合通识课与经典阅读课。",
+    "en": "Summarises first, then evaluates against specific passages; suited to general-education and reading courses."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "老师指定了书目并要求提交报告或书评",
+      "en": "A specific book is assigned and a report or review is required"
+    },
+    {
+      "zh-CN": "重点是理解与评价而不是论证一个新观点",
+      "en": "Understanding and evaluation matter more than a new argument"
+    },
+    {
+      "zh-CN": "读者假定没有读过原书",
+      "en": "The reader is assumed not to have read the book"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "给出书目信息、作者背景与本次评价的角度，让读者知道后面要评判什么。",
+        "en": "Give the book details, author background and the angle of evaluation."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "summary",
+      "title": {
+        "zh-CN": "内容概述",
+        "en": "Summary"
+      },
+      "focus": {
+        "zh-CN": "只提供理解评价所需的背景，不逐章复述，不透露结局。",
+        "en": "Give only the background needed to follow the evaluation; no chapter-by-chapter retelling."
+      },
+      "share": 0.35,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "evaluation",
+      "title": {
+        "zh-CN": "分析与评价",
+        "en": "Analysis and Evaluation"
+      },
+      "focus": {
+        "zh-CN": "结合具体文本与理由，说明什么奏效、与同类作品相比如何、在主题或情理上是否有说服力。",
+        "en": "Argue from specific passages what works, how it compares with similar works, and whether it persuades."
+      },
+      "share": 0.45,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "conclusion",
+      "title": {
+        "zh-CN": "结论",
+        "en": "Conclusion"
+      },
+      "focus": {
+        "zh-CN": "给出总体判断与推荐对象；如需出版信息，按老师要求列在文末。",
+        "en": "State the overall judgement and who should read it; add publication details if required."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "publication-info",
+      "description": {
+        "zh-CN": "出版信息",
+        "en": "Publication details"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "概述与评价的比例按作业要求调整，常见各占一半；本预设把评价放在更重的一侧。",
+    "en": "The summary-to-evaluation ratio follows the assignment; this preset weights evaluation more heavily."
+  },
+  "references": [
+    {
+      "label": "Purdue OWL · Book Reviews",
+      "url": "https://owl.purdue.edu/owl/general_writing/common_writing_assignments/book_reviews.html"
+    }
+  ]
+}

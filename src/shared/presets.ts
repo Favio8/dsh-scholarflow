@@ -1,0 +1,105 @@
+import { z } from 'zod'
+import { projectType } from './schema.ts'
+
+// Structure presets are a plugin-level resource (SPEC v1.1 §5.1). Built-in entries
+// ship inside the package; user entries live under <DSH_HOME>/scholarflow/presets/user.
+// Everything here validates before use: a damaged entry is reported, never repaired.
+
+export const presetId = z.string().min(1).max(80).regex(/^[a-z][a-z0-9-]{0,79}$/)
+export const presetSectionKey = z.string().min(1).max(64).regex(/^[a-z][a-z0-9-]{0,63}$/)
+export const presetSource = z.enum(['builtin', 'user'])
+export const supplementalKind = z.enum(['abstract', 'keywords', 'references', 'appendix', 'publication-info'])
+
+/** Built-ins carry both languages; user entries may carry a single string. */
+export const localizedText = z.union([
+  z.string().min(1).max(2000),
+  z.object({ 'zh-CN': z.string().min(1).max(2000), en: z.string().min(1).max(2000).optional() }).strict(),
+])
+export type LocalizedText = z.infer<typeof localizedText>
+
+export const presetSection = z.object({
+  key: presetSectionKey,
+  title: localizedText,
+  focus: localizedText,
+  share: z.number().positive().finite(),
+  // Widening this to `sourced` requires a contract update (SPEC v1.1 §5.1).
+  shareSource: z.literal('heuristic').default('heuristic'),
+}).strict()
+
+export const supplementalPart = z.object({
+  kind: supplementalKind,
+  description: localizedText,
+  suggestedLength: z.number().int().min(1).max(100000).optional(),
+}).strict()
+
+export const presetReference = z.object({ label: z.string().min(1).max(200), url: z.string().url().max(2000) }).strict()
+
+export const presetDocument = z.object({
+  schemaVersion: z.literal(1),
+  id: presetId,
+  version: z.string().regex(/^\d+\.\d+\.\d+$/),
+  updatedAt: z.string().datetime(),
+  paperType: projectType,
+  order: z.number().int().nonnegative().max(1000).optional(),
+  title: localizedText,
+  summary: localizedText,
+  whenToUse: z.array(localizedText).max(4).default([]),
+  sections: z.array(presetSection).min(1).max(40),
+  supplementalParts: z.array(supplementalPart).max(12).default([]),
+  methodNotes: localizedText.optional(),
+  references: z.array(presetReference).max(20).default([]),
+  derivedFrom: presetId.optional(),
+  basedOnVersion: z.string().regex(/^\d+\.\d+\.\d+$/).optional(),
+  tags: z.array(z.string().min(1).max(40)).max(20).default([]),
+}).strict()
+export type PresetDocument = z.infer<typeof presetDocument>
+
+/** A loaded entry: the document plus the identity decided by the loading directory. */
+export type Preset = PresetDocument & { source: z.infer<typeof presetSource> }
+
+export const presetSummary = z.object({
+  id: presetId, source: presetSource, paperType: projectType,
+  order: z.number().int().nonnegative().nullable(), version: z.string(),
+  title: localizedText, summary: localizedText, sectionCount: z.number().int().positive(),
+  modified: z.boolean().optional(),
+}).strict()
+
+export const presetSelectionRequest = z.object({ id: presetId }).strict()
+export const presetSaveRequest = z.object({ title: localizedText, summary: localizedText, paperType: projectType,
+  sections: z.array(presetSection).min(1).max(40), supplementalParts: z.array(supplementalPart).max(12).default([]),
+  tags: z.array(z.string().min(1).max(40)).max(20).default([]), derivedFrom: presetId.optional() }).strict()
+export const presetUpdateRequest = presetSaveRequest.extend({ id: presetId, expectedVersion: z.string().regex(/^\d+\.\d+\.\d+$/) }).strict()
+export const presetCopyRequest = z.object({ id: presetId, title: localizedText.optional() }).strict()
+export const presetRenameRequest = z.object({ id: presetId, title: localizedText }).strict()
+export const presetRemoveRequest = z.object({ id: presetId }).strict()
+
+/** Text in the requested language, falling back to the only available language. */
+export function localized(text: LocalizedText, language: 'zh-CN' | 'en'): string {
+  if (typeof text === 'string') return text
+  return text[language] ?? text['zh-CN']
+}
+
+/**
+ * Shares are stored normalised to 1. Rejects negative, zero, NaN and all-zero
+ * sets; a damaged file is reported instead of silently corrected (SPEC v1.1 §5.1).
+ */
+export function normalizeShares(sections: { key: string; share: number }[]): { key: string; share: number }[] {
+  const total = sections.reduce((sum, section) => sum + section.share, 0)
+  if (!Number.isFinite(total) || total <= 0) throw new Error('PRESET_SHARES_INVALID')
+  return sections.map(section => ({ key: section.key, share: section.share / total }))
+}
+
+/** Compares two share sets within the stored floating-point tolerance. */
+export function sharesSumToOne(sections: { share: number }[], tolerance = 1e-6): boolean {
+  const total = sections.reduce((sum, section) => sum + section.share, 0)
+  return Math.abs(total - 1) <= tolerance
+}
+
+/** Same-type display order: `order` ascending, then missing order, then title then id. */
+export function comparePresets(a: Preset, b: Preset): number {
+  const left = a.order ?? Number.MAX_SAFE_INTEGER, right = b.order ?? Number.MAX_SAFE_INTEGER
+  if (left !== right) return left - right
+  const titleA = localized(a.title, 'zh-CN'), titleB = localized(b.title, 'zh-CN')
+  if (titleA !== titleB) return titleA < titleB ? -1 : 1
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+}

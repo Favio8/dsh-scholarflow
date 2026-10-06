@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "id": "research-qualitative",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "research-paper",
+  "order": 2,
+  "title": {
+    "zh-CN": "质性研究",
+    "en": "Qualitative Study"
+  },
+  "summary": {
+    "zh-CN": "研究为什么与如何、意义与过程；发现按主题组织，方法与研究者立场交代充分。",
+    "en": "Studies why and how, meaning and process; findings are organised by theme with an explicit methodological stance."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "研究问题关注过程、意义或情境化经验",
+      "en": "The question concerns process, meaning or situated experience"
+    },
+    {
+      "zh-CN": "材料来自访谈、焦点小组、田野观察或文本与话语",
+      "en": "Material comes from interviews, focus groups, fieldwork or texts"
+    },
+    {
+      "zh-CN": "需要解释机制而不是检验效应",
+      "en": "Explanation is wanted rather than effect testing"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "说明研究问题与理论视角，交代为什么质性的路径适合这个问题。",
+        "en": "State the question and theoretical perspective, and why a qualitative approach fits it."
+      },
+      "share": 0.13,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "method",
+      "title": {
+        "zh-CN": "研究设计与方法",
+        "en": "Research Design and Methodology"
+      },
+      "focus": {
+        "zh-CN": "交代研究取向、情境、材料来源与抽样、研究者立场与反身性、分析过程与可信度策略（可对照 SRQR 或 COREQ）。",
+        "en": "Cover the approach, setting, sampling, the researcher's stance and reflexivity, analysis process and trustworthiness strategies (SRQR or COREQ)."
+      },
+      "share": 0.22,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "findings",
+      "title": {
+        "zh-CN": "研究发现",
+        "en": "Findings"
+      },
+      "focus": {
+        "zh-CN": "按主题或类别组织，用真实材料支持每个主题；不按变量或假设排列。",
+        "en": "Organise by theme or category with supporting material; never by variable or hypothesis."
+      },
+      "share": 0.35,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "discussion",
+      "title": {
+        "zh-CN": "讨论",
+        "en": "Discussion"
+      },
+      "focus": {
+        "zh-CN": "回到研究问题与理论，说明这些主题意味着什么；需要时与发现合并为一章。",
+        "en": "Return to the question and theory to say what the themes mean; may be merged with findings."
+      },
+      "share": 0.22,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "conclusion",
+      "title": {
+        "zh-CN": "结论",
+        "en": "Conclusion"
+      },
+      "focus": {
+        "zh-CN": "总结贡献与限制；不把质性发现表述为可外推的统计结论。",
+        "en": "Summarise contribution and limits; do not present qualitative findings as generalisable statistics."
+      },
+      "share": 0.08,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要",
+        "en": "Abstract"
+      },
+      "suggestedLength": 200
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词",
+        "en": "Keywords"
+      }
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    },
+    {
+      "kind": "appendix",
+      "description": {
+        "zh-CN": "附录（访谈提纲、编码示例）",
+        "en": "Appendix (interview guide, coding examples)"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "COREQ 适用于访谈与焦点小组，不能套给所有质性研究；观察类研究可参考 SRQR 并按其条目裁剪。",
+    "en": "COREQ applies to interviews and focus groups only; observational studies follow SRQR and drop items that do not apply."
+  },
+  "references": [
+    {
+      "label": "SRQR (Standards for Reporting Qualitative Research)",
+      "url": "https://www.equator-network.org/reporting-guidelines/srqr/"
+    },
+    {
+      "label": "COREQ",
+      "url": "https://www.equator-network.org/reporting-guidelines/coreq/"
+    }
+  ]
+}

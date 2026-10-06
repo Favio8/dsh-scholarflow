@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "id": "review-critical-integrative",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "paperType": "literature-review",
+  "order": 4,
+  "title": {
+    "zh-CN": "批判性/整合性综述",
+    "en": "Critical / Integrative Review"
+  },
+  "summary": {
+    "zh-CN": "整合量性与质性、经验与理论来源并构建解释框架，必须交代评价与综合的方法。",
+    "en": "Integrates quantitative and qualitative, empirical and theoretical sources into an explanatory framework; the appraisal and synthesis method must be explicit."
+  },
+  "whenToUse": [
+    {
+      "zh-CN": "需要同时整合实验证据与质性或理论文献",
+      "en": "Experimental evidence must be combined with qualitative or theoretical work"
+    },
+    {
+      "zh-CN": "目标是生成新的概念框架或重新评估既有立场",
+      "en": "The goal is a new framework or a re-appraisal of existing positions"
+    },
+    {
+      "zh-CN": "允许来源异质，但必须说明评价标准",
+      "en": "Heterogeneous sources are acceptable if appraisal criteria are stated"
+    }
+  ],
+  "sections": [
+    {
+      "key": "intro",
+      "title": {
+        "zh-CN": "引言",
+        "en": "Introduction"
+      },
+      "focus": {
+        "zh-CN": "明确综合目标与所依据的核心概念。",
+        "en": "State the synthesis objective and the guiding concept."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "search",
+      "title": {
+        "zh-CN": "文献检索",
+        "en": "Literature Search"
+      },
+      "focus": {
+        "zh-CN": "说明来源范围、检索方式与时间跨度，使读者能判断覆盖面。",
+        "en": "State sources, search approach and time span so coverage can be judged."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "appraisal",
+      "title": {
+        "zh-CN": "资料评价",
+        "en": "Appraisal"
+      },
+      "focus": {
+        "zh-CN": "交代质量与相关性的评价标准；不同研究类型的标准可以不同，但必须写明。",
+        "en": "Explain how quality and relevance were judged; criteria may differ by study type but must be stated."
+      },
+      "share": 0.1,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "synthesis-method",
+      "title": {
+        "zh-CN": "综合方法",
+        "en": "Synthesis Method"
+      },
+      "focus": {
+        "zh-CN": "说明比较与整合的具体步骤（如持续比较、主题归纳）；这是此类综述最容易被写薄的部分。",
+        "en": "Describe the concrete steps of comparison and integration (constant comparison, thematic induction); this is the part most often left thin."
+      },
+      "share": 0.18,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "synthesis-result",
+      "title": {
+        "zh-CN": "综合结果",
+        "en": "Synthesis"
+      },
+      "focus": {
+        "zh-CN": "呈现整合后的框架、主题结构与支持依据，按核心概念组织。",
+        "en": "Present the integrated framework, themes and their supporting basis, organised by the guiding concept."
+      },
+      "share": 0.35,
+      "shareSource": "heuristic"
+    },
+    {
+      "key": "discussion",
+      "title": {
+        "zh-CN": "讨论与结论",
+        "en": "Discussion and Conclusion"
+      },
+      "focus": {
+        "zh-CN": "说明解释力、分歧与限制，以及对实践与后续研究的启示。",
+        "en": "Explain reach, disagreement and limits, plus implications for practice and further research."
+      },
+      "share": 0.17,
+      "shareSource": "heuristic"
+    }
+  ],
+  "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要",
+        "en": "Abstract"
+      },
+      "suggestedLength": 200
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词",
+        "en": "Keywords"
+      }
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    }
+  ],
+  "methodNotes": {
+    "zh-CN": "整合性综述与批判性综述并不等同：本预设取整合路径并允许加入批判性讨论，两者方法差异需在文中说明。",
+    "en": "Integrative and critical reviews are not the same; this preset takes the integrative route and allows critical discussion, with the difference stated in the text."
+  },
+  "references": [
+    {
+      "label": "Whittemore & Knafl 2005 · The integrative review",
+      "url": "https://doi.org/10.1111/j.1365-2648.2005.03621.x"
+    },
+    {
+      "label": "UNC Writing Center · Literature Reviews",
+      "url": "https://writingcenter.unc.edu/tips-and-tools/literature-reviews/"
+    }
+  ]
+}
