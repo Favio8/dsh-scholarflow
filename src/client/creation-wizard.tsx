@@ -5,11 +5,85 @@ import { allocate } from '../core/presets/allocation.ts'
 import { sectionsFromPreset, selectionFromPreset } from '../core/presets/apply.ts'
 import { FORMAT_LABELS, TYPE_LABELS } from './paper-workspace.tsx'
 import { PresetPicker } from './preset-picker.tsx'
+import { DEFAULT_TYPOGRAPHY } from '../core/export/typography.ts'
+
+function formatElapsed(ms: number) {
+  const seconds = Math.floor(ms / 1000)
+  return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+}
 
 const splitPath = (path: string) => {
   const cut = path.lastIndexOf('/')
   return cut < 0 ? { name: path, dir: '工作区根目录' } : { name: path.slice(cut + 1), dir: path.slice(0, cut) }
 }
+
+/**
+ * The requirements candidate (PRD §3.2). Six groups, each with the source it came from; the
+ * teacher-versus-preset conflict is shown rather than resolved, and the raw input is untouched
+ * until the user adopts.
+ */
+function BriefCandidate({ candidate, busy, onAdopt, onDiscard }: any) {
+  const brief = candidate.brief
+  const row = (label: string, value?: string, path?: string) => value
+    ? <div className="sf-brief-row" key={label}><dt>{label}</dt><dd>{value}{path && brief.origins?.[path] &&
+      <em className="sf-brief-origin">{ORIGIN_LABEL[brief.origins[path]] ?? brief.origins[path]}</em>}</dd></div> : null
+  const length = brief.length?.value !== undefined
+    ? `${brief.length.approximate ? '约 ' : ''}${brief.length.value} ${brief.length.unit === 'words' ? '词' : '字'}${brief.length.pages ? ` · 共 ${brief.length.pages} 页` : ''}${brief.length.coverPages !== undefined ? `（封面 ${brief.length.coverPages} 页＋正文 ${brief.length.bodyPages ?? '?'} 页）` : ''}`
+    : undefined
+  return <section className="sf-brief" aria-label="要求候选">
+    <h5>要求候选 · 确认后才成为写作要求</h5>
+    <dl>
+      {row('写什么', [brief.task?.nature, brief.task?.subject, brief.task?.deliverable].filter(Boolean).join(' · '), 'task.nature')}
+      {!!brief.coverage?.length && <div className="sf-brief-row"><dt>必须覆盖</dt><dd>{brief.coverage.map((item: any) => item.text).join('、')}</dd></div>}
+      {row('篇幅', length, 'length')}
+      {row('格式', [brief.format?.fileFormat, brief.format?.citationStyle, brief.format?.cover ? '需要封面' : undefined].filter(Boolean).join(' · '), 'format.fileFormat')}
+      {brief.typography && row('排版', `中文 ${brief.typography.bodyFontZh}／英文 ${brief.typography.bodyFontEn} · ${brief.typography.bodySizeLabel} · ${brief.typography.lineSpacing} 倍行距`, 'typography')}
+      {row('提交', [brief.submission?.when, brief.submission?.where, brief.submission?.how].filter(Boolean).join(' · '), 'submission.when')}
+    </dl>
+    {!!brief.submission?.needsConfirmation?.length && <p className="sf-brief-note">需要你确认：{brief.submission.needsConfirmation.join('、')}。来源没有写明，产品不推断。</p>}
+    {candidate.diff?.length > 0 && <details className="sf-brief-diff"><summary>与当前输入的差异（{candidate.diff.length} 项）</summary>
+      {candidate.diff.map((row: any) => <p key={row.path}><b>{row.label}</b>：{row.before ? `${row.before} → ` : ''}{row.after}</p>)}</details>}
+    {candidate.conflicts?.map((conflict: any) => <div className="sf-brief-conflict" key={conflict.topic}>
+      <b>需要决定：{conflict.topic}</b> {conflict.current}；候选 {conflict.candidate}{conflict.source ? `（来源 ${conflict.source}）` : ''}。
+      {conflict.preferred === 'candidate' && <span>建议采用候选，因为它是作业要求的原文。</span>}
+    </div>)}
+    <div className="sf-brief-actions">
+      <button type="button" className="sf-primary" disabled={busy} onClick={() => onAdopt({ all: true })}>全部采用</button>
+      {candidate.conflicts?.some((conflict: any) => conflict.topic === '篇幅') && <>
+        <button type="button" disabled={busy} onClick={() => onAdopt({ all: true, resolveLength: 'teacher' })}>采用老师要求并同步篇幅</button>
+        <button type="button" disabled={busy} onClick={() => onAdopt({ all: true, resolveLength: 'current' })}>保留当前篇幅（记录本次覆盖）</button>
+      </>}
+      <button type="button" disabled={busy} onClick={onDiscard}>放弃候选</button>
+      <span className="sf-field-hint">原输入保留；采用后会追加一段带标签的整理记录，不会覆盖你写的文字。</span>
+    </div>
+  </section>
+}
+
+/** The outline candidate: what changed, which requirement each section carries, and the gaps. */
+function OutlineCandidate({ candidate, busy, onAdopt, onDiscard }: any) {
+  return <section className="sf-outline-candidate" aria-label="大纲候选">
+    <h5>大纲候选 · 与当前结构对照</h5>
+    {!!candidate.changes?.length && <p className="sf-field-hint">变化：{summarizeChanges(candidate.changes)}</p>}
+    <ul className="sf-coverage-list">{candidate.sections.map((section: any) => <li key={section.id}>
+      <b>{section.title}</b>{section.purpose ? ` — ${section.purpose}` : ''}</li>)}</ul>
+    {!!candidate.coverage?.length && <details open><summary>要求覆盖（{candidate.coverage.filter((row: any) => row.covered).length}/{candidate.coverage.length}）</summary>
+      {candidate.coverage.map((row: any) => <p key={row.itemId} className={row.covered ? undefined : 'sf-gap'}>{row.covered ? '✔' : '✖'} {row.text}{!row.covered && ' · 还没有对应章节'}</p>)}</details>}
+    {candidate.gaps?.map((gap: string) => <p className="sf-gap" key={gap}>缺口：{gap}</p>)}
+    <div className="sf-brief-actions">
+      <button type="button" className="sf-primary" disabled={busy} onClick={onAdopt}>采用此大纲</button>
+      <button type="button" disabled={busy} onClick={onDiscard}>放弃候选</button>
+      <span className="sf-field-hint">放弃只删除候选，当前结构逐字节不变。</span>
+    </div>
+  </section>
+}
+
+const ORIGIN_LABEL: Record<string, string> = { teacher: '老师要求', user: '你的描述', suggestion: '模型建议', unspecified: '未说明', unread: '未读到' }
+function summarizeChanges(changes: any[]) {
+  const count = (kind: string) => changes.filter(change => change.kind === kind).length
+  return [count('added') && `新增 ${count('added')} 节`, count('renamed') && `改名 ${count('renamed')} 节`,
+    count('removed') && `删除 ${count('removed')} 节`, count('reordered') && '调整了顺序'].filter(Boolean).join(' · ')
+}
+const MEMBER_STATE: Record<string, string> = { pending: '待读取', reading: '读取中', ready: '已读取', failed: '未读到' }
 
 export const REQUIREMENT_KIND_LABEL = { readable: '可读取', image: '图片', unsupported: '不可读取' } as const
 /** What the parser can do with a file, decided by extension only — never a promise. */
@@ -66,8 +140,9 @@ function RequirementPicker({ files, disabled, scanning, onPick, onRescan, onPick
   </div>
 }
 
-// Local drafts predate the requirement-source and allocation fields. Restore those
-// additions once, without validating unfinished input as a submitted creation request.
+// Local drafts predate the requirement-source and allocation fields, and later ones predate
+// the v1.2 typography, cover and override fields. Restore those additions once, without
+// validating unfinished input as a submitted creation request (SPEC v1.2 §19).
 export function restoreCreationDraft(spec: CreationSpec): CreationSpec {
   const { assignmentPath, ...draft } = spec
   const requirementSources = spec.requirementSources ?? (assignmentPath ? [{
@@ -77,6 +152,9 @@ export function restoreCreationDraft(spec: CreationSpec): CreationSpec {
   return { ...draft, requirementSources,
     countingPolicy: spec.countingPolicy ?? { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
     sections: spec.sections.map(section => ({ ...section, allocationMode: section.allocationMode ?? 'manual' })),
+    overrides: spec.overrides ?? [],
+    typography: spec.typography ?? DEFAULT_TYPOGRAPHY,
+    cover: spec.cover ?? { enabled: false, title: spec.title ?? '', fields: [], date: '' },
   }
 }
 
@@ -86,7 +164,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     format: 'docx', requirements: '', requirementSources: [], materials: [], online: false, targetLength: 4000,
     countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
     sections: presetSections(defaults?.defaultProjectType ?? 'course-paper', 4000), manuscriptDir: 'manuscript',
-    overrides: [], typography: { bodyFontZh: '宋体', bodyFontEn: 'Times New Roman', bodySizePt: 12, bodySizeLabel: '小四', lineSpacing: 1.2, marginsMm: 25 },
+    overrides: [], typography: DEFAULT_TYPOGRAPHY,
     cover: { enabled: false, title: '', fields: [], date: '' } }
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') } catch { return null } })
   const [spec, setSpec] = useState<CreationSpec>(() => saved?.spec ? restoreCreationDraft(saved.spec) : initial), [step, setStep] = useState(saved?.step ?? 0)
@@ -149,10 +227,107 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   // Requirement sources stand on their own: they are never merged into the materials
   // list, and extraction reads them under their own authorisation (SPEC v1.1 §7).
   const readySpec = () => ({ ...spec, title: spec.title.trim() || spec.requirements.trim().split('\n')[0].slice(0, 60) })
-  const suggest = async (structure: boolean) => {
-    const result = await api('creation.suggest', { context: context(), spec: { ...readySpec(), title: readySpec().title || '待确定论文题目', requirements: spec.requirements.trim() || '根据所选要求来源提取写作要求。' } })
-    update({ title: spec.title.trim() || result.title, ...(structure ? { sections: result.sections } : { requirements: result.requirements }) })
+  /**
+   * 整理要求 is one action that reads every member and then structures what was read
+   * (PRD §3.1). The read is a job, so the button reports the real phase within a second and
+   * stays stoppable; the structuring step never sees unconfirmed reference material.
+   */
+  const readRef = useRef<{ readId?: string; timer?: number; startedAt?: number; opId: string }>({ opId: '' })
+  const [read, setRead] = useState<any>()
+  const [brief, setBrief] = useState<any>()
+  const [elapsed, setElapsed] = useState(0)
+  const stopReading = () => {
+    const { readId, timer } = readRef.current
+    window.clearInterval(timer); setElapsed(0)
+    if (readId) void api('creation.stopRead', { readId }).then(setRead).catch(() => undefined)
+    readRef.current = { opId: '' }
+    setOperator('stopped')
   }
+  const [operator, setOperator] = useState<'idle' | 'reading' | 'structuring' | 'stopped' | 'done'>('idle')
+  const organize = () => act(async () => {
+    const current = readySpec()
+    const opId = `op_${Date.now()}`
+    readRef.current = { opId, startedAt: Date.now() }
+    setElapsed(0); setBrief(undefined); setOperator('reading'); setError('')
+    const { readId } = await api('creation.readRequirements', { context: context(), spec: creationSpec.parse(current) })
+    readRef.current.readId = readId
+    const startedAt = readRef.current.startedAt!
+    readRef.current.timer = window.setInterval(async () => {
+      const live = readRef.current
+      if (live.opId !== opId) return
+      setElapsed(Date.now() - startedAt)
+      try {
+        const status = await api('creation.readStatus', { readId })
+        // A late answer from a stopped or superseded action never reaches a field (PRD §4.1).
+        if (live.opId !== opId) return
+        setRead(status)
+      } catch { /* a finished job reports its final state on the next poll */ }
+    }, 400)
+    // Polling ends when the job settles; the result is the same object the last poll saw.
+    const settled = await waitForRead(readId, opId)
+    window.clearInterval(readRef.current.timer); setElapsed(Date.now() - startedAt)
+    if (readRef.current.opId !== opId) return
+    setRead(settled)
+    if (!settled || !settled.members.some((member: any) => member.state === 'ready')) {
+      // Nothing read is a stated outcome, not a silent success (SPEC v1.2 §5.4).
+      setOperator('done')
+      setIssues([settled?.state === 'stopped' ? '已停止；已读到的成员保留，未读到的成员需要处理后才能成为已确认要求。'
+        : '这次没有读到任何要求文字。可以在失败的文件旁粘贴文字、换一个文件，或直接填写写作要求。'])
+      return
+    }
+    setOperator('structuring')
+    try {
+      const result = await api('creation.structure', { context: context(), spec: creationSpec.parse(current), readId, presetLength: spec.targetLength })
+      if (readRef.current.opId !== opId) return
+      setBrief(result.candidate); setOperator('done')
+    } catch (error) { setOperator('done'); throw error }
+  })
+  const waitForRead = async (readId: string, opId: string, timeoutMs = 15 * 60 * 1000) => {
+    const deadline = Date.now() + timeoutMs
+    let last: any
+    while (Date.now() < deadline) {
+      if (readRef.current.opId !== opId) return last
+      try { last = await api('creation.readStatus', { readId }) } catch { /* keep polling */ }
+      if (last && last.state !== 'reading') return last
+      await new Promise(resolve => window.setTimeout(resolve, 700))
+    }
+    return last
+  }
+  const adoptBrief = (mode: { all?: boolean; resolveLength?: 'teacher' | 'current' }) => act(async () => {
+    const result = await api('candidates.adopt', { context: context(), candidateId: brief.candidateId, spec: creationSpec.parse(readySpec()), ...mode })
+    const next = creationSpec.parse(result.spec)
+    // The adopted text stays editable in the requirement field; nothing overwrites the user's own words.
+    setSpec(previous => ({ ...previous, requirements: next.requirements, targetLength: next.targetLength,
+      brief: next.brief, typography: next.typography, cover: next.cover, overrides: next.overrides }))
+    setBrief(undefined); setOperator('done')
+    setIssues(['已采用要求候选；原输入保留在写作要求中，可以继续编辑。'])
+  })
+  const discardBrief = () => act(async () => {
+    if (brief) await api('candidates.discard', { context: context(), candidateId: brief.candidateId })
+    setBrief(undefined); setIssues(['已放弃候选；写作要求保持原样。'])
+  })
+  /** A single member can be retried without repeating the members that already read. */
+  const retryMember = (member: string) => act(async () => {
+    const { readId } = readRef.current
+    if (!readId) return
+    const result = await api('creation.retryMember', { context: context(), spec: creationSpec.parse(readySpec()), readId, member })
+    setRead(result.read)
+  })
+  // The old single-shot suggest stays available for the chapter-only path in step 3.
+  const suggestStructure = () => act(async () => {
+    const current = creationSpec.parse(readySpec())
+    const result = await api('outline.suggest', { context: context(), spec: current })
+    setOutline(result.candidate)
+  })
+  const [outline, setOutline] = useState<any>()
+  const adoptOutline = () => act(async () => {
+    const result = await api('candidates.adopt', { context: context(), candidateId: outline.candidateId, spec: creationSpec.parse(readySpec()), all: true })
+    const next = creationSpec.parse(result.spec)
+    setHistory(rows => [...rows.slice(-9), spec.sections])
+    setSpec(previous => ({ ...previous, sections: outline.sections, preset: previous.preset ? { ...previous.preset, modified: true } : previous.preset }))
+    setOutline(undefined); setIssues(['已采用大纲候选，可以继续编辑章节。'])
+    void next
+  })
   const clearDraft = () => {
     if (!window.confirm('清除本次填写的草稿？论文项目不会被创建，已有项目不受影响。')) return
     try { localStorage.removeItem(key) } catch { /* storage may be unavailable */ }
@@ -215,12 +390,28 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     update({ requirements: added })
     setRecognition(previous => ({ ...previous, [resourceId]: { state: 'confirmed' as const, text: candidate.text } }))
   }
+  /** Pasting the text of a file that could not be read is a user action, not a parser guess. */
+  const pasteMemberText = (member: string) => {
+    const text = window.prompt(`把 ${member} 里真实存在的要求文字粘贴到这里（确认后进入写作要求）：`)
+    if (!text?.trim()) return
+    update({ requirements: [spec.requirements.trim(), text.trim()].filter(Boolean).join(String.fromCharCode(10)).slice(0, 12000) })
+    setRead((current: any) => current ? { ...current, members: current.members.map((row: any) => row.name === member
+      ? { ...row, state: 'ready', chars: text.trim().length, note: '由你粘贴文字；已加入写作要求。', noteKind: undefined } : row) } : current)
+    setIssues([`已把 ${member} 的文字加入写作要求；它不再算作未读要求。`])
+  }
+  const removeNamedMember = (resourceId: string, name: string) => {
+    removeMember(resourceId, name)
+    setRead((current: any) => current ? { ...current, members: current.members.filter((row: any) => row.name !== name) } : current)
+  }
   const requirementRows = spec.requirementSources.map(source => {
     const external = source.origin === 'external'
     const shown = external ? { name: '电脑其他位置的要求文件夹', dir: `${source.members.length} 个文件` } : splitPath(source.path ?? '')
     const kind = source.kind === 'folder' ? 'folder' : requirementKind(source.path ?? '')
     const status = recognition[source.resourceId]
     const needsReconnect = external && source.state !== 'connected'
+    // Each member reports its own outcome; a folder is never summarised as one file.
+    const members = (read?.members ?? []).filter((row: any) => source.origin === 'external' ? true
+      : source.kind === 'folder' ? source.members.some((member: any) => member.name === row.name) : row.name === source.path)
     return <li key={source.resourceId} className="sf-source-row">
       <span className="sf-source-badge" data-kind={external ? 'external' : kind}>{external ? '外部' : source.kind === 'folder' ? '文件夹' : REQUIREMENT_KIND_LABEL[kind as keyof typeof REQUIREMENT_KIND_LABEL]}</span>
       <span className="sf-source-name">{shown.name}<small>{shown.dir}</small></span>
@@ -241,6 +432,16 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         </div></div>}
       {status?.state === 'confirmed' && <p className="sf-source-note" role="status">已采用的识别文字已在写作要求中，可以继续编辑；重新识别只替换本次候选。</p>}
       {status?.note && <p className="sf-source-note" role="status">{status.note}</p>}
+      {!!members.length && <ul className="sf-member-reads">{members.map((row: any) => <li key={row.name} data-state={row.state}>
+        <span className="sf-member-name">{row.name}</span>
+        <span className="sf-member-state">{MEMBER_STATE[row.state] ?? row.state}{row.chars ? ` · ${row.chars} 字` : ''}</span>
+        {!!row.note && <span className="sf-member-note">{row.note}</span>}
+        {row.state === 'failed' && <span className="sf-member-actions">
+          <button type="button" className="sf-source-action" disabled={busy} onClick={() => retryMember(row.name)}>重新读取</button>
+          <button type="button" className="sf-source-action" onClick={() => pasteMemberText(row.name)}>粘贴文字</button>
+          <button type="button" className="sf-source-action" onClick={() => removeNamedMember(source.resourceId, row.name)}>移除</button>
+        </span>}
+      </li>)}</ul>}
     </li> })
   const readable = files.filter((file: any) => file.supported)
   const attachments = files.filter((file: any) => !file.supported && requirementKind(file.relativePath) === 'image')
@@ -314,9 +515,20 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <div className="sf-field"><span className="sf-field-label">写作要求来源</span>
           <div className="sf-assignment-row">
             <RequirementPicker files={files} disabled={busy} scanning={scanning} onPick={addSource} onPickExternal={addExternalSource} onRescan={() => loadFiles(false)} />
-            <button className="sf-assignment-extract" disabled={busy || (!spec.requirements.trim() && !spec.requirementSources.length)} onClick={() => act(() => suggest(false))}>整理要求</button>
+            {operator === 'reading' || operator === 'structuring'
+              ? <button className="sf-assignment-extract" onClick={stopReading}>停止</button>
+              : <button className="sf-assignment-extract" disabled={busy || (!spec.requirements.trim() && !spec.requirementSources.length)} onClick={organize}>整理要求</button>}
           </div>
+          {/* One action, real phases, live elapsed time, and a stop that keeps what was read. */}
+          {(operator === 'reading' || operator === 'structuring') && <div className="sf-long-op" role="status" aria-live="polite">
+            <span className="sf-long-op-dot" aria-hidden="true" />
+            <strong>{operator === 'reading' ? (read?.phase || '正在读取要求来源…') : '整理已读要求'}</strong>
+            <span className="sf-long-op-count">{read ? `${read.done} / ${read.total} 个成员` : '准备中'}</span>
+            <span className="sf-long-op-elapsed">已用 {formatElapsed(elapsed)}</span>
+            <span className="sf-long-op-hint">{operator === 'reading' ? '等待模型响应期间不显示推算的剩余时间。' : '只使用本次真正读到的文字。'}</span>
+          </div>}
           <p className="sf-field-hint">要求来源规定这篇论文该怎么写；第二步的论文参考材料提供写作所需的资料。两者独立选择，互不要求对方包含自己。文件保持原样，只在整理或写作时读取。</p>
+          {brief && <BriefCandidate candidate={brief} busy={busy} onAdopt={adoptBrief} onDiscard={discardBrief} />}
           {spec.requirementSources.length
             ? <ul className="sf-source-list">{requirementRows}</ul>
             : <p className="sf-field-hint">还没有添加要求来源。也可以直接填写写作要求后继续。</p>}
@@ -352,9 +564,11 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           <div className="sf-structure-actions">
             <button disabled={busy || !spec.preset} onClick={() => setPresetOpen(true)}>更换预设</button>
             <button disabled={busy || allocationPlan.minimumShortfall} onClick={reallocate}>重新分配</button>
-            <button disabled={busy} onClick={() => act(() => suggest(true))}>AI 完善结构</button>
+            <button disabled={busy} onClick={suggestStructure}>AI 完善结构</button>
           </div>
         </div>
+        {outline && <OutlineCandidate candidate={outline} busy={busy} onAdopt={adoptOutline}
+          onDiscard={() => act(async () => { await api('candidates.discard', { context: context(), candidateId: outline.candidateId }); setOutline(undefined) })} />}
         <p className="sf-field-hint">当前预设：{spec.preset ? `${spec.preset.id}（${spec.preset.source === 'builtin' ? '内置' : '我的'}${spec.preset.modified ? ' · 已修改' : ''}）` : '尚未选择'}
           ，计划合计 {allocationPlan.total} / {spec.targetLength}。手工章节保持原值，其余按建议比例分配；比例只是起点，任何一项都可以改。</p>
         {allocationPlan.notes.map(note => <p className="sf-field-hint" key={note} role="status">{note}</p>)}
@@ -379,23 +593,26 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
             if (!window.confirm('用当前结构更新这个预设？已有论文不受影响。')) return
             await api('presets.update', { ...structureForPreset(), id: spec.preset!.id, expectedVersion: spec.preset!.version }) })}>更新此预设</button>}
         </div>
-        <section className="sf-confirm" aria-label="创建前确认">
-          <h4>创建前确认</h4>
-          <dl>
-            <div><dt>论文与结构</dt><dd>{spec.title.trim() || '（创建前必须填写题目）'} · {TYPE_LABELS[spec.type]} · {spec.language === 'en' ? 'English' : '中文'} ·
-              {spec.targetLength} {spec.language === 'en' ? '词' : '汉字'}（正文{spec.countingPolicy.includeAbstract ? '含摘要' : '不含摘要'}） ·
-              {spec.sections.length} 章 · 计划合计 {allocationPlan.total} · 预设 {spec.preset ? `${spec.preset.id}${spec.preset.modified ? '（已修改）' : ''}` : '未选择'}</dd></div>
-            <div><dt>资料</dt><dd>要求来源 {spec.requirementSources.length} · 参考材料 {spec.materials.length}
-              <details><summary>查看实际授权集合（{approvedPaths.length} 项）</summary>
-                <ul>{approvedPaths.map(path => <li key={path}>{path}</li>)}</ul>
-                {spec.requirementSources.some(source => source.origin === 'external') && <p>外部来源按句柄记录，不写入项目相对路径。</p>}</details></dd></div>
-            <div><dt>输出</dt><dd>将新增 {spec.manuscriptDir}/ 与 .scholarflow/；已有同名文件时会在提交前提示，不会覆盖。</dd></div>
-            <div><dt>外部处理</dt><dd>模型：当前会话在输入框中选择的模型 · 联网：{spec.online ? '开启（Crossref 核验元数据，必要时取公开全文）' : '关闭'}。
-              本地保存不等于本地模型：联网与模型调用都会把选定范围发送出去。</dd></div>
-            <div><dt>预算</dt><dd>模型调用上限 {defaults?.maxModelCalls ?? '按插件设置'}（来自插件设置，可在「ScholarFlow 设置」中修改）；检索次数与时限按项目默认。</dd></div>
-            <div><dt>文风与能力</dt><dd>使用项目默认的写作 Profile 与已启用 Skill；可在项目概览中查看与调整生效项。</dd></div>
-            <div><dt>能力缺口</dt><dd>{capabilityGaps.join('；')}。这些会作为要求保留，不会被当作已满足。</dd></div>
-          </dl>
+        {/* A short summary next to the create button, expandable for the full scope. The large
+            pre-creation confirmation block is gone: nothing here is asked twice. */}
+        <section className="sf-create-summary" aria-label="创建摘要">
+          <div className="sf-create-line">
+            <strong>{FORMAT_LABELS[spec.format]} · {spec.language === 'en' ? `约 ${spec.targetLength} 词` : `约 ${spec.targetLength} 字`}
+              {spec.brief?.length?.pages ? ` · A4 共 ${spec.brief.length.pages} 页` : ''}</strong>
+            <span>要求来源 {spec.requirementSources.length} · 参考材料 {spec.materials.length} · 输出 {spec.manuscriptDir}/ ·
+              模型由当前会话决定 · 联网{spec.online ? '开启' : '关闭'}</span>
+          </div>
+          <details><summary>查看实际读取与写入范围、排版与能力缺口</summary>
+            <p>将读取：{approvedPaths.length ? approvedPaths.join('、') : '（没有选中任何文件）'}</p>
+            <p>将写入：{spec.manuscriptDir}/ 与 .scholarflow/；已有同名文件时在提交前提示，不会覆盖。</p>
+            <p>排版：中文 {spec.typography?.bodyFontZh ?? '宋体'}／英文 {spec.typography?.bodyFontEn ?? 'Times New Roman'} ·
+              {spec.typography?.bodySizeLabel ?? '小四'} · {spec.typography?.lineSpacing ?? 1.2} 倍行距
+              {spec.cover?.enabled ? ` · 封面 ${spec.brief?.length?.coverPages ?? 1} 页` : ' · 无封面'}。
+              导出成功不等于排版合格：页数要在 Word 或等效查看环境中核对。</p>
+            <p>能力缺口：{capabilityGaps.join('；')}。这些会作为要求保留，不会被当作已满足。</p>
+            {!!spec.overrides.length && <p>你选择覆盖过的要求：{spec.overrides.map(row => `${row.field}（要求 ${row.requirementValue} → 采用 ${row.chosenValue}）`).join('；')}。</p>}
+            <p>模型调用次数与耗时只作为统计展示，不再限制本次任务。</p>
+          </details>
         </section>
         {conflict && <label>论文输出目录<input value={spec.manuscriptDir} onChange={e => update({ manuscriptDir: e.target.value })} /><small>此处已有文件，请选择新的输出目录。</small></label>}
       </>}
@@ -410,7 +627,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           setIssues(['请填写写作要求，或添加至少一个要求来源。'])
           document.getElementById('sf-field-requirements')?.focus(); return
         }
-        if (step === 1 && spec.sections.every(row => !row.purpose)) act(async () => { setStep(2); await suggest(true) }); else setStep(step + 1) }}>下一步 →</button>
+        setStep(step + 1) }}>下一步 →</button>
         : <button className="sf-primary" disabled={busy} onClick={() => {
           const empty = spec.sections.findIndex(section => !section.title.trim() || section.targetLength < 50)
           const blockers = [
@@ -539,7 +756,45 @@ export const WIZARD_CSS = `/* Text colours are tokens because they must clear WC
 .sf-wizard .sf-picker-modes button[aria-pressed=true]{background:#4475e714;border-color:var(--sf-accent);color:var(--sf-accent-text)}
 .sf-wizard .sf-picker-note{margin:0;padding:8px 12px;border-top:1px solid #8882;font-size:11.5px;color:var(--dsw-alias-label-secondary,#8b9099)}
 /* Creation confirmation, merged into step 3 rather than a fourth step (design 02 §8). */
-.sf-wizard .sf-confirm{margin-top:22px;padding:16px 18px;border:1px solid #8882;border-radius:10px;background:#8881}
+.sf-wizard .sf-long-op{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding:9px 12px;border:1px solid #8882;border-radius:9px;background:#88805;font-size:12px}
+.sf-wizard .sf-long-op-dot{width:8px;height:8px;border-radius:50%;background:var(--sf-accent);animation:sf-op-pulse 1.4s infinite;flex:none}
+.sf-wizard .sf-long-op strong{font-weight:500}
+.sf-wizard .sf-long-op-count,.sf-wizard .sf-long-op-elapsed{color:var(--dsw-alias-label-secondary,#727780);font-variant-numeric:tabular-nums}
+.sf-wizard .sf-long-op-hint{flex:1 1 100%;color:var(--dsw-alias-label-secondary,#8b9099)}
+@keyframes sf-op-pulse{50%{opacity:.35}}
+@media(prefers-reduced-motion:reduce){.sf-wizard .sf-long-op-dot{animation:none}}
+.sf-wizard .sf-member-reads{flex:1 1 100%;list-style:none;margin:6px 0 0;padding:0 0 0 12px;font-size:12px}
+.sf-wizard .sf-member-reads li{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:3px 0;border-bottom:1px solid #8881}
+.sf-wizard .sf-member-reads li:last-child{border-bottom:0}
+.sf-wizard .sf-member-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-wizard .sf-member-state{flex:none;padding:0 6px;border-radius:999px;background:#8882;color:var(--dsw-alias-label-secondary,#727780);font-size:11px}
+.sf-wizard .sf-member-reads li[data-state=ready] .sf-member-state{background:#2f7d5222;color:#2f7d52}
+.sf-wizard .sf-member-reads li[data-state=failed] .sf-member-state{background:#d4515122;color:var(--sf-danger)}
+.sf-wizard .sf-member-reads li[data-state=reading] .sf-member-state{background:#4475e722;color:var(--sf-accent-text)}
+.sf-wizard .sf-member-note{flex:1 1 100%;color:var(--dsw-alias-label-secondary,#8b9099)}
+.sf-wizard .sf-member-actions{display:flex;gap:6px;flex:none}
+.sf-wizard .sf-brief,.sf-wizard .sf-outline-candidate{margin-top:12px;padding:12px 14px;border:1px solid #4475e755;border-radius:10px;background:#4475e70d}
+.sf-wizard .sf-brief h5,.sf-wizard .sf-outline-candidate h5{margin:0 0 10px;font-size:12.5px}
+.sf-wizard .sf-brief dl{margin:0;display:flex;flex-direction:column;gap:8px}
+.sf-wizard .sf-brief .sf-brief-row{display:flex;gap:10px;align-items:flex-start}
+.sf-wizard .sf-brief dt{flex:0 0 76px;font-size:12px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-brief dd{flex:1 1 auto;min-width:0;margin:0;font-size:12.5px;line-height:1.65}
+.sf-wizard .sf-brief-origin{margin-left:8px;font-style:normal;font-size:11px;padding:0 6px;border-radius:999px;background:#8882;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-brief-note,.sf-wizard .sf-brief-diff p{margin:8px 0 0;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-brief-diff summary,.sf-wizard .sf-outline-candidate summary{cursor:pointer;font-size:12px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-brief-conflict{margin-top:10px;padding:9px 11px;border:1px solid #e8a33d55;border-radius:8px;background:#e8a33d12;font-size:12.5px;line-height:1.65}
+.sf-wizard .sf-brief-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
+.sf-wizard .sf-brief-actions>button{height:32px}
+.sf-wizard .sf-coverage-list{margin:8px 0;padding-left:18px;font-size:12.5px;line-height:1.7}
+.sf-wizard .sf-outline-candidate>details p,.sf-wizard .sf-gap{margin:6px 0 0;font-size:12px;line-height:1.6}
+.sf-wizard .sf-gap{color:var(--sf-warn-text)}
+.sf-wizard .sf-create-summary{margin-top:18px;padding:12px 14px;border:1px solid #8882;border-radius:9px;background:#88805}
+.sf-wizard .sf-create-line{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.sf-wizard .sf-create-line strong{font-size:12.5px}
+.sf-wizard .sf-create-line>span{flex:1 1 240px;min-width:0;font-size:12px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-create-summary details{margin-top:8px}
+.sf-wizard .sf-create-summary p{margin:6px 0 0;font-size:12px;line-height:1.65;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-confirm{display:none}
 .sf-wizard .sf-confirm h4{margin:0 0 10px;font-size:13px;font-weight:600}
 .sf-wizard .sf-confirm dl{margin:0;display:flex;flex-direction:column;gap:10px}
 .sf-wizard .sf-confirm dl>div{display:flex;gap:12px;align-items:flex-start}
