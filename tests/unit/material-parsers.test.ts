@@ -51,3 +51,25 @@ test('unsupported formats, invalid encoding and cancellation never return fabric
   const cancelled = new AbortController(); cancelled.abort()
   await assert.rejects(parseMaterialBytes(new Uint8Array(), 'text/plain', cancelled.signal))
 })
+
+test('a PDF page becomes citable paragraphs and table rows, not one page-sized block (v1.2)', async () => {
+  const { splitPageIntoBlocks } = await import('../../src/host/parsers/pdf-blocks.ts')
+  const page = ['5.3. Results and Analysis', 'To evaluate the framework we conduct experiments on two datasets.',
+    'Table 6. Comparison with baselines.', 'MISA 42.3 84.6 84.7', 'FDMER [12] 44.1 84.6 84.7', 'Ours 48.1 86.6 86.2'].join('\n')
+  const blocks = splitPageIntoBlocks(page)
+  // The numbers have to be reachable on their own: a whole-page block is what put them out of
+  // an evidence excerpt's reach.
+  const rows = blocks.filter(block => block.kind === 'table')
+  assert.equal(rows.length >= 3, true, '数値行应各自成块')
+  assert.equal(rows.some(block => block.text.includes('48.1')), true)
+  assert.equal(blocks.some(block => /Results and Analysis/.test(block.text)), true, '小标题应留下')
+  assert.equal(Math.max(...blocks.map(block => block.text.length)) <= 3000, true, '单块不得长到会被摘录截断')
+})
+
+test('an over-long run is cut so an evidence excerpt cannot silently drop its tail', async () => {
+  const { splitPageIntoBlocks } = await import('../../src/host/parsers/pdf-blocks.ts')
+  // One unbroken run, long enough that a page-sized block would exceed the excerpt limit.
+  const blocks = splitPageIntoBlocks(Array.from({ length: 400 }, (_, index) => `句子 ${index} 说明这一段的内容。`).join(''))
+  assert.equal(blocks.every(block => block.text.length <= 3000), true)
+  assert.equal(blocks.length > 1, true)
+})

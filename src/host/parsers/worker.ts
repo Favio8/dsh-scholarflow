@@ -1,3 +1,4 @@
+import { splitPageIntoBlocks } from './pdf-blocks.ts'
 import { parentPort, workerData } from 'node:worker_threads'
 import { Readable } from 'node:stream'
 import JSZip from 'jszip'
@@ -66,14 +67,23 @@ async function parse(): Promise<ParsedBody> {
         const page = await document.getPage(pageNumber)
         const content = await page.getTextContent({ disableNormalization: true })
         const text = content.items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join('').trim()
-        if (text) add({ text, kind: 'paragraph', locator: { kind: 'pdf', pageNumber } }); else empty++
+        if (text) {
+          // A page as a single block made every evidence unit a whole page: a section could only
+          // cite 3000 characters, and an excerpt of that page kept its first 1800, which is why
+          // the results tables — further down the page — never reached the evidence at all.
+          // Splitting into paragraphs puts sentences in reach; a table row stands alone so its
+          // values stay together and stay citable.
+          for (const part of splitPageIntoBlocks(text)) {
+            add({ text: part.text, kind: part.kind, locator: { kind: 'pdf', pageNumber } })
+          }
+        } else empty++
         page.cleanup()
       }
-      warnings.push('PDF 只提取文字层；图像、公式及表格结构未核验。物理页码从 1 开始。')
+      warnings.push('PDF 只提取文字层；图像、公式及表格结构未核验。物理页码从 1 开始。表格行按视觉行拆分为独立块，单元格对应关系未核验。')
       if (empty) warnings.push(`${empty} 页没有可提取文字，可能是扫描页；本插件未执行 OCR。`)
       return { parser: { id: 'pdfjs-text', version: `pdfjs-${pdfjs.version}/${PARSER_VERSION}` }, blocks,
         coverage: from === 1 && to === document.numPages && !empty ? 'complete' : 'partial', warnings,
-        unprocessedContent: ['images', 'formulas', 'tables', ...(from > 1 || to < document.numPages ? ['pages' as const] : [])], ranges: [{ kind: 'pages', from, to }] }
+        unprocessedContent: ['images', 'formulas', ...(from > 1 || to < document.numPages ? ['pages' as const] : [])], ranges: [{ kind: 'pages', from, to }] }
     } finally { await task.destroy() }
   }
   if (mediaType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {

@@ -1,7 +1,9 @@
 import { z } from 'zod'
 import { locator, hash, id, relativePath, materialSchema, requestContext } from './schema.ts'
 
-export const PARSER_VERSION = 'scholarflow-parsers-1'
+// 2: PDF blocks are paragraphs and table rows rather than whole pages, so evidence can cite a
+// sentence or a row instead of a 3000-character page and nothing is lost to excerpt trimming.
+export const PARSER_VERSION = 'scholarflow-parsers-2'
 export const parseRange = z.object({ kind: z.enum(['pages', 'paragraphs']), from: z.number().int().min(1), to: z.number().int().min(1) }).strict().refine(value => value.to >= value.from && value.to - value.from < 100, 'Read at most 100 pages / paragraphs per request')
 export const parsedMaterialSchema = z.object({
   schemaVersion: z.literal(1), materialId: id, sourceContentHash: hash,
