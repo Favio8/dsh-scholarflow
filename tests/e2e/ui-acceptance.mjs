@@ -484,30 +484,53 @@ try {
   // ── AT-67/68/59 · the project is created through the wizard itself (AT-67/68/59 need one).
   // The workbench mounts only when the project's binding session is the conversation on
   // screen, so creating it out of band would leave it permanently unready.
-  await wizard.locator('#sf-field-title').fill('TEST_ONLY 交互验收').catch(() => undefined)
-  // Earlier items left manual section lengths; a target below their sum blocks creation.
-  const lengthInput = wizard.locator('input[aria-label="目标篇幅"]')
-  await lengthInput.fill('4000').catch(() => undefined)
-  await page.waitForTimeout(300)
-  await page.evaluate(() => { const button = [...document.querySelectorAll('.sf-wizard-footer button')].find(el => (el.innerText ?? '').includes('创建')); return button ? { disabled: button.disabled, text: button.innerText } : { missing: true } })
-  await page.evaluate(() => { const third = document.querySelectorAll('.sf-wizard-steps button')[2]; if (third && third.getAttribute('aria-current') !== 'step') third.click() })
-  await page.waitForTimeout(900)
   let workbench = 0
-  try {
-    await page.evaluate(() => {
+  // 创建 requires a title, and the title field only exists on step 1 — so return there, fill
+  // it, and only then advance. Jumping straight to step 3 was why creation never went through.
+  for (let back = 0; back < 3; back += 1) await pressStep('上一步')
+  await page.waitForTimeout(700)
+  await wizard.locator('#sf-field-title').fill('TEST_ONLY 交互验收').catch(() => undefined)
+  await page.waitForTimeout(300)
+  await pressStep('下一步')
+  await page.waitForTimeout(700)
+  await pressStep('下一步')
+  await page.waitForTimeout(1000)
+  for (let round = 0; round < 3 && !workbench; round += 1) {
+    const state = await page.evaluate(() => {
       const button = [...document.querySelectorAll('.sf-wizard-footer button')].find(el => (el.innerText ?? '').includes('创建'))
-      if (button) button.click()
+      const sections = [...document.querySelectorAll('.sf-section-title')].map(el => el.value)
+      return { hasButton: Boolean(button), disabled: button ? button.disabled : null, text: button?.innerText ?? '',
+        issues: (document.querySelector('.sf-wizard-issues')?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 200),
+        title: document.querySelector('#sf-field-title')?.value ?? '',
+        emptySections: sections.filter(value => !value.trim()).length, sections: sections.length,
+        target: document.querySelector('input[aria-label="目标篇幅"]')?.value ?? '' }
     })
-    for (let attempt = 0; attempt < 30 && !workbench; attempt += 1) {
+    record('AT-68 创建就绪状态（第 ' + (round + 1) + ' 次）', true, JSON.stringify(state))
+    if (!state.hasButton) {
+      record('AT-68 创建按钮存在', 'FAIL', 'footer buttons=' + (await page.locator('.sf-wizard-footer button').count()))
+      break
+    }
+    if (state.disabled || round > 0) {
+      // Fill whatever the wizard is waiting for, then try again in the same session.
+      if (!state.title.trim()) await wizard.locator('#sf-field-title').fill('TEST_ONLY 交互验收').catch(() => undefined)
+      await wizard.locator('input[aria-label="目标篇幅"]').fill('8000').catch(() => undefined)
+      await page.evaluate(() => { [...document.querySelectorAll('.sf-section-title')].forEach((row, index) => {
+        if (!row.value.trim()) { row.value = '第' + (index + 1) + '节'; row.dispatchEvent(new Event('input', { bubbles: true })) } }) })
+      await page.waitForTimeout(700)
+      if (round === 0) continue
+    }
+    await page.evaluate(() => { const button = [...document.querySelectorAll('.sf-wizard-footer button')].find(el => (el.innerText ?? '').includes('创建')); button?.click() })
+    for (let attempt = 0; attempt < 25 && !workbench; attempt += 1) {
       await page.waitForTimeout(1000)
       workbench = await page.locator('.sf-middle-column').count()
     }
-    const wizardError = await page.locator('.sf-wizard-error').first().innerText().catch(() => '')
-    record('AT-68 通过向导创建项目以驱动工作台', workbench > 0,
-      'middle columns=' + workbench + ' 向导错误=' + String(wizardError).replace(/\s+/g, ' ').slice(0, 90))
-  } catch (error) {
-    record('AT-68 通过向导创建项目以驱动工作台', 'FAIL', error.message)
+    if (!workbench) {
+      const shown = await page.evaluate(() => (document.querySelector('.sf-wizard-issues')?.innerText ?? '(no issues shown)').replace(/\s+/g, ' ').slice(0, 200))
+      const wizardError = await page.locator('.sf-wizard-error').first().innerText().catch(() => '')
+      record('AT-68 点击创建后向导提示', true, 'issues=' + shown + ' error=' + String(wizardError).slice(0, 90))
+    }
   }
+  record('AT-68 通过向导创建项目以驱动工作台', workbench > 0, 'middle columns=' + workbench)
   record('AT-67 正文工作台在真实客户端挂载', workbench > 0, 'middle columns=' + workbench)
   if (workbench > 0) {
     const box = () => page.evaluate(() => {
@@ -525,9 +548,13 @@ try {
       'padBottom=' + idle.padBottom + ' overlay=' + Boolean(idle.overlay))
     const selected = await page.evaluate(() => {
       const block = document.querySelector('.sf-paper-page p')
-      if (!block?.firstChild) return false
-      const range = document.createRange(); range.setStart(block.firstChild, 0)
-      range.setEnd(block.firstChild, Math.min(20, block.firstChild.textContent.length))
+      if (!block) return false
+      // The paragraph holds elements as well as text, so the range starts in a text node.
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+      const node = walker.nextNode()
+      if (!node || !node.textContent.trim()) return false
+      const range = document.createRange(); range.setStart(node, 0)
+      range.setEnd(node, Math.max(1, Math.min(20, node.textContent.length)))
       const list = window.getSelection(); list.removeAllRanges(); list.addRange(range)
       block.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
       return true
@@ -556,6 +583,23 @@ try {
       !toggled.overlay || (toggled.overlay.left >= toggled.column.left - 1 && toggled.overlay.right <= toggled.column.right + 1),
       'overlay=' + Boolean(toggled.overlay) + ' padBottom=' + Math.round(toggled.padBottom ?? 0))
     const before = await page.evaluate(() => document.querySelector('.sf-source-input')?.value ?? '')
+    // The toggling above can leave the overlay collapsed, which hides 提交; re-select the text
+    // and expand it so the submit actually reaches the control.
+    await page.locator('.sf-overlay button:has-text("展开")').first().click().catch(() => undefined)
+    await page.waitForTimeout(400)
+    await page.evaluate(() => {
+      const block = document.querySelector('.sf-paper-page p')
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+      const node = walker.nextNode()
+      if (!node) return
+      const range = document.createRange(); range.setStart(node, 0)
+      range.setEnd(node, Math.max(1, Math.min(20, node.textContent.length)))
+      const list = window.getSelection(); list.removeAllRanges(); list.addRange(range)
+      block.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    })
+    await page.waitForTimeout(500)
+    await page.locator('.sf-selection-menu button').first().click().catch(() => undefined)
+    await page.waitForTimeout(600)
     await page.locator('.sf-overlay button:has-text("提交")').first().click().catch(() => undefined)
     const generating = await page.evaluate(async () => {
       const deadline = Date.now() + 8000
@@ -565,6 +609,16 @@ try {
       }
       return false
     })
+    const submitState = await page.evaluate(() => ({
+      overlay: (document.querySelector('.sf-overlay')?.innerText ?? '(no overlay)').replace(/s+/g, ' ').slice(0, 200),
+      notice: (document.querySelector('.sf-editor-notice')?.innerText ?? '').replace(/s+/g, ' ').slice(0, 120),
+      submit: Boolean([...document.querySelectorAll('.sf-overlay button')].find(el => (el.innerText ?? '').includes('提交'))),
+      rewrite: document.querySelector('.sf-rewrite')?.dataset.state ?? 'absent' }))
+    record('AT-57 提交前界面状态', true, JSON.stringify(submitState))
+    const afterSubmit = await page.evaluate(() => ({ state: document.querySelector('.sf-rewrite')?.dataset.state ?? 'absent',
+      note: (document.querySelector('.sf-rewrite-note')?.innerText ?? document.querySelector('.sf-editor-notice')?.innerText ?? '').replace(/s+/g, ' ').slice(0, 160),
+      notice: (document.querySelector('.sf-editor-notice')?.innerText ?? '').replace(/s+/g, ' ').slice(0, 120) }))
+    record('AT-57 提交后界面状态', true, JSON.stringify(afterSubmit))
     record('AT-57 提交后真实进入生成状态', generating, 'generating=' + generating)
     await page.locator('.sf-rewrite button:has-text("停止")').first().click().catch(() => undefined)
     await page.waitForTimeout(2000)
