@@ -15,7 +15,7 @@ export function WorkbenchIcon({ kind = 'book' }: { kind?: 'book' | 'chat' | 'clo
 export const CAPTION_CSS = `
 .sf-caption-entry{position:fixed;left:var(--sf-caption-left,150px);top:0;height:var(--dsh-windows-titlebar-height);z-index:1100;display:flex;align-items:center;-webkit-app-region:no-drag}
 .sf-caption-entry button{display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:14px;cursor:pointer}
-.sf-caption-entry button:hover,.sf-caption-entry button[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.sf-caption-entry button:hover,.sf-caption-entry button[aria-pressed=true],.sf-caption-entry button[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .sf-caption-entry button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}
 `
 

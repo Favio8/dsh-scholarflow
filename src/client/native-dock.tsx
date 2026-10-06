@@ -72,7 +72,9 @@ export function createWorkbenchNavigation(ctx: any, Workspace: React.ComponentTy
   return {
     source,
     open(sessionId = ctx.uiSession.adapter.current.getSnapshot().key) {
-      if (!sessionId) { ctx.layout.selectPanel('scholarflow'); return }
+      // Without a session there is nothing to surface; the panel that used to stand in
+      // for it was removed with the workbench entry (SPEC v1.1 §10).
+      if (!sessionId) return
       ctx.layout.selectPanel(null); enabledSession = sessionId; sync()
     },
     ordinary() {

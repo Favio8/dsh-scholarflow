@@ -111,13 +111,17 @@ for (const platform of [undefined, 'win32']) test(`slot registrations use the DS
   }
   plugin.apply(host)
   assert.equal(errors.length, 0, 'slot errors must not be hidden by guards')
+  // The top entry opens settings on every platform: a caption button on Windows, a
+  // sidebar row plus its panel elsewhere. No cell registers the removed workbench entry.
+  const platformCells = platform === 'win32'
+    ? [['shell.overlay', 'scholarflow-caption']]
+    : [['main', 'scholarflow-settings'], ['sidebar.panellist', 'scholarflow-settings']]
   assert.deepEqual(cells.map(({ options }) => [options.name, options.key ?? options.id]), [
     ['scholarflow.project', undefined],
-    ['main', 'scholarflow'],
     ['sidebar.right.pane.tab', 'dsh-scholarflow/chat'],
     ['sidebar.right.pane.tab.title', 'dsh-scholarflow/chat'],
     ['sidebar.right.tab.guide.entry', 'dsh-scholarflow/chat'],
-    platform === 'win32' ? ['shell.overlay', 'scholarflow-caption'] : ['sidebar.panellist', 'scholarflow'],
+    ...platformCells,
     ['settings.section', 'scholarflow-settings'],
   ])
   assert.equal(factories.length, 1)

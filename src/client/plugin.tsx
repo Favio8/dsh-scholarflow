@@ -26,6 +26,13 @@ const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inheri
 export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'layout', 'sidebarRight', 'sidebarRightTabs', 'inputTriggers', 'conversation']
 const LAYOUT_CSS = `.sf-agent-resize{width:8px;flex-shrink:0;cursor:col-resize;touch-action:none;background:#8881}.sf-agent-resize:focus-visible{outline:2px solid currentColor;outline-offset:-2px}.sf-app[data-sf-narrow=true] .sf-agent{height:100%;min-height:0;flex:1}.sf-header{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.sf-header button{margin-left:auto}`
 const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:6px;padding:8px;resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid #8884;padding:12px 0;margin:12px 0}.sf-tabs button[aria-selected=true]{background:#8882;border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:2px solid currentColor;outline-offset:2px}`
+// The settings surface reached from the top entry: the same component as the global
+// settings section, so the two can never drift into two configurations.
+const SETTINGS_CSS = `.sf-caption-settings{position:absolute;top:calc(100% + 4px);left:var(--sf-caption-left,150px);width:min(600px,94vw);max-height:min(72vh,640px);overflow:auto;background:var(--dsw-alias-bg-base,#fff);border:1px solid #8883;border-radius:12px;box-shadow:0 18px 44px #00000024;z-index:1200}
+.sf-caption-settings>header{position:sticky;top:0;display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #8882;background:var(--dsw-alias-bg-base,#fff)}
+.sf-caption-settings>header strong{font-size:14px;font-weight:600}
+.sf-caption-settings>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:18px;line-height:1;cursor:pointer;padding:0 4px}
+.sf-caption-settings .sf-settings{max-width:none;padding:16px}`
 
 export function apply(ctx: Host) {
   const call = async (method: string, args: unknown = {}) => {
@@ -43,12 +50,9 @@ export function apply(ctx: Host) {
   const selectionReferences = createSelectionReferences(ctx)
   const nativeHeader = createNativeHeader(ctx)
   function WorkspaceSurface(props: Host) { return props.renderFactorySlot('scholarflow.workspace', {}) }
-  function LegacyWorkspace(props: Host) {
-    const readCurrent = () => ctx.uiSession.adapter.current.getSnapshot().key
-    const current = useSyncExternalStore(listener => ctx.uiSession.adapter.current.subscribe(listener), readCurrent, readCurrent)
-    useEffect(() => { if (current) navigation.open(current) }, [current])
-    return props.renderFactorySlot('scholarflow.workspace', {})
-  }
+  // The settings surface for platforms whose top entry is a sidebar row rather than a
+  // caption button; it renders the same Settings component as the global section.
+  function SettingsSurface() { return <div className="sf-app"><style>{CSS + EXTRA_CSS + SETTINGS_CSS}</style><Settings /></div> }
   function ChatViews(props: Host) { return props.renderSlot('conversation.session', { view: 'chat' }) }
   function DockChat(props: Host) {
     const scope = useSyncExternalStore(navigation.source.subscribe, navigation.source.getSnapshot, navigation.source.getSnapshot)
@@ -97,28 +101,13 @@ export function apply(ctx: Host) {
       variant: 'embedded', phase: 'active', hero: false,
     }, { slots: { views: ChatViews } })}</div></>
   }
+  // The top entry opens the plugin's settings, nothing else. Mode entry belongs to the
+  // new-conversation mode picker, and an existing ScholarFlow conversation restores its
+  // workbench on its own (SPEC v1.1 §10). DSH keeps the settings panel's open state
+  // private to its shell, so this renders the SAME Settings component against the same
+  // namespace and write path — one configuration, reachable from both places.
   function CaptionEntry(props: Host) {
-    const [entering, setEntering] = useState(false), [entryError, setEntryError] = useState('')
-    const enter = async () => {
-      setEntering(true); setEntryError('')
-      try {
-        const current = ctx.uiSession.adapter.current.getSnapshot().key
-        const session = ctx.sessions.list.getSnapshot().byId[current]
-        if (session?.projectionValues?.agentPreset === 'scholarflow') { navigation.open(current); return }
-        if (session?.blank) {
-          const seat = ctx.slots.entries('conversation.hero.agentPreset').find((entry: Host) => entry.options.id !== 'scholarflow-preset-entry')
-          if (seat?.inject) { const refusal = await seat.inject(current).select('scholarflow'); if (refusal) throw new Error(refusal); navigation.open(current); return }
-        }
-        const workspace = ctx.workspaces.list.getSnapshot().items.find((item: Host) => item.sessionIds.includes(current))
-        if (!workspace) { navigation.open(); return }
-        const created = await ctx.connection.rpc.call('/api', 'session/create', { args: { request: { workspaceId: workspace.workspaceId, agentPreset: 'scholarflow' } } })
-        if (!created.ok) throw new Error(created.error.message)
-        await ctx.sessions.refresh(); await ctx.uiWorkspace.openSession(created.value.sessionId); navigation.open(created.value.sessionId)
-      } catch (error) { setEntryError((error as Error).message) } finally { setEntering(false) }
-    }
-    const scope = useSyncExternalStore(navigation.source.subscribe, navigation.source.getSnapshot, navigation.source.getSnapshot)
-    const legacyActive = props.usePanelInfo((info: Host) => info.activePanelId === 'scholarflow')
-    const active = scope.active || legacyActive
+    const [open, setOpen] = useState(false)
     const entry = useRef<HTMLDivElement>(null)
     useLayoutEffect(() => {
       const menu = document.querySelector<HTMLElement>('[data-windows-menu]')
@@ -131,8 +120,13 @@ export function apply(ctx: Host) {
       window.addEventListener('resize', position)
       return () => { size.disconnect(); offset.disconnect(); window.removeEventListener('resize', position) }
     }, [])
-    return <><style>{CAPTION_CSS}</style><div ref={entry} className="sf-caption-entry"><button aria-label="ScholarFlow" aria-pressed={active}
-      title={entryError || "打开 ScholarFlow 工作台"} disabled={entering} onClick={enter}><WorkbenchIcon />ScholarFlow</button></div></>
+    return <><style>{CAPTION_CSS + SETTINGS_CSS}</style><div ref={entry} className="sf-caption-entry">
+      <button aria-label="ScholarFlow 设置" aria-expanded={open} title="打开 ScholarFlow 设置" onClick={() => setOpen(value => !value)}><WorkbenchIcon />ScholarFlow</button>
+      {open && <section className="sf-caption-settings" role="dialog" aria-label="ScholarFlow 设置">
+        <header><strong>ScholarFlow 设置</strong><button aria-label="关闭设置" onClick={() => setOpen(false)}>×</button></header>
+        <Settings />
+      </section>}
+    </div></>
   }
   function Workspace(props: Host) {
     return <div className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS}</style>
@@ -293,8 +287,10 @@ export function apply(ctx: Host) {
   }
   ctx.effect(() => ctx.slots.registerFactory({ name: 'scholarflow.workspace', scope: 'session-maybe', children: { 'scholarflow.project': { kind: 'single', scope: 'session-maybe' } } }, Workspace), 'scholarflow: project surface')
   ctx.effect(() => ctx.slots.inject('scholarflow.project', () => ctx.slots.register({ name: 'scholarflow.project' }, Project)), 'scholarflow: project')
-  ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'scholarflow' }, LegacyWorkspace)), 'scholarflow: workspace entry')
-  // A persisted legacy panel is not an explicit click in this app lifetime.
+  // The workbench entry is gone: the surface appears for ScholarFlow conversations and is
+  // never reached by selecting a panel, so no `main` cell registers it any more.
+  // A persisted panel from the removed workbench entry is not an explicit click in this
+  // app lifetime; clearing it once keeps old installations from opening a dead panel.
   if (ctx.layout.panelInfo.getSnapshot().activePanelId === 'scholarflow') ctx.layout.selectPanel(null)
   ctx.effect(() => {
     let disposeType: (() => void) | undefined, reconciling = false
@@ -320,9 +316,12 @@ export function apply(ctx: Host) {
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({ name: 'sidebar.right.pane.tab.title', key: CHAT_ID }, () => <WorkbenchIcon kind="chat" />)), 'scholarflow: chat dock title')
   ctx.effect(() => ctx.slots.inject('sidebar.right.tab.guide.entry', () => ctx.slots.register({ name: 'sidebar.right.tab.guide.entry', key: CHAT_ID }, ChatGuide)), 'scholarflow: existing chat guide entry')
   if (document.documentElement.dataset.platform === 'win32') {
-    ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'scholarflow-caption', order: 50 }, CaptionEntry)), 'scholarflow: caption navigation')
+    ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'scholarflow-caption', order: 50 }, CaptionEntry)), 'scholarflow: settings entry')
   } else {
-    ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: 'scholarflow', order: 50, label: () => 'ScholarFlow' }, WorkbenchIcon)), 'scholarflow: navigation')
+    // No caption bar: the same settings surface is reached through a sidebar row. The key
+    // is deliberately new, so a persisted panel from the removed workbench entry stays dead.
+    ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'scholarflow-settings' }, SettingsSurface)), 'scholarflow: settings panel')
+    ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: 'scholarflow-settings', order: 50, label: () => 'ScholarFlow 设置' }, WorkbenchIcon)), 'scholarflow: settings navigation')
   }
   ctx.effect(() => ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'scholarflow-settings', order: 50, label: () => 'ScholarFlow' }, Settings)), 'scholarflow: settings')
 }
