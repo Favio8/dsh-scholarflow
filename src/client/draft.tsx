@@ -11,7 +11,11 @@ import type { DraftController, PaperView } from './paper-workspace.tsx'
 import type { ExportFormat } from '../shared/presentation.ts'
 import { SelectionDetails, type SelectionContext } from './selection-card.tsx'
 import { useCowrite } from './cowrite.tsx'
-import { SelectionMenu, sourceSelectionRect } from './selection-menu.tsx'
+import { REWRITE_ACTIONS, SelectionMenu, renderedSelectionRect, sourceSelectionRect, type RewriteAction } from './selection-menu.tsx'
+import { OverlayHost, useOverlaySpace } from './middle-overlay.tsx'
+import { RewriteCandidateView, protectedChanges, type RewriteCandidate } from './rewrite-candidate.tsx'
+import { SfPresence } from './motion/presence.tsx'
+import { SCENE } from './motion/tokens.ts'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
@@ -56,8 +60,62 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   }, error => { persistenceBlocked.current = true; setBufferMessage(`暂存未完成，保留本页面和浏览器备份：${(error as Error).message}`) })
   const root = useRef<HTMLDivElement>(null), gutter = useRef<HTMLDivElement>(null)
   const sourceArea = useRef<HTMLTextAreaElement>(null)
+  const middleColumn = useRef<HTMLDivElement>(null)
+  useOverlaySpace(middleColumn)
+  // The rewrite flow (SPEC v1.2 §12): a chosen function fills the overlay's instruction, the
+  // running candidate replaces it, and neither writes to the document until the user accepts.
+  const [rewrite, setRewrite] = useState<{ action: RewriteAction; instruction: string }>()
+  const [candidate, setCandidate] = useState<RewriteCandidate>()
+  const [undoSnapshot, setUndoSnapshot] = useState<{ text: string; start: number; end: number }>()
+  const [overlayTask, setOverlayTask] = useState(false)
+  const [overlayCollapsed, setOverlayCollapsed] = useState(false)
+  const [answer, setAnswer] = useState('')
+  /**
+   * The question a task needs answered belongs in the same place as the local instruction, so
+   * the reader has one place to look and the two never stack (SPEC v1.2 §11.2). It is polled
+   * here rather than passed down because the progress line and this overlay are siblings.
+   */
+  const [question, setQuestion] = useState<any>()
+  useEffect(() => {
+    let live = true
+    const read = async () => {
+      try {
+        const result = await api('writingTask.inspect', { context: context() })
+        if (live) setQuestion(result.task?.questions?.find((row: any) => row.answered === undefined))
+      } catch { /* a project without a task simply has no question */ }
+    }
+    read()
+    const timer = window.setInterval(read, 3000)
+    return () => { live = false; clearInterval(timer) }
+  }, [context().sessionId, project.binding.projectId])
+  useEffect(() => { if (question) setOverlayTask(true) }, [question?.id])
+  const answerQuestion = async (value: string) => {
+    if (!question) return
+    try {
+      await api('writingTask.action', { context: context(), taskId: undefined, action: 'answer', questionId: question.id, answer: value })
+      setAnswer(''); setQuestion(undefined); setOverlayTask(false); await refresh()
+    } catch (error) { setMessage((error as Error).message) }
+  }
+  /** A short, honest description of what the pending instruction would act on. */
+  const targetPreview = () => {
+    const range = candidate ? { start: candidate.start, end: candidate.end } : editRange ?? (selection
+      ? { start: selection.sourceRange.startUtf16, end: selection.sourceRange.endUtf16 } : undefined)
+    if (rewrite && range) {
+      const label = REWRITE_ACTIONS.find(entry => entry.action === rewrite.action)?.label ?? '改写'
+      const excerpt = text.slice(range.start, range.end).replace(/\s+/g, ' ').slice(0, 60)
+      return `${label} · ${excerpt}${excerpt.length >= 60 ? '…' : ''}`
+    }
+    if (range) return `已选中 ${range.end - range.start} 个字符；从菜单选择功能后在这里提交。`
+    return '选中正文后从菜单选择功能，或在这里写修改要求。'
+  }
   const [editRange, setEditRange] = useState<{ start: number; end: number }>(), [rewriteScope, setRewriteScope] = useState('selection'), [rewriteInstruction, setRewriteInstruction] = useState('')
   const liveText = useRef(text); liveText.current = text
+  const rewriteController = useRef<AbortController | undefined>(undefined)
+  useEffect(() => () => rewriteController.current?.abort('unmounted'), [])
+  const textHash = async (value: string) => {
+    const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))
+    return 'sha256:' + [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('')
+  }
   const cowrite = useCowrite({ text, baseHash, api, context, refresh, merge: async (next: string, expected: string) => {
     if (liveText.current !== expected) throw new Error('编辑内容已改变，请检查新的修改建议。')
     setText(next); remember({ text: next, baseHash }); setSelectionAnchor(undefined)
@@ -131,7 +189,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     return () => { live = false; clearInterval(timer) }
   }, [activeRun])
   const capture = () => {
-    if (dirty) { setMessage('先保存或处理手工编辑缓冲，再选择已保存正文改写。'); return }
+    // An unsaved selection can start a candidate (SPEC v1.2 §12.1): the proposal is bound to
+    // the buffer hash, so accepting it writes the buffer and the saved manuscript stays the
+    // reference the range is validated against.
     try {
       if (!window.getSelection()?.toString()) { setSelectionAnchor(undefined); return }
       const payload = captureSelection(root.current!, projection, project.document, projectId)
@@ -140,8 +200,91 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       setAnchorClaimIds(payload.claimIds); setAnchorId('')
       setSelection(payload); setEditRange({ start: payload.sourceRange.startUtf16, end: payload.sourceRange.endUtf16 })
       const range = window.getSelection()!.getRangeAt(0)
-      setSelectionAnchor(range.getClientRects()[0] ?? range.getBoundingClientRect())
+      setSelectionAnchor(renderedSelectionRect(range))
     } catch (error) { setSelection(undefined); setSelectionAnchor(undefined); setMessage((error as Error).message) }
+  }
+  /** Range and text of the current target, from the rendered selection or the source textarea. */
+  const targetRange = () => {
+    if (selection) return { start: selection.sourceRange.startUtf16, end: selection.sourceRange.endUtf16, text: text }
+    if (editRange) return { start: editRange.start, end: editRange.end, text }
+    return undefined
+  }
+  const openRewrite = (action: RewriteAction) => {
+    const preset = REWRITE_ACTIONS.find(entry => entry.action === action)
+    setSelectionAnchor(undefined)
+    setOverlayTask(false)
+    setRewrite({ action, instruction: preset?.instruction ?? '' })
+    if (!preset?.instruction) requestAnimationFrame(() => document.getElementById('sf-rewrite-input')?.focus())
+  }
+  /**
+   * The request is sent when the user submits, not when an animation ends (PRD §10.1); the
+   * stop control cancels the same call rather than hiding it.
+   */
+  const submitRewrite = () => {
+    const target = targetRange()
+    if (!target || !rewrite) { setMessage('请先选中一段正文，再选择改写功能。'); return }
+    const before = text.slice(target.start, target.end)
+    if (!before.trim()) { setMessage('选中的范围没有文字。'); return }
+    const controller = new AbortController()
+    const startedAt = Date.now()
+    setOverlayTask(false)
+    setCandidate({ id: `local_${startedAt}`, action: rewrite.action, instruction: rewrite.instruction,
+      start: target.start, end: target.end, before, after: '', state: 'generating', elapsedMs: 0, phase: '正在生成候选…' })
+    const timer = window.setInterval(() => setCandidate(current => current && current.state === 'generating'
+      ? { ...current, elapsedMs: Date.now() - startedAt } : current), 200)
+    rewriteController.current = controller
+    void (async () => {
+      try {
+        const result = await api('cowrite.propose', { context: context(), text, baseDocumentHash: baseHash,
+          baseBufferHash: await textHash(text), action: rewrite.action, instruction: rewrite.instruction,
+          start: target.start, end: target.end })
+        if (controller.signal.aborted) return
+        const row = result.suggestion
+        setCandidate(current => current && current.id === `local_${startedAt}`
+          ? { ...current, id: row.id, after: row.after, state: 'ready', elapsedMs: Date.now() - startedAt,
+              protectedFactChanges: row.protectedFactChanges, citationChanges: row.citationChanges }
+          : current)
+      } catch (error) {
+        if (controller.signal.aborted) return
+        setCandidate(current => current && current.id === `local_${startedAt}`
+          ? { ...current, state: 'failed', note: (error as Error).message, elapsedMs: Date.now() - startedAt } : current)
+      } finally { window.clearInterval(timer); rewriteController.current = undefined; await cowrite.reload() }
+    })()
+  }
+  const stopRewrite = () => {
+    rewriteController.current?.abort('stopped')
+    setCandidate(current => current ? { ...current, state: 'stopped', note: '已停止；原文未改变，未接受的建议不会写入正文。' } : current)
+  }
+  /** Accepting writes the edit buffer only, and remembers exactly what to restore. */
+  const acceptRewrite = async () => {
+    if (!candidate || candidate.state !== 'ready') return
+    if (candidate.before !== text.slice(candidate.start, candidate.end)) {
+      setCandidate({ ...candidate, state: 'failed', note: '目标范围在你编辑之后已经改变，请重新生成这个候选。' })
+      return
+    }
+    const before = text.slice(0, candidate.start) + candidate.after + text.slice(candidate.end)
+    setUndoSnapshot({ text, start: candidate.start, end: candidate.end })
+    await cowrite.merge(before, text)
+    await api('cowrite.decide', { context: context(), suggestionId: candidate.id, state: 'accepted' }).catch(() => undefined)
+    setCandidate({ ...candidate, state: 'accepted', note: '已接受进入编辑缓冲，主稿尚未保存；可在下方撤销。' })
+    await cowrite.reload()
+  }
+  const discardRewrite = async () => {
+    if (candidate && candidate.state !== 'generating') {
+      await api('cowrite.decide', { context: context(), suggestionId: candidate.id, state: 'rejected' }).catch(() => undefined)
+    }
+    rewriteController.current?.abort('discarded')
+    setCandidate(undefined); await cowrite.reload()
+  }
+  const undoRewrite = async () => {
+    if (!undoSnapshot) return
+    if (text !== undoSnapshot.text + '' && text.length !== undoSnapshot.text.length + (candidate?.after.length ?? 0) - (candidate?.before.length ?? 0)) {
+      // The buffer moved on since the accept; restoring blindly would drop those edits.
+      if (!window.confirm('接受之后正文又有改动。用撤销会回到接受之前的内容，继续？')) return
+    }
+    await cowrite.merge(undoSnapshot.text, text)
+    setUndoSnapshot(undefined)
+    setCandidate(current => current ? { ...current, state: 'ready', note: '已撤销，正文回到接受前的内容。' } : current)
   }
   const prepare = (whole: boolean) => run(async () => {
     if (!whole && !selection) throw new Error('请先选择已保存的渲染正文。')
@@ -194,26 +337,31 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const currentHeading = [...headings].reverse().find(node => (node.position?.start.offset ?? 0) <= cursor)
   const statistics = livePreview.statistics
   return <section className="sf-draft" aria-label="正文编辑">
-    {selection && selectionAnchor && !dirty && !tool && visible && <SelectionMenu anchor={selectionAnchor} busy={busy}
-      onAdd={attachSelection} onDetails={() => selectionAction('details')} onAsk={() => selectionAction('ask')} onClose={() => setSelectionAnchor(undefined)} />}
+    {/* The menu appears next to the selection and calls no model; the chosen function becomes
+        an instruction in the bottom overlay (PRD §5.2). */}
+    {selection && selectionAnchor && !tool && visible && <SelectionMenu anchor={selectionAnchor} busy={busy}
+      onAction={openRewrite} onClose={() => setSelectionAnchor(undefined)} />}
     {selectionDetail && <SelectionDetails card={selectionDetail} onClose={() => setSelectionDetail(undefined)} onTool={onTool} />}
-    <div className="sf-editor-surface" hidden={!!tool}>
+    <div className="sf-middle-column" ref={middleColumn}>
+    <div className="sf-editor-surface sf-editor-scroll" hidden={!!tool}>
       {cowrite.briefsView}{cowrite.generatedView}
-      <div className="sf-cowrite-bar"><details className="sf-chapter-nav"><summary>章节 ▾</summary><div>{headings.map(node => <button key={node.position!.start.offset} onClick={e => {
+      {/* Chapter navigation is its own entry; the fixed 选区／要求／AI 修改 bar is gone. */}
+    <div className="sf-cowrite-bar">
+      <details className="sf-chapter-nav"><summary>目录</summary><div>{headings.map(node => <button key={node.position!.start.offset} onClick={e => {
         const offset = node.position!.start.offset!; setCursor(offset); e.currentTarget.closest('details')?.removeAttribute('open')
         if (view === 'preview') root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${offset}"]`)?.scrollIntoView({ block: 'start' })
-        else { const area = sourceArea.current!; area.focus(); area.setSelectionRange(offset, offset); area.scrollTop = text.slice(0, offset).split('\n').length * 24 - 40 }
+        else { const area = sourceArea.current!; area.focus(); area.setSelectionRange(offset, offset); area.scrollTop = text.slice(0, offset).split(String.fromCharCode(10)).length * 24 - 40 }
       }}>{textOf(node)}</button>)}</div></details>
-        <select aria-label="AI 修改范围" value={rewriteScope} onChange={e => setRewriteScope(e.target.value)}><option value="selection">选中内容</option><option value="chapter">当前章节</option><option value="document">全文</option></select>
-        <input aria-label="AI 修改要求" placeholder="告诉 AI 怎样修改…" value={rewriteInstruction} onChange={e => setRewriteInstruction(e.target.value)} />
-        <button disabled={busy || cowrite.busy || !rewriteInstruction.trim() || baseHash !== project.document.contentHash || (rewriteScope === 'selection' && !editRange)} onClick={() => {
-          const start = rewriteScope === 'document' ? 0 : rewriteScope === 'selection' ? editRange!.start : currentHeading?.position?.start.offset ?? 0
-          const end = rewriteScope === 'document' ? text.length : rewriteScope === 'selection' ? editRange!.end : headings.find(node => (node.position?.start.offset ?? 0) > start)?.position?.start.offset ?? text.length
-          cowrite.request(start, end, rewriteInstruction)
-        }}>{cowrite.busy ? '正在修改…' : 'AI 修改'}</button>
-      </div>
-      {cowrite.message && <p className="sf-editor-notice" role="status">{cowrite.message}</p>}
-      {view === 'edit' && cowrite.suggestions.length > 0 && <div style={{ maxHeight: 300, overflow: 'auto' }}>{cowrite.annotations(0, text.length + 1)}</div>}
+      <span className="sf-cowrite-hint">选中正文后出现改写菜单；局部入口只作用于选中范围，整篇讨论在右栏。</span>
+    </div>
+    {cowrite.message && <p className="sf-editor-notice" role="status">{cowrite.message}</p>}
+    {/* In edit mode the target lives in the source pane, so the candidate is rendered directly
+        below the editor rather than in a distant list (PRD §5.3). */}
+    {view === 'edit' && candidate && <RewriteCandidateView candidate={candidate} busy={busy}
+      canAccept={candidate.before === text.slice(candidate.start, candidate.end)}
+      onAccept={() => void acceptRewrite()} onDiscard={() => void discardRewrite()} onUndo={() => void undoRewrite()}
+      onStop={stopRewrite} onRegenerate={() => { setCandidate(undefined); submitRewrite() }} />}
+    {view === 'edit' && !candidate && cowrite.suggestions.length > 0 && <div className="sf-pending-list">{cowrite.annotations(0, text.length + 1)}</div>}
       {(recoverable || baseHash !== project.document.contentHash || project.document.externalChange) && <div className="sf-editor-notice" role="status">
         {recoverable ? '有暂存编辑可恢复' : '正文版本发生变化，当前编辑已保留'}<button onClick={onTool}>查看与处理</button>
       </div>}
@@ -247,6 +395,34 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       </div>
       <footer className="sf-draft-status"><span role="status" title={message || bufferMessage}>{saving ? '保存中…' : dirty ? '未保存 · 编辑已在本页保留' : project.document.externalChange ? '外部正文已改变' : <><span className="sf-saved-dot">●</span>已保存</>}{message && ` · ${message}`}</span>
         <span>{statistics ? `${statistics?.chineseCharacters ?? 0} 汉字 · ${statistics?.westernWords ?? 0} 词` : '字数暂不可用'}{currentHeading && ` · ${textOf(currentHeading)}`}</span></footer>
+    </div>
+    {/* The overlay lives inside the middle column, so it never reaches the left workspace or the
+        right pane, and the scroller gains matching room while it is open (SPEC v1.2 §11). */}
+    <OverlayHost open={Boolean(rewrite) || Boolean(candidate && candidate.state !== 'accepted') || Boolean(question)}
+      tabs={[{ id: 'local', label: '局部改写' }, ...(question ? [{ id: 'task', label: '当前目标的问题' }] : [])]}
+      active={overlayTask && question ? 'task' : 'local'} onTab={id => setOverlayTask(id === 'task')} collapsed={overlayCollapsed}
+      onCollapse={() => setOverlayCollapsed(value => !value)} label={overlayTask && question ? '当前目标的问题' : '局部改写'}>
+      {overlayTask && question ? <div className="sf-overlay-question">
+        <p className="sf-overlay-note" style={{ margin: '0 0 8px' }}>{question.title}</p>
+        <div className="sf-overlay-row" style={{ flexWrap: 'wrap' }}>
+          {question.options.map((option: string) => <button key={option} type="button" disabled={busy} onClick={() => void answerQuestion(option)}>{option}</button>)}
+        </div>
+        <div className="sf-overlay-row">
+          <input aria-label="回答问题" placeholder="也可以补充你的要求…" value={answer} onChange={event => setAnswer(event.target.value)} />
+          <button type="button" className="sf-primary" disabled={busy || !answer.trim()} onClick={() => void answerQuestion(answer)}>回答并继续</button>
+        </div>
+        <p className="sf-overlay-note">只对确实影响本次目标的冲突或缺失提问；其他章节的编辑不会逐节打断你。</p>
+      </div> : <>
+        <p className="sf-overlay-note" style={{ margin: '0 0 8px' }}>{targetPreview()}</p>
+        <div className="sf-overlay-row">
+          <input id="sf-rewrite-input" aria-label="局部修改要求" placeholder="可选：补充要求（不填也可以提交已选择的功能）"
+            value={rewrite?.instruction ?? ''} onChange={event => setRewrite(current => ({ action: current?.action ?? 'custom', instruction: event.target.value }))} />
+          <button type="button" className="sf-primary" disabled={busy || !rewrite || candidate?.state === 'generating'} onClick={submitRewrite}>
+            {candidate?.state === 'generating' ? '正在生成…' : '提交'}</button>
+        </div>
+        <p className="sf-overlay-note">仅点选功能不会调用模型；提交时请求立即发出，不等动画播完。接受前不会写入正文。</p>
+      </>}
+    </OverlayHost>
     </div>
     <div className="sf-draft-tools" hidden={!tool}>
     <div hidden={tool !== 'Changes'}><h3>修改建议与正文管理</h3>

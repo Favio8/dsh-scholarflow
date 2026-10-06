@@ -41,7 +41,9 @@ export function useCowrite({ text, baseHash, api, context, merge, refresh }: any
   const briefsView = briefs.map(row => <section className="sf-cowrite-inline" key={row.id}><header><strong>AI 建议更新写作要求</strong>
     <button disabled={busy} onClick={() => act(async () => { await api('cowrite.decideBrief', { context: context(), suggestionId: row.id, state: 'accepted' }); await refresh(); await load() })}>接受</button>
     <button disabled={busy} onClick={() => act(async () => { await api('cowrite.decideBrief', { context: context(), suggestionId: row.id, state: 'rejected' }); await load() })}>放弃</button></header><p>{row.spec.title} · {row.spec.format}</p><p>{row.spec.requirements}</p></section>)
-  return { suggestions, annotations, briefsView, generatedView, message, busy, request: (start: number, end: number, instruction: string) => act(async () => {
-    await api('cowrite.propose', { context: context(), text, baseDocumentHash: baseHash, start, end, instruction }); await load()
-  }) }
+  return { suggestions, annotations, briefsView, generatedView, message, busy, reload: load, merge,
+    decideProposal: (suggestion: any, state: 'accepted' | 'rejected') => api('cowrite.decide', { context: context(), suggestionId: suggestion.id, state }),
+    request: (start: number, end: number, instruction: string) => act(async () => {
+      await api('cowrite.propose', { context: context(), text, baseDocumentHash: baseHash, start, end, instruction }); await load()
+    }) }
 }

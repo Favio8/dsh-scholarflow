@@ -29,6 +29,12 @@ function loadClient(platform) {
     document: { compatMode: 'CSS1Compat', documentElement: { dataset: { platform } }, createElement(tag) { assert.equal(tag, 'i'); return { get textContent() { throw new Error('Entity decoding requires the real Chromium test') } } } },
     window: { __ModuleLoader__: { load(value) { handoff = value } }, addEventListener() {}, removeEventListener() {} },
     console: { log() {}, info() {}, debug() {}, warn() {}, error(...args) { errors.push(args) } },
+    // Scheduling primitives every browser provides. A dependency may touch them while its
+    // module body runs, and their absence here would fail the contract for a reason that
+    // cannot happen in the host — not what this stub exists to assert.
+    queueMicrotask: handler => { Promise.resolve().then(handler) },
+    setTimeout: (handler, ms) => setTimeout(handler, ms),
+    clearTimeout: handle => clearTimeout(handle),
   }, { filename: 'dist/client.js' })
   assert.equal(handoff.id, 'dsh-scholarflow')
   const plugin = handoff.factory((specifier) => {
