@@ -98,3 +98,47 @@ Verification after the follow-up:
 
 Inspection does not read credentials, send prompts, initialize a project or change
 the installed DSH archive. Temporary debugger connections are removed afterward.
+
+## Follow-up: new buttons must return to standard mode (2026-10-06)
+
+The user clarified SF-037 / AT-30: clicking either native new button must always
+show the native standard-mode entry. ScholarFlow requires a subsequent manual
+mode choice; opening an existing ScholarFlow session still restores its workbench.
+This supersedes the earlier acceptance of blank ScholarFlow session reuse.
+
+`src/client/new-session-entry.tsx` recognizes the installed rc.2 native new buttons
+by their Chinese/English accessibility labels and workspace row identity. The
+pointer event is handled before the native blank-session reuse action. It calls
+the public `session/create` RPC with `agentPreset: 'standard'` and no old session
+ID, refreshes the catalog and uses `uiWorkspace.openSession`. Global new chooses
+the current or most recent workspace; workspace new uses the clicked workspace.
+The existing layout navigation signal prevents a late response from replacing
+newer navigation. A failed creation displays an error without changing old modes.
+History actions, mode selection, project files and existing drafts are untouched.
+
+This is a version-specific UI adapter, not a patch to the installed DSH archive
+or a replacement of Host service methods. A Slot wrapper cannot decorate the
+native sidebar/workspace entries: they declare children, and rc.2 SlotCore refuses
+duplicate child declarations (`dsh-client-ui-slots/lib/index.js:186–189`). The
+plugin removes its event listener and notice registration when disabled. The
+adapter covers the two pointer controls; DSH's separate keyboard command is
+unchanged. Native DSH still hides non-current blank sessions; preserving a draft
+does not alter that native history-list policy.
+
+Verification:
+
+- Build, typecheck and **417/417** automated tests pass. Tests cover targeted
+  button recognition, current/clicked workspace, explicit standard creation,
+  unchanged old preset, failed creation and stale navigation.
+- **15 Desktop scenario checks pass**, no renderer errors. They cover both new
+  buttons from ScholarFlow and each other installed mode, explicit mode entry,
+  old draft preservation and existing-session/legacy-draft restoration. The test
+  waits for the created session's selected row, not just the HTTP response, before
+  checking the mode. Artifacts: `.dsh-tmp/native-navigation/1791279416762/`.
+- In the user's running Desktop, both the global new button and the
+  `科技论文写作` new button created distinct standard-mode sessions with a native
+  composer and no workbench/Slot errors. Captured requests explicitly specified
+  `standard` without an existing session ID; no console errors were reported.
+
+No model requests were sent. Production validation left the standard native
+entry visible, and the temporary debugger was detached.

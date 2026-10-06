@@ -20,6 +20,7 @@ import { PAPER_CSS, MATH_CSS, ProjectSettings, TYPE_LABELS, FORMAT_LABELS, type 
 import type { ExportFormat } from '../shared/presentation.ts'
 import { CHAT_ID, CHAT_KIND, NATIVE_DOCK_CSS, NativeTools, createNativeHeader, createWorkbenchNavigation, connectPresetEntry, openExistingChat } from './native-dock.tsx'
 import { SurfaceBoundary, SURFACE_BOUNDARY_CSS } from './surface-boundary.tsx'
+import { connectNewSessionEntry } from './new-session-entry.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export', 'Settings', 'Changes', 'History'] as const
@@ -48,6 +49,7 @@ export function apply(ctx: Host) {
     return result.data
   }
   const navigation = createWorkbenchNavigation(ctx, WorkspaceSurface)
+  connectNewSessionEntry(ctx)
   connectPresetEntry(ctx, navigation)
   const selectionReferences = createSelectionReferences(ctx)
   const nativeHeader = createNativeHeader(ctx)

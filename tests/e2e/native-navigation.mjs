@@ -75,6 +75,7 @@ const createFrom = async button => {
   await button.click()
   const body = await (await finished).json()
   assert.equal(body.result?.ok, true, JSON.stringify(body))
+  await page.locator(`[data-row-key="session:${body.result.value.sessionId}"][aria-selected="true"]`).waitFor()
   return body.result.value.sessionId
 }
 try {
@@ -105,13 +106,6 @@ try {
   const sessionId = await page.locator('.sf-project').getAttribute('data-sf-session-id')
   await page.locator('#sf-field-title').fill('TEST_ONLY retained wizard draft')
   await page.screenshot({ path: join(root, 'wizard.png') })
-  await workspaceRow.hover()
-  assert.equal(await createFrom(workspaceNew), sessionId, 'DSH reuses its current empty session')
-  await page.locator('.sf-wizard').waitFor()
-  assert.equal(await page.locator('#sf-field-title').inputValue(), 'TEST_ONLY retained wizard draft')
-  await createFrom(globalNew)
-  await page.locator('.sf-wizard').waitFor()
-  console.log('PASS both native new buttons complete while ScholarFlow is active')
   // DSH hides non-current blank sessions. A global panel keeps the same session
   // retained, so its sidebar row remains available for this restoration check.
   await page.getByRole('button', { name: '插件', exact: true }).click()
@@ -145,17 +139,44 @@ try {
   assert.deepEqual(migrated.spec.requirementSources, [])
   assert.equal(migrated.spec.countingPolicy.scope, 'body')
   assert.ok(migrated.spec.sections.every(section => section.allocationMode === 'manual'))
+  console.log('PASS pre-upgrade wizard draft survives reload')
+  const picker = page.locator('button[title="选择新任务使用的 Agent 预设"]')
+  const assertStandard = async () => {
+    await page.locator('[data-composer-input]').waitFor()
+    assert.equal(await page.locator('.sf-wizard').count(), 0)
+    await page.waitForFunction(() => document.querySelector('button[title="选择新任务使用的 Agent 预设"]')?.textContent.includes('标准模式'))
+    assert.equal(await page.locator('[data-slot-error]').count(), 0)
+  }
   await workspaceRow.hover()
-  await createFrom(workspaceNew)
-  await createFrom(globalNew)
+  const nativeId = await createFrom(workspaceNew)
+  assert.notEqual(nativeId, sessionId, 'new must not reuse or reconfigure the old ScholarFlow session')
+  await assertStandard()
+  assert.deepEqual(await page.evaluate(sessionId => JSON.parse(localStorage.getItem(Object.keys(localStorage)
+    .find(key => key.startsWith('scholarflow:creation:') && key.endsWith(`:${sessionId}`)))), sessionId), migrated)
+  console.log('PASS workspace new from ScholarFlow opens standard and preserves the old draft')
+  await picker.click()
+  await page.locator('[class*="_item_"]').filter({ hasText: /^ScholarFlow/ }).click()
   await page.locator('.sf-wizard').waitFor()
-  assert.equal(await page.locator('[data-slot-error="scholarflow.project"]').count(), 0)
-  console.log('PASS pre-upgrade wizard draft survives reload and both native new buttons')
+  assert.equal(await page.locator('.sf-project').getAttribute('data-sf-session-id'), nativeId)
+  const globalId = await createFrom(globalNew)
+  assert.notEqual(globalId, nativeId)
+  await assertStandard()
+  console.log('PASS global new from ScholarFlow opens standard; mode entry remains explicit')
+  for (const mode of ['PTC 模式', '极简模式', '创造模式']) {
+    for (const origin of ['global', 'workspace']) {
+      await picker.click()
+      await page.locator('[class*="_item_"]').filter({ hasText: new RegExp(`^${mode}`) }).click()
+      await page.waitForFunction(mode => document.querySelector('button[title="选择新任务使用的 Agent 预设"]')?.textContent.includes(mode), mode)
+      if (origin === 'workspace') await workspaceRow.hover()
+      await createFrom(origin === 'global' ? globalNew : workspaceNew)
+      await assertStandard()
+      console.log('PASS', mode, origin, 'new defaults to standard')
+    }
+  }
   const ordinaryRow = page.locator('[role="treeitem"][data-row-key^="workspace:"]').filter({ hasText: '默认工作区' })
   await ordinaryRow.hover()
   await createFrom(page.getByRole('button', { name: '在“默认工作区”中新建会话', exact: true }))
-  await page.locator('button[title="选择新任务使用的 Agent 预设"]').waitFor()
-  assert.equal(await page.locator('.sf-wizard').count(), 0)
+  await assertStandard()
   console.log('PASS an ordinary workspace retains its native conversation surface')
   assert.deepEqual(errors, [])
 } catch (error) {

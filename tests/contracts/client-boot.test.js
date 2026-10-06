@@ -27,7 +27,7 @@ function loadClient(platform) {
     // warns through console.warn in quirks mode, so the stub states standards mode
     // and carries the console methods a browser always provides.
     document: { compatMode: 'CSS1Compat', documentElement: { dataset: { platform } }, createElement(tag) { assert.equal(tag, 'i'); return { get textContent() { throw new Error('Entity decoding requires the real Chromium test') } } } },
-    window: { __ModuleLoader__: { load(value) { handoff = value } } },
+    window: { __ModuleLoader__: { load(value) { handoff = value } }, addEventListener() {}, removeEventListener() {} },
     console: { log() {}, info() {}, debug() {}, warn() {}, error(...args) { errors.push(args) } },
   }, { filename: 'dist/client.js' })
   assert.equal(handoff.id, 'dsh-scholarflow')
@@ -123,6 +123,7 @@ for (const platform of [undefined, 'win32']) test(`slot registrations use the DS
     ? [['shell.overlay', 'scholarflow-caption']]
     : [['main', 'scholarflow-settings'], ['sidebar.panellist', 'scholarflow-settings']]
   assert.deepEqual(cells.map(({ options }) => [options.name, options.key ?? options.id]), [
+    ['shell.overlay', 'scholarflow-new-session-notice'],
     ['scholarflow.project', undefined],
     ['sidebar.right.pane.tab', 'dsh-scholarflow/chat'],
     ['sidebar.right.pane.tab.title', 'dsh-scholarflow/chat'],
