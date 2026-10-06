@@ -1849,6 +1849,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
       return decideIssue(io, input.issueId, input.state, input.reason, revision) })
   }
 
+  @Remote('writing.locateSectionEvidence')
+  async writingLocateSectionEvidence(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.locateSectionEvidence(request, signal) }) }
   @Remote('export.preflight')
   async exportPreflight(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => {

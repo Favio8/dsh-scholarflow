@@ -103,7 +103,7 @@ try {
       const started = await must('runs.start', { context, planId: plan.planId, planHash: plan.planHash })
       const proposal = started?.proposal
       if (!proposal) { record('no-proposal', { section: gap.title, paused: Boolean(started?.paused) }); continue }
-      const image = await must('edits.read', { context, proposalId: proposal.proposal.id })
+      const image = await must('edits.read', { context, proposalId: proposal.id })
       const edit = image?.proposal?.edits?.[0]
       const located = (image?.proposal?.section?.paragraphClaims ?? []).length
       record('proposal', { section: gap.title, edits: image?.proposal?.edits?.length,
@@ -115,7 +115,7 @@ try {
       const fillsMarker = /\[待补[：:]/.test(edit?.expectedText ?? '') && !/\[待补[：:]/.test(edit?.replacementText ?? '')
       if (!fillsMarker) { record('kept-gap', { section: gap.title, reason: '候选没有去掉待补标记，视为缺证据' }); continue }
       await must('edits.apply', { context: { ...base, expectedLedgerRevision: (await must('document.read', { context: base })).revision },
-        proposalId: proposal.proposal.id, proposalHash: proposal.proposalHash })
+        proposalId: proposal.id, proposalHash: proposal.proposalHash })
       record('accepted', { section: gap.title })
     } catch (error) {
       record('failed', { section: gap.title, message: String(error?.message).slice(0, 200) })
