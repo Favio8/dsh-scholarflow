@@ -259,6 +259,27 @@ try {
       const afterHash = createHash('sha256').update(await readFile(legacyPath)).digest('hex')
       record('AT-43 旧项目只读不迁移', inspected?.initialized === true && legacyHash === afterHash ? 'PASS' : 'FAIL',
         'initialized=' + String(inspected?.initialized) + ' 文件字节未变=' + String(legacyHash === afterHash))
+      // AT-37: requirement sources stand alone — a project with no reference material at all
+      // still records its source.
+      const onlyRoot = join(testHome, '仅要求文件 TEST_ONLY')
+      await mkdir(onlyRoot, { recursive: true })
+      await writeFile(join(onlyRoot, 'TEST_ONLY 作业说明.txt'), 'TEST_ONLY assignment text.')
+      const only = payload((await rpc('workspace/create', { request: { path: onlyRoot } })).body)
+      const onlyWorkspaceId = only?.workspace?.workspaceId
+      const onlySessionId = onlyWorkspaceId
+        ? payload((await rpc('session/create', { request: { workspaceId: onlyWorkspaceId, agentPreset: 'scholarflow' } })).body)?.sessionId : undefined
+      const onlyContext = { requestId: 'req_TEST_ONLY', workspaceId: onlyWorkspaceId, sessionId: onlySessionId }
+      const onlySpec = { ...spec, title: 'TEST_ONLY 只用要求文件', materials: [],
+        requirementSources: [{ resourceId: 'req_only1', origin: 'workspace', kind: 'file', path: 'TEST_ONLY 作业说明.txt', members: [], role: 'assignment', state: 'selected' }] }
+      const onlyPlan = payload((await rpc('scholarflow.v1/creation.prepare', { request: { context: onlyContext, spec: onlySpec } })).body)
+      if (!onlyPlan?.planId) record('AT-37 仅要求文件创建', 'FAIL', String(JSON.stringify(onlyPlan)).slice(0, 160))
+      else {
+        await rpc('scholarflow.v1/creation.start', { request: { context: onlyContext, planId: onlyPlan.planId, planHash: onlyPlan.planHash } })
+        const onlyWritten = JSON.parse(await readFile(join(onlyRoot, '.scholarflow', 'writing', 'requirements.json'), 'utf8')).spec
+        record('AT-37 无材料仍保留要求来源',
+          onlyWritten.requirementSources?.length === 1 && Array.isArray(onlyWritten.materials) && onlyWritten.materials.length === 0 ? 'PASS' : 'FAIL',
+          '来源=' + String(onlyWritten.requirementSources?.length) + ' 材料=' + String(onlyWritten.materials?.length))
+      }
       record('AT-34 预设随创建记录', row.preset?.id === 'course-argumentative' && row.sections?.length === 2 ? 'PASS' : 'FAIL',
         '预设=' + String(row.preset?.id) + ' 章节=' + String(row.sections?.length))
     }

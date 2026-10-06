@@ -281,5 +281,11 @@ calls.
 That is the compatibility promise from SPEC v1.1 §13 ("打开不写迁移") holding on the installed
 host rather than only in the domain tests.
 
+**AT-37 — verified: a requirement source needs no reference material.** A project created with
+exactly one requirement source and an empty material list records the source and no material
+(来源=1, 材料=0), so clearing the material list cannot remove a requirement source and a
+requirement file no longer has to double as a material. That is the property the old build
+enforced the other way round.
+
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.
