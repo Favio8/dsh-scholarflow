@@ -43,6 +43,28 @@ export const PRESET_CSS = `
 .sf-preset-dialog>footer button{height:36px;padding:0 14px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;cursor:pointer}
 .sf-preset-dialog>footer button.sf-primary{background:#4778e8;border-color:#4778e8;color:#fff}
 .sf-preset-error{margin:0;padding:8px 18px;color:#d45151;font-size:12.5px}
+.sf-preset-dialog>header .sf-preset-new{margin-left:auto;height:32px;padding:0 12px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
+.sf-preset-back{height:30px;padding:0 10px;margin-bottom:10px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:12.5px;cursor:pointer}
+.sf-preset-draft{flex:1;min-width:0;overflow:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.sf-preset-draft h3{margin:0;font-size:16px}
+.sf-preset-draft p{margin:0;font-size:13px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-preset-draft label{display:flex;flex-direction:column;gap:6px;font-size:12.5px;width:100%}
+.sf-preset-draft input{height:34px;padding:0 10px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;font:inherit}
+.sf-preset-draft .sf-preset-sections{width:100%}
+.sf-preset-draft .sf-preset-sections li{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sf-preset-draft .sf-preset-sections li>input:first-child{flex:1 1 160px;min-width:0}
+.sf-preset-draft .sf-preset-sections li>input:nth-child(2){flex:1 1 200px;min-width:0}
+.sf-preset-draft-length{display:flex;align-items:center;gap:4px;flex:none}
+.sf-preset-draft-length input{width:80px}
+.sf-preset-draft-length button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px}
+.sf-preset-draft-actions{display:flex;gap:10px;margin-top:4px}
+.sf-preset-draft-actions button{height:34px;padding:0 14px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.sf-preset-draft-actions button.sf-primary{background:#4778e8;border-color:#4778e8;color:#fff}
+/* Narrow containers show one column at a time; the apply button stays reachable. */
+@media(max-width:720px){.sf-preset-body{flex-direction:column}.sf-preset-body[data-view=list] .sf-preset-preview{display:none}
+.sf-preset-body[data-view=detail] .sf-preset-list{display:none}
+.sf-preset-list{width:100%;min-width:0;border-right:0;border-bottom:1px solid #8882;flex:0 0 auto;max-height:45%}
+.sf-preset-dialog>footer{flex-wrap:wrap}}
 `
 
 export function PresetPicker({ open, language, paperType, applied, structure, api, run, busy, onClose, onUse }: any) {
@@ -51,6 +73,16 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
   const [query, setQuery] = useState('')
   const [chosen, setChosen] = useState<string>()
   const [error, setError] = useState('')
+  // Narrow containers show one column at a time: list, then detail with a way back
+  // (design 02 §7). The breakpoint follows the container, not the whole desktop.
+  const [detail, setDetail] = useState(false), [narrow, setNarrow] = useState(false)
+  const [draft, setDraft] = useState<{ title: string; sections: { key: string; title: string; focus: string; targetLength: number }[] }>()
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 720px)')
+    const sync = () => setNarrow(query.matches)
+    sync(); query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
   useEffect(() => {
     if (!open) return
     let live = true
@@ -77,7 +109,10 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
   return <div className="sf-preset-backdrop" onClick={event => { if (event.target === event.currentTarget) onClose() }}>
     <section className="sf-preset-dialog" role="dialog" aria-modal="true" aria-label="选择结构预设">
       <style>{PRESET_CSS}</style>
-      <header><strong>选择结构预设</strong><button aria-label="关闭" onClick={onClose}>×</button></header>
+      <header><strong>结构预设</strong>
+        <button className="sf-preset-new" disabled={busy} onClick={() => { setDetail(false)
+          setDraft({ title: '', sections: [{ key: 'k-section-1', title: '引言', focus: '', targetLength: 1000 }] }) }}>新建我的预设</button>
+        <button aria-label="关闭" onClick={onClose}>×</button></header>
       <div className="sf-preset-tabs" role="group" aria-label="论文类型">
         {(['course-paper', 'research-paper', 'literature-review'] as const).map(name => <button key={name} aria-pressed={tab === name}
           onClick={() => setTab(name)}>{name === 'course-paper' ? '课程论文' : name === 'research-paper' ? '研究论文' : '文献综述'}</button>)}
@@ -85,13 +120,39 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
       </div>
       {error && <p className="sf-preset-error" role="alert">{error}</p>}
       {library.issues.length > 0 && <p className="sf-preset-error" role="status">{library.issues.length} 个预设条目未通过校验，已跳过：{library.issues[0].message}</p>}
-      <div className="sf-preset-body">
+      <div className="sf-preset-body" data-view={draft ? 'draft' : narrow ? (detail ? 'detail' : 'list') : 'wide'}>
+        {draft ? <>
+          <div className="sf-preset-draft">
+            <h3>新建我的预设</h3>
+            <p>从空白开始，至少一章；保存后加入列表，使用才会应用到论文，不依赖先创建论文。</p>
+            <label>预设名称<input value={draft.title} maxLength={80} placeholder="例如：我的课程论文骨架"
+              onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>
+            <ul className="sf-preset-sections">{draft.sections.map((section, index) => <li key={section.key}>
+              <input aria-label={`第${index + 1}章标题`} value={section.title} placeholder="章节标题"
+                onChange={event => setDraft({ ...draft, sections: draft.sections.map(row => row.key === section.key ? { ...row, title: event.target.value } : row) })} />
+              <input aria-label={`第${index + 1}章写作重点`} value={section.focus} placeholder="本节写什么（可选）"
+                onChange={event => setDraft({ ...draft, sections: draft.sections.map(row => row.key === section.key ? { ...row, focus: event.target.value } : row) })} />
+              <span className="sf-preset-draft-length"><input aria-label={`第${index + 1}章篇幅`} type="number" min={50} value={section.targetLength}
+                onChange={event => setDraft({ ...draft, sections: draft.sections.map(row => row.key === section.key ? { ...row, targetLength: Number(event.target.value) } : row) })} />
+                <button aria-label="删除章节" disabled={draft.sections.length === 1}
+                  onClick={() => setDraft({ ...draft, sections: draft.sections.filter(row => row.key !== section.key) })}>×</button></span>
+            </li>)}</ul>
+            <button onClick={() => setDraft({ ...draft, sections: [...draft.sections,
+              { key: `k-section-${draft.sections.length + 1}`, title: '新章节', focus: '', targetLength: 500 }] })}>+ 添加章节</button>
+            <div className="sf-preset-draft-actions">
+              <button onClick={() => setDraft(undefined)}>取消</button>
+              <button className="sf-primary" disabled={busy || !draft.title.trim() || !draft.sections.every(section => section.title.trim())}
+                onClick={() => void manage(() => api('presets.save', { title: draft.title.trim(), summary: '由我创建的空白预设',
+                  paperType, sections: draft.sections })).then(() => setDraft(undefined))}>保存为我的预设</button>
+            </div>
+          </div>
+        </> : <>
         <div className="sf-preset-list">
           {(['user', 'builtin'] as const).map(source => { const group = rows.filter(preset => preset.source === source)
             if (!group.length) return null
             return <div key={source}><p className="sf-preset-group">{source === 'user' ? '我的预设' : '内置'}</p>
               {group.map(preset => <div key={preset.id} style={{ display: 'flex', alignItems: 'center' }}>
-                <button className="sf-preset-row" aria-pressed={chosen === preset.id} onClick={() => setChosen(preset.id)}>
+                <button className="sf-preset-row" aria-pressed={chosen === preset.id} onClick={() => { setChosen(preset.id); if (narrow) setDetail(true) }}>
                   <span><strong>{localized(preset.title, language)}</strong><small>{localized(preset.summary, language)}</small></span>
                   {applied?.id === preset.id && <em>当前</em>}
                 </button>
@@ -106,6 +167,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
           {tab !== paperType && !rows.some(preset => preset.source === 'builtin') && <p className="sf-preset-group">该类型还没有内置预设。</p>}
         </div>
         <div className="sf-preset-preview">
+          {narrow && <button className="sf-preset-back" onClick={() => setDetail(false)}>← 返回列表</button>}
           {selected ? <>
             <h3>{localized(selected.title, language)}</h3>
             <p>{localized(selected.summary, language)}</p>
@@ -121,6 +183,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
             <p>比例是建议起点，可按自己的需要修改。</p>
           </> : <p>从左侧选择一个预设查看结构。</p>}
         </div>
+        </>}
       </div>
       <footer>
         <button disabled={busy} onClick={() => void manage(() => api('presets.save', structure()))}>保存当前结构为我的预设</button>
