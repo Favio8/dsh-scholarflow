@@ -168,8 +168,11 @@ try {
 
   // AT-29 (user acceptance 1), substance only: both surfaces edit one settings document.
   // The UI-level check still needs a person; this proves there is no second configuration.
-  const readSettings = async () => (payload((await rpc('scholarflow.v1/diagnostics', { request: {} })).body)?.settings ?? [])[0]
+  // This Remote takes no arguments at all; sending an unexpected request field is refused.
+  // This Remote takes no arguments and answers without the applicationResult wrapper.
+  const readSettings = async () => ((await rpc('scholarflow.v1/diagnostics', {})).body?.result?.value?.settings ?? [])[0]
   const row = await readSettings()
+  console.log('设置行字段:', row ? Object.keys(row).join(', ') : '无')
   if (!row?.revision) record('AT-29 设置同源', 'NOT ESTABLISHED', '探针未能读到设置行的形状（诊断响应与假设不同）；代码层证据是两个入口都调用同一个 settings/update，界面确认仍需真机')
   else {
     const wanted = row.value?.defaultProjectType === 'research-paper' ? 'course-paper' : 'research-paper'
