@@ -47,3 +47,17 @@ test('legacy assignment selection is retained and modern sources and allocation 
   assert.deepEqual(restoreCreationDraft(modern), modern)
   assert.deepEqual(restoreCreationDraft(restored), restored, 'restoration is idempotent')
 })
+
+test('a draft from before requirement sources carried members still renders', async () => {
+  // The shape a much older build wrote: sources with no members, no typography, no overrides.
+  const { restoreCreationDraft } = await import('../../.dsh-tmp/contracts/creation-draft.mjs')
+  const spec = restoreCreationDraft({
+    title: 'TEST_ONLY', type: 'course-paper', language: 'zh-CN', format: 'docx', requirements: 'TEST_ONLY 要求',
+    requirementSources: [{ resourceId: 'req_1', origin: 'workspace', kind: 'folder', path: '作业要求' }],
+    materials: [], online: false, targetLength: 4000,
+    sections: [{ id: 's1', title: '引言', purpose: '', targetLength: 4000 }], manuscriptDir: 'manuscript',
+  })
+  assert.equal(Array.isArray(spec.requirementSources[0].members), true, '缺少成员时要补成空列表')
+  assert.equal(Array.isArray(spec.overrides), true)
+  assert.equal(typeof spec.typography?.bodyFontZh, 'string')
+})

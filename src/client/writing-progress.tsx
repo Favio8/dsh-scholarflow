@@ -35,7 +35,8 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision }:
     try { const result = await api('writingTask.action', { context: context(), taskId: task.id, action: name }); setTask(result.task); await refresh() }
     catch (error) { setError((error as Error).message) } finally { setBusy(false) }
   }
-  const issues = task.issues.length ? task.issues : mapLegacyNotes(task.notes, task.updatedAt)
+  // A task stored before this field existed still has to render, so absence is an empty list.
+  const issues = task.issues?.length ? task.issues : mapLegacyNotes(task.notes ?? [], task.updatedAt)
   const { needsAction, inProgress, handled } = groupIssues(issues)
   const main = task.status === 'paused' ? '写作已暂停'
     : task.status === 'interrupted' ? '写作进度已保留'

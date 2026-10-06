@@ -145,10 +145,13 @@ function RequirementPicker({ files, disabled, scanning, onPick, onRescan, onPick
 // validating unfinished input as a submitted creation request (SPEC v1.2 §19).
 export function restoreCreationDraft(spec: CreationSpec): CreationSpec {
   const { assignmentPath, ...draft } = spec
-  const requirementSources = spec.requirementSources ?? (assignmentPath ? [{
+  // A draft saved by an older build carries sources without the fields added since; the schema
+  // defaults only apply when the spec is parsed, which happens at creation, not when it is
+  // restored for editing. Missing members here made the first render throw.
+  const requirementSources = (spec.requirementSources ?? (assignmentPath ? [{
     resourceId: 'req_legacy_assignment', origin: 'workspace' as const, kind: 'file' as const,
     path: assignmentPath, members: [], role: 'assignment' as const, state: 'selected' as const,
-  }] : [])
+  }] : [])).map(source => ({ ...source, members: source.members ?? [] }))
   return { ...draft, requirementSources,
     countingPolicy: spec.countingPolicy ?? { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
     sections: spec.sections.map(section => ({ ...section, allocationMode: section.allocationMode ?? 'manual' })),
