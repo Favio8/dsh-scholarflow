@@ -7,6 +7,9 @@ import { sectionsFromPreset } from '../core/presets/apply.ts'
  * the paper. Management writes only through the explicit operator actions. */
 
 export const PRESET_CSS = `
+/* The dialog can render without the wizard's stylesheet, so it carries the same tokens. */
+:root{--sf-accent:#3f68d8;--sf-accent-text:#2f5bc4;--sf-muted:#697080;--sf-danger:#b04a4a;--sf-warn-text:#8a5c15}
+@media(prefers-color-scheme:dark){:root{--sf-accent-text:#8fb3ff;--sf-muted:#9aa0a8;--sf-danger:#f0a0a0;--sf-warn-text:#f0b860}}
 .sf-preset-backdrop{position:fixed;inset:0;background:#00000052;z-index:1400;display:flex;align-items:center;justify-content:center;padding:24px}
 .sf-preset-dialog{display:flex;flex-direction:column;width:min(960px,92vw);height:min(80vh,720px);background:var(--dsw-alias-bg-base,#fff);border:1px solid #8883;border-radius:14px;overflow:hidden;box-shadow:0 24px 60px #00000030}
 .sf-preset-dialog>header{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #8882}
@@ -15,35 +18,35 @@ export const PRESET_CSS = `
 .sf-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .sf-preset-tabs{display:flex;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid #8882;flex-wrap:wrap}
 .sf-preset-tabs button{height:32px;padding:0 12px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
-.sf-preset-tabs button[aria-pressed=true]{background:#4475e714;border-color:#4475e7;color:#4475e7}
+.sf-preset-tabs button[aria-pressed=true]{background:#4475e714;border-color:var(--sf-accent);color:var(--sf-accent-text)}
 .sf-preset-tabs input{margin-left:auto;height:32px;min-width:180px}
 .sf-preset-body{display:flex;min-height:0;flex:1}
 .sf-preset-list{width:40%;min-width:220px;border-right:1px solid #8882;overflow:auto;padding:8px}
-.sf-preset-group{margin:6px 10px;font-size:11.5px;color:#8b9099}
+.sf-preset-group{margin:6px 10px;font-size:11.5px;color:var(--sf-muted)}
 .sf-preset-row{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:8px;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
 .sf-preset-row:hover{background:#8881}
-.sf-preset-row[aria-pressed=true]{background:#4475e714;border-color:#4475e7}
+.sf-preset-row[aria-pressed=true]{background:#4475e714;border-color:var(--sf-accent)}
 .sf-preset-row>span{display:flex;flex-direction:column;flex:1;min-width:0}
-.sf-preset-row small{font-size:11.5px;color:#8b9099;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sf-preset-row em{flex:none;font-size:11px;font-style:normal;color:#8b9099}
+.sf-preset-row small{font-size:11.5px;color:var(--sf-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-preset-row em{flex:none;font-size:11px;font-style:normal;color:var(--sf-muted)}
 .sf-preset-manage{display:flex;gap:4px;flex:none}
-.sf-preset-manage button{border:0;background:transparent;color:#8b9099;cursor:pointer;font-size:12px;padding:2px 4px}
+.sf-preset-manage button{border:0;background:transparent;color:var(--sf-muted);cursor:pointer;font-size:12px;padding:2px 4px}
 .sf-preset-preview{flex:1;min-width:0;overflow:auto;padding:16px 20px}
 .sf-preset-preview h3{margin:0 0 6px;font-size:16px}
 .sf-preset-preview p{margin:6px 0;font-size:13px;color:var(--dsw-alias-label-secondary,#727780);line-height:1.6}
 .sf-preset-scene{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--dsw-alias-label-secondary,#727780)}
 .sf-preset-share{display:flex;align-items:center;gap:8px;font-size:12.5px;margin:8px 0 0}
 .sf-preset-bar{flex:1;height:8px;border-radius:4px;background:#8882;overflow:hidden;display:flex}
-.sf-preset-bar i{display:block;height:100%;background:#4475e7;opacity:.85}
+.sf-preset-bar i{display:block;height:100%;background:var(--sf-accent);opacity:.85}
 .sf-preset-sections{margin:10px 0 0;padding:0;list-style:none;font-size:13px}
 .sf-preset-sections li{padding:7px 0;border-bottom:1px solid #8881}
 .sf-preset-sections strong{font-weight:500}
-.sf-preset-sections small{display:block;color:#8b9099;font-size:12px;margin-top:2px}
+.sf-preset-sections small{display:block;color:var(--sf-muted);font-size:12px;margin-top:2px}
 .sf-preset-dialog>footer{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid #8882}
 .sf-preset-dialog>footer>span{flex:1}
 .sf-preset-dialog>footer button{height:36px;padding:0 14px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;cursor:pointer}
-.sf-preset-dialog>footer button.sf-primary{background:#4778e8;border-color:#4778e8;color:#fff}
-.sf-preset-error{margin:0;padding:8px 18px;color:#d45151;font-size:12.5px}
+.sf-preset-dialog>footer button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:#fff}
+.sf-preset-error{margin:0;padding:8px 18px;color:var(--sf-danger);font-size:12.5px}
 .sf-preset-dialog>header .sf-preset-new{margin-left:auto;height:32px;padding:0 12px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .sf-preset-back{height:30px;padding:0 10px;margin-bottom:10px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:12.5px;cursor:pointer}
 .sf-preset-draft{flex:1;min-width:0;overflow:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
@@ -60,7 +63,7 @@ export const PRESET_CSS = `
 .sf-preset-draft-length button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px}
 .sf-preset-draft-actions{display:flex;gap:10px;margin-top:4px}
 .sf-preset-draft-actions button{height:34px;padding:0 14px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;cursor:pointer}
-.sf-preset-draft-actions button.sf-primary{background:#4778e8;border-color:#4778e8;color:#fff}
+.sf-preset-draft-actions button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:#fff}
 /* Narrow containers show one column at a time; the apply button stays reachable. */
 @media(max-width:720px){.sf-preset-body{flex-direction:column}.sf-preset-body[data-view=list] .sf-preset-preview{display:none}
 .sf-preset-body[data-view=detail] .sf-preset-list{display:none}
@@ -176,7 +179,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
             <div className="sf-preset-share"><span>建议分配</span><span className="sf-preset-bar">
               {selected.sections.map(section => <i key={section.key} style={{ width: `${section.share * 100}%` }} />)}</span></div>
             <ul className="sf-preset-sections">{selected.sections.map(section => <li key={section.key}>
-              <strong>{localized(section.title, language)}</strong><em style={{ marginLeft: 8, fontSize: 12, color: '#8b9099' }}>{Math.round(section.share * 100)}%</em>
+              <strong>{localized(section.title, language)}</strong><em style={{ marginLeft: 8, fontSize: 12, color: 'var(--sf-muted)' }}>{Math.round(section.share * 100)}%</em>
               <small>{localized(section.focus, language)}</small></li>)}</ul>
             {selected.supplementalParts.length > 0 && <p>附属部分：{selected.supplementalParts.map(part => localized(part.description, language)).join('、')}（不计入正文目标）</p>}
             {selected.methodNotes && <p>{localized(selected.methodNotes, language)}</p>}

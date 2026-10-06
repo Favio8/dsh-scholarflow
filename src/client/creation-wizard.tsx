@@ -417,7 +417,14 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   </section></div>
 }
 
-export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var(--dsw-alias-bg-layer-1,#fafbfc);padding:36px 24px}
+export const WIZARD_CSS = `/* Text colours are tokens because they must clear WCAG AA in both colour schemes
+   (design 05 §9). --sf-accent is the background role and stays constant: white on it
+   measures 5.02:1. The text roles flip per scheme, since one blue cannot be both dark
+   enough for white text and light enough for dark surfaces. Verified by
+   scripts/audit-appearance.mjs. */
+:root{--sf-accent:#3f68d8;--sf-accent-text:#2f5bc4;--sf-muted:#697080;--sf-danger:#b04a4a;--sf-warn-text:#8a5c15}
+@media(prefers-color-scheme:dark){:root{--sf-accent-text:#8fb3ff;--sf-muted:#9aa0a8;--sf-danger:#f0a0a0;--sf-warn-text:#f0b860}}
+.sf-wizard-scroll{overflow:auto;flex:1;background:var(--dsw-alias-bg-layer-1,#fafbfc);padding:36px 24px}
 .sf-wizard{max-width:760px;margin:0 auto;padding:30px 36px;background:var(--dsw-alias-bg-base,#fff);border:1px solid #8882;border-radius:16px;box-shadow:0 8px 32px #00000005;font-size:14px}
 .sf-wizard h2{font-size:24px;margin:8px 0}
 .sf-wizard h3{font-size:16px;margin:0}
@@ -428,10 +435,10 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard textarea{font-size:14px;line-height:1.7}
 .sf-field-hint{margin:6px 0 0;font-size:12px;line-height:1.55;color:var(--dsw-alias-label-secondary,#8b9099)}
 .sf-wizard-steps{display:flex;gap:20px;padding:22px 0;border-bottom:1px solid #8882;margin-bottom:20px}
-.sf-wizard-steps button{border:0!important;padding:0!important;display:flex;align-items:center;gap:8px;color:#858a92!important}
+.sf-wizard-steps button{border:0!important;padding:0!important;display:flex;align-items:center;gap:8px;color:var(--sf-muted)!important}
 .sf-wizard-steps span{display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:#8881}
-.sf-wizard-steps [aria-current=step]{color:#4475e7!important}
-.sf-wizard-steps [aria-current=step] span{background:#4475e7;color:#fff}
+.sf-wizard-steps [aria-current=step]{color:var(--sf-accent-text)!important}
+.sf-wizard-steps [aria-current=step] span{background:var(--sf-accent);color:#fff}
 .sf-wizard-page{animation:sf-wizard-enter .22s ease-out}
 .sf-wizard-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:16px}
 .sf-wizard .sf-assignment-row{display:flex;align-items:flex-end;gap:12px}
@@ -482,7 +489,7 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-material-checklist label{display:flex;flex-direction:row;align-items:center;margin:0!important;padding:10px 12px;border-bottom:1px solid #8881}
 .sf-material-checklist span{flex:1;overflow-wrap:anywhere}
 .sf-material-checklist small{color:var(--dsw-alias-label-secondary,#999);flex:none}
-.sf-material-tag{margin-left:8px;padding:1px 6px;border-radius:999px;background:#4475e714;color:#4475e7;font-size:11px;font-style:normal}
+.sf-material-tag{margin-left:8px;padding:1px 6px;border-radius:999px;background:#4475e714;color:var(--sf-accent-text);font-size:11px;font-style:normal}
 /* Requirement sources, format choice and the merged material list (Phase 3). */
 .sf-wizard .sf-field{display:flex;flex-direction:column;gap:8px;margin:16px 0 0}
 .sf-wizard .sf-field-label{font-size:12.5px;font-weight:500;color:var(--dsw-alias-label-secondary,#727780)}
@@ -491,9 +498,9 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard .sf-source-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid #8881}
 .sf-wizard .sf-source-row:last-child{border-bottom:0}
 .sf-wizard .sf-source-badge{flex:none;padding:1px 7px;border-radius:999px;background:#8882;font-size:11px;color:var(--dsw-alias-label-secondary,#727780)}
-.sf-wizard .sf-source-badge[data-kind=image]{background:#e8a33d22;color:#a5701f}
-.sf-wizard .sf-source-badge[data-kind=unsupported]{background:#d4515122;color:#b04a4a}
-.sf-wizard .sf-source-badge[data-kind=external]{background:#4475e722;color:#3b63c4}
+.sf-wizard .sf-source-badge[data-kind=image]{background:#e8a33d22;color:var(--sf-warn-text)}
+.sf-wizard .sf-source-badge[data-kind=unsupported]{background:#d4515122;color:var(--sf-danger)}
+.sf-wizard .sf-source-badge[data-kind=external]{background:#4475e722;color:var(--sf-accent-text)}
 .sf-wizard .sf-source-name{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sf-wizard .sf-source-name small{font-size:11px;color:var(--dsw-alias-label-secondary,#8b9099)}
 .sf-wizard .sf-source-action{flex:none;height:28px;padding:0 9px;border:1px solid #8884;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}
@@ -513,7 +520,7 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard .sf-material-checklist label.sf-material-disabled{opacity:.6}
 .sf-wizard .sf-picker-modes{display:flex;flex:none;gap:2px}
 .sf-wizard .sf-picker-modes button{height:32px;padding:0 10px;border:1px solid #8884;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}
-.sf-wizard .sf-picker-modes button[aria-pressed=true]{background:#4475e714;border-color:#4475e7;color:#4475e7}
+.sf-wizard .sf-picker-modes button[aria-pressed=true]{background:#4475e714;border-color:var(--sf-accent);color:var(--sf-accent-text)}
 .sf-wizard .sf-picker-note{margin:0;padding:8px 12px;border-top:1px solid #8882;font-size:11.5px;color:var(--dsw-alias-label-secondary,#8b9099)}
 /* Creation confirmation, merged into step 3 rather than a fourth step (design 02 §8). */
 .sf-wizard .sf-confirm{margin-top:22px;padding:16px 18px;border:1px solid #8882;border-radius:10px;background:#8881}
@@ -526,7 +533,7 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard .sf-confirm summary{cursor:pointer;font-size:12px;color:var(--dsw-alias-label-secondary,#8b9099)}
 .sf-wizard .sf-confirm ul{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--dsw-alias-label-secondary,#727780)}
 .sf-wizard .sf-confirm p{margin:6px 0 0;font-size:12px;color:var(--dsw-alias-label-secondary,#8b9099)}
-.sf-wizard .sf-wizard-issues{list-style:none;margin:14px 0 0;padding:10px 14px;border:1px solid #d4515155;border-radius:9px;background:#d451510f;color:#b04a4a;font-size:12.5px;line-height:1.7}
+.sf-wizard .sf-wizard-issues{list-style:none;margin:14px 0 0;padding:10px 14px;border:1px solid #d4515155;border-radius:9px;background:#d451510f;color:var(--sf-danger);font-size:12.5px;line-height:1.7}
 .sf-wizard .sf-wizard-issues li+li{margin-top:4px}
 .sf-wizard .sf-wizard-step-compact{display:none;margin:16px 0 0;font-size:13px;color:var(--dsw-alias-label-secondary,#727780)}
 .sf-wizard .sf-wizard-clear{margin-left:auto;height:30px;padding:0 10px;border:1px solid #8884;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary,#727780);font:inherit;font-size:12px;cursor:pointer}
@@ -536,8 +543,8 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard-summary{padding:14px;background:#88805;border-radius:8px;font-size:12px}
 .sf-wizard-footer{display:flex;align-items:center;gap:12px;padding-top:22px}
 .sf-wizard-footer>span{flex:1}
-.sf-primary{background:#4778e8!important;border-color:#4778e8!important;color:white!important}
-.sf-wizard-error{color:#d45151!important}
+.sf-primary{background:var(--sf-accent)!important;border-color:var(--sf-accent)!important;color:white!important}
+.sf-wizard-error{color:var(--sf-danger)!important}
 .sf-wizard button{cursor:pointer}
 .sf-wizard button:disabled{opacity:.45;cursor:default}
 @keyframes sf-wizard-enter{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
@@ -545,7 +552,9 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 @media(max-width:720px){.sf-wizard{padding:20px}.sf-wizard-row{grid-template-columns:1fr}.sf-wizard-steps{gap:12px}.sf-wizard .sf-structure-caption{flex-wrap:wrap}.sf-wizard .sf-structure-actions{margin-left:0}
 .sf-wizard .sf-material-checklist{max-height:none}
 .sf-wizard .sf-structure-list{max-height:none}
-.sf-wizard button{min-height:44px}
+/* At 200% zoom the CSS viewport halves and this is the touch case design 05 §9 sets a 44px
+   floor for, so selects and text inputs join the buttons. */
+.sf-wizard button,.sf-wizard select,.sf-wizard input:not([type=checkbox]),.sf-wizard textarea{min-height:44px}
 .sf-wizard .sf-wizard-steps{display:none}
 .sf-wizard .sf-wizard-step-compact{display:block}
 .sf-wizard .sf-structure-section{flex-wrap:wrap}
