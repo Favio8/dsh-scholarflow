@@ -11,7 +11,7 @@ export function nativeNewSessionButton(button: Element): { workspaceId?: string 
   if (row) return { workspaceId: row.getAttribute('data-row-key')!.slice('workspace:'.length) || undefined }
 }
 
-export async function createStandardSession(ctx: any, workspaceId?: string) {
+export async function createNativeSession(ctx: any, workspaceId?: string) {
   const signal = ctx.layout.beginNavigation()
   const workspaces = ctx.workspaces.list.getSnapshot().items
   const sessions = ctx.sessions.list.getSnapshot()
@@ -23,7 +23,8 @@ export async function createStandardSession(ctx: any, workspaceId?: string) {
     workspaceId = owner?.workspaceId ?? workspaces.reduce((recent: any, item: any) => !recent || latest(item) > latest(recent) ? item : recent, undefined)?.workspaceId
   }
   const result = await ctx.connection.rpc.call('/api', 'session/create', {
-    args: { request: { ...(workspaceId && { workspaceId }), agentPreset: 'standard' } },
+    // Omitting agentPreset lets the Host resolve its current new-task default.
+    args: { request: { ...(workspaceId && { workspaceId }) } },
   })
   if (!result.ok) throw new Error(result.error.message)
   if (signal.aborted) return
@@ -50,10 +51,10 @@ export function connectNewSessionEntry(ctx: any) {
       if (!target) return
       event.preventDefault(); event.stopImmediatePropagation()
       publish('')
-      void createStandardSession(ctx, target.workspaceId).catch(error => { if (live) publish(error.message) })
+      void createNativeSession(ctx, target.workspaceId).catch(error => { if (live) publish(error.message) })
     }
     window.addEventListener('click', click, true)
     const disposeNotice = ctx.slots.register({ name: 'shell.overlay', id: 'scholarflow-new-session-notice' }, Notice)
     return () => { live = false; window.removeEventListener('click', click, true); disposeNotice(); listeners.clear() }
-  }, 'scholarflow: native new buttons start in standard mode')
+  }, 'scholarflow: native new buttons follow the Host default')
 }

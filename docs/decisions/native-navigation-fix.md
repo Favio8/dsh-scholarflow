@@ -2,6 +2,10 @@
 
 Date: 2026-10-06. Applies to the installed DSH 0.2.0-rc.2 integration.
 
+Current behavior (D-07): new buttons create a fresh session using DSH's saved
+new-task default. The later sections below supersede earlier fixed-standard and
+blank-session-reuse decisions; those sections remain as historical evidence.
+
 ## Problem and evidence
 
 The user reported that native new-session buttons did nothing even in ordinary
@@ -142,3 +146,38 @@ Verification:
 
 No model requests were sent. Production validation left the standard native
 entry visible, and the temporary debugger was detached.
+
+## Follow-up: respect the saved Host default (2026-10-06, D-07)
+
+The user selected PTC as the new-task default in DSH settings, but the preceding
+fix forced `agentPreset: 'standard'`. That explicit request overrides the Host's
+default, so the saved setting never affected these buttons.
+
+Creation now omits both `agentPreset` and an old `sessionId`. A fresh session
+still avoids inheriting an old blank session's mode, while the Host resolves its
+live default itself. There is no second default setting, cache or local fallback.
+The helper is renamed `createNativeSession` to reflect this behavior.
+
+Primary evidence in the installed archive:
+
+- `dsh-client-ui-agent-preset/lib/client.js:1071–1073`: the native settings card
+  writes `agent-preset-registry.selectedDefault`.
+- `dsh-agent-preset-registry/lib/index.js:493–495,603–605`: `resolve(undefined)`
+  reads `selectedDefault`, falling back to the Host's configured default.
+- `dsh-api-session-controller/lib/index.js:686–699`: session creation passes the
+  optional requested preset to Host composition. Omission delegates resolution.
+
+An explicitly saved ScholarFlow default is a user mode choice: new sessions then
+open ScholarFlow. With another saved default they open that native mode. Existing
+sessions and drafts keep their modes and content.
+
+Verification: build/typecheck and **417/417** automated tests pass; **25 Desktop
+scenario checks pass**, no renderer errors. The added ten checks change the same
+settings namespace/field the native card uses, verify the roster's `isDefault`,
+and exercise both new buttons for PTC, Minimal, Creator, ScholarFlow and Standard
+without restarting. Artifacts: `.dsh-tmp/native-navigation/1791280015423/`.
+
+The actual user's saved default was read as `ptc`, without changing it. After a
+renderer reload, the global new button and `科技论文写作` new button both displayed
+PTC with the native composer and no Slot/console errors. Captured requests omitted
+the preset and old session ID. No model requests were sent; debugger detached.

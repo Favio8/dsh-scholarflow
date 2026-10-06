@@ -178,6 +178,28 @@ try {
   await createFrom(page.getByRole('button', { name: '在“默认工作区”中新建会话', exact: true }))
   await assertStandard()
   console.log('PASS an ordinary workspace retains its native conversation surface')
+  // The host setting is authoritative. Its settings UI writes this exact
+  // namespace/field; do not force standard or inherit a recycled blank session.
+  for (const [id, label] of [['ptc', 'PTC 模式'], ['minimal', '极简模式'], ['cordis', '创造模式'], ['scholarflow', 'ScholarFlow'], ['standard', '标准模式']]) {
+    const written = await rpc('settings/update', { ns: 'agent-preset-registry', patch: { selectedDefault: id } })
+    assert.equal(written.result?.ok, true, JSON.stringify(written))
+    const roster = await rpc('agentPresets/list')
+    assert.equal(roster.result.value.presets.find(row => row.isDefault).id, id)
+    for (const origin of ['global', 'workspace']) {
+      if (origin === 'workspace') await workspaceRow.hover()
+      const createdId = await createFrom(origin === 'global' ? globalNew : workspaceNew)
+      if (id === 'scholarflow') {
+        await page.locator('.sf-wizard').waitFor()
+        assert.equal(await page.locator('.sf-project').getAttribute('data-sf-session-id'), createdId)
+      } else {
+        await page.locator('[data-composer-input]').waitFor()
+        await page.waitForFunction(label => document.querySelector('button[title="选择新任务使用的 Agent 预设"]')?.textContent.includes(label), label)
+        assert.equal(await page.locator('.sf-wizard').count(), 0)
+      }
+      assert.equal(await page.locator('[data-slot-error]').count(), 0)
+      console.log('PASS host default', id, origin, 'new follows saved setting')
+    }
+  }
   assert.deepEqual(errors, [])
 } catch (error) {
   console.error('Navigation failed:', error.message)

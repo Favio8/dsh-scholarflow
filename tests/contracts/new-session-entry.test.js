@@ -6,7 +6,7 @@ import { parseHTML } from 'linkedom'
 const bundle = await build({ entryPoints: ['src/client/new-session-entry.tsx'], bundle: true, write: false,
   platform: 'node', format: 'esm', packages: 'external' })
 const code = bundle.outputFiles[0].text.replace('from "react"', `from ${JSON.stringify(import.meta.resolve('react'))}`)
-const { nativeNewSessionButton, createStandardSession } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`)
+const { nativeNewSessionButton, createNativeSession } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`)
 
 function fixture() {
   const navigation = new AbortController(), requests = [], opened = []
@@ -34,10 +34,10 @@ test('native new-button recognition excludes history, mode controls and workspac
   assert.equal(nativeNewSessionButton(buttons[4]), undefined)
 })
 
-test('global new creates standard mode in the current workspace without reusing or modifying ScholarFlow', async () => {
+test('global new delegates the preset to the Host default without reusing or modifying ScholarFlow', async () => {
   const f = fixture()
-  await createStandardSession(f.ctx)
-  assert.deepEqual(f.requests[0], { namespace: '/api', method: 'session/create', payload: { args: { request: { workspaceId: 'A', agentPreset: 'standard' } } } })
+  await createNativeSession(f.ctx)
+  assert.deepEqual(f.requests[0], { namespace: '/api', method: 'session/create', payload: { args: { request: { workspaceId: 'A' } } } })
   assert.deepEqual(f.opened, ['NEW'])
   assert.equal(f.old.projectionValues.agentPreset, 'scholarflow')
 })
@@ -45,7 +45,7 @@ test('global new creates standard mode in the current workspace without reusing 
 test('workspace new uses the clicked workspace, and a late result cannot replace newer navigation', async () => {
   const f = fixture()
   f.ctx.sessions.refresh = async () => { f.navigation.abort() }
-  await createStandardSession(f.ctx, 'B')
+  await createNativeSession(f.ctx, 'B')
   assert.equal(f.requests[0].payload.args.request.workspaceId, 'B')
   assert.deepEqual(f.opened, [])
 })
@@ -53,7 +53,7 @@ test('workspace new uses the clicked workspace, and a late result cannot replace
 test('a Host refusal is reported without navigating or changing an existing session', async () => {
   const f = fixture()
   f.ctx.connection.rpc.call = async () => ({ ok: false, error: { message: 'TEST_ONLY refusal' } })
-  await assert.rejects(createStandardSession(f.ctx), /TEST_ONLY refusal/)
+  await assert.rejects(createNativeSession(f.ctx), /TEST_ONLY refusal/)
   assert.deepEqual(f.opened, [])
   assert.equal(f.old.projectionValues.agentPreset, 'scholarflow')
 })
