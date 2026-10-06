@@ -1,4 +1,6 @@
-import { request } from 'node:https'
+// DSH source-mode RPC reflects the emitted `request` parameter name. Keep this
+// transport import distinct so bundling does not rename the Remote parameters.
+import { request as httpsRequest } from 'node:https'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { invariant, ScholarError } from '../../shared/errors.ts'
@@ -18,7 +20,7 @@ export async function fetchPublicFulltext(input: string, signal: AbortSignal, ho
   invariant(hosts.length && hosts.every(host => publicAddress(host.address)), 'FULLTEXT_PRIVATE_HOST', '全文地址不是公开网络地址。')
   const host = hosts[0], bounded = AbortSignal.any([signal, AbortSignal.timeout(30000)])
   return new Promise((resolve, reject) => {
-    const req = request(url, { signal: bounded, headers: { 'User-Agent': 'ScholarFlow/1.0 (open-access research)', Accept: 'application/pdf,text/html,application/xhtml+xml' },
+    const req = httpsRequest(url, { signal: bounded, headers: { 'User-Agent': 'ScholarFlow/1.0 (open-access research)', Accept: 'application/pdf,text/html,application/xhtml+xml' },
       lookup: ((_name: string, options: any, done: any) => options.all ? done(null, [host]) : done(null, host.address, host.family)) as any }, response => {
       if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         response.resume(); fetchPublicFulltext(new URL(response.headers.location, url).href, bounded, hops + 1).then(resolve, reject); return
