@@ -222,5 +222,17 @@ person opens the session normally. The substance that can be checked without a p
 already recorded above: V6a/V6b for the session behaviour, AT-29 for the shared settings
 document, AT-36 for preset reuse and library isolation.
 
+**Visual review artifact — still not produced.** A reload was added so a session created over
+RPC reaches the sidebar, and the probe now captures `wizard-wide.png` and `wizard-narrow.png`
+into `.dsh-tmp/ui-review/`. The wizard container still did not render (count 0), so the row
+click did not navigate to the session and the two images are not a valid review artifact.
+They are kept only as evidence of the attempt.
+
+Phase 0 §2.1 asks for high-fidelity visuals of the three pages, the modal and the narrow
+layout for the user to review; with the implementation already built, the honest equivalent is
+for the user to open the workbench in the real Desktop and look at the actual pages, which is
+exactly what the acceptance checklist asks for. Producing mockups now would describe something
+that already exists.
+
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.

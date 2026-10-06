@@ -143,8 +143,16 @@ try {
   // each surface actually appears. Presence, not aesthetics — the review matrix still needs
   // a person.
   if (sessionId) {
+    // A session created over RPC reaches the sidebar only after the client reloads.
+    await page.reload(); await page.waitForTimeout(2500)
+    const shots = resolve('.dsh-tmp/ui-review')
+    await mkdir(shots, { recursive: true })
     await page.locator('[data-row-key="session:' + sessionId + '"]').click().catch(() => undefined)
-    await page.waitForTimeout(1500)
+    await page.waitForTimeout(2000)
+    await page.screenshot({ path: join(shots, 'wizard-wide.png') })
+    await page.setViewportSize({ width: 420, height: 900 }); await page.waitForTimeout(1200)
+    await page.screenshot({ path: join(shots, 'wizard-narrow.png') })
+    await page.setViewportSize({ width: 1500, height: 960 }); await page.waitForTimeout(1200)
     const wizard = page.locator('[aria-label="创建论文向导"]')
     const rendered = await wizard.count()
     record('AT-30/31 引导已渲染', rendered === 1 ? 'PASS' : 'FAIL', '向导容器数量=' + rendered)
