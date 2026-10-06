@@ -69,7 +69,8 @@
     "remark-rehype": "^11.1.2",
     "unified": "^11.0.5",
     "yaml": "^2.9.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "motion": "14.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
