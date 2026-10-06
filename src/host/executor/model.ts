@@ -31,7 +31,46 @@ export async function selectedModel(ctx: Host, sessionId: string, signal: AbortS
   // is only the frozen run-schema ceiling, not a writing limit.
   const reported = info.defaultMaxTokens
   const maxOutputTokens = Number.isSafeInteger(reported) && (reported as number) > 0 ? Math.min(32768, reported as number) : undefined
-  return { selected, contextWindow: info.context.contextWindow as number, maxOutputTokens, session: agent.session }
+  // Absent modalities mean the host does not know, which is not the same as "no": the
+  // three states are kept apart so the UI never claims a capability it did not observe.
+  const modalities = info.inputModalities
+  const imageInput = Array.isArray(modalities) ? modalities.includes('image') : undefined
+  return { selected, contextWindow: info.context.contextWindow as number, maxOutputTokens, imageInput, session: agent.session }
+}
+
+/**
+ * Call the model with an image attached to the user turn. The image is admitted through the
+ * host's attachment service, which normalizes it and owns the durable reference, so the
+ * provider never receives bytes this plugin assembled by hand.
+ */
+export async function callStageModelWithImage(ctx: Host, session: Host, selected: { provider: string; model: string; reasoningEffort?: string },
+  call: ModelCall & { image: { bytes: Uint8Array; mediaType: string; name: string } }) {
+  const admitted = await ctx.attachments.admitPromptContent([
+    { type: 'text', text: JSON.stringify({ instruction: call.instruction, researchData: call.context }) },
+    { type: 'image', data: Buffer.from(call.image.bytes).toString('base64'), mediaType: call.image.mediaType, name: call.image.name },
+  ])
+  const messages = [createSystemMessage(call.system), createUserMessage({ source: { kind: 'user' }, content: admitted })]
+  const request = { ...selected, sessionId: session.id, temperature: 0.2, messages }
+  logStage(session, call.runId, 'request', { ...request, messages: messages.map(message => ({ ...message, content: message.content.map((part: { type: string }) => part.type === 'image' ? { type: 'image', attachment: '<附件>' } : part) })) })
+  invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认请求日志持久化；未调用模型。')
+  let text = '', finish: Host, usage: Host
+  for await (const chunk of ctx.llm.stream({ ...request, signal: call.signal })) {
+    if (chunk.type === 'text-delta') {
+      text += chunk.text
+      invariant(Buffer.byteLength(text) <= 2 * 1024 * 1024, 'MODEL_OUTPUT_TOO_LARGE', '模型输出超过阶段限额。')
+    } else if (chunk.type === 'finish') finish = chunk.reason
+    else if (chunk.type === 'usage') usage = chunk.usage
+  }
+  logStage(session, call.runId, 'result', { text, finish: finish?.kind ?? 'missing', ...(usage && { usage }) })
+  invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认结果日志持久化；未发布识别结果。')
+  if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '宿主模型调用已取消。')
+  if (finish?.kind === 'max-tokens') throw new ScholarError('MODEL_OUTPUT_LIMIT_REACHED', '模型输出达到提供方上限而未完整返回；本次调用已计费，请重试或缩小范围。')
+  if (finish?.kind === 'error') {
+    const code = /^[A-Z_]{1,64}$/.test(finish.failure?.code ?? '') ? finish.failure.code : 'MODEL_CALL_FAILED'
+    throw new ScholarError(code, '宿主模型调用失败；请在 DSH 中检查模型、凭据或服务状态。')
+  }
+  invariant(finish?.kind === 'stop' && text.trim(), 'MODEL_OUTPUT_INCOMPLETE', '模型输出未正常结束或为空；未发布识别结果。')
+  return text
 }
 
 export async function callStageModel(ctx: Host, session: Host, selected: { provider: string; model: string; reasoningEffort?: string }, call: ModelCall) {

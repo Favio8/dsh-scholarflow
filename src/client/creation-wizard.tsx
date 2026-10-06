@@ -88,7 +88,9 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     sync(); query.addEventListener('change', sync)
     return () => query.removeEventListener('change', sync)
   }, [])
-  const [recognition, setRecognition] = useState<Record<string, { state: 'idle' | 'running' | 'pending' | 'confirmed' | 'unavailable'; text?: string; note?: string }>>({})
+  // Per image source: 未识别 / 识别中 / 待确认（candidate）/ 已确认, plus 失败 and 不支持
+  // (PRD §3.3). `text` holds the candidate while it is being edited and after it is adopted.
+  const [recognition, setRecognition] = useState<Record<string, { state: 'idle' | 'running' | 'candidate' | 'confirmed' | 'failed' | 'unsupported'; text?: string; note?: string; model?: string }>>({})
   const update = (change: Partial<CreationSpec>) => { setIssues([]); setSpec(previous => ({ ...previous, ...change })) }
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify({ spec, step })) } catch { setError('创建信息暂未保存，请保留当前页面。') } }, [spec, step, key])
   const loadFiles = async (selectAll: boolean) => {
@@ -163,10 +165,40 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     if (result.truncated) notes.push('文件夹内容较多，只列出了前 200 个文件。')
     if (notes.length) setRecognition(previous => ({ ...previous, [result.resourceId]: { state: 'note' as const, note: notes.join(' ') } }))
   })
-  // Recognition is a model call, so it stays user-triggered and reports why it cannot run
-  // yet instead of failing silently (SPEC v1.1 §2 V4 is still unverified).
-  const identify = (resourceId: string) => setRecognition(previous => ({ ...previous, [resourceId]: { state: 'unavailable' as const,
-    note: '图片识别需要模型具备图片输入能力，尚未通过验证。可以先把截图中的要求粘贴到写作要求里，来源登记会保留。' } }))
+  // Recognition is user-triggered and produces a candidate, never a silent edit (PRD §3.3).
+  // The capability check runs first and costs nothing, so an unsupported model is stated in
+  // its own words instead of surfacing as a failed call.
+  const identify = (resourceId: string) => act(async () => {
+    setRecognition(previous => ({ ...previous, [resourceId]: { state: 'running' as const } }))
+    try {
+      const capability = await api('creation.imageCapability', { context: context() })
+      if (capability.imageInput !== true) {
+        setRecognition(previous => ({ ...previous, [resourceId]: { state: 'unsupported' as const,
+          note: capability.imageInput === false
+            ? `当前模型（${capability.model}）不接受图片输入。把截图里的要求粘贴到写作要求即可，来源登记会保留。`
+            : `宿主没有返回 ${capability.model} 的图片输入能力，因此不发送图片。可以手动粘贴文字，或换成支持图片的模型。` } }))
+        return
+      }
+      const result = await api('creation.recognizeImage', { context: context(), spec: creationSpec.parse(readySpec()), resourceId })
+      setRecognition(previous => ({ ...previous, [resourceId]: { state: 'candidate' as const, text: result.text, model: result.model } }))
+    } catch (error) {
+      const message = (error as Error).message
+      setRecognition(previous => ({ ...previous, [resourceId]: { state: 'failed' as const, note: message } }))
+    }
+  })
+  const editCandidate = (resourceId: string, text: string) => setRecognition(previous =>
+    ({ ...previous, [resourceId]: { ...previous[resourceId], text } }))
+  // Confirming appends to the requirements; it never replaces what the user already wrote, and
+  // re-recognising only ever replaces this image's own candidate.
+  const confirmCandidate = (resourceId: string) => {
+    const candidate = recognition[resourceId]
+    if (!candidate?.text?.trim()) return
+    const added = [spec.requirements.trim(), candidate.text.trim()].filter(Boolean).join('\n')
+    if (added.length > 12000) { setError('写作要求已达 12000 字上限，请先精简再采用识别结果。'); return }
+    setError('')
+    update({ requirements: added })
+    setRecognition(previous => ({ ...previous, [resourceId]: { state: 'confirmed' as const, text: candidate.text } }))
+  }
   const requirementRows = spec.requirementSources.map(source => {
     const external = source.origin === 'external'
     const shown = external ? { name: '电脑其他位置的要求文件夹', dir: `${source.members.length} 个文件` } : splitPath(source.path ?? '')
@@ -177,11 +209,21 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       <span className="sf-source-badge" data-kind={external ? 'external' : kind}>{external ? '外部' : source.kind === 'folder' ? '文件夹' : REQUIREMENT_KIND_LABEL[kind as keyof typeof REQUIREMENT_KIND_LABEL]}</span>
       <span className="sf-source-name">{shown.name}<small>{shown.dir}</small></span>
       {needsReconnect && <button type="button" className="sf-source-action" disabled={busy} onClick={addExternalSource}>重新连接</button>}
-      {!external && kind === 'image' && <button type="button" className="sf-source-action" disabled={busy} onClick={() => identify(source.resourceId)}>{status?.state === 'confirmed' ? '重新识别' : '识别文字'}</button>}
+      {!external && kind === 'image' && <button type="button" className="sf-source-action" disabled={busy} onClick={() => identify(source.resourceId)}>
+        {status?.state === 'running' ? '识别中…' : status?.state === 'confirmed' || status?.state === 'candidate' ? '重新识别' : '识别文字'}</button>}
       <button type="button" className="sf-source-action" onClick={() => removeSource(source.resourceId)}>移除</button>
       {source.kind === 'folder' && <ul className="sf-source-members">{source.members.map(member => <li key={member.name}>
         <span>{member.name}</span><button type="button" aria-label={`移除 ${member.name}`} onClick={() => removeMember(source.resourceId, member.name)}>×</button></li>)}</ul>}
       {needsReconnect && <p className="sf-source-note" role="status">读取授权已过期，需要重新选择这个文件夹；已经确认的要求文字不受影响。</p>}
+      {status?.state === 'candidate' && <div className="sf-candidate">
+        <span className="sf-field-label">识别候选 · 确认后才成为要求</span>
+        <textarea aria-label="识别候选文字" rows={3} value={status.text ?? ''} onChange={event => editCandidate(source.resourceId, event.target.value)} />
+        <div className="sf-candidate-actions">
+          <button type="button" className="sf-primary" disabled={busy || !status.text?.trim()} onClick={() => confirmCandidate(source.resourceId)}>采用到写作要求</button>
+          <button type="button" disabled={busy} onClick={() => setRecognition(previous => { const next = { ...previous }; delete next[source.resourceId]; return next })}>放弃</button>
+          <span className="sf-field-hint">来自 {status.model}</span>
+        </div></div>}
+      {status?.state === 'confirmed' && <p className="sf-source-note" role="status">已采用的识别文字已在写作要求中，可以继续编辑；重新识别只替换本次候选。</p>}
       {status?.note && <p className="sf-source-note" role="status">{status.note}</p>}
     </li> })
   const readable = files.filter((file: any) => file.supported)
@@ -226,7 +268,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const capabilityGaps = [
     '引用样式只支持顺序编号，作者—年份尚未实现',
     '排版要求（字体、行距、页数、封面）暂未支持',
-    ...(spec.requirementSources.some(source => requirementKind(source.path ?? '') === 'image') ? ['图片文字识别尚未验证，需要手动补充'] : []),
+    ...(spec.requirementSources.some(source => requirementKind(source.path ?? '') === 'image' && recognition[source.resourceId]?.state !== 'confirmed')
+      ? ['图片文字需先识别并确认，或手动补充'] : []),
     ...(spec.requirementSources.some(source => source.origin === 'external' && source.state !== 'connected') ? ['外部来源需要重新连接后才能再次读取'] : []),
   ]
   return <div className="sf-wizard-scroll"><section ref={root} className="sf-wizard" aria-label="创建论文向导">
@@ -458,6 +501,11 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard .sf-source-members li{display:flex;align-items:center;gap:8px;padding:2px 0}
 .sf-wizard .sf-source-members button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:13px;line-height:1;padding:0 4px}
 .sf-wizard .sf-source-note{flex:1 1 100%;margin:4px 0 0;font-size:12px;color:var(--dsw-alias-label-secondary,#8b9099)}
+.sf-wizard .sf-candidate{flex:1 1 100%;display:flex;flex-direction:column;gap:6px;margin-top:8px;padding:10px;border:1px solid #4475e755;border-radius:8px;background:#4475e70d}
+.sf-wizard .sf-candidate textarea{width:100%;min-height:64px;font-size:13px;line-height:1.6}
+.sf-wizard .sf-candidate-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sf-wizard .sf-candidate-actions>button{height:32px}
+.sf-wizard .sf-candidate-actions>.sf-field-hint{flex:1;margin:0;min-width:120px}
 .sf-wizard .sf-material-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0}
 .sf-wizard .sf-material-toolbar>input{flex:1 1 180px;min-width:0;height:34px}
 .sf-wizard .sf-material-toolbar>button{height:34px;flex:none}

@@ -79,11 +79,38 @@ bytes or a stream for one Session and returns a receipt, which is the documented
 for remote hosts where the desktop chooser is unreachable. Both routes need a real
 prototype, including the copy's retention and deletion statement.
 
-## V4 · Image recognition — awaiting prototype
+## V4 · Image recognition — channel verified, one real call left
 
-Nothing has been executed. The intended path (client reads the image, host hands it to a
-vision-capable model, the result is a candidate the user confirms) is unverified; the
-fallback is registration plus manual text, which the design already requires to exist.
+The question this row had to answer was whether the host has an image channel at all, and
+whether a plugin can tell when it does not. Both are now answered without spending anything:
+
+- `ctx.llm.resolveModelInfo()` returns `inputModalities`, whose vocabulary is
+  `'text' | 'image'` and whose **absence means unknown** — the host does not claim a capability
+  it cannot report. `dsh-llm` also states the degradation is the host's own: "durable `ImageBlock`
+  references become route-specific request versions only for image-capable models; text-only
+  models receive stable placeholders."
+- `ctx.attachments.admitPromptContent()` is the documented seam for a host prompt consumer: it
+  normalizes the image, owns the durable reference, and hands back an `ImageBlock`, so the plugin
+  never assembles provider bytes by hand.
+- Probe (`V4 图片输入能力可探测`): the installed host resolves the session model
+  (`deepseek-official/deepseek-flash`) with `imageInput: true`. **PASS**, no model call made.
+
+Implemented to PRD §3.3 and SPEC §7.3: recognition is user-triggered, the result is a
+**candidate** the user edits and adopts, adopting appends to the requirements instead of
+overwriting them, re-recognising replaces only that image's own candidate, and a model that
+cannot take images is told apart from one whose capability the host does not report — the two
+need different words, and both keep the registration and the manual-paste path.
+
+`tests/integration/image-recognition.test.ts` verifies the plumbing against a stubbed provider:
+the image is admitted through the attachment service and the request carries the returned
+reference rather than raw bytes; the plugin's own session-log entry **redacts** the image
+(`<附件>`) instead of duplicating base64; a run whose log is not durable is refused rather than
+reported as success; and provider failure, truncation and empty output keep their own codes.
+
+**What is still unverified:** that a real provider returns *good* transcription for a real
+screenshot. That is a quality question rather than a channel question, it needs one paid call,
+and in production it is the user's own trigger (AT-32 requires recognition never to start by
+itself). It is left to the first real use rather than spent as a verification cost.
 
 ## V5 · Submission format and numbered citation style — source review done
 
@@ -108,7 +135,7 @@ must keep the input.
 | V3a | **Verified** — the host serves only the native OS chooser; no in-app browser, no single-file chooser |
 | V3b | **Verified (corrected 2026-10-06)** — an operator-chosen external folder is readable; the earlier "no channel" conclusion was wrong. See "V3b correction" below |
 | V3c | **Resolved by design** — still no single-file chooser, so an external *file* is reached as a member of a chosen folder. That is now implemented behaviour, not a gap |
-| V4 | **Awaiting the user's decision** — image recognition needs one real model call, which costs money, so it is not run without explicit approval |
+| V4 | **Channel verified (2026-10-06 晚)** — the host resolves per-model image input, the wizard reports it, and the recognition path is implemented and tested against a stubbed provider. The single real OCR call stays user-triggered. See "V4" below |
 | V5 | **Verified** — all three deliveries agree on the numbered style, including the Word list |
 | V6a | **Verified** — selecting the mode writes nothing into the workspace |
 | V6b | **Verified** — opening a session does not re-initialise the project |

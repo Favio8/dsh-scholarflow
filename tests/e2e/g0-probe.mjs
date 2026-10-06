@@ -295,6 +295,11 @@ try {
         sessionId: payload((await rpc('session/create', { request: { workspaceId: imageWorkspace?.workspace?.workspaceId, agentPreset: 'scholarflow' } })).body)?.sessionId }
       const imagePlan = payload((await rpc('scholarflow.v1/creation.prepare', { request: { context: imageContext, spec: imageSpec } })).body)
       record('AT-32 图片可作要求来源', imagePlan?.planId ? 'PASS' : 'FAIL', '预检=' + String(imagePlan?.planId ?? JSON.stringify(imagePlan).slice(0, 120)))
+      // V4 — the image channel is a resolved per-model fact, so the wizard can state the real
+      // reason instead of offering a control that cannot work. No model call is made here.
+      const capability = payload((await rpc('scholarflow.v1/creation.imageCapability', { request: { context: imageContext } })).body)
+      record('V4 图片输入能力可探测', capability && 'imageInput' in capability ? 'PASS' : 'FAIL',
+        '模型=' + String(capability?.model) + ' 图片输入=' + JSON.stringify(capability?.imageInput) + '（null 表示宿主未报告）')
       record('AT-34 预设随创建记录', row.preset?.id === 'course-argumentative' && row.sections?.length === 2 ? 'PASS' : 'FAIL',
         '预设=' + String(row.preset?.id) + ' 章节=' + String(row.sections?.length))
 
