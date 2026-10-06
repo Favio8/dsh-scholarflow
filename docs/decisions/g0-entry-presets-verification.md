@@ -104,7 +104,35 @@ must keep the input.
 |---|---|
 | V1 | Resolved by contract inspection; fallback chosen and recorded above |
 | V2 | Verified (isolated probe) |
-| V3a/V3b/V3c | Source facts recorded; prototypes outstanding |
+| V3a/V3b/V3c | Source facts recorded; prototype ran but could not reach the capability — see below |
 | V4 | Outstanding |
 | V5 | Source review complete; end-to-end outstanding |
 | V6 | Outstanding |
+
+## Prototype run (2026-10-06, `tests/e2e/g0-probe.mjs`)
+
+Booted the installed Host with an isolated `DSH_HOME`, an isolated profile and a
+`TEST_ONLY` workspace, then called the RPC endpoint directly from the served page. No
+model call was made and no paid usage occurred.
+
+| Probe | Result |
+|---|---|
+| `directoryPicker/capability`, `directory-picker/capability`, `directoryPicker/describe` | **404 not found** for all three |
+| `workspaces/list` | 200, empty — the fixture workspace is not registered as a DSH workspace in this profile |
+| `workspace/files/read` on an absolute path outside the workspace | **404 not found** |
+
+**Conclusion: V3a is not verified.** The directory picker's Remote namespace appears in the
+host source (`dsh-api-workspace-controller` mentions `directoryPicker` and
+`directoryPickerController`), but the names probed are not exposed as client RPC methods —
+so the capability is reached by the workspace flow rather than by a generic call a plugin
+can make. Verifying it needs the actual call site inspected in the workspace controller and
+a UI-driven attempt, which this probe did not do.
+
+The same run shows the probe harness itself works (isolated boot, page, RPC round trip),
+so a follow-up run can reuse it once the real method names are known. Until then the
+external-source feature stays unimplemented, and the wizard says so rather than offering a
+control that cannot work.
+
+**Not attempted here:** V3b (external read) and V5 (numbered style across three exports)
+need a registered workspace and a project fixture respectively; both remain source-verified
+only, as recorded above.
