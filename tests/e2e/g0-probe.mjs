@@ -129,8 +129,12 @@ try {
       const tex = found.find(path => path.endsWith('.tex'))
       const docx = found.find(path => path.endsWith('.docx'))
       if (tex) { const text = await readFile(tex, 'utf8')
-        record('V5 LaTeX 编号式', /\\bibliographystyle\{unsrt\}/.test(text) && /ctexart/.test(text) ? 'PASS' : 'FAIL',
-          `bibliographystyle(unsrt)=${/\\bibliographystyle\{unsrt\}/.test(text)} ctexart=${/ctexart/.test(text)}`) }
+        // This project registers no source, so the honest invariant is that the numbered style
+        // is declared exactly when the manuscript cites something. The with-citations case is
+        // covered by tests/integration/export-citation-order.test.ts.
+        const cites = /\\cite\{/.test(text), styled = /\\bibliographystyle\{unsrt\}/.test(text)
+        record('V5 LaTeX 编号式', /ctexart/.test(text) && styled === cites ? 'PASS' : 'FAIL',
+          `ctexart=${/ctexart/.test(text)} 有引用=${cites} 声明编号式=${styled}（无引用时不应声明参考文献样式）`) }
       else record('V5 LaTeX 编号式', 'FAIL', '未找到交付的 .tex')
       if (docx) { const bytes = await readFile(docx)
         record('V5 Word 真实字节', bytes.subarray(0, 2).toString('latin1') === 'PK' ? 'PASS' : 'FAIL', `前两字节=${bytes.subarray(0, 2).toString('latin1')} 大小=${bytes.length}`) }
@@ -293,14 +297,62 @@ try {
       record('AT-32 图片可作要求来源', imagePlan?.planId ? 'PASS' : 'FAIL', '预检=' + String(imagePlan?.planId ?? JSON.stringify(imagePlan).slice(0, 120)))
       record('AT-34 预设随创建记录', row.preset?.id === 'course-argumentative' && row.sections?.length === 2 ? 'PASS' : 'FAIL',
         '预设=' + String(row.preset?.id) + ' 章节=' + String(row.sections?.length))
+
+      // V3b — an external requirement source is stored as an opaque handle: the plan carries the
+      // handle and the relative member names, never the folder's location, and no external bytes
+      // are copied into the project. A source that tries to smuggle a path is rejected outright.
+      const externalRoot = join(testHome, '电脑其他位置 TEST_ONLY')
+      await mkdir(externalRoot, { recursive: true })
+      await writeFile(join(externalRoot, 'TEST_ONLY 作业要求.md'), 'TEST_ONLY assignment outside the workspace.')
+      // The workspace must be a different directory: the point is that the source lives outside it.
+      const externalWorkspaceRoot = join(testHome, '外部来源项目 TEST_ONLY')
+      await mkdir(externalWorkspaceRoot, { recursive: true })
+      const externalStatus = payload((await rpc('scholarflow.v1/sources.externalStatus', { request: { handles: ['external_source_probe'] } })).body)
+      record('V3b 外部来源状态接口', Array.isArray(externalStatus?.live) && externalStatus.live.length === 0 ? 'PASS' : 'FAIL',
+        '未授权句柄返回 live=' + JSON.stringify(externalStatus?.live ?? externalStatus).slice(0, 200))
+      const externalWorkspaceId = payload((await rpc('workspace/create', { request: { path: externalWorkspaceRoot } })).body)?.workspace?.workspaceId
+      const externalSessionId = externalWorkspaceId
+        ? payload((await rpc('session/create', { request: { workspaceId: externalWorkspaceId, agentPreset: 'scholarflow' } })).body)?.sessionId : undefined
+      const externalContext = { requestId: 'req_TEST_ONLY', workspaceId: externalWorkspaceId, sessionId: externalSessionId }
+      const externalSpec = { ...spec, title: 'TEST_ONLY 外部来源', materials: [],
+        requirementSources: [{ resourceId: 'req_ext1', origin: 'external', kind: 'folder',
+          handle: 'external_source_probe', members: [{ name: 'TEST_ONLY 作业要求.md', size: 40 }], role: 'assignment', state: 'connected' }] }
+      const externalPlan = payload((await rpc('scholarflow.v1/creation.prepare', { request: { context: externalContext, spec: externalSpec } })).body)
+      if (!externalPlan?.planId) record('V3b 外部来源可预检', 'FAIL', String(JSON.stringify(externalPlan)).slice(0, 200))
+      else {
+        await rpc('scholarflow.v1/creation.start', { request: { context: externalContext, planId: externalPlan.planId, planHash: externalPlan.planHash } })
+        const externalWritten = await readFile(join(externalWorkspaceRoot, '.scholarflow', 'writing', 'requirements.json'), 'utf8')
+        record('V3b 外部来源只存句柄',
+          JSON.parse(externalWritten).spec.requirementSources?.[0]?.handle === 'external_source_probe' && !externalWritten.includes(testHome) ? 'PASS' : 'FAIL',
+          '句柄=' + String(JSON.parse(externalWritten).spec.requirementSources?.[0]?.handle) + ' 项目文件不含绝对路径=' + String(!externalWritten.includes(testHome)))
+        // The project legitimately holds its own manuscript; what must not appear is a copy of
+        // the external file — neither by name nor by content.
+        const copied = []
+        const scan = async (directory, prefix) => {
+          for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
+            const name = prefix ? `${prefix}/${entry.name}` : entry.name
+            if (entry.isDirectory()) { await scan(join(directory, entry.name), name); continue }
+            if (name.includes('作业要求') || (await readFile(join(directory, entry.name), 'utf8').catch(() => '')).includes('TEST_ONLY assignment outside the workspace.')) copied.push(name)
+          }
+        }
+        await scan(externalWorkspaceRoot, '')
+        record('V3b 外部内容不复制进项目', copied.length === 0 ? 'PASS' : 'FAIL', '项目内外部副本=' + JSON.stringify(copied))
+      }
+      const smuggling = payload((await rpc('scholarflow.v1/creation.prepare', { request: { context: externalContext,
+        spec: { ...externalSpec, requirementSources: [{ resourceId: 'req_ext2', origin: 'external', kind: 'folder', path: 'C:/elsewhere', members: [] }] } } })).body)
+      record('V3b 外部来源不得携带路径', smuggling?.ok === false ? 'PASS' : 'FAIL',
+        'ok=' + String(smuggling?.ok) + ' code=' + String(smuggling?.error?.code))
     }
   }
 
-  // V3b — can the picker's browse backend reach a directory outside the workspace?
+  // V3a/V3b — the composed picker serves only the native OS chooser: there is no browse backend,
+  // so the host cannot enumerate a directory for a client. External folders are therefore reached
+  // by the operator's own pick, which is why the plugin asks for a grant instead of listing one.
   const outsideRoot = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
   const outside = await rpc('directoryPicker/list', { path: outsideRoot })
-  record('V3b 选择器列工作区外目录', outside.status === 200 ? 'OBSERVED' : 'REFUSED',
-    `${outside.status} ${JSON.stringify(outside.body?.result?.value ?? outside.body).slice(0, 200)}`)
+  const outsideError = outside.body?.result?.error
+  record('V3a 选择器仅原生、无浏览后端', outsideError?.code === 'directory-picker/unavailable' ? 'PASS' : 'FAIL',
+    `${outside.status} ${outsideError?.code ?? ''} ${String(outsideError?.details?.capability ?? '').slice(0, 60)}`)
 
   await writeFile(resolve('.dsh-tmp/g0-probe/result.json'), JSON.stringify({ at: new Date().toISOString(), results }, null, 2))
 } catch (error) {

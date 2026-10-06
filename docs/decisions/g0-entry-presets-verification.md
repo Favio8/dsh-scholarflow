@@ -2,8 +2,9 @@
 
 Scope: the G0 matrix of SPEC v1.1 §2 (V1–V6), run before implementing the entry,
 wizard and preset-library work. Evidence here is read-only source inspection plus
-isolated-file probes; real-machine prototypes for V3/V4/V6 are still outstanding and
-are marked as such. Nothing in this file claims a capability that was not observed.
+isolated-file probes; V3b was corrected on 2026-10-06 after implementation showed the
+earlier conclusion was wrong, and V4 still awaits a paid model call. Nothing in this
+file claims a capability that was not observed.
 
 ## V1 · Opening the global settings panel — not available to plugins
 
@@ -105,12 +106,55 @@ must keep the input.
 | V1 | Resolved by contract inspection; fallback chosen and recorded above |
 | V2 | Verified (isolated probe) |
 | V3a | **Verified** — the host serves only the native OS chooser; no in-app browser, no single-file chooser |
+| V3b | **Verified (corrected 2026-10-06)** — an operator-chosen external folder is readable; the earlier "no channel" conclusion was wrong. See "V3b correction" below |
+| V3c | **Resolved by design** — still no single-file chooser, so an external *file* is reached as a member of a chosen folder. That is now implemented behaviour, not a gap |
 | V4 | **Awaiting the user's decision** — image recognition needs one real model call, which costs money, so it is not run without explicit approval |
 | V5 | **Verified** — all three deliveries agree on the numbered style, including the Word list |
 | V6a | **Verified** — selecting the mode writes nothing into the workspace |
 | V6b | **Verified** — opening a session does not re-initialise the project |
-| V3b | **No verified channel** — see below |
-| V3c | **Awaiting the user's decision** — no single-file chooser exists, so only a person can say how an external file should be reached |
+
+## V3b correction (2026-10-06): the channel exists
+
+The earlier finding below concluded "no verified channel" and asked for the requirement to be
+re-scoped with the user. **That conclusion was wrong, and the requirement needed no re-scoping.**
+It searched the host's *API surface* — the workspace-files Remote API and the directory picker —
+and missed that this plugin already reads outside a workspace through the two mechanisms it uses
+for its own global storage and its local Skill imports:
+
+1. **`PresetLibrary` uses `node:fs/promises` directly** for `<DSH_HOME>/scholarflow/presets/`
+   (`src/host/presets/library.ts`), which is outside every workspace. V2 verified this end to end,
+   including atomic replacement and corruption isolation.
+2. **`LocalSkillSource` reads an operator-picked absolute directory** (`src/host/skills/local.ts`),
+   reached through `skills.pickLocal` → `directoryPicker.pick()` → `skills.scanLocal`. It validates
+   an absolute path, refuses links, and walks a bounded tree. `tests/integration/private-skills.test.ts`
+   covers it.
+
+The host's own contract agrees: `dsh-fs-sandbox` confines *writes and edits* while
+"**preserving the local filesystem's read behavior**" — "Reads, listings, metadata, and read-only
+watches work exactly as with `fs-local`; the mutation fence does not restrict observation."
+
+So the read half was never blocked. What was genuinely absent is a *single-file* chooser (V3c),
+which is why an external file is reached as a member of a chosen folder.
+
+**Implemented and verified on the installed host** — `sources.pickExternal` and
+`sources.externalStatus` are registered, and the external source travels through the project as an
+opaque handle:
+
+| Probe | Result |
+|---|---|
+| `V3b 外部来源状态接口` | **PASS** — an unauthorised handle returns `live: []` |
+| `V3b 外部来源只存句柄` | **PASS** — the project stores `external_source_probe` and contains no absolute path |
+| `V3b 外部内容不复制进项目` | **PASS** — no copy of the external file appears in the project, by name or by content |
+| `V3b 外部来源不得携带路径` | **PASS** — a source that smuggles a `path` instead of a handle is rejected with `INVALID_REQUEST` |
+| `V3a 选择器仅原生、无浏览后端` | **PASS** — `directory-picker/unavailable`, `capability: native` |
+
+The grant is minimal and read-only by construction, and each of those properties has a test in
+`tests/integration/external-requirement-source.test.ts`: one chosen folder and nothing above it,
+symlinks refused at open and on every segment of a read, sensitive names and dependency directories
+refused even when named directly, a bounded walk (200 members, depth 8) and a bounded read
+(50 MiB) with a change detected mid-read, member names always relative, and the write gate still
+refusing any path outside the workspace root. A grant belongs to the operator who made it and
+lapses, which is why "reconnect" is a normal wizard state rather than an error.
 
 ## Prototype run (2026-10-06, `tests/e2e/g0-probe.mjs`)
 
@@ -140,20 +184,24 @@ Calling `pick` itself was deliberately not attempted: it opens a modal OS dialog
 headless probe cannot answer. Confirming it needs a real Desktop session with a person
 present, and that is where the external-source feature stays until it happens.
 
-**V3b (no verified channel):** every read method of the host's workspace-files API takes a
-workspace file scope and the package also exposes `confine(root, workspaceRoot, path)`, so
-that surface is bounded by the workspace by construction. The directory picker refuses to
-enumerate outside the workspace (native-only, see V3a). The only remaining theoretical route
-is the raw `ctx.fs` service, which `dsh-fs-sandbox` documents as confining writes while
-preserving reads — but no concrete read entry point could be established from the installed
-bundle, and no prototype exercised it.
+**V3b (superseded — kept for the record):** every read method of the host's workspace-files API
+takes a workspace file scope and the package also exposes `confine(root, workspaceRoot, path)`, so
+that surface is bounded by the workspace by construction. The directory picker refuses to enumerate
+outside the workspace (native-only, see V3a). The only remaining theoretical route is the raw
+`ctx.fs` service, which `dsh-fs-sandbox` documents as confining writes while preserving reads — but
+no concrete read entry point could be established from the installed bundle, and no prototype
+exercised it.
 
-**Consequence, and the reason this is recorded as a finding rather than a task:** the
-external requirement source ("电脑其他位置") cannot be implemented on verified ground today.
-The design already behaves correctly in that situation — the wizard states the capability is
-unverified instead of offering a control that cannot work — so nothing is silently broken.
-D-01/SF-039 need re-scoping with the user: today only a workspace source is reachable, and a
-single external *file* has no chooser at all.
+**Why that reasoning failed:** it treated the host's Remote API surface as the only route to a
+file, and so never looked at how this plugin already reaches outside a workspace. `PresetLibrary`
+writes and reads `<DSH_HOME>/scholarflow/presets/` with `node:fs/promises`, and `LocalSkillSource`
+reads an operator-picked absolute directory. Both were already verified. The correction above
+records the real conclusion: the requirement stands as designed, and it is implemented.
+
+**V3c (resolved by design):** an external *file* still has no chooser of its own — the OS dialog
+picks directories. The requirement is therefore met by reaching a file as a member of a chosen
+folder, which is what `sources.pickExternal` returns and what the wizard lists. The upload fallback
+(`dsh-client-file-upload`) is not needed for this and stays unused.
 
 **V5 (verified):** `tests/integration/export-citation-order.test.ts`
 registers two sources, cites them in the reverse of their registration order, and delivers

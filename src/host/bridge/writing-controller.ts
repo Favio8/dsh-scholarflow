@@ -24,13 +24,28 @@ import { readPrivateSkill } from '../skills/reader.ts'
 import { unicodeBoundary } from '../../core/editing/markdown.ts'
 import { currentWritingText, proposeCowrite } from '../../core/editing/cowrite.ts'
 import { proposalImage } from '../../core/editing/proposals.ts'
+import { ExternalSourceRegistry, type PickResult } from '../sources/registry.ts'
 
 type Host = any
 export class WritingController {
   private plans = new Map<string, { plan: Awaited<ReturnType<typeof prepareInit>>; spec: CreationSpec; context: z.infer<typeof requestContext>; operator: string }>()
   private active = new Map<string, { controller: AbortController; pause: boolean; promise?: Promise<void> }>()
+  // Session-scoped read grants for operator-chosen folders outside the workspace; the
+  // absolute root lives only inside this registry (see sources/registry.ts).
+  private external = new ExternalSourceRegistry()
   constructor(private ctx: Host, private owner: string) {
-    ctx.effect(() => () => { for (const run of this.active.values()) run.controller.abort('plugin-unload'); this.plans.clear() }, 'scholarflow: stop writing tasks')
+    ctx.effect(() => () => { for (const run of this.active.values()) run.controller.abort('plugin-unload'); this.plans.clear(); this.external.clear() }, 'scholarflow: stop writing tasks')
+  }
+
+  /** One explicit operator action authorises reading one external folder (SPEC v1.1 §7.2). */
+  async pickExternal(request: unknown, operator: string, signal: AbortSignal): Promise<PickResult> {
+    z.object({}).strict().parse(request)
+    return this.external.pick(this.ctx.get('directoryPicker')?.capability(), operator, signal)
+  }
+
+  async externalStatus(request: unknown, operator: string) {
+    const input = z.object({ handles: z.array(z.string().min(1).max(200)).max(200) }).strict().parse(request)
+    return this.external.status(input.handles, operator)
   }
   async scan(request: unknown, signal: AbortSignal) {
     const { context } = z.object({ context: requestContext }).parse(request), { io } = await resolveStore(this.ctx, context, signal)
@@ -48,7 +63,7 @@ export class WritingController {
     }
     await visit(''); return { files, truncated }
   }
-  async suggest(request: unknown, signal: AbortSignal) {
+  async suggest(request: unknown, operator: string, signal: AbortSignal) {
     const input = z.object({ context: requestContext, spec: creationSpec, assignmentPath: z.string().optional() }).parse(request)
     const { io } = await resolveStore(this.ctx, input.context, signal)
     // Requirement sources are read on their own authority; they no longer have to
@@ -59,7 +74,18 @@ export class WritingController {
     const assignments: { path: string; content?: unknown; note?: string }[] = []
     for (const source of readRequirementSources(spec)) {
       if (source.origin !== 'workspace') {
-        assignments.push({ path: source.handle ?? '外部来源', note: '工作区外来源的读取能力尚未通过验证，本次未读取；可手动补充要求。' }); continue
+        // An external source is read only while its grant is live and belongs to this
+        // operator. A lapsed handle costs the source, never the confirmed requirement text.
+        const granted = source.handle ? this.external.resolve(source.handle, operator) : undefined
+        if (!granted) {
+          assignments.push({ path: '外部来源', note: '外部来源需要重新连接后才能读取；已确认的要求文字仍然有效。' }); continue
+        }
+        for (const member of source.members) {
+          if (sensitivePath(member.name)) { assignments.push({ path: member.name, note: '敏感文件不读取。' }); continue }
+          try { assignments.push({ path: member.name, content: await parseMaterialBytes(await granted.read(member.name, signal), mediaType(member.name), signal, undefined, true) }) }
+          catch (error) { assignments.push({ path: member.name, note: `本次无法读取：${(error as Error).message}` }) }
+        }
+        continue
       }
       for (const path of source.kind === 'folder' ? source.members.map(member => member.name) : [source.path!]) {
         if (sensitivePath(path)) { assignments.push({ path, note: '敏感文件不读取。' }); continue }

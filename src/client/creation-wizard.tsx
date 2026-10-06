@@ -30,7 +30,7 @@ function directoriesOf(files: any[]) {
 }
 
 /** Picks one requirement file or one folder; the caller decides what a folder expands to. */
-function RequirementPicker({ files, disabled, scanning, onPick, onRescan }: any) {
+function RequirementPicker({ files, disabled, scanning, onPick, onRescan, onPickExternal }: any) {
   const [open, setOpen] = useState(false), [mode, setMode] = useState<'file' | 'folder'>('file'), [query, setQuery] = useState('')
   const needle = query.trim().toLowerCase()
   const rows = mode === 'file'
@@ -60,8 +60,8 @@ function RequirementPicker({ files, disabled, scanning, onPick, onRescan }: any)
           </button> })}
         {!matches.length && <p className="sf-picker-blank">{scanning ? '正在读取工作区…' : mode === 'file' ? '没有匹配的文件。' : '工作区里没有子文件夹。'}</p>}
       </div>
-      <div className="sf-picker-foot"><span /><button type="button" onClick={() => setOpen(false)}>完成</button></div>
-      <p className="sf-picker-note">工作区外的文件需要宿主选择器，尚未通过验证，因此这里只列当前工作区。</p>
+      <div className="sf-picker-foot"><button type="button" disabled={disabled} onClick={() => { onPickExternal(); setOpen(false) }}>从电脑其他位置选择…</button><span /><button type="button" onClick={() => setOpen(false)}>完成</button></div>
+      <p className="sf-picker-note">上面的列表是当前工作区。工作区外的要求文件夹用左侧按钮：由系统对话框选择，只读取这一个文件夹，不写入、不扩大到父目录。</p>
     </div>}
   </div>
 }
@@ -100,6 +100,21 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     } catch (failure) { setError((failure as Error).message) } finally { setScanning(false) }
   }
   useEffect(() => { void loadFiles(!saved) }, [key])
+  // A restored draft may name external handles the host no longer holds (a new session, a
+  // lapsed grant). Ask which are still live and mark the rest for reconnection, so the
+  // wizard never implies a source will be read when it will not be (SPEC v1.1 §7.2).
+  useEffect(() => {
+    const handles = spec.requirementSources.filter(source => source.origin === 'external' && source.handle).map(source => source.handle!)
+    if (!handles.length) return
+    let live = true
+    api('sources.externalStatus', { handles }).then((value: any) => {
+      if (!live) return
+      const alive = new Set(value.live ?? [])
+      update({ requirementSources: spec.requirementSources.map(source => source.origin === 'external' && source.handle && !alive.has(source.handle)
+        ? { ...source, state: 'disconnected' as const } : source) })
+    }).catch(() => undefined)
+    return () => { live = false }
+  }, [key])
   // A fresh wizard opens on the type's default built-in preset (design 02 §6); an
   // existing draft keeps whatever the user had, and a missing library falls back to the
   // offline structure without saying anything wrong.
@@ -133,20 +148,40 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const removeSource = (resourceId: string) => update({ requirementSources: spec.requirementSources.filter(source => source.resourceId !== resourceId) })
   const removeMember = (resourceId: string, name: string) => update({ requirementSources: spec.requirementSources.map(source =>
     source.resourceId === resourceId ? { ...source, members: source.members.filter(member => member.name !== name) } : source) })
+  // An external folder is chosen in the OS dialog, so the host owns the pick and returns an
+  // opaque handle plus the members it found; the wizard never learns where the folder is.
+  const addExternalSource = () => act(async () => {
+    const result = await api('sources.pickExternal', {})
+    if (result.cancelled) return
+    const dropped = (result.members as any[]).filter(member => requirementKind(member.name) === 'unsupported')
+    update({ requirementSources: [...spec.requirementSources,
+      { resourceId: result.resourceId, origin: 'external' as const, kind: 'folder' as const, handle: result.handle,
+        role: 'assignment' as const, state: 'connected' as const,
+        members: (result.members as any[]).filter(member => requirementKind(member.name) !== 'unsupported').map(member => ({ name: member.name, size: member.size })) }] })
+    const notes = [...(result.diagnostics as string[])]
+    if (dropped.length) notes.push(`已跳过 ${dropped.length} 个当前格式无法读取的文件。`)
+    if (result.truncated) notes.push('文件夹内容较多，只列出了前 200 个文件。')
+    if (notes.length) setRecognition(previous => ({ ...previous, [result.resourceId]: { state: 'note' as const, note: notes.join(' ') } }))
+  })
   // Recognition is a model call, so it stays user-triggered and reports why it cannot run
   // yet instead of failing silently (SPEC v1.1 §2 V4 is still unverified).
   const identify = (resourceId: string) => setRecognition(previous => ({ ...previous, [resourceId]: { state: 'unavailable' as const,
     note: '图片识别需要模型具备图片输入能力，尚未通过验证。可以先把截图中的要求粘贴到写作要求里，来源登记会保留。' } }))
   const requirementRows = spec.requirementSources.map(source => {
-    const shown = splitPath(source.path ?? ''), kind = source.kind === 'folder' ? 'folder' : requirementKind(source.path ?? '')
+    const external = source.origin === 'external'
+    const shown = external ? { name: '电脑其他位置的要求文件夹', dir: `${source.members.length} 个文件` } : splitPath(source.path ?? '')
+    const kind = source.kind === 'folder' ? 'folder' : requirementKind(source.path ?? '')
     const status = recognition[source.resourceId]
+    const needsReconnect = external && source.state !== 'connected'
     return <li key={source.resourceId} className="sf-source-row">
-      <span className="sf-source-badge" data-kind={kind}>{source.kind === 'folder' ? '文件夹' : REQUIREMENT_KIND_LABEL[kind as keyof typeof REQUIREMENT_KIND_LABEL]}</span>
+      <span className="sf-source-badge" data-kind={external ? 'external' : kind}>{external ? '外部' : source.kind === 'folder' ? '文件夹' : REQUIREMENT_KIND_LABEL[kind as keyof typeof REQUIREMENT_KIND_LABEL]}</span>
       <span className="sf-source-name">{shown.name}<small>{shown.dir}</small></span>
-      {kind === 'image' && <button type="button" className="sf-source-action" disabled={busy} onClick={() => identify(source.resourceId)}>{status?.state === 'confirmed' ? '重新识别' : '识别文字'}</button>}
+      {needsReconnect && <button type="button" className="sf-source-action" disabled={busy} onClick={addExternalSource}>重新连接</button>}
+      {!external && kind === 'image' && <button type="button" className="sf-source-action" disabled={busy} onClick={() => identify(source.resourceId)}>{status?.state === 'confirmed' ? '重新识别' : '识别文字'}</button>}
       <button type="button" className="sf-source-action" onClick={() => removeSource(source.resourceId)}>移除</button>
       {source.kind === 'folder' && <ul className="sf-source-members">{source.members.map(member => <li key={member.name}>
         <span>{member.name}</span><button type="button" aria-label={`移除 ${member.name}`} onClick={() => removeMember(source.resourceId, member.name)}>×</button></li>)}</ul>}
+      {needsReconnect && <p className="sf-source-note" role="status">读取授权已过期，需要重新选择这个文件夹；已经确认的要求文字不受影响。</p>}
       {status?.note && <p className="sf-source-note" role="status">{status.note}</p>}
     </li> })
   const readable = files.filter((file: any) => file.supported)
@@ -192,7 +227,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     '引用样式只支持顺序编号，作者—年份尚未实现',
     '排版要求（字体、行距、页数、封面）暂未支持',
     ...(spec.requirementSources.some(source => requirementKind(source.path ?? '') === 'image') ? ['图片文字识别尚未验证，需要手动补充'] : []),
-    ...(spec.requirementSources.some(source => source.origin === 'external') ? ['工作区外来源的读取尚未验证'] : []),
+    ...(spec.requirementSources.some(source => source.origin === 'external' && source.state !== 'connected') ? ['外部来源需要重新连接后才能再次读取'] : []),
   ]
   return <div className="sf-wizard-scroll"><section ref={root} className="sf-wizard" aria-label="创建论文向导">
     <header><span className="sf-wizard-eyebrow">{workspaceTitle}</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p>
@@ -219,7 +254,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <label>写作要求<textarea id="sf-field-requirements" rows={6} placeholder="例如：机器学习课程论文，约4000字，结合课件和笔记讨论实际应用，需要参考文献。也可以粘贴老师的要求。" value={spec.requirements} maxLength={12000} onChange={e => update({ requirements: e.target.value })} /></label>
         <div className="sf-field"><span className="sf-field-label">写作要求来源</span>
           <div className="sf-assignment-row">
-            <RequirementPicker files={files} disabled={busy} scanning={scanning} onPick={addSource} onRescan={() => loadFiles(false)} />
+            <RequirementPicker files={files} disabled={busy} scanning={scanning} onPick={addSource} onPickExternal={addExternalSource} onRescan={() => loadFiles(false)} />
             <button className="sf-assignment-extract" disabled={busy || (!spec.requirements.trim() && !spec.requirementSources.length)} onClick={() => act(() => suggest(false))}>整理要求</button>
           </div>
           <p className="sf-field-hint">要求来源规定这篇论文该怎么写；第二步的论文参考材料提供写作所需的资料。两者独立选择，互不要求对方包含自己。文件保持原样，只在整理或写作时读取。</p>
@@ -415,6 +450,7 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard .sf-source-badge{flex:none;padding:1px 7px;border-radius:999px;background:#8882;font-size:11px;color:var(--dsw-alias-label-secondary,#727780)}
 .sf-wizard .sf-source-badge[data-kind=image]{background:#e8a33d22;color:#a5701f}
 .sf-wizard .sf-source-badge[data-kind=unsupported]{background:#d4515122;color:#b04a4a}
+.sf-wizard .sf-source-badge[data-kind=external]{background:#4475e722;color:#3b63c4}
 .sf-wizard .sf-source-name{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sf-wizard .sf-source-name small{font-size:11px;color:var(--dsw-alias-label-secondary,#8b9099)}
 .sf-wizard .sf-source-action{flex:none;height:28px;padding:0 9px;border:1px solid #8884;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}

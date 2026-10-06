@@ -1195,7 +1195,11 @@ export class ScholarFlowRemote extends TypertRemoteService {
   @Remote('creation.materials')
   async creationMaterials(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.scan(request, signal) }) }
   @Remote('creation.suggest')
-  async creationSuggest(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.suggest(request, signal) }) }
+  async creationSuggest(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.suggest(request, this.requireOperator(), signal)) }
+  @Remote('sources.pickExternal')
+  async sourcesPickExternal(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.pickExternal(request, this.requireOperator(), signal)) }
+  @Remote('sources.externalStatus')
+  async sourcesExternalStatus(request: unknown) { return applicationResult(async () => this.writingController.externalStatus(request, this.requireOperator())) }
   @Remote('creation.prepare')
   async creationPrepare(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.prepare(request, this.requireOperator(), signal, this.projectDefaults())) }
   @Remote('creation.start')
