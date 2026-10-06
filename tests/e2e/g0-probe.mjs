@@ -139,6 +139,25 @@ try {
     }
   }
 
+  // Items 2-5, rendered: open the ScholarFlow session in the real client and assert that
+  // each surface actually appears. Presence, not aesthetics — the review matrix still needs
+  // a person.
+  if (sessionId) {
+    await page.locator('[data-row-key="session:' + sessionId + '"]').click().catch(() => undefined)
+    await page.waitForTimeout(1500)
+    const wizard = page.locator('[aria-label="创建论文向导"]')
+    const rendered = await wizard.count()
+    record('AT-30/31 引导已渲染', rendered === 1 ? 'PASS' : 'FAIL', '向导容器数量=' + rendered)
+    if (rendered) {
+      const steps = await wizard.locator('.sf-wizard-steps button').count()
+      record('AT-31 三步导航', steps === 3 ? 'PASS' : 'FAIL', '步骤按钮=' + steps)
+      const sources = await wizard.locator('.sf-source-list, .sf-field-hint').count()
+      record('AT-31 要求来源区', sources > 0 ? 'PASS' : 'FAIL', '来源相关元素=' + sources)
+      const compact = await wizard.locator('.sf-wizard-step-compact').count()
+      record('AT-31 窄屏步骤行存在（宽屏隐藏）', compact === 1 ? 'PASS' : 'FAIL', '紧凑步骤元素=' + compact)
+    }
+  }
+
   // AT-36 (user acceptance 7 and 8) — a user preset outlives project work and is
   // reachable from another project. No model call, no paid usage.
   if (sessionId) {

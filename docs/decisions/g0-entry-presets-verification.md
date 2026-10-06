@@ -210,5 +210,17 @@ check on it is wrong.
 
 The interface-level confirmation (clicking both entries) still needs the real Desktop.
 
+**Rendered-UI presence — attempted, not established.** A further probe step tried to open the
+ScholarFlow session in the real client and assert that the wizard container, its three-step
+nav and the requirement-source area actually render. It could not navigate: a session created
+over RPC does not appear in the sidebar until the client refreshes, so the row click found
+nothing and the wizard container count was 0. That is a probe limitation, not a product
+finding.
+
+The interface-level confirmation of items 2-5 therefore stays with the real Desktop, where a
+person opens the session normally. The substance that can be checked without a person is
+already recorded above: V6a/V6b for the session behaviour, AT-29 for the shared settings
+document, AT-36 for preset reuse and library isolation.
+
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.
