@@ -168,6 +168,9 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     cover: { enabled: false, title: '', fields: [], date: '' } }
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') } catch { return null } })
   const [spec, setSpec] = useState<CreationSpec>(() => saved?.spec ? restoreCreationDraft(saved.spec) : initial), [step, setStep] = useState(saved?.step ?? 0)
+  // The direction the user actually moved in, so going back does not look like going forward.
+  const [direction, setDirection] = useState<1 | -1>(1)
+  const goToStep = (next: number) => { setDirection(next >= step ? 1 : -1); setStep(next) }
   const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [conflict, setConflict] = useState(false)
   const [scanning, setScanning] = useState(false), [truncated, setTruncated] = useState(false)
   const [materialQuery, setMaterialQuery] = useState('')
@@ -494,7 +497,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       <button className="sf-wizard-clear" disabled={busy} onClick={clearDraft}>清除草稿</button></header>
     <p className="sf-wizard-step-compact" aria-current="step">第 {step + 1} 步 / 共 3 步 · {["写作要求", "资料范围", "行文结构"][step]}</p>
     <nav className="sf-wizard-steps" aria-label="创建步骤">{['写作要求', '资料范围', '行文结构'].map((title, index) => <button key={title} disabled={busy || index > step} aria-current={step === index ? 'step' : undefined}
-      onClick={() => setStep(index)}><span>{index + 1}</span>{title}</button>)}</nav>
+      onClick={() => goToStep(index)}><span>{index + 1}</span>{title}</button>)}</nav>
     <div className="sf-wizard-page" key={step}>
       {step === 0 && <>
         <label>论文标题<input id="sf-field-title" placeholder="可以先留空，由写作要求生成" value={spec.title} maxLength={300} onChange={e => update({ title: e.target.value })} /></label>
@@ -619,7 +622,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     </div>
     {error && <p className="sf-wizard-error" role="alert">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}
     {issues.length > 0 && <ul className="sf-wizard-issues" role="alert">{issues.map(issue => <li key={issue}>{issue}</li>)}</ul>}
-    <footer className="sf-wizard-footer">{step > 0 && <button disabled={busy} onClick={() => setStep(step - 1)}>← 上一步</button>}<span />
+    <footer className="sf-wizard-footer">{step > 0 && <button disabled={busy} onClick={() => goToStep(step - 1)}>← 上一步</button>}<span />
       {step < 2 ? <button className="sf-primary" disabled={busy} onClick={() => {
         // The control stays reachable: a greyed-out button tells the user nothing
         // (design 02 §9). Clicking reports what is missing and focuses the first field.
@@ -627,7 +630,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           setIssues(['请填写写作要求，或添加至少一个要求来源。'])
           document.getElementById('sf-field-requirements')?.focus(); return
         }
-        setStep(step + 1) }}>下一步 →</button>
+        goToStep(step + 1) }}>下一步 →</button>
         : <button className="sf-primary" disabled={busy} onClick={() => {
           const empty = spec.sections.findIndex(section => !section.title.trim() || section.targetLength < 50)
           const blockers = [
