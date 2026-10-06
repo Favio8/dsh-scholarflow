@@ -87,6 +87,7 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && node --test tests/unit/*.test.* tests/contracts/*.test.* tests/integration/*.test.* tests/fault-injection/*.test.*",
     "render:surfaces": "node scripts/render-surfaces.mjs",
+    "acceptance:ui": "node tests/e2e/ui-acceptance.mjs",
     "prepack": "pnpm build"
   }
 }
