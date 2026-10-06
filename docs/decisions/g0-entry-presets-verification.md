@@ -178,5 +178,20 @@ the LaTeX specials and keeping non-ASCII text as UTF-8. The same title now arriv
 The check covers it: the two citations carry Chinese titles, both must arrive complete with
 the underscore escaped and no trailing space, in citation order.
 
+**AT-36 (user acceptance 7 and 8) — verified in the isolated host, no model call:** the probe
+saves the current structure as a user preset, then writes to the project and re-hashes.
+
+| Check | Result |
+|---|---|
+| The preset lands in `<DSH_HOME>/scholarflow/presets/user/user-<32 hex>.json` | **PASS** |
+| A project write leaves that file **byte-identical** (same SHA-256) | **PASS** |
+| From a second workspace and session the library lists 13 entries (12 built-ins plus the saved one) | **PASS** |
+
+This is the first evidence for two of the eight acceptance items: a user preset is reusable
+across projects, and editing a paper never writes to the global library.
+
+One API detail the probe surfaced: a Remote with no arguments still needs an explicit
+`request` object, because the handler parses it strictly.
+
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.

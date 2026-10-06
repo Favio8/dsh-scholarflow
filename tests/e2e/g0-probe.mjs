@@ -3,6 +3,8 @@
 import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
 import { mkdir, writeFile, symlink, readdir, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { resolve, join } from 'node:path'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
@@ -69,7 +71,7 @@ try {
   // V6a — selecting the mode creates a conversation but no project files.
   const workspace = await rpc('workspace/create', { request: { path: workspaceRoot } })
   const workspaceId = workspace.body?.result?.value?.workspace?.workspaceId
-  let sessionId
+  let sessionId, context, projectId
   if (!workspaceId) record('V6a 工作区注册', 'FAIL', JSON.stringify(workspace.body).slice(0, 200))
   else {
     const before = (await readdir(workspaceRoot)).sort()
@@ -92,7 +94,7 @@ try {
   // V5 — build a real project through the public RPCs, then produce all three exports and
   // inspect what the installed host actually wrote.
   if (workspaceId) {
-    const context = { requestId: 'req_TEST_ONLY', workspaceId, sessionId }
+    context = { requestId: 'req_TEST_ONLY', workspaceId, sessionId }
     const prepared = await rpc('scholarflow.v1/project.prepareInit', { request: { context, input: { title: 'TEST_ONLY 导出检查', type: 'course-paper' } } })
     const plan = payload(prepared.body)
     if (!plan?.planId) record('V5 项目预检', 'FAIL', JSON.stringify(prepared.body).slice(0, 200))
@@ -101,7 +103,7 @@ try {
       const created = payload(initialized.body)
       record('V5 项目创建', initialized.status === 200 && created?.initialized !== false ? 'PASS' : 'FAIL',
         `initialized=${created?.initialized} projectId=${created?.binding?.projectId ?? created?.ledger?.projectId ?? '?'}`)
-      const projectId = created?.binding?.projectId ?? created?.ledger?.projectId
+      projectId = created?.binding?.projectId ?? created?.ledger?.projectId
       const inspected = payload((await rpc('scholarflow.v1/project.inspect', { request: { context: { ...context, projectId } } })).body)
       const projectContext = { ...context, projectId, expectedLedgerRevision: inspected?.ledger?.revision }
       for (const format of ['markdown', 'latex', 'docx']) {
@@ -134,6 +136,33 @@ try {
         record('V5 Word 真实字节', bytes.subarray(0, 2).toString('latin1') === 'PK' ? 'PASS' : 'FAIL', `前两字节=${bytes.subarray(0, 2).toString('latin1')} 大小=${bytes.length}`) }
       else record('V5 Word 真实字节', 'FAIL', '未找到交付的 .docx')
       record('V5 交付文件清单', found.length ? 'PASS' : 'FAIL', found.map(path => path.replace(workspaceRoot, '')).join(' | ').slice(0, 300))
+    }
+  }
+
+  // AT-36 (user acceptance 7 and 8) — a user preset outlives project work and is
+  // reachable from another project. No model call, no paid usage.
+  if (sessionId) {
+    const structure = { title: 'TEST_ONLY 我的结构', summary: '按当前论文结构保存', paperType: 'course-paper',
+      sections: [{ key: 'k-intro', title: '引言', focus: '开头', targetLength: 800 },
+        { key: 'k-body', title: '正文', focus: '主体', targetLength: 3200 }] }
+    const saved = payload((await rpc('scholarflow.v1/presets.save', { request: structure })).body)
+    const presetFile = saved?.id ? join(testHome, 'scholarflow', 'presets', 'user', saved.id + '.json') : undefined
+    const digestOf = async () => createHash('sha256').update(await readFile(presetFile)).digest('hex')
+    const before = presetFile && existsSync(presetFile) ? await digestOf() : undefined
+    record('AT-36a 用户预设落盘', before ? 'PASS' : 'FAIL', (saved?.id ?? '未保存') + ' → ' + String(presetFile).replace(testHome, '<DSH_HOME>'))
+    if (before) {
+      // A project write is the closest thing to "editing the paper" this probe can do.
+      await rpc('scholarflow.v1/document.saveManual', { request: { context: { ...context, projectId }, text: 'TEST_ONLY 改写后的正文。' } })
+      const after = await digestOf()
+      record('AT-36b 项目改动不改全局库', before === after ? 'PASS' : 'FAIL', '预设文件哈希前后一致=' + (before === after))
+      const otherRoot = join(testHome, '另一个工作区 TEST_ONLY')
+      await mkdir(otherRoot, { recursive: true })
+      const other = payload((await rpc('workspace/create', { request: { path: otherRoot } })).body)
+      const otherId = other?.workspace?.workspaceId
+      if (otherId) await rpc('session/create', { request: { workspaceId: otherId, agentPreset: 'scholarflow' } })
+      const list = payload((await rpc('scholarflow.v1/presets.list', { request: {} })).body)
+      const all = list?.all ?? []
+      record('AT-36c 另一个项目可见', all.some(row => row.id === saved.id) ? 'PASS' : 'FAIL', '库中共 ' + all.length + ' 条，含内置与用户预设')
     }
   }
 
