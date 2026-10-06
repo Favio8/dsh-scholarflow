@@ -146,7 +146,8 @@ export class WritingController {
     const services = this.readServices(io, operator, input.context.sessionId, input.provider)
     const readId = newId('read')
     this.reads.start({ readId, owner: operator, session: input.context.sessionId,
-      run: (jobSignal, onUpdate) => runRead({ readId, projectId, sessionId: input.context.sessionId, sources, services, signal: jobSignal, onUpdate }) })
+      run: (jobSignal, onUpdate) => runRead({ readId, projectId, sessionId: input.context.sessionId, sources, services,
+        signal: jobSignal, onUpdate, memberTimeoutMs: 150000 }) })
     return { readId }
   }
   /** Polling reads the live snapshot; nothing is invented while a member is still running. */

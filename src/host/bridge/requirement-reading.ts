@@ -23,7 +23,9 @@ export type ReadServices = {
 }
 
 export type ReadRun = { readId: string; projectId: string; sessionId: string; sources: RequirementSource[]
-  services: ReadServices; signal: AbortSignal; onUpdate?: (read: RequirementRead) => void; now?: () => number }
+  services: ReadServices; signal: AbortSignal; onUpdate?: (read: RequirementRead) => void; now?: () => number
+  /** A single member may not hold the whole job forever (SF-048/SF-057). */
+  memberTimeoutMs?: number }
 
 /**
  * Runs one read to completion. An individual failure never aborts the batch: the point is to
@@ -44,10 +46,19 @@ export async function runRead(input: ReadRun): Promise<RequirementRead> {
     read = settleMember(read, member.name, { state: 'reading' }, iso())
     input.onUpdate?.(read)
     try {
-      read = settleMember(read, member.name, await readOneMember(member, sourceOf(member), input.services, input.signal), iso())
+      // One member gets its own bound: a provider that never answers, or a file the host
+      // cannot hand over, must become a reported failure instead of silently stopping the
+      // whole read. The bound is on the read, not on how many calls it took.
+      const bounded = input.memberTimeoutMs
+        ? AbortSignal.any([input.signal, AbortSignal.timeout(input.memberTimeoutMs)]) : input.signal
+      read = settleMember(read, member.name, await readOneMember(member, sourceOf(member), input.services, bounded), iso())
     } catch (error) {
-      if (input.signal.aborted || (error as Error)?.name === 'AbortError') return stop()
-      read = settleMember(read, member.name, failureFor(member, error), iso())
+      if (input.signal.aborted) return stop()
+      const timedOut = (error as Error)?.name === 'TimeoutError'
+      read = settleMember(read, member.name, timedOut
+        ? { ...failureNote({ kind: 'read', name: member.name,
+            reason: `这一步超过 ${Math.round((input.memberTimeoutMs ?? 0) / 1000)} 秒没有响应` }) }
+        : failureFor(member, error), iso())
     }
     read.elapsedMs = clock() - started
     input.onUpdate?.(read)
