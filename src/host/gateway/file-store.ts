@@ -25,14 +25,14 @@ export class HostFileStore implements FileStore {
   private signal: AbortSignal
   private insideLock = false
   constructor(ctx: Host, binding: GatewayBinding, signal: AbortSignal) { this.ctx = ctx; this.binding = binding; this.signal = signal }
-  private async target(path: string, write = false) {
+  private async target(path: string, write = false, signal: AbortSignal = this.signal) {
     if (path !== '') relativePath.parse(path)
     if (write) invariant(path.startsWith('.scholarflow/') || path.startsWith(this.binding.manuscriptDir + '/'), 'PATH_OUTSIDE_ALLOWED_ROOT', '写入范围必须是项目专属目录。')
-    this.signal.throwIfAborted()
+    signal.throwIfAborted()
     const fs = this.ctx.fs
-    const root = await fs.resolve(this.binding.canonicalRoot, { signal: this.signal })
+    const root = await fs.resolve(this.binding.canonicalRoot, { signal })
     invariant(fs.processPath(root) === this.binding.canonicalRoot, 'SESSION_BINDING_CHANGED', '工作区的真实路径已改变。')
-    const target = await fs.resolve(join(this.binding.canonicalRoot, path), { signal: this.signal })
+    const target = await fs.resolve(join(this.binding.canonicalRoot, path), { signal })
     invariant(fs.contains(root, target), 'PATH_OUTSIDE_ALLOWED_ROOT', '符号链接或路径超出当前项目。')
     if (write) {
       // Canonical path must be inside the OWNED subdirectory as well as the root.
@@ -54,7 +54,10 @@ export class HostFileStore implements FileStore {
     invariant(before.version === after?.version, 'STALE_DOCUMENT_VERSION', '读取期间文件发生变化，请重试。')
     return { text, version: after.version }
   }
-  async readBytes(path: string, maxBytes: number) {
+  async readBytes(path: string, maxBytes: number, signal: AbortSignal = this.signal) {
+    // Every await in this read uses the caller's signal, so a caller-owned bound stops the
+    // file read itself instead of waiting for a step that can never finish.
+    signal.throwIfAborted()
     if (path.startsWith('.scholarflow/cache/writing-assets/') && path.endsWith('.json')) {
       const asset = await this.read(path)
       invariant(asset, 'MATERIAL_CACHE_MISSING', '公开全文缓存缺失，请重新获取。')
@@ -62,13 +65,13 @@ export class HostFileStore implements FileStore {
       invariant(bytes.byteLength <= maxBytes, 'CONTENT_TOO_LARGE', '公开全文超过读取限额。')
       return bytes
     }
-    const target = await this.target(path)
+    const target = await this.target(path, false, signal)
     const canonical = relative(this.binding.canonicalRoot, this.ctx.fs.processPath(target)).split(sep).join('/')
     invariant(!sensitivePath(canonical) && !canonical.startsWith('.scholarflow/') && !canonical.startsWith(this.binding.manuscriptDir + '/'), 'MATERIAL_ACCESS_DENIED', '资料链接不能指向凭据、项目元数据或输出稿件。')
-    const before = await this.ctx.fs.stat(target, this.signal)
+    const before = await this.ctx.fs.stat(target, signal)
     invariant(before?.type === 'file', 'FILE_NOT_REGULAR', '需要普通资料文件。')
-    const bytes = await this.ctx.fs.readBytes(target, this.signal, maxBytes)
-    invariant(before.version === (await this.ctx.fs.stat(target, this.signal))?.version, 'STALE_MATERIAL_VERSION', '读取期间原始资料发生变化。')
+    const bytes = await this.ctx.fs.readBytes(target, signal, maxBytes)
+    invariant(before.version === (await this.ctx.fs.stat(target, signal))?.version, 'STALE_MATERIAL_VERSION', '读取期间原始资料发生变化。')
     return bytes
   }
   private async resourceTarget(path: string) {

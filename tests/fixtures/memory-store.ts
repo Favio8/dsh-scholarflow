@@ -9,7 +9,8 @@ export class MemoryStore implements FileStore {
     for (const [path, text] of Object.entries(initial)) this.files.set(path, { text, version: `initial-${path}` })
   }
   async read(path: string) { const image = this.files.get(path); return image && { ...image } }
-  async readBytes(path: string, maxBytes: number) {
+  async readBytes(path: string, maxBytes: number, signal?: AbortSignal) {
+    signal?.throwIfAborted()
     const image = this.files.get(path)
     if (!image) throw new ScholarError('FILE_NOT_FOUND', 'TEST_ONLY missing file')
     const bytes = new TextEncoder().encode(image.text)

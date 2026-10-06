@@ -103,7 +103,7 @@ export class WritingController {
     let bytes: Uint8Array
     if (source.origin === 'workspace') {
       invariant(source.kind === 'file' && source.path && !sensitivePath(source.path), 'EXTERNAL_SOURCE_INVALID', '这个来源不能作为图片读取。')
-      bytes = await io.readBytes(source.path, 20 * 1024 * 1024)
+      bytes = await io.readBytes(source.path, 20 * 1024 * 1024, signal)
     } else {
       const granted = source.handle ? this.external.resolve(source.handle, operator) : undefined
       invariant(granted, 'EXTERNAL_SOURCE_RECONNECT', '外部来源需要重新连接后才能读取。')
@@ -309,7 +309,7 @@ export class WritingController {
   /** Bytes, parsing and image transcription for one read job. */
   private readServices(io: FileStore, operator: string, sessionId: string, provider?: string): ReadServices {
     return {
-      readWorkspace: (path, signal) => io.readBytes(path, READ_BYTES_LIMIT),
+      readWorkspace: (path, signal) => io.readBytes(path, READ_BYTES_LIMIT, signal),
       readExternal: async (source, name, signal) => {
         const granted = source.handle ? this.external.resolve(source.handle, operator) : undefined
         invariant(granted, 'EXTERNAL_SOURCE_RECONNECT', '外部来源需要重新连接后才能读取。')
@@ -377,7 +377,7 @@ export class WritingController {
       }
       for (const path of source.kind === 'folder' ? source.members.map(member => member.name) : [source.path!]) {
         if (sensitivePath(path)) { assignments.push({ path, note: '敏感文件不读取。' }); continue }
-        try { assignments.push({ path, content: await parseMaterialBytes(await io.readBytes(path, 50 * 1024 * 1024), mediaType(path), signal, undefined, true) }) }
+        try { assignments.push({ path, content: await parseMaterialBytes(await io.readBytes(path, 50 * 1024 * 1024, signal), mediaType(path), signal, undefined, true) }) }
         catch (error) { assignments.push({ path, note: `本次无法读取：${(error as Error).message}` }) }
       }
     }

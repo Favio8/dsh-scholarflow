@@ -46,24 +46,45 @@ export async function runRead(input: ReadRun): Promise<RequirementRead> {
     read = settleMember(read, member.name, { state: 'reading' }, iso())
     input.onUpdate?.(read)
     try {
-      // One member gets its own bound: a provider that never answers, or a file the host
-      // cannot hand over, must become a reported failure instead of silently stopping the
-      // whole read. The bound is on the read, not on how many calls it took.
-      const bounded = input.memberTimeoutMs
-        ? AbortSignal.any([input.signal, AbortSignal.timeout(input.memberTimeoutMs)]) : input.signal
-      read = settleMember(read, member.name, await readOneMember(member, sourceOf(member), input.services, bounded), iso())
+      // One member gets its own bound. It has to be a race, not only an abort signal: the
+      // bound must hold even when the step inside does not observe cancellation (a host call
+      // that never settles), otherwise one member can stop the whole job forever and the UI
+      // is left showing a phase that will never change.
+      read = settleMember(read, member.name, await withBound(
+        signal => readOneMember(member, sourceOf(member), input.services, signal),
+        input.signal, input.memberTimeoutMs), iso())
     } catch (error) {
       if (input.signal.aborted) return stop()
       const timedOut = (error as Error)?.name === 'TimeoutError'
       read = settleMember(read, member.name, timedOut
-        ? { ...failureNote({ kind: 'read', name: member.name,
+        ? { state: 'failed', ...failureNote({ kind: 'read', name: member.name,
             reason: `这一步超过 ${Math.round((input.memberTimeoutMs ?? 0) / 1000)} 秒没有响应` }) }
-        : failureFor(member, error), iso())
+        : { state: 'failed', ...failureFor(member, error) }, iso())
     }
     read.elapsedMs = clock() - started
     input.onUpdate?.(read)
   }
   return finishRead({ ...read, elapsedMs: clock() - started }, 'ready', iso())
+}
+
+export /**
+ * Runs one bounded step. The inner controller is aborted on timeout so a cooperating
+ * operation stops too, and the race settles regardless, so a step that ignores cancellation
+ * still cannot hold the job.
+ */
+async function withBound<T>(run: (signal: AbortSignal) => Promise<T>, outer: AbortSignal, timeoutMs?: number): Promise<T> {
+  if (!timeoutMs) return run(outer)
+  const controller = new AbortController()
+  const signal = AbortSignal.any([outer, controller.signal])
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const guard = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort('member-timeout')
+      reject(Object.assign(new Error('member timed out'), { name: 'TimeoutError' }))
+    }, timeoutMs)
+  })
+  try { return await Promise.race([run(signal), guard]) }
+  finally { clearTimeout(timer) }
 }
 
 export async function readOneMember(member: RequirementReadMember, source: RequirementSource, services: ReadServices, signal: AbortSignal) {
@@ -125,7 +146,10 @@ type Job = { controller: AbortController; promise: Promise<RequirementRead>; rea
  */
 export class ReadingJobs {
   private jobs = new Map<string, Job>()
-  constructor(private limit = 8) {}
+  private limit: number
+  // Written out rather than a parameter property: the test runner loads this module with
+  // type stripping, which does not support that syntax.
+  constructor(limit = 8) { this.limit = limit }
 
   start(input: { readId: string; owner: string; session: string; run: (signal: AbortSignal, onUpdate: (read: RequirementRead) => void) => Promise<RequirementRead> }) {
     this.prune()
