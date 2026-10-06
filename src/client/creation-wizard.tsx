@@ -184,7 +184,14 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     <div className="sf-wizard-page" key={step}>
       {step === 0 && <>
         <label>论文标题<input placeholder="可以先留空，由写作要求生成" value={spec.title} maxLength={300} onChange={e => update({ title: e.target.value })} /></label>
-        <div className="sf-wizard-row"><label>论文类型<select value={spec.type} onChange={e => { const type = e.target.value as CreationSpec['type']; update({ type, sections: presetSections(type, spec.targetLength) }) }}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <div className="sf-wizard-row"><label>论文类型<select value={spec.type} onChange={e => { const type = e.target.value as CreationSpec['type']
+          if (type === spec.type) return
+          // Switching the type replaces the structure, so an edited one asks first and can
+          // still be undone (design 02 §3). The old preset reference no longer applies.
+          const edited = history.length > 0 || spec.preset?.modified === true
+          if (edited && !window.confirm(`切换为「${TYPE_LABELS[type]}」会按该类型的预设替换当前 ${spec.sections.length} 章结构，可用「撤销结构编辑」还原。继续？`)) return
+          setHistory(rows => [...rows.slice(-9), spec.sections])
+          update({ type, sections: presetSections(type, spec.targetLength), preset: undefined }) }}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label>语言<select value={spec.language} onChange={e => update({ language: e.target.value as CreationSpec['language'] })}><option value="zh-CN">中文</option><option value="en">English</option></select></label>
           <label>提交格式<select value={spec.format} onChange={e => update({ format: e.target.value as CreationSpec['format'] })}>{Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
         <div className="sf-field"><span className="sf-field-label">引用样式</span>
@@ -303,7 +310,7 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard p,.sf-muted{color:var(--dsw-alias-label-secondary,#727780);line-height:1.65}
 .sf-wizard-eyebrow{font-size:12px;color:#888}
 .sf-wizard label,.sf-wizard .sf-assignment-field{display:flex;flex-direction:column;gap:8px;font-size:13px;margin:16px 0 0}
-.sf-wizard input:not([type=checkbox]),.sf-wizard select{height:38px;width:100%;padding:0 10px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit}
+.sf-wizard input:not([type=checkbox]),.sf-wizard select{height:40px;width:100%;padding:0 10px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit}
 .sf-wizard textarea{font-size:14px;line-height:1.7}
 .sf-field-hint{margin:6px 0 0;font-size:12px;line-height:1.55;color:#8b9099}
 .sf-wizard-steps{display:flex;gap:20px;padding:22px 0;border-bottom:1px solid #8882;margin-bottom:20px}
@@ -315,9 +322,9 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:16px}
 .sf-wizard .sf-assignment-row{display:flex;align-items:flex-end;gap:12px}
 .sf-wizard .sf-assignment-row>.sf-assignment-field{flex:1 1 auto;min-width:0}
-.sf-wizard .sf-assignment-row>.sf-assignment-extract{flex:none;height:38px}
+.sf-wizard .sf-assignment-row>.sf-assignment-extract{flex:none;height:40px}
 .sf-wizard .sf-picker{position:relative}
-.sf-wizard .sf-picker-toggle{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 10px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.sf-wizard .sf-picker-toggle{display:flex;align-items:center;gap:10px;width:100%;height:40px;padding:0 10px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;text-align:left;cursor:pointer}
 .sf-wizard .sf-picker-current{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;line-height:1.3}
 .sf-wizard .sf-picker-current strong{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sf-wizard .sf-picker-current small{font-size:11px;color:#8b9099;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -365,7 +372,7 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 /* Requirement sources, format choice and the merged material list (Phase 3). */
 .sf-wizard .sf-field{display:flex;flex-direction:column;gap:8px;margin:16px 0 0}
 .sf-wizard .sf-field-label{font-size:12.5px;font-weight:500;color:var(--dsw-alias-label-secondary,#727780)}
-.sf-wizard .sf-choice-current{margin:0;height:38px;display:flex;align-items:center;padding:0 10px;border:1px solid #8884;border-radius:7px;background:#8881;color:inherit;font-size:14px}
+.sf-wizard .sf-choice-current{margin:0;height:40px;display:flex;align-items:center;padding:0 10px;border:1px solid #8884;border-radius:7px;background:#8881;color:inherit;font-size:14px}
 .sf-wizard .sf-source-list{list-style:none;margin:0;padding:0;border:1px solid #8882;border-radius:9px;overflow:hidden}
 .sf-wizard .sf-source-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid #8881}
 .sf-wizard .sf-source-row:last-child{border-bottom:0}
