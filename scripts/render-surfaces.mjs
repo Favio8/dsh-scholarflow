@@ -243,5 +243,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const problem of problems) console.error(`  ${problem}`)
     process.exit(1)
   }
-  console.log(`\n${results.length} 张截图写入 ${outDir}（同实现的 CSS 与结构，未接宿主；界面验收仍需在真实 Desktop 执行）`)
+  console.log(`\n${results.length} 张截图写入 ${outDir}（同实现的 CSS 与结构，未接宿主）`)
+  console.log('行为验收由 pnpm acceptance:ui 驱动真实客户端完成；这里只覆盖渲染本身。')
 }
