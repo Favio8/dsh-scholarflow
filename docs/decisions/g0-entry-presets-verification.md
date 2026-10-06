@@ -193,23 +193,22 @@ across projects, and editing a paper never writes to the global library.
 One API detail the probe surfaced: a Remote with no arguments still needs an explicit
 `request` object, because the handler parses it strictly.
 
-**AT-29 substance — still not established, but the probe now knows the shape.** The intent was
-to prove that one settings document serves both surfaces by writing through
-`settings/update` and reading the change back through the plugin's diagnostics RPC. What the
-probe established about that RPC along the way:
+**AT-29 substance (user acceptance 1) — verified in the isolated host:** the probe writes
+`defaultProjectType` through the host's `settings/update` and reads it back through the
+plugin's diagnostics RPC. The value changed and the read-back showed the new one, so the
+global settings section and the top entry genuinely share one document rather than holding
+two configurations.
 
-- it takes **no arguments**; sending an unexpected `request` field is refused with
-  `gateway/arguments-invalid`, unlike the `presets.*` methods which require one;
-- it answers **without** the `applicationResult` wrapper, so the row sits at
-  `result.value.settings[0]`;
-- that row carries `ns, revision, value, base, user, schema, applies, secrets`, which is
-  exactly what the settings write needs.
+Getting there established how these two host RPCs differ from the plugin's own, which is
+worth keeping: **`diagnostics` takes no arguments at all** and answers without the
+`applicationResult` wrapper (the row sits at `result.value.settings[0]`), and
+**`settings/update` takes `ns`, `patch` and `expectedRevision` at the top level of the
+arguments**, not inside a `request`. Passing a `request` wrapper is refused with
+`gateway/arguments-invalid`. The settings row carries `ns, revision, value, base, user,
+schema, applies, secrets`; note that `revision` is `0` on a fresh profile, so a truthiness
+check on it is wrong.
 
-The check still reports not-established because of how the probe itself is constructed, not
-because of the product: a later revision of `tests/e2e/g0-probe.mjs` should read
-`result.value.settings[0]`, write with its `revision`, and read the value back. The
-code-level evidence stands independently: both surfaces render the same component and call
-the same `settings/update` with the same namespace and revision.
+The interface-level confirmation (clicking both entries) still needs the real Desktop.
 
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.

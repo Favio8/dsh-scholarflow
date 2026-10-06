@@ -166,20 +166,18 @@ try {
     }
   }
 
-  // AT-29 (user acceptance 1), substance only: both surfaces edit one settings document.
-  // The UI-level check still needs a person; this proves there is no second configuration.
-  // This Remote takes no arguments at all; sending an unexpected request field is refused.
-  // This Remote takes no arguments and answers without the applicationResult wrapper.
+  // AT-29 (user acceptance 1), substance: one settings document serves both surfaces.
+  // The diagnostics Remote takes no arguments and answers without the applicationResult
+  // wrapper, so the row sits at result.value.settings[0] with ns, revision and value.
   const readSettings = async () => ((await rpc('scholarflow.v1/diagnostics', {})).body?.result?.value?.settings ?? [])[0]
   const row = await readSettings()
-  console.log('设置行字段:', row ? Object.keys(row).join(', ') : '无')
-  if (!row?.revision) record('AT-29 设置同源', 'NOT ESTABLISHED', '探针未能读到设置行的形状（诊断响应与假设不同）；代码层证据是两个入口都调用同一个 settings/update，界面确认仍需真机')
+  if (typeof row?.revision !== 'number') record('AT-29 设置同源', 'NOT ESTABLISHED', '未读到设置行：' + String(JSON.stringify(row)).slice(0, 120))
   else {
     const wanted = row.value?.defaultProjectType === 'research-paper' ? 'course-paper' : 'research-paper'
-    const changed = payload((await rpc('settings/update', { request: { ns: 'scholarflow', patch: { defaultProjectType: wanted }, expectedRevision: row.revision } })).body)
+    const written = payload((await rpc('settings/update', { ns: 'scholarflow', patch: { defaultProjectType: wanted }, expectedRevision: row.revision })).body)
     const after = await readSettings()
     record('AT-29 设置同源', after?.value?.defaultProjectType === wanted ? 'PASS' : 'FAIL',
-      '经 settings/update 写入 ' + wanted + ' 后 diagnostics 读回 ' + String(after?.value?.defaultProjectType) + '；ok=' + String(changed?.ok))
+      '经 settings/update 写入 ' + wanted + '，诊断读回 ' + String(after?.value?.defaultProjectType) + '；写入 ok=' + String(written?.ok))
   }
 
   // V3b — can the picker's browse backend reach a directory outside the workspace?
