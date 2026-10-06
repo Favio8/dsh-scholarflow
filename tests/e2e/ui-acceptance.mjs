@@ -326,12 +326,20 @@ try {
   record('AT-39 手工篇幅不被自动削减', manualKept && manualValues === '800' && secondManual === '1200' ? 'PASS' : 'FAIL',
     '章节=' + count + ' 目标降到 1500 后手工值=' + manualValues + '/' + secondManual + ' 差额说明=' + /差额|超出|计划合计/.test(lowered))
 
-  // ── AT-40 · the confirmation area states the seven things before creation ────────────────
-  const confirm = await wizard.locator('.sf-confirm').innerText()
-  const wanted = ['论文与结构', '资料', '输出', '外部处理', '预算', '能力缺口']
-  const missing = wanted.filter(label => !confirm.includes(label))
-  record('AT-40 创建前确认区逐项', missing.length === 0 ? 'PASS' : 'FAIL',
-    '缺失=' + JSON.stringify(missing) + ' 行数=' + wanted.length)
+  // ── AT-51/SF-053 · the big pre-creation block is gone; a short summary sits by the button ─
+  const visibleConfirm = await wizard.locator('.sf-confirm:visible').count()
+  record('AT-51 大块创建前确认区已移除', visibleConfirm === 0 ? 'PASS' : 'FAIL', '可见的 .sf-confirm=' + visibleConfirm)
+  const summary = await wizard.locator('.sf-create-summary').first().innerText()
+  // The summary shows the user-facing format label, not the machine value.
+  const deliverable = ['Word', '字', '要求来源', '参考材料', '输出', '联网'].every(token => summary.includes(token))
+  record('AT-51 短摘要可核对范围', deliverable ? 'PASS' : 'FAIL', summary.replace(/\s+/g, ' ').slice(0, 120))
+  await wizard.locator('.sf-create-summary details > summary').first().click()
+  await page.waitForTimeout(200)
+  const scope = await wizard.locator('.sf-create-summary details').first().innerText()
+  const scopeMissing = ['将读取', '将写入', '排版', '能力缺口'].filter(label => !scope.includes(label))
+  record('AT-51 展开后可见读取/写入范围与能力缺口', scopeMissing.length === 0 ? 'PASS' : 'FAIL', '缺失=' + JSON.stringify(scopeMissing))
+  record('AT-57 不再展示固定额度', /模型调用上限/.test(scope) ? 'FAIL' : 'PASS',
+    /模型调用上限/.test(scope) ? '仍显示调用上限' : '只说明次数与耗时为统计')
 
   // ── AT-41 · narrow widths do not scroll sideways; Escape closes and restores focus ───────
   const overflow = {}
