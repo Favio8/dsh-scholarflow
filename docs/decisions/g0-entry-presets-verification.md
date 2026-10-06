@@ -141,22 +141,24 @@ present, and that is where the external-source feature stays until it happens.
 workspace on this host, so reading an external source would have to go through whatever the
 OS chooser returns plus the host's own file service — neither has been exercised.
 
-**V5 (partially verified):** a project was created through the public RPCs
-(`project.prepareInit` then `project.initialize`) and all three exports ran through the
-installed host, each delivering into `manuscript/exports/delivery_*/`:
+**V5 (verified for Markdown and LaTeX; Word open):** `tests/integration/export-citation-order.test.ts`
+registers two sources, cites them in the reverse of their registration order, and delivers
+the project. Verified:
 
 | Check | Result |
 |---|---|
-| Word delivery | **PASS** — real OOXML bytes (`PK` header, 9717 bytes) |
-| LaTeX delivery | produced and uses `ctexart`; the numbered bibliography block is absent because the fixture has no citations, and the exporter emits it only when citations exist |
-| Markdown delivery | produced |
-| Three deliveries in one project | **PASS** — every plan is built on a freshly read ledger revision |
+| LaTeX declares `\bibliographystyle{unsrt}` and `\bibliography{references}` | **PASS** |
+| LaTeX emits real keys in the manuscript's citation order | **PASS** |
+| BibTeX entries follow the citation order, not the registration order | **PASS** |
+| Markdown keeps the machine keys in the same order | **PASS** |
+| Both deliveries carry the same manuscript bytes | **PASS** |
+| Word numbered list | **not covered** — `MemoryStore` has no create-only binary capability (`BINARY_EXPORT_UNAVAILABLE`); the installed-host run produced real OOXML bytes but for a citation-free manuscript |
 
-Two behaviours the probe itself surfaced, both correct rather than defects: a project
-context must carry `expectedLedgerRevision`, and each delivery advances the ledger, so the
-next plan needs a fresh read (`STALE_LEDGER_REVISION` otherwise).
-**Not yet exercised:** the numbered citation style itself, which needs a project with a
-registered source and a cited paragraph. That is the remaining part of V5.
+**Anomaly observed while checking, not yet explained:** the BibTeX entry keeps only the ASCII
+part of a Chinese source title — `TEST_ONLY 来源乙` becomes `TEST\textunderscore{}{ONLY} `, with
+the Chinese characters dropped and a trailing space left behind. Keys, order and the escaping
+of the underscore are correct; the title text is not. Recorded as a finding for the user to
+decide on, and asserted around rather than encoded as expected behaviour.
 
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.
