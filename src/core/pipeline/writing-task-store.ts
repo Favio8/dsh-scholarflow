@@ -5,10 +5,30 @@ import { snapshot, mutateLedger } from '../project/project.ts'
 import { parseDocument } from 'yaml'
 import { CONFIG_PATH } from '../project/project.ts'
 import { invariant } from '../../shared/errors.ts'
+import { classifyNote, handledIssue, mergeIssue, progressIssue } from './task-issues.ts'
 
 const POINTER = '.scholarflow/writing/current.json'
 export const taskPath = (taskId: string) => `.scholarflow/writing/tasks/${taskId}.json`
 export const specPath = '.scholarflow/writing/requirements.json'
+
+/**
+ * `notes` stays the raw audit trail the quality report reads; `issues` is the same event
+ * classified for the user (SPEC v1.2 §9). One call keeps the two from drifting apart.
+ */
+export function noteTask(task: WritingTask, text: string, at = new Date().toISOString()) {
+  task.notes.push(text)
+  task.issues = mergeIssue(task.issues, classifyNote(text, at))
+  return task
+}
+export function showProgress(task: WritingTask, input: { object: string; what: string; impact: string }) {
+  task.issues = mergeIssue(task.issues, progressIssue({ ...input, at: new Date().toISOString() }))
+  return task
+}
+export function markHandled(task: WritingTask, input: { object: string; what: string; impact: string }) {
+  task.issues = mergeIssue(task.issues, handledIssue({ ...input, at: new Date().toISOString() }))
+  return task
+}
+
 export async function readWritingSpec(io: FileStore) { const file = await io.read(specPath); return file ? creationSpec.parse(JSON.parse(file.text).spec) : undefined }
 export async function readWritingTask(io: FileStore, taskId?: string) {
   const pointer = await io.read(POINTER)
@@ -35,8 +55,8 @@ export async function createWritingTask(io: FileStore, spec: CreationSpec, sessi
   const time = new Date().toISOString()
   const state = writingTaskSchema.parse({ schemaVersion: 1, id: newId('writing'), projectId: current.ledger.projectId, sessionId, spec,
     status: 'queued', stage: 'materials', revision: 0, materialIndex: 0, sectionIndex: 0, usedModelCalls: 0,
-    modelCallAllowance: current.config.workflow.budget.maxModelCalls, usedSearchQueries: 0,
-    elapsedMs: 0, owner, expectedDocumentHash: current.document.contentHash, questions: [], notes: [], onlineSources: [], createdAt: time, updatedAt: time })
+    usedSearchQueries: 0, elapsedMs: 0, owner, expectedDocumentHash: current.document.contentHash,
+    questions: [], notes: [], issues: [], onlineSources: [], createdAt: time, updatedAt: time })
   await io.lock(async () => { await commit(io, [{ path: taskPath(state.id), before: undefined, after: json(state) },
     { path: POINTER, before: await io.read(POINTER), after: json({ taskId: state.id, projectId: state.projectId }) },
     { path: specPath, before: await io.read(specPath), after: json({ schemaVersion: 1, projectId: state.projectId, spec }) }]) })

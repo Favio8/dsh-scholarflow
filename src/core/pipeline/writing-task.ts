@@ -11,7 +11,8 @@ import { saveManual, applyProposal, proposalImage } from '../editing/proposals.t
 import { sectionTarget } from '../editing/sections.ts'
 import { runReview } from '../review/review.ts'
 import { invariant, ScholarError } from '../../shared/errors.ts'
-import { saveWritingTask, dirtyWritingBuffers, readWritingSpec } from './writing-task-store.ts'
+import { saveWritingTask, dirtyWritingBuffers, readWritingSpec, noteTask, showProgress, markHandled } from './writing-task-store.ts'
+import { classifyNote, mergeIssue } from './task-issues.ts'
 import type { ParsedMaterial } from '../../shared/materials.ts'
 
 export interface WritingServices {
@@ -39,7 +40,7 @@ async function locateEvidence(io: FileStore, task: WritingTask, model: WritingSe
     if (!source) source = (await registerSource(io, { title: material.projectRelativePath.split('/').at(-1)!, kind: material.role === 'paper' ? 'paper' : 'other',
       authors: [], identifiers: {}, materialId: material.id }, state.ledger.revision)).source
     const parsed = await readParsed(io, material.id)
-    if (parsed.coverage === 'partial') task.notes.push(material.projectRelativePath + '：资料含未读取或未核验部分，写作仅使用实际提取的文字。')
+    if (parsed.coverage === 'partial') noteTask(task, material.projectRelativePath + '：资料含未读取或未核验部分，写作仅使用实际提取的文字。')
     while (task.evidenceBlockIndex < parsed.blocks.length) {
       signal.throwIfAborted()
       if (pauseRequested()) { task.status = 'paused'; await saveWritingTask(io, task); return false }
@@ -109,8 +110,10 @@ async function prepareWritingOutline(io: FileStore, task: WritingTask, model: Wr
 export async function driveWritingTask(io: FileStore, task: WritingTask, services: WritingServices) {
   task.status = 'running'; await saveWritingTask(io, task)
   const start = Date.now(), initialElapsed = task.elapsedMs
+  // Counters are telemetry only (SPEC v1.2 §8): no call count, elapsed time or review round
+  // stops a task. What does stop it is repeated identical failure with nothing new produced.
+  const note = async (text: string) => { task.notes.push(text); task.issues = mergeIssue(task.issues, classifyNote(text, new Date().toISOString())); await saveWritingTask(io, task) }
   const model = async (system: string, data: unknown, runId: string) => {
-    if (task.usedModelCalls >= task.modelCallAllowance) throw new ScholarError('BUDGET_EXHAUSTED', '本轮调用额度已用完，已有内容已保留。')
     task.usedModelCalls++; task.elapsedMs = initialElapsed + Date.now() - start; await saveWritingTask(io, task)
     return services.model(system, data, runId)
   }
@@ -122,7 +125,6 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
       const sharedSpec = await readWritingSpec(io)
       if (sharedSpec) task.spec = sharedSpec
       if (services.pauseRequested()) { task.status = 'paused'; await checkpoint(); return }
-      if (Date.now() - start >= current.config.workflow.budget.maxDurationMinutes * 60000) throw new ScholarError('BUDGET_EXHAUSTED', '本轮写作时间已到，已有内容已保留。')
       if (task.stage === 'materials') {
         // Read the union of what the user authorised: requirement sources and reference
         // materials are independent, and a requirement file keeps its assignment role
@@ -137,7 +139,7 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
             const material = Object.values(state.ledger.materials).find(row => row.projectRelativePath === path) ??
               (await registerMaterial(io, { relativePath: path, role: requirementPaths.has(path) ? 'assignment' : /\.pdf$/i.test(path) ? 'paper' : 'notes', confirmExcludedFile: false }, state.ledger.revision)).material
             if (!['ready', 'partial'].includes(material.parseStatus)) await services.parse(material.id)
-          } catch (error) { if (services.signal.aborted) throw error; task.notes.push(`${path}：${(error as Error).message}`) }
+          } catch (error) { if (services.signal.aborted) throw error; noteTask(task, `${path}：${(error as Error).message}`) }
           task.materialIndex++; await checkpoint()
         }
         task.stage = task.spec.online ? 'research' : 'evidence'
@@ -151,7 +153,7 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
           services.signal.throwIfAborted()
           if (services.pauseRequested()) { task.status = 'paused'; await checkpoint(); return }
           try { task.onlineSources = [...new Set([...task.onlineSources, ...await services.search(task.searchQueries[task.searchQueryIndex])])] }
-          catch (error) { if (services.signal.aborted) throw error; task.notes.push('联网补充：' + (error as Error).message) }
+          catch (error) { if (services.signal.aborted) throw error; noteTask(task, '联网补充：' + (error as Error).message) }
           task.searchQueryIndex++; await checkpoint()
         }
         task.researchComplete = true; task.stage = 'evidence'
@@ -176,22 +178,21 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
           }
           const target = sectionTarget(current.document.text, current.ledger.outline, section.id)
           const existing = current.document.text.slice(target.startUtf16, target.endUtf16).trim()
-          if (existing && !existing.startsWith('[待补：')) { task.notes.push(`保留人工内容：${section.title}`); task.sectionIndex++; await checkpoint(); continue }
+          if (existing && !existing.startsWith('[待补：')) { noteTask(task, `保留人工内容：${section.title}`); task.sectionIndex++; await checkpoint(); continue }
           const claimIds = current.ledger.outline.sections.find(row => row.id === section.id)?.claimIds ?? []
           const hasEvidence = claimIds.some(id => current.ledger.claims[id]?.evidenceLinks.length)
           const gapQuestion = '“' + section.title + '”目前没有可用于正文的定位证据。如何继续？'
           if (!hasEvidence && !task.questions.some(row => (row.title === gapQuestion && row.answered === '保留待补并继续') || row.answered === '先创建结构草稿')) {
             await askWritingQuestion(io, task, gapQuestion, ['补充资料后继续', '保留待补并继续'], 'materials'); return
           }
-          if (!hasEvidence) task.notes.push(section.title + '：保留待补标记，未生成事实性正文。')
-          if (task.usedModelCalls >= task.modelCallAllowance) throw new ScholarError('BUDGET_EXHAUSTED', '本轮调用额度已用完。')
-          const instruction = `写作要求：${task.spec.requirements}\n本节：${section.title}，约 ${section.targetLength} ${task.spec.language === 'en' ? 'words' : '汉字'}。${section.purpose}\n已回答：${task.questions.filter(row => row.answered).map(row => row.title + '：' + row.answered).join('\n')}\n按段落组织内容，解释材料与论点的关系；只引用已给证据，不编造实验。`
+          if (!hasEvidence) await note(section.title + '：保留待补标记，未生成事实性正文。')
+          const instruction = `写作要求：${task.spec.requirements}\n本节：${section.title}，约 ${section.targetLength} ${task.spec.language === 'en' ? 'words' : '汉字'}。${section.purpose}\n已回答：${task.questions.filter(row => row.answered).map(row => row.title + '：' + row.answered).join('\n')}\n按段落组织内容，解释材料与论点的关系；只引用已给证据，不编造实验。分析他人论文的实验结果时，必须写成原作者报告的结果，不得要求读者补做自己的实验。`
           task.pendingProposalId = (await services.generate(section.id, instruction, task)).proposalId; await checkpoint()
         }
         const image = await proposalImage(io, task.pendingProposalId!)
         const live = await snapshot(io), state = live.ledger.proposalStates[image.proposal.id]
         if (state?.state === 'accepted') task.expectedDocumentHash = live.document.contentHash
-        else if (state?.state === 'rejected') task.notes.push(`未采纳生成内容：${section.title}`)
+        else if (state?.state === 'rejected') noteTask(task, `未采纳生成内容：${section.title}`)
         else {
           if (live.document.contentHash !== task.expectedDocumentHash || await dirtyWritingBuffers(io)) {
             await askWritingQuestion(io, task, '本节生成时出现人工编辑。建议已保留，请在正文检查并接受或放弃，再继续。', ['已处理，继续'], 'conflict'); return
@@ -206,18 +207,32 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
           const raw = await model('只返回 JSON {"issues":["具体问题与对应章节"],"summary":"简短检查结论"}。检查稿件是否符合写作要求、各章论述是否一致，识别缺失结果、矛盾、待补、篇幅和结构问题。不得自报已人工核验引用，不将未知视为通过。',
             { requirements: task.spec, manuscript: live.document.text, sources: Object.values(live.ledger.sources), answeredQuestions: task.questions }, task.id + '.review')
           const assessment = z.object({ issues: z.array(z.string().max(2000)).max(30), summary: z.string().max(2000) }).parse(JSON.parse(raw))
-          task.notes.push('AI 全文检查：' + assessment.summary, ...assessment.issues.map(issue => '待检查：' + issue))
+          noteTask(task, 'AI 全文检查：' + assessment.summary)
+          for (const issue of assessment.issues) noteTask(task, '待检查：' + issue)
           task.modelReviewComplete = true; await checkpoint()
         }
         await runReview(io, (await snapshot(io)).ledger.revision)
         task.stage = 'completed'
       }
+      task.consecutiveFailures = 0
       await checkpoint()
     }
     task.status = 'completed'; await checkpoint()
   } catch (error) {
     if (services.signal.aborted) { task.status = services.signal.reason === 'cancelled' ? 'cancelled' : 'interrupted'; await checkpoint(); return }
-    await askWritingQuestion(io, task, (error as Error).message, ['继续'], error instanceof ScholarError && error.code === 'BUDGET_EXHAUSTED' ? 'budget' : 'failure')
+    const message = (error as Error).message
+    // No fixed round or time cap decides this (SPEC v1.2 §8.3): the same failure twice with
+    // nothing new produced is what stops the run and asks a human to choose a direction.
+    const progressed = task.materialIndex + task.sectionIndex + task.onlineSources.length + task.evidenceBlockIndex
+    task.consecutiveFailures = task.consecutiveFailures + 1
+    showProgress(task, { object: '本次任务', what: `本次执行未完成：${message}`,
+      impact: `已产生的正文（${task.sectionIndex} 节）与证据都已保留，恢复后不会重复生成。` })
+    const stalled = task.consecutiveFailures >= 2 && progressed <= task.progressMark
+    task.progressMark = progressed
+    await checkpoint()
+    await askWritingQuestion(io, task,
+      stalled ? `同一问题已经连续出现 ${task.consecutiveFailures} 次，本次执行没有产生新内容：${message}。已保存的结果可以继续使用。` : message,
+      stalled ? ['重试', '调整输入后继续', '先结束本次任务'] : ['继续'], 'failure')
   }
 }
 

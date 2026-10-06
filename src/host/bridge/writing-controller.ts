@@ -10,7 +10,7 @@ import { parseRegisteredMaterial } from '../../core/materials/parse.ts'
 import { parseMaterialBytes } from '../parsers/parse.ts'
 import { selectedModel, callStageModel, callStageModelWithImage } from '../executor/model.ts'
 import { invariant } from '../../shared/errors.ts'
-import { createWritingTask, readWritingTask, readWritingSpec, saveWritingTask, saveWritingSpec, taskPath } from '../../core/pipeline/writing-task-store.ts'
+import { createWritingTask, readWritingTask, readWritingSpec, saveWritingTask, saveWritingSpec, taskPath, noteTask } from '../../core/pipeline/writing-task-store.ts'
 import { driveWritingTask, registerDownloadedText } from '../../core/pipeline/writing-task.ts'
 import { readRequirementSources } from '../../core/pipeline/spec-compat.ts'
 import { prepareGeneration, executeGeneration } from '../../core/pipeline/generation.ts'
@@ -216,8 +216,10 @@ export class WritingController {
         }
       }
       if (question.kind === 'requirements') task.spec.requirements += `\n补充确认：${question.title} ${input.answer}`
-      if (question.kind === 'budget') task.modelCallAllowance += (await snapshot(io)).config.workflow.budget.maxModelCalls
       if (question.kind === 'conflict') task.expectedDocumentHash = (await snapshot(io)).document.contentHash
+      // Answering a stalled run is the user's decision to continue: clear the stall counter
+      // instead of adding an allowance, which no longer exists (SPEC v1.2 §8.3).
+      task.consecutiveFailures = 0
       await saveWritingSpec(io, task.spec, (await snapshot(io)).ledger.revision)
     }
     if (input.action === 'resume') { const spec = await readWritingSpec(io); if (spec) task.spec = spec; await saveWritingSpec(io, task.spec, (await snapshot(io)).ledger.revision) }
@@ -261,7 +263,8 @@ export class WritingController {
         invariant(plan.inputBytes + plan.snapshot.modelDescriptor.maxOutputTokens! * 4 < model.contextWindow * 4, 'CONTEXT_WINDOW_EXCEEDED', '本节输入超过模型范围，请缩小篇幅或资料范围。')
         state.childRunId = plan.snapshot.runId; await saveWritingTask(io, state)
         const result = await executeGeneration(io, plan, { pid: process.pid, bootInstance: this.owner }, controller.signal, async call => {
-          invariant(state.usedModelCalls < state.modelCallAllowance, 'BUDGET_EXHAUSTED', '本轮调用额度已用完。')
+          // Telemetry, not a gate: the only things that still bound a request are the
+          // provider's own timeout and the model's context window (SPEC v1.2 §8.1–8.2).
           state.usedModelCalls++; await saveWritingTask(io, state)
           return callStageModel(this.ctx, model.session, model.selected, call)
         }, candidate => candidate.bootInstance === this.owner)
@@ -293,7 +296,7 @@ export class WritingController {
         task.usedSearchQueries++; await saveWritingTask(io, task)
         try { const metadata = await crossrefProvider(this.ctx.web).lookup(doi, signal)
           if (metadata) { title = metadata.title; authors = metadata.authors.map(row => row.literal); year = metadata.year; verified = true }
-        } catch (error) { signal.throwIfAborted(); task.notes.push(`${title}：出版身份核验暂未完成。`) }
+        } catch (error) { signal.throwIfAborted(); noteTask(task, `${title}：出版身份核验暂未完成。`) }
       }
       if (!source) {
         current = await snapshot(io)
@@ -315,7 +318,7 @@ export class WritingController {
           if (!ids.includes(sourceId)) ids.push(sourceId); acquired = true; break
         } catch (error) { signal.throwIfAborted() }
       }
-      if (!acquired) task.notes.push(`${title}：仅找到文献信息，未获得可读全文。`)
+      if (!acquired) noteTask(task, `${title}：仅找到文献信息，未获得可读全文。`)
       task.onlineSources = [...new Set([...task.onlineSources, ...ids])]; await saveWritingTask(io, task)
     }
     return ids

@@ -85,7 +85,9 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const initial: CreationSpec = { title: '', type: defaults?.defaultProjectType ?? 'course-paper', language: defaults?.language === 'en' ? 'en' : 'zh-CN',
     format: 'docx', requirements: '', requirementSources: [], materials: [], online: false, targetLength: 4000,
     countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
-    sections: presetSections(defaults?.defaultProjectType ?? 'course-paper', 4000), manuscriptDir: 'manuscript' }
+    sections: presetSections(defaults?.defaultProjectType ?? 'course-paper', 4000), manuscriptDir: 'manuscript',
+    overrides: [], typography: { bodyFontZh: '宋体', bodyFontEn: 'Times New Roman', bodySizePt: 12, bodySizeLabel: '小四', lineSpacing: 1.2, marginsMm: 25 },
+    cover: { enabled: false, title: '', fields: [], date: '' } }
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') } catch { return null } })
   const [spec, setSpec] = useState<CreationSpec>(() => saved?.spec ? restoreCreationDraft(saved.spec) : initial), [step, setStep] = useState(saved?.step ?? 0)
   const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [conflict, setConflict] = useState(false)
