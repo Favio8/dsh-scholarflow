@@ -7,6 +7,7 @@ import { validateArtifactPrivacy, validateExportUrl, validateManuscriptPublicati
 import { deliverySchema, type Ledger } from '../../shared/schema.ts'
 import { invariant } from '../../shared/errors.ts'
 import { latexDocument, wordDocument } from './formats.ts'
+import { readWritingSpec } from '../pipeline/writing-task-store.ts'
 import type { ExportFormat } from '../../shared/presentation.ts'
 
 export async function prepareDelivery(io: FileStore, format: ExportFormat = 'markdown') {
@@ -37,7 +38,8 @@ export async function prepareDelivery(io: FileStore, format: ExportFormat = 'mar
     reviewId: review.report?.id, reviewState, sourceIds, unresolvedIssueIds: issues.filter(issue => issue.state !== 'resolved').map(issue => issue.id),
     reviewedAllowed: reviewed, limitations: review.report?.limitations ?? ['当前稿件尚未执行审查；只能导出工作草稿。'],
     format, formats: [...(format === 'markdown' ? [] : [format]), 'markdown', 'bibtex', 'quality-report'],
-    formatNotes: format === 'docx' ? ['Word 公式保留 TeX 表达式；预览排版与 Word 实际分页可能不同。']
+    formatNotes: format === 'docx' ? ['Word 公式保留 TeX 表达式。',
+      '导出成功不等于排版合格：封面与正文的实际页数要在 Word 或等效查看环境中核对后才能称为已验证。']
       : format === 'latex' ? ['LaTeX 为完整源码，中文使用 ctex；下载包含 references.bib。'] : [] }
   invariant(format !== 'docx' || io.createExportBytes && io.readExportBytes, 'BINARY_EXPORT_UNAVAILABLE', '当前宿主不能保存 Word 交付。')
   return { ...plan, planHash: digest(json(plan)) }
@@ -72,7 +74,13 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
     const root = `${config.paths.manuscriptDir}/exports/${deliveryId}`
     const files: Array<{ relativePath: string; text: string; encoding?: 'base64' }> = [{ relativePath: 'paper.md', text: current.document.text }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger) }, { relativePath: 'quality-report.md', text: report }]
     if (plan.format === 'latex') files.unshift({ relativePath: 'paper.tex', text: latexDocument(current.document.text, config) })
-    if (plan.format === 'docx') files.unshift({ relativePath: 'paper.docx', text: Buffer.from(await wordDocument(current.document.text, config, ledger)).toString('base64'), encoding: 'base64' })
+    // 排版 is read from the confirmed spec, not from prose: the requirement's own fields are
+    // what actually shapes the exported page (SPEC v1.2 §16.1).
+    if (plan.format === 'docx') {
+      const spec = await readWritingSpec(io)
+      const bytes = await wordDocument(current.document.text, config, ledger, { typography: spec?.typography, cover: spec?.cover })
+      files.unshift({ relativePath: 'paper.docx', text: Buffer.from(bytes).toString('base64'), encoding: 'base64' })
+    }
     for (const file of files) if (!file.encoding) validateArtifactPrivacy(file.text)
     manifest = deliverySchema.parse({ id: deliveryId, projectId: ledger.projectId, documentId: 'paper', documentHash: plan.documentHash,
       revisionId: plan.revisionId, ledgerRevision: plan.ledgerRevision, ...(plan.reviewId && { reviewId: plan.reviewId }), reviewState,
