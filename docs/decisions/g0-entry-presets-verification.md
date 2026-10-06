@@ -287,5 +287,11 @@ exactly one requirement source and an empty material list records the source and
 requirement file no longer has to double as a material. That is the property the old build
 enforced the other way round.
 
+**AT-32, registration half — verified without spending anything.** An image can be registered as
+a requirement source: the creation preflight accepts a spec whose only source is a `.png` and
+returns a plan. The probe deliberately stops there, because starting the task would run the
+materials stage into the planning stage and call a model, which needs the user's approval. So
+the registration half of AT-32 is verified and the recognition half stays with V4.
+
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.

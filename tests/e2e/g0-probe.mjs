@@ -280,6 +280,17 @@ try {
           onlyWritten.requirementSources?.length === 1 && Array.isArray(onlyWritten.materials) && onlyWritten.materials.length === 0 ? 'PASS' : 'FAIL',
           '来源=' + String(onlyWritten.requirementSources?.length) + ' 材料=' + String(onlyWritten.materials?.length))
       }
+      // AT-32: an image can be registered as a requirement source. Only the plan is built —
+      // starting a task would reach the planning stage and call a model, which needs approval.
+      const imageSpec = { ...spec, title: 'TEST_ONLY 图片来源登记', materials: [],
+        requirementSources: [{ resourceId: 'req_img1', origin: 'workspace', kind: 'file', path: 'TEST_ONLY 截图.png', members: [], role: 'assignment', state: 'selected' }] }
+      const imageRoot = join(testHome, '图片来源检查 TEST_ONLY')
+      await mkdir(imageRoot, { recursive: true })
+      const imageWorkspace = payload((await rpc('workspace/create', { request: { path: imageRoot } })).body)
+      const imageContext = { requestId: 'req_TEST_ONLY', workspaceId: imageWorkspace?.workspace?.workspaceId,
+        sessionId: payload((await rpc('session/create', { request: { workspaceId: imageWorkspace?.workspace?.workspaceId, agentPreset: 'scholarflow' } })).body)?.sessionId }
+      const imagePlan = payload((await rpc('scholarflow.v1/creation.prepare', { request: { context: imageContext, spec: imageSpec } })).body)
+      record('AT-32 图片可作要求来源', imagePlan?.planId ? 'PASS' : 'FAIL', '预检=' + String(imagePlan?.planId ?? JSON.stringify(imagePlan).slice(0, 120)))
       record('AT-34 预设随创建记录', row.preset?.id === 'course-argumentative' && row.sections?.length === 2 ? 'PASS' : 'FAIL',
         '预设=' + String(row.preset?.id) + ' 章节=' + String(row.sections?.length))
     }
