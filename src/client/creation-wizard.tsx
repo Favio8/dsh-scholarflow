@@ -7,34 +7,57 @@ const splitPath = (path: string) => {
   return cut < 0 ? { name: path, dir: '工作区根目录' } : { name: path.slice(cut + 1), dir: path.slice(0, cut) }
 }
 
-function AssignmentPicker({ files, value, disabled, scanning, onSelect, onRescan }: any) {
-  const [open, setOpen] = useState(false), [query, setQuery] = useState('')
-  const supported = files.filter((file: any) => file.supported), needle = query.trim().toLowerCase()
-  const matches = needle ? supported.filter((file: any) => file.relativePath.toLowerCase().includes(needle)) : supported
-  const current = value ? splitPath(value) : null
+export const REQUIREMENT_KIND_LABEL = { readable: '可读取', image: '图片', unsupported: '不可读取' } as const
+/** What the parser can do with a file, decided by extension only — never a promise. */
+export function requirementKind(path: string): keyof typeof REQUIREMENT_KIND_LABEL {
+  if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(path)) return 'image'
+  if (/\.(pdf|docx|md|markdown|txt|html?)$/i.test(path)) return 'readable'
+  return 'unsupported'
+}
+function directoriesOf(files: any[]) {
+  const rows = new Map<string, number>()
+  for (const file of files) {
+    const cut = file.relativePath.lastIndexOf('/')
+    if (cut < 0) continue
+    const directory = file.relativePath.slice(0, cut)
+    rows.set(directory, (rows.get(directory) ?? 0) + 1)
+  }
+  return [...rows].map(([path, count]) => ({ path, count })).sort((a, b) => a.path.localeCompare(b.path))
+}
+
+/** Picks one requirement file or one folder; the caller decides what a folder expands to. */
+function RequirementPicker({ files, disabled, scanning, onPick, onRescan }: any) {
+  const [open, setOpen] = useState(false), [mode, setMode] = useState<'file' | 'folder'>('file'), [query, setQuery] = useState('')
+  const needle = query.trim().toLowerCase()
+  const rows = mode === 'file'
+    ? files.map((file: any) => ({ path: file.relativePath, size: file.size, count: 0 }))
+    : directoriesOf(files)
+  const matches = needle ? rows.filter((row: any) => row.path.toLowerCase().includes(needle)) : rows
   return <div className="sf-picker">
     <button type="button" className="sf-picker-toggle" aria-expanded={open} disabled={disabled} onClick={() => setOpen(!open)}>
-      <span className="sf-picker-current">{current ? <><strong>{current.name}</strong><small>{current.dir}</small></> : <em>选择工作区中的文件（可选）</em>}</span>
+      <span className="sf-picker-current"><em>添加要求文件或文件夹</em></span>
       <span className="sf-picker-caret" aria-hidden="true">⌄</span>
     </button>
     {open && <div className="sf-picker-panel">
       <div className="sf-picker-search">
-        <input autoFocus aria-label="搜索要求文件" placeholder="搜索文件名或路径" value={query} onChange={event => setQuery(event.target.value)} />
+        <div className="sf-picker-modes" role="group" aria-label="选择方式">
+          {(['file', 'folder'] as const).map(name => <button key={name} type="button" aria-pressed={mode === name}
+            onClick={() => { setMode(name); setQuery('') }}>{name === 'file' ? '文件' : '文件夹'}</button>)}
+        </div>
+        <input autoFocus aria-label="搜索要求来源" placeholder={mode === 'file' ? '搜索文件名或路径' : '搜索文件夹'} value={query} onChange={event => setQuery(event.target.value)} />
         <button type="button" disabled={scanning} onClick={onRescan}>{scanning ? '正在扫描…' : '重新扫描'}</button>
       </div>
       <div className="sf-picker-list">
-        {matches.map((file: any) => { const row = splitPath(file.relativePath)
-          return <button type="button" key={file.relativePath} aria-pressed={file.relativePath === value}
-            className={file.relativePath === value ? 'sf-picker-row sf-picker-selected' : 'sf-picker-row'}
-            onClick={() => { onSelect(file.relativePath); setOpen(false) }}>
-            <span className="sf-picker-name">{row.name}</span><span className="sf-picker-dir">{row.dir}</span><small>{Math.max(1, Math.ceil(file.size / 1024))} KB</small>
+        {matches.map((row: any) => { const shown = splitPath(row.path)
+          return <button type="button" key={row.path} className="sf-picker-row" onClick={() => { onPick(mode, row.path); setOpen(false) }}>
+            <span className="sf-picker-name">{shown.name}</span><span className="sf-picker-dir">{shown.dir}</span>
+            {mode === 'file' ? <small>{REQUIREMENT_KIND_LABEL[requirementKind(row.path)]} · {Math.max(1, Math.ceil(row.size / 1024))} KB</small>
+              : <small>{row.count} 个文件</small>}
           </button> })}
-        {!matches.length && <p className="sf-picker-blank">{scanning ? '正在读取工作区…' : '没有匹配的可读取文件。'}</p>}
+        {!matches.length && <p className="sf-picker-blank">{scanning ? '正在读取工作区…' : mode === 'file' ? '没有匹配的文件。' : '工作区里没有子文件夹。'}</p>}
       </div>
-      <div className="sf-picker-foot">
-        {value && <button type="button" onClick={() => { onSelect(undefined); setOpen(false) }}>清除选择</button>}
-        <span /><button type="button" onClick={() => setOpen(false)}>完成</button>
-      </div>
+      <div className="sf-picker-foot"><span /><button type="button" onClick={() => setOpen(false)}>完成</button></div>
+      <p className="sf-picker-note">工作区外的文件需要宿主选择器，尚未通过验证，因此这里只列当前工作区。</p>
     </div>}
   </div>
 }
@@ -49,6 +72,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const [spec, setSpec] = useState<CreationSpec>(saved?.spec ?? initial), [step, setStep] = useState(saved?.step ?? 0)
   const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [conflict, setConflict] = useState(false)
   const [scanning, setScanning] = useState(false), [truncated, setTruncated] = useState(false)
+  const [materialQuery, setMaterialQuery] = useState('')
+  const [recognition, setRecognition] = useState<Record<string, { state: 'idle' | 'running' | 'pending' | 'confirmed' | 'unavailable'; text?: string; note?: string }>>({})
   const update = (change: Partial<CreationSpec>) => setSpec(previous => ({ ...previous, ...change }))
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify({ spec, step })) } catch { setError('创建信息暂未保存，请保留当前页面。') } }, [spec, step, key])
   const loadFiles = async (selectAll: boolean) => {
@@ -61,12 +86,40 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   }
   useEffect(() => { void loadFiles(!saved) }, [key])
   const act = async (fn: () => Promise<void>) => { setBusy(true); setError(''); try { await fn() } catch (error) { setError((error as Error).message) } finally { setBusy(false) } }
-  const readySpec = () => ({ ...spec, title: spec.title.trim() || spec.requirements.trim().split('\n')[0].slice(0, 60),
-    materials: [...new Set([...spec.materials, ...(spec.assignmentPath ? [spec.assignmentPath] : [])])] })
+  // Requirement sources stand on their own: they are never merged into the materials
+  // list, and extraction reads them under their own authorisation (SPEC v1.1 §7).
+  const readySpec = () => ({ ...spec, title: spec.title.trim() || spec.requirements.trim().split('\n')[0].slice(0, 60) })
   const suggest = async (structure: boolean) => {
-    const result = await api('creation.suggest', { context: context(), spec: { ...readySpec(), title: readySpec().title || '待确定论文题目', requirements: spec.requirements.trim() || '根据所选作业要求文件提取写作要求。' }, assignmentPath: spec.assignmentPath })
+    const result = await api('creation.suggest', { context: context(), spec: { ...readySpec(), title: readySpec().title || '待确定论文题目', requirements: spec.requirements.trim() || '根据所选要求来源提取写作要求。' } })
     update({ title: spec.title.trim() || result.title, ...(structure ? { sections: result.sections } : { requirements: result.requirements }) })
   }
+  const newSourceId = () => `req_${crypto.randomUUID().replaceAll('-', '')}`
+  const addSource = (kind: 'file' | 'folder', path: string) => update({ requirementSources: [...spec.requirementSources,
+    { resourceId: newSourceId(), origin: 'workspace' as const, kind, path, role: 'assignment' as const, state: 'selected' as const,
+      members: kind === 'folder' ? files.filter((file: any) => file.relativePath.startsWith(path + '/')).map((file: any) => ({ name: file.relativePath, size: file.size })) : [] }] })
+  const removeSource = (resourceId: string) => update({ requirementSources: spec.requirementSources.filter(source => source.resourceId !== resourceId) })
+  const removeMember = (resourceId: string, name: string) => update({ requirementSources: spec.requirementSources.map(source =>
+    source.resourceId === resourceId ? { ...source, members: source.members.filter(member => member.name !== name) } : source) })
+  // Recognition is a model call, so it stays user-triggered and reports why it cannot run
+  // yet instead of failing silently (SPEC v1.1 §2 V4 is still unverified).
+  const identify = (resourceId: string) => setRecognition(previous => ({ ...previous, [resourceId]: { state: 'unavailable' as const,
+    note: '图片识别需要模型具备图片输入能力，尚未通过验证。可以先把截图中的要求粘贴到写作要求里，来源登记会保留。' } }))
+  const requirementRows = spec.requirementSources.map(source => {
+    const shown = splitPath(source.path ?? ''), kind = source.kind === 'folder' ? 'folder' : requirementKind(source.path ?? '')
+    const status = recognition[source.resourceId]
+    return <li key={source.resourceId} className="sf-source-row">
+      <span className="sf-source-badge" data-kind={kind}>{source.kind === 'folder' ? '文件夹' : REQUIREMENT_KIND_LABEL[kind as keyof typeof REQUIREMENT_KIND_LABEL]}</span>
+      <span className="sf-source-name">{shown.name}<small>{shown.dir}</small></span>
+      {kind === 'image' && <button type="button" className="sf-source-action" disabled={busy} onClick={() => identify(source.resourceId)}>{status?.state === 'confirmed' ? '重新识别' : '识别文字'}</button>}
+      <button type="button" className="sf-source-action" onClick={() => removeSource(source.resourceId)}>移除</button>
+      {source.kind === 'folder' && <ul className="sf-source-members">{source.members.map(member => <li key={member.name}>
+        <span>{member.name}</span><button type="button" aria-label={`移除 ${member.name}`} onClick={() => removeMember(source.resourceId, member.name)}>×</button></li>)}</ul>}
+      {status?.note && <p className="sf-source-note" role="status">{status.note}</p>}
+    </li> })
+  const readable = files.filter((file: any) => file.supported)
+  const attachments = files.filter((file: any) => !file.supported && requirementKind(file.relativePath) === 'image')
+  const materialNeedle = materialQuery.trim().toLowerCase()
+  const visibleFiles = materialNeedle ? files.filter((file: any) => file.relativePath.toLowerCase().includes(materialNeedle)) : files
   const moveSection = (index: number, direction: number) => {
     const sections = [...spec.sections], target = index + direction
     if (target < 0 || target >= sections.length) return
@@ -82,21 +135,42 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <div className="sf-wizard-row"><label>论文类型<select value={spec.type} onChange={e => { const type = e.target.value as CreationSpec['type']; update({ type, sections: presetSections(type, spec.targetLength) }) }}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label>语言<select value={spec.language} onChange={e => update({ language: e.target.value as CreationSpec['language'] })}><option value="zh-CN">中文</option><option value="en">English</option></select></label>
           <label>提交格式<select value={spec.format} onChange={e => update({ format: e.target.value as CreationSpec['format'] })}>{Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
+        <div className="sf-field"><span className="sf-field-label">引用样式</span>
+          <p className="sf-choice-current">顺序编号 [1]</p>
+          <p className="sf-field-hint">当前只支持这一种样式。作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></div>
         <label>写作要求<textarea rows={6} placeholder="例如：机器学习课程论文，约4000字，结合课件和笔记讨论实际应用，需要参考文献。也可以粘贴老师的要求。" value={spec.requirements} maxLength={12000} onChange={e => update({ requirements: e.target.value })} /></label>
-        <div className="sf-assignment-row"><div className="sf-assignment-field">作业要求文件
-          <AssignmentPicker files={files} value={spec.assignmentPath} disabled={busy} scanning={scanning}
-            onSelect={(path?: string) => update({ assignmentPath: path, materials: path ? [...new Set([...spec.materials, path])] : spec.materials })} onRescan={() => loadFiles(false)} /></div>
-          <button className="sf-assignment-extract" disabled={busy || !spec.assignmentPath} onClick={() => act(() => suggest(false))}>提取要求摘要</button></div>
-        <p className="sf-field-hint">工作区任意文件夹里的要求文件都能在这里找到；文件保持原样，只在提取摘要时读取一次。{truncated && ' 文件较多，只列出前 500 个，把要求文件放进更具体的文件夹可以缩小范围。'}</p>
+        <div className="sf-field"><span className="sf-field-label">写作要求来源</span>
+          <div className="sf-assignment-row">
+            <RequirementPicker files={files} disabled={busy} scanning={scanning} onPick={addSource} onRescan={() => loadFiles(false)} />
+            <button className="sf-assignment-extract" disabled={busy || (!spec.requirements.trim() && !spec.requirementSources.length)} onClick={() => act(() => suggest(false))}>整理要求</button>
+          </div>
+          <p className="sf-field-hint">要求来源规定这篇论文该怎么写；第二步的论文参考材料提供写作所需的资料。两者独立选择，互不要求对方包含自己。文件保持原样，只在整理或写作时读取。</p>
+          {spec.requirementSources.length
+            ? <ul className="sf-source-list">{requirementRows}</ul>
+            : <p className="sf-field-hint">还没有添加要求来源。也可以直接填写写作要求后继续。</p>}
+          {truncated && <p className="sf-field-hint">工作区文件较多，只列出前 500 个，把要求文件放进更具体的文件夹可以缩小范围。</p>}
+        </div>
       </>}
       {step === 1 && <>
-        <h3>选择论文使用的资料</h3><p className="sf-muted">读取当前工作区中的课件、论文和笔记，原文件保留原样。</p>
-        <div className="sf-material-checklist">{files.filter(file => file.supported).map(file => { const required = file.relativePath === spec.assignmentPath
-          return <label key={file.relativePath}><input type="checkbox" checked={required || spec.materials.includes(file.relativePath)} disabled={required}
-            onChange={e => update({ materials: e.target.checked ? [...spec.materials, file.relativePath] : spec.materials.filter(path => path !== file.relativePath) })} /><span>{file.relativePath}{required && <em className="sf-material-tag">作业要求文件</em>}</span><small>{Math.ceil(file.size / 1024)} KB</small></label> })}
-          {!files.some(file => file.supported) && <p>工作区中还没有可读取的资料，可以开启联网补充，或先继续确定结构。</p>}</div>
+        <h3>选择论文使用的资料</h3>
+        <p className="sf-muted">这里是写作所需的参考材料，原文件保持原样。要求来源已在第一步单独选择，清空材料不会移除它们。</p>
+        <div className="sf-material-toolbar">
+          <input aria-label="搜索资料" placeholder="搜索资料" value={materialQuery} onChange={event => setMaterialQuery(event.target.value)} />
+          <span className="sf-material-count">已选 {spec.materials.length} · 可解析 {readable.length} · 仅附件 {attachments.length}</span>
+          <button type="button" disabled={busy || !readable.length} onClick={() => update({ materials: readable.map((file: any) => file.relativePath) })}>全选可解析</button>
+          <button type="button" disabled={busy || !spec.materials.length} onClick={() => update({ materials: [] })}>清空</button>
+        </div>
+        <div className="sf-material-checklist">{visibleFiles.map(file => { const kind = requirementKind(file.relativePath)
+          const alsoRequired = spec.requirementSources.some(source => source.path === file.relativePath || source.members.some(member => member.name === file.relativePath))
+          const reason = kind === 'image' ? '仅附件，尚未解析' : '当前格式暂不支持'
+          return <label key={file.relativePath} className={file.supported ? undefined : 'sf-material-disabled'}>
+            <input type="checkbox" checked={spec.materials.includes(file.relativePath)} disabled={busy || !file.supported}
+              onChange={e => update({ materials: e.target.checked ? [...spec.materials, file.relativePath] : spec.materials.filter(path => path !== file.relativePath) })} />
+            <span>{file.relativePath}{alsoRequired && <em className="sf-material-tag">也用作要求来源</em>}</span>
+            <small>{file.supported ? `${Math.max(1, Math.ceil(file.size / 1024))} KB` : reason}</small></label> })}
+          {!visibleFiles.length && <p className="sf-picker-blank">{files.length ? '没有匹配的文件。' : '工作区中还没有文件，可以开启联网补充，或先继续确定结构。'}</p>}
+        </div>
         <label className="sf-online-choice"><input type="checkbox" checked={spec.online} onChange={e => update({ online: e.target.checked })} /><span><strong>联网补充文献</strong><small>检索相关文献，获取公开可读取的全文。</small></span></label>
-        {files.some(file => !file.supported) && <details><summary>其他文件</summary><p className="sf-muted">这些文件保持原样，本次不会作为已读取资料。</p>{files.filter(file => !file.supported).map(file => <p key={file.relativePath}>{file.relativePath}</p>)}</details>}
       </>}
       {step === 2 && <>
         <div className="sf-structure-caption">
@@ -202,6 +276,32 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-material-checklist span{flex:1;overflow-wrap:anywhere}
 .sf-material-checklist small{color:#999;flex:none}
 .sf-material-tag{margin-left:8px;padding:1px 6px;border-radius:999px;background:#4475e714;color:#4475e7;font-size:11px;font-style:normal}
+/* Requirement sources, format choice and the merged material list (Phase 3). */
+.sf-wizard .sf-field{display:flex;flex-direction:column;gap:8px;margin:16px 0 0}
+.sf-wizard .sf-field-label{font-size:12.5px;font-weight:500;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-choice-current{margin:0;height:38px;display:flex;align-items:center;padding:0 10px;border:1px solid #8884;border-radius:7px;background:#8881;color:inherit;font-size:14px}
+.sf-wizard .sf-source-list{list-style:none;margin:0;padding:0;border:1px solid #8882;border-radius:9px;overflow:hidden}
+.sf-wizard .sf-source-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid #8881}
+.sf-wizard .sf-source-row:last-child{border-bottom:0}
+.sf-wizard .sf-source-badge{flex:none;padding:1px 7px;border-radius:999px;background:#8882;font-size:11px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-source-badge[data-kind=image]{background:#e8a33d22;color:#a5701f}
+.sf-wizard .sf-source-badge[data-kind=unsupported]{background:#d4515122;color:#b04a4a}
+.sf-wizard .sf-source-name{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-wizard .sf-source-name small{font-size:11px;color:#8b9099}
+.sf-wizard .sf-source-action{flex:none;height:28px;padding:0 9px;border:1px solid #8884;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}
+.sf-wizard .sf-source-members{flex:1 1 100%;list-style:none;margin:2px 0 0;padding:0 0 0 12px;font-size:12px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-source-members li{display:flex;align-items:center;gap:8px;padding:2px 0}
+.sf-wizard .sf-source-members button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:13px;line-height:1;padding:0 4px}
+.sf-wizard .sf-source-note{flex:1 1 100%;margin:4px 0 0;font-size:12px;color:#8b9099}
+.sf-wizard .sf-material-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0}
+.sf-wizard .sf-material-toolbar>input{flex:1 1 180px;min-width:0;height:34px}
+.sf-wizard .sf-material-toolbar>button{height:34px;flex:none}
+.sf-wizard .sf-material-count{flex:none;font-size:12px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-wizard .sf-material-checklist label.sf-material-disabled{opacity:.6}
+.sf-wizard .sf-picker-modes{display:flex;flex:none;gap:2px}
+.sf-wizard .sf-picker-modes button{height:32px;padding:0 10px;border:1px solid #8884;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}
+.sf-wizard .sf-picker-modes button[aria-pressed=true]{background:#4475e714;border-color:#4475e7;color:#4475e7}
+.sf-wizard .sf-picker-note{margin:0;padding:8px 12px;border-top:1px solid #8882;font-size:11.5px;color:#8b9099}
 .sf-online-choice{flex-direction:row!important;align-items:center;padding:15px;border-radius:9px;background:#4475e708;margin-top:18px!important}
 .sf-online-choice span{display:flex;flex-direction:column;gap:4px}
 .sf-online-choice small{color:#888}
