@@ -222,17 +222,21 @@ person opens the session normally. The substance that can be checked without a p
 already recorded above: V6a/V6b for the session behaviour, AT-29 for the shared settings
 document, AT-36 for preset reuse and library isolation.
 
-**Visual review artifact — still not produced.** A reload was added so a session created over
-RPC reaches the sidebar, and the probe now captures `wizard-wide.png` and `wizard-narrow.png`
-into `.dsh-tmp/ui-review/`. The wizard container still did not render (count 0), so the row
-click did not navigate to the session and the two images are not a valid review artifact.
-They are kept only as evidence of the attempt.
+**Rendered-UI presence — investigated, not dependable in the probe.** Two diagnostic runs
+established what the client actually shows after an RPC-created session:
 
-Phase 0 §2.1 asks for high-fidelity visuals of the three pages, the modal and the narrow
-layout for the user to review; with the implementation already built, the honest equivalent is
-for the user to open the workbench in the real Desktop and look at the actual pages, which is
-exactly what the acceptance checklist asks for. Producing mockups now would describe something
-that already exists.
+- the page settles on a **blank new session** (`新会话`), not on the created one, and no
+  workbench renders (`sf-app` count 0);
+- the sidebar's row keys are `workspace:<id>` and `session:<sessionId>`; one run listed the
+  created session, the next found the row count at 0 for its own session, so the row is not
+  reliably present after a reload;
+- clicking it therefore times out, and the screenshots kept in `.dsh-tmp/ui-review/` show the
+  ordinary client rather than the workbench.
+
+Conclusion: driving the client to a ScholarFlow session from a probe is not dependable here, so
+the interface confirmation of items 2-5 stays with the real Desktop, where a person opens the
+session normally. Phase 0 §2.1's visual review has the same answer — with the implementation
+already built, the artifact worth reviewing is the real page, not a mockup of it.
 
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.
