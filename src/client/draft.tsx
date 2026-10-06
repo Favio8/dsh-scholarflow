@@ -356,12 +356,13 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     </div>
     {cowrite.message && <p className="sf-editor-notice" role="status">{cowrite.message}</p>}
     {/* In edit mode the target lives in the source pane, so the candidate is rendered directly
-        below the editor rather than in a distant list (PRD §5.3). */}
-    {view === 'edit' && candidate && <RewriteCandidateView candidate={candidate} busy={busy}
+    {/* The candidate belongs to the current target, not to one view: in 分屏 or 预览 the
+        reader must not have to switch pages to find it (PRD §5.3). */}
+    {candidate && <RewriteCandidateView candidate={candidate} busy={busy}
       canAccept={candidate.before === text.slice(candidate.start, candidate.end)}
       onAccept={() => void acceptRewrite()} onDiscard={() => void discardRewrite()} onUndo={() => void undoRewrite()}
       onStop={stopRewrite} onRegenerate={() => { setCandidate(undefined); submitRewrite() }} />}
-    {view === 'edit' && !candidate && cowrite.suggestions.length > 0 && <div className="sf-pending-list">{cowrite.annotations(0, text.length + 1)}</div>}
+    {!candidate && cowrite.suggestions.length > 0 && <div className="sf-pending-list">{cowrite.annotations(0, text.length + 1)}</div>}
       {(recoverable || baseHash !== project.document.contentHash || project.document.externalChange) && <div className="sf-editor-notice" role="status">
         {recoverable ? '有暂存编辑可恢复' : '正文版本发生变化，当前编辑已保留'}<button onClick={onTool}>查看与处理</button>
       </div>}

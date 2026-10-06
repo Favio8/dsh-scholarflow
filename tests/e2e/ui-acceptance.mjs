@@ -617,7 +617,8 @@ try {
     record('AT-57 提交前界面状态', true, JSON.stringify(submitState))
     const afterSubmit = await page.evaluate(() => ({ state: document.querySelector('.sf-rewrite')?.dataset.state ?? 'absent',
       note: (document.querySelector('.sf-rewrite-note')?.innerText ?? document.querySelector('.sf-editor-notice')?.innerText ?? '').replace(/s+/g, ' ').slice(0, 160),
-      notice: (document.querySelector('.sf-editor-notice')?.innerText ?? '').replace(/s+/g, ' ').slice(0, 120) }))
+      notice: (document.querySelector('.sf-editor-notice')?.innerText ?? '').replace(/s+/g, ' ').slice(0, 120),
+      status: (document.querySelector('.sf-draft-status')?.innerText ?? '').replace(/s+/g, ' ').slice(0, 160) }))
     record('AT-57 提交后界面状态', true, JSON.stringify(afterSubmit))
     record('AT-57 提交后真实进入生成状态', generating, 'generating=' + generating)
     await page.locator('.sf-rewrite button:has-text("停止")').first().click().catch(() => undefined)
