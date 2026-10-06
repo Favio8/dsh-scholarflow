@@ -14,9 +14,13 @@ import { id } from '../../shared/schema.ts'
 import { unicodeBoundary } from '../../core/editing/markdown.ts'
 import { approvedMemory } from '../../core/project/memory.ts'
 import { listSearches, readSearch } from '../../core/research/online.ts'
+import { currentWritingText, proposeCowrite } from '../../core/editing/cowrite.ts'
+import { digest, json } from '../../core/store/files.ts'
+import { readWritingSpec } from '../../core/pipeline/writing-task-store.ts'
+import { creationSpec } from '../../shared/writing-task.ts'
 
 export const academicToolNames = ['scholar_project', 'scholar_materials', 'scholar_research', 'scholar_evidence', 'scholar_outline',
-  'scholar_manuscript', 'scholar_review', 'scholar_skill', 'scholar_export'] as const
+  'scholar_manuscript', 'scholar_review', 'scholar_skill', 'scholar_export', 'scholar_cowrite'] as const
 type Host = any
 const actions = (values: readonly string[]) => z.enum(values as [string, ...string[]])
 const offset = z.number().int().min(0).max(2 * 1024 * 1024).default(0)
@@ -31,19 +35,49 @@ async function boundStore(ctx: Host, exec: Host) {
 }
 export function academicDefinitions(ctx: Host) {
   const make = (name: typeof academicToolNames[number], allowed: readonly string[], description: string, parameters: any,
-    schema: z.ZodType, execute: (args: any, io: Awaited<ReturnType<typeof boundStore>>['io']) => Promise<unknown>) => defineTool({
+    schema: z.ZodType, execute: (args: any, io: Awaited<ReturnType<typeof boundStore>>['io'], binding: any) => Promise<unknown>) => defineTool({
     name, description,
     parameters: { action: { type: 'string', required: true, enum: allowed, description: '允许的动作；不接受或授予用户确认。' }, ...parameters },
     output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args, exec) {
       return JSON.parse(JSON.stringify(await applicationResult(async () => {
-        const input = schema.parse(args), { io } = await boundStore(ctx, exec)
-        return execute(input, io)
+        const input = schema.parse(args), bound = await boundStore(ctx, exec)
+        return execute(input, bound.io, { sessionId: exec.agent.session.id })
       })))
     },
   })
   const simple = (values: readonly string[]) => z.object({ action: actions(values) }).strict()
   return [
+    make('scholar_cowrite', ['read', 'propose', 'requirements', 'proposeRequirements'],
+      '人机双写：读取当前编辑缓冲，提交正文差异或写作要求建议。建议只展示给用户，不能接受或保存。先 read，再用返回的 bufferHash 与精确源码范围 propose。',
+      { start: { type: 'integer' }, end: { type: 'integer' }, bufferHash: { type: 'string' }, replacementText: { type: 'string' },
+        instruction: { type: 'string' }, specJson: { type: 'string', description: 'proposeRequirements 使用的完整创建规格 JSON；保留未修改的资料范围、结构和目录。' } },
+      z.object({ action: actions(['read', 'propose', 'requirements', 'proposeRequirements']), start: offset, end: offset.optional(),
+        bufferHash: z.string().optional(), replacementText: z.string().max(2 * 1024 * 1024).optional(), instruction: z.string().max(12000).optional(), specJson: z.string().max(100000).optional() }).strict(),
+      async (args, io, binding) => {
+        const spec = await readWritingSpec(io)
+        if (args.action === 'requirements') return { spec }
+        if (args.action === 'proposeRequirements') {
+          invariant(spec && args.specJson, 'INVALID_REQUEST', '请先读取实际写作要求。')
+          const proposed = creationSpec.parse(JSON.parse(args.specJson)), current = await snapshot(io), suggestionId = newId('brief')
+          invariant(proposed.manuscriptDir === spec.manuscriptDir, 'OUTPUT_PATH_CONFLICT', '已创建论文不能通过聊天迁移目录。')
+          await io.lock(async () => io.write(`.scholarflow/writing/brief-suggestions/${suggestionId}.json`, json({ id: suggestionId,
+            projectId: current.ledger.projectId, sessionId: binding.sessionId, baseSpecHash: digest(json(spec)), spec: proposed, state: 'pending' }), undefined))
+          return { suggestionId, state: 'pending', nextStep: '写作要求建议已显示到中栏，等待用户接受。' }
+        }
+        const live = await currentWritingText(io, binding.sessionId)
+        if (args.action === 'read') {
+          invariant(args.start <= live.text.length && unicodeBoundary(live.text, args.start), 'SELECTION_INVALID', '正文读取位置无效。')
+          let end = Math.min(live.text.length, args.start + 12000); if (!unicodeBoundary(live.text, end)) end--
+          return { ...live, text: live.text.slice(args.start, end), start: args.start, end, totalCharacters: live.text.length,
+            nextStart: end < live.text.length ? end : null, spec }
+        }
+        invariant(args.bufferHash === live.bufferHash && args.end !== undefined && args.replacementText !== undefined && args.instruction,
+          'EDITOR_BUFFER_CONFLICT', '编辑缓冲已改变，请重新读取后提出修改。')
+        const suggestion = await proposeCowrite(io, binding.sessionId, { text: live.text, baseDocumentHash: live.baseDocumentHash,
+          start: args.start, end: args.end, replacementText: args.replacementText, instruction: args.instruction })
+        return { suggestionId: suggestion.id, state: suggestion.state, nextStep: '正文对应位置已显示差异，等待用户接受或放弃。' }
+      }),
     make('scholar_project', ['inspect', 'requirements', 'memory'], '查看当前项目、写作要求和已确认记忆；不能自定根目录、初始化或变更确认。', {}, simple(['inspect', 'requirements', 'memory']), async (args, io) => {
       const current = await snapshot(io)
       if (args.action === 'requirements') return { requirements: Object.values(current.ledger.requirements), ledgerRevision: current.ledger.revision }

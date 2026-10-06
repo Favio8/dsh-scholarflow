@@ -16,7 +16,7 @@ export function excludedPath(path: string, config: ProjectConfig) {
 }
 export function mediaType(path: string) {
   const ext = path.split('.').at(-1)?.toLowerCase()
-  return ({ md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'
+  return ({ md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', html: 'text/html', htm: 'text/html', pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'
 }
 export async function scanMaterials(io: FileStore, directory = '', cursor = 0, limit = 50) {
   const { config } = await snapshot(io)

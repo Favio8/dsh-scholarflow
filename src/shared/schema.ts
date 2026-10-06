@@ -21,7 +21,7 @@ const configObject = z.object({
     budget: z.object({ maxModelCalls: z.number().int().min(1).max(40).default(40), maxSearchQueries: z.number().int().min(0).max(12).default(12), maxCandidateSources: z.number().int().min(1).max(80).default(80), maxDurationMinutes: z.number().int().min(1).max(30).default(30) }).strict().prefault({}) }).strict().prefault({}),
   research: z.object({ providerRefs: z.array(z.string()).default([]), allowLocalOnly: z.boolean().default(true), fullTextDownload: z.literal('ask').default('ask') }).strict().prefault({}),
   privacy: z.object({ sendSelectedContentOnly: z.literal(true).default(true), verboseModelLogging: z.literal(false).default(false) }).strict().prefault({}),
-  output: z.object({ formats: z.array(z.enum(['markdown', 'bibtex', 'quality-report'])).default(['markdown', 'bibtex', 'quality-report']) }).strict().prefault({}),
+  output: z.object({ formats: z.array(z.enum(['markdown', 'bibtex', 'quality-report'])).default(['markdown', 'bibtex', 'quality-report']), defaultFormat: z.enum(['markdown', 'latex', 'docx']).optional() }).strict().prefault({}),
 }).strict().superRefine((config, ctx) => {
   for (const key of ['mainDocument', 'references'] as const)
     if (!config.paths[key].startsWith(config.paths.manuscriptDir + '/')) ctx.addIssue({ code: 'custom', path: ['paths', key], message: 'Must be within the confirmed manuscript directory' })

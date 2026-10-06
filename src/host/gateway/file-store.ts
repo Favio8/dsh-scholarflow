@@ -55,6 +55,13 @@ export class HostFileStore implements FileStore {
     return { text, version: after.version }
   }
   async readBytes(path: string, maxBytes: number) {
+    if (path.startsWith('.scholarflow/cache/writing-assets/') && path.endsWith('.json')) {
+      const asset = await this.read(path)
+      invariant(asset, 'MATERIAL_CACHE_MISSING', '公开全文缓存缺失，请重新获取。')
+      const bytes = Buffer.from(JSON.parse(asset.text).base64, 'base64')
+      invariant(bytes.byteLength <= maxBytes, 'CONTENT_TOO_LARGE', '公开全文超过读取限额。')
+      return bytes
+    }
     const target = await this.target(path)
     const canonical = relative(this.binding.canonicalRoot, this.ctx.fs.processPath(target)).split(sep).join('/')
     invariant(!sensitivePath(canonical) && !canonical.startsWith('.scholarflow/') && !canonical.startsWith(this.binding.manuscriptDir + '/'), 'MATERIAL_ACCESS_DENIED', '资料链接不能指向凭据、项目元数据或输出稿件。')

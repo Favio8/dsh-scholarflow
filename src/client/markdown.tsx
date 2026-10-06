@@ -3,12 +3,14 @@ import katex from 'katex'
 import { type AstNode, type Projection, mapLeafPoint, validateRange } from '../core/editing/markdown.ts'
 import type { SelectionPayload } from '../shared/editing.ts'
 
-export function MarkdownView({ projection }: { projection: Projection }) {
+export function MarkdownView({ projection, annotations }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode }) {
   const leaves = new Map(projection.leaves.map(leaf => [leaf.id, leaf]))
   const render = (node: AstNode, key: string): React.ReactNode => {
     const children = node.children?.map((child, index) => render(child, `${key}_${index}`))
     if (node.type === 'text') return <React.Fragment key={key}>{node.leafIds?.map(id => { const leaf = leaves.get(id)!; return <span key={id} data-sf-leaf={id} title={leaf.citationKeys ? leaf.citationKeys.map(key => `[@${key}]`).join('; ') : undefined}>{leaf.text}</span> })}</React.Fragment>
-    if (node.type === 'root') return <React.Fragment key={key}>{children}</React.Fragment>
+    if (node.type === 'root') return <React.Fragment key={key}>{node.children?.map((child, index) => <React.Fragment key={index}>
+      {annotations?.(child.position?.start.offset ?? 0, node.children?.[index + 1]?.position?.start.offset ?? projection.source.length + 1)}
+      {render(child, `${key}_${index}`)}</React.Fragment>)}</React.Fragment>
     if (node.type === 'paragraph') return <p key={key} data-sf-block={node.blockId} tabIndex={-1} style={{ whiteSpace: 'pre-wrap' }}>{children}</p>
     if (node.type === 'heading') return React.createElement(`h${node.depth ?? 2}`, { key, 'data-sf-heading-offset': node.position?.start.offset, tabIndex: -1 }, children)
     if (node.type === 'strong') return <strong key={key}>{children}</strong>

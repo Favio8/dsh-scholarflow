@@ -1,5 +1,7 @@
 # 兼容性记录（ScholarFlow × DSH）
 
+2026-10-06 UI-08：新增创建向导、持久写作任务、缓冲绑定的双写建议与默认格式直接导出。沿用 Windows Desktop 0.2.0-rc.2 的公共 Slot、会话、模型和文件能力。只读源码确认原生预设 seat 与工作区快照；本次未进行运行时测试或界面验收。旧项目的新字段可缺省，既有稿件与交付记录保留，无需重新初始化。DSH web.fetch 不提供 PDF 二进制响应，公开全文使用插件 Host 网关，元数据与已读取正文分别记录。详见 [实现决定](decisions/continuous-writing-and-cowrite.md)。
+
 2026-10-05 当前交付范围：ScholarFlow 1.0.0、Windows DSH Desktop 0.2.0-rc.2。
 类型、构建、343 项分层测试、实际 Host 和 Electron 工作台已通过；详见
 [最终验证记录](final-runtime-validation.md)。下面按时间保留 G0 早期调查，

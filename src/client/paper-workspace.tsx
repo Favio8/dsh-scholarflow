@@ -48,7 +48,7 @@ export const PAPER_CSS = `
 .sf-paper-project button:disabled:not(.sf-native-tools *){cursor:default;opacity:.5}
 .sf-paper-header .sf-type-chip,.sf-paper-header select{font-size:12px;padding:4px 8px;color:var(--dsw-alias-label-secondary,#626976);max-width:160px}
 .sf-paper-header .sf-native-tools{margin-left:auto}
-.sf-paper-export{flex-shrink:0}
+.sf-paper-export{flex-shrink:0}.sf-export-split{display:flex;align-items:center;gap:0}.sf-export-split>button{border:0!important;font-size:13px!important}.sf-export-split .sf-paper-export>summary{padding:5px 7px}
 .sf-paper-menu{position:relative;flex-shrink:0}
 .sf-paper-menu>summary{list-style:none;cursor:pointer;padding:6px 9px;border-radius:6px;white-space:nowrap}
 .sf-paper-menu>summary::-webkit-details-marker{display:none}

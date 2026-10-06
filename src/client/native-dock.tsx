@@ -37,14 +37,37 @@ export function createWorkbenchNavigation(ctx: any, Workspace: React.ComponentTy
       snapshot = { sessionId, active }; listeners.forEach(listener => listener())
     }
   }
+  const selectedPreset = () => {
+    const sessionId = ctx.uiSession.adapter.current.getSnapshot().key
+    return ctx.sessions.list.getSnapshot().byId[sessionId]?.projectionValues?.agentPreset
+  }
   ctx.effect(() => {
     const disposeSlot = ctx.slots.inject('main', () => { sync(); return () => { shadow?.(); shadow = undefined } })
     const disposeCurrent = ctx.uiSession.adapter.current.subscribe(sync), disposePanel = ctx.layout.panelInfo.subscribe(sync)
     // rc.2 publishes a fresh selection for EVERY native navigation, including
     // startSession reusing the same blank Session. Catalog refreshes are separate.
-    const disposeNavigation = ctx.uiWorkspace.selection.subscribe(() => { enabledSession = undefined; sync() })
+    let navigatedSession = ctx.uiSession.adapter.current.getSnapshot().key
+    const disposeNavigation = ctx.uiWorkspace.selection.subscribe(() => {
+      const previous = navigatedSession
+      enabledSession = undefined; sync()
+      queueMicrotask(() => {
+        const current = ctx.uiSession.adapter.current.getSnapshot().key; navigatedSession = current
+        const session = ctx.sessions.list.getSnapshot().byId[current]
+        if (selectedPreset() === 'scholarflow' && (current !== previous || !session?.blank)) { enabledSession = current; sync() }
+      })
+    })
+    let lastPreset = selectedPreset()
+    const disposePreset = ctx.sessions.list.subscribe(() => {
+      const preset = selectedPreset()
+      if (preset !== lastPreset) {
+        lastPreset = preset
+        if (preset === 'scholarflow') { ctx.layout.selectPanel(null); enabledSession = ctx.uiSession.adapter.current.getSnapshot().key }
+        else enabledSession = undefined
+        sync()
+      }
+    })
     const disposeMounted = ctx.sidebarRight.mounted.subscribe(revealChat)
-    return () => { disposeMounted(); disposeNavigation(); disposeCurrent(); disposePanel(); disposeSlot(); listeners.clear() }
+    return () => { disposePreset(); disposeMounted(); disposeNavigation(); disposeCurrent(); disposePanel(); disposeSlot(); listeners.clear() }
   }, 'scholarflow: scoped native Conversation surface')
   return {
     source,
@@ -60,6 +83,33 @@ export function createWorkbenchNavigation(ctx: any, Workspace: React.ComponentTy
       chatRequest = { sessionId, afterOpen }; revealChat()
     },
   }
+}
+
+// Wrap the publicly registered preset seat, preserving its native UI and
+// injected controller. A repeated pick of the same blank preset still opens it.
+export function connectPresetEntry(ctx: any, navigation: ReturnType<typeof createWorkbenchNavigation>) {
+  ctx.effect(() => ctx.slots.inject('conversation.hero.agentPreset', () => {
+    let original: any, dispose: (() => void) | undefined
+    const sync = () => {
+      const entry = ctx.slots.entriesOfSlot('conversation.hero.agentPreset').find((entry: any) => entry.options.id !== 'scholarflow-preset-entry')
+      if (entry === original) return
+      original = entry; dispose?.(); dispose = undefined
+      if (!entry) return
+      const Seat = entry.component
+      function PresetSeat(props: any) {
+        return <Seat {...props} select={async (id: string) => {
+          const refusal = await props.select(id)
+          if (!refusal && id === 'scholarflow') navigation.open()
+          else if (!refusal) navigation.ordinary()
+          return refusal
+        }} />
+      }
+      dispose = ctx.slots.register({ name: 'conversation.hero.agentPreset', id: 'scholarflow-preset-entry', priority: -50,
+        ...(entry.locale && { locale: entry.locale }), ...(entry.inject && { inject: entry.inject }), ...(entry.store && { store: entry.store }) }, PresetSeat)
+    }
+    sync(); const unsubscribe = ctx.slots.subscribe('conversation.hero.agentPreset', sync)
+    return () => { unsubscribe(); dispose?.() }
+  }), 'scholarflow: native preset entry')
 }
 
 // rc.2 exposes these native implementations through the public Slot registry.

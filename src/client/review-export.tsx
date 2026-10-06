@@ -7,7 +7,7 @@ import { ReviewFixes } from './review-fixes.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 export function ReviewExport({ project, context, api, refresh, run, busy, mode, onLocate, format = 'markdown', exportTrigger = 0 }: Props & { mode: string; format?: ExportFormat; exportTrigger?: number; onLocate: (location: any) => void }) {
-  const [review, setReview] = useState<any>(), [plan, setPlan] = useState<any>(), [message, setMessage] = useState('')
+  const [review, setReview] = useState<any>(), [message, setMessage] = useState('')
   const handledTrigger = useRef(0)
   const download = (data: BlobPart, filename: string, type: string) => {
     const url = URL.createObjectURL(new Blob([data], { type })), link = document.createElement('a')
@@ -22,23 +22,35 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode, 
     zip.file('manifest.json', JSON.stringify(result.manifest, null, 2))
     download(new Uint8Array(await zip.generateAsync({ type: 'uint8array' })).buffer, `ScholarFlow-${deliveryId}.zip`, 'application/zip')
   }
-  useEffect(() => { setPlan(undefined) }, [format])
   useEffect(() => {
     if (!exportTrigger || exportTrigger === handledTrigger.current) return
     handledTrigger.current = exportTrigger
-    let live = true
-    api('export.preflight', { context: context(), format }).then(value => live && setPlan(value)).catch(error => live && setMessage(error.message))
-    return () => { live = false }
+    run(async () => {
+      setMessage('正在导出…')
+      const plan = await api('export.preflight', { context: context(), format })
+      const result = await api('export.create', { context: context(), planId: plan.planId, planHash: plan.planHash,
+        deliveryType: plan.reviewedAllowed ? 'reviewed-draft' : 'working-draft' })
+      const delivery = await api('export.read', { context: context(), deliveryId: result.manifest.id })
+      const extension = format === 'docx' ? 'docx' : format === 'latex' ? 'tex' : 'md'
+      const main = delivery.files.find((file: any) => file.relativePath === 'paper.' + extension)
+      if (!main) throw new Error('交付中缺少所选格式的正文。')
+      const data = bytes(main)
+      download(typeof data === 'string' ? data : new Uint8Array(data).buffer, project.config.project.title.replace(/[<>:"/\\|?*]/g, '_') + '.' + extension, main.mediaType)
+      if (format === 'latex') { const bib = delivery.files.find((file: any) => file.relativePath === 'references.bib'); if (bib) download(bib.text, 'references.bib', 'text/plain;charset=utf-8') }
+      setMessage('已导出 ' + FORMAT_LABELS[format] + (plan.unresolvedIssueIds.length ? ' · 有待检查项，可在正文审查中查看。' : ''))
+      await refresh()
+    })
   }, [exportTrigger])
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [manualCheck, setManualCheck] = useState(''), [manualStatus, setManualStatus] = useState('unknown'), [manualReason, setManualReason] = useState('')
   const [manualEvidence, setManualEvidence] = useState<string[]>([]), [manualClaims, setManualClaims] = useState<string[]>([]), [manualPlan, setManualPlan] = useState<any>()
-  useEffect(() => { let live = true; setPlan(undefined)
+  useEffect(() => { let live = true
     api('review.inspect', { context: context() }).then(value => live && setReview(value)).catch(error => live && setMessage(error.message))
     return () => { live = false }
   }, [project.ledger.revision, project.document.contentHash, project.document.externalChange])
   const issues = Object.values(project.ledger.reviewIssues) as any[]
   return <>
+    {message && mode !== 'Export' && <div className="sf-editor-notice" role="status">{message}</div>}
     <section id="sf-panel-Review" role="tabpanel"  hidden={mode !== 'Review'} aria-label="审查"><h3>审查</h3>
       <p>规则检查、模型辅助与人工判断分别显示。未知项不能当作通过；问题经对应复查后才关闭。</p>
       <button disabled={busy || project.document.externalChange} onClick={() => run(async () => {
@@ -79,22 +91,7 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode, 
       </section>)}
       <ReviewFixes project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} />
     </section>
-    <section id="sf-panel-Export" role="tabpanel"  hidden={mode !== 'Export'} aria-label="导出"><h3>导出</h3><p>支持 Word、LaTeX、Markdown，附引用库与质量报告。每次导出创建独立快照。</p>
-      <p>支持公开链接和稿内锚点；未打包的相对资源、图片与原始 HTML 会在预检中拒绝。请先明确移除凭据与私有绝对路径，再导出新版本。</p>
-      <button disabled={busy || project.document.externalChange} onClick={() => run(async () => setPlan(await api('export.preflight', { context: context(), format })))}>准备导出 {FORMAT_LABELS[format]}</button>
-      {plan && <section role="dialog" aria-modal="false" aria-label="导出确认"><h4>导出 {FORMAT_LABELS[plan.format as ExportFormat] ?? 'Markdown'}</h4><p>{plan.revisionId} · {plan.reviewState} · 尚未关闭问题 {plan.unresolvedIssueIds.length} 项</p>
-        <p>交付包包含此版本的正文、references.bib 与质量报告。</p>
-        {plan.formatNotes?.map((note: string) => <p key={note}>{note}</p>)}
-        {plan.limitations.map((limit: string) => <p key={limit}>{limit}</p>)}
-        <button disabled={busy} onClick={() => run(async () => {
-          const result = await api('export.create', { context: context(), planId: plan.planId, planHash: plan.planHash, deliveryType: 'working-draft' })
-          setPlan(undefined); setMessage('工作草稿已导出。'); await refresh(); await downloadBundle(result.manifest.id)
-        })}>确认导出工作草稿</button>
-        {plan.reviewedAllowed && <button disabled={busy} onClick={() => run(async () => {
-          const result = await api('export.create', { context: context(), planId: plan.planId, planHash: plan.planHash, deliveryType: 'reviewed-draft' })
-          setPlan(undefined); setMessage('已审查草稿已导出。'); await refresh(); await downloadBundle(result.manifest.id)
-        })}>确认导出已审查草稿</button>}
-        <button disabled={busy} onClick={() => setPlan(undefined)}>取消导出计划</button></section>}
+    <section id="sf-panel-Export" role="tabpanel" hidden={mode !== 'Export'} aria-label="交付历史"><h3>交付历史</h3><p>正文、引用库和质量报告保存在同一稿件快照中。</p>
       {(Object.values(project.ledger.deliveries) as any[]).map(delivery => <div key={delivery.id}><p>{delivery.id} · {delivery.reviewState} · {delivery.revisionId}</p>
         <button disabled={busy} onClick={() => run(() => downloadBundle(delivery.id))}>下载完整交付包</button>
         {delivery.files.map((file: any) => <button key={file.relativePath} disabled={busy} onClick={() => run(async () => {

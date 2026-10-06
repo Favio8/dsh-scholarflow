@@ -64,6 +64,7 @@ import { upsertAnchor } from '../core/editing/anchors.ts'
 import { listProjectSkills, projectSkillEntry } from '../core/skills/project-resources.ts'
 import { prepareProjectSkillCopy, applyProjectSkillCopy, type ProjectSkillCopyPlan } from '../core/skills/project-copy.ts'
 import type { FileStore } from '../core/store/files.ts'
+import { WritingController } from './bridge/writing-controller.ts'
 import { readRun, inspectRuns, prepareRunMigration, migrateRun } from '../core/pipeline/run-store.ts'
 import { prepareRunAction, validateRunAction, closeRun, readGenerationCheckpoint, type RunActionPlan } from '../core/pipeline/run-control.ts'
 import { newProjectDefaultsSchema, resolveInitDefaults } from '../shared/project-defaults.ts'
@@ -99,6 +100,7 @@ const mutationRevision = (context: RequestContext) => {
 }
 
 export class ScholarFlowRemote extends TypertRemoteService {
+  private writingController: WritingController
   private initPlans = new Map<string, StoredInitPlan>()
   private workflowPlans = new Map<string, { plan: WorkflowStartPlan | WorkflowActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
   private automaticPlans = new Map<string, { plan: AutomaticPlan | AutomaticActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
@@ -135,6 +137,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private runMigrationPlans = new Map<string, { plan: Awaited<ReturnType<typeof prepareRunMigration>>; context: RequestContext; peerId: string; expires: number }>()
   constructor(ctx: Host) {
     super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
+    this.writingController = new WritingController(ctx, this.bootInstance)
     this.researchProvider = crossrefProvider(ctx.web)
     this.githubProvider = githubSkills(ctx.web)
     ctx.effect(() => () => this.proposalRevisionPlans.clear(), 'scholarflow: clear operator candidate previews')
@@ -1144,6 +1147,35 @@ export class ScholarFlowRemote extends TypertRemoteService {
       invariant(this.draftSequencePlans.get(planId)?.peerId === peerId, 'INVALID_APPROVAL', '只可取消自己的初稿操作预览。')
       this.draftSequencePlans.delete(planId); return { dismissed: true } })
   }
+
+  @Remote('creation.materials')
+  async creationMaterials(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.scan(request, signal) }) }
+  @Remote('creation.suggest')
+  async creationSuggest(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.suggest(request, signal) }) }
+  @Remote('creation.prepare')
+  async creationPrepare(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.prepare(request, this.requireOperator(), signal, this.projectDefaults())) }
+  @Remote('creation.start')
+  async creationStart(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.create(request, this.requireOperator(), signal)) }
+  @Remote('writingTask.inspect')
+  async writingTaskInspect(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.inspect(request, signal) }) }
+  @Remote('document.versions')
+  async documentVersions(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.versions(request, signal) }) }
+  @Remote('writingTask.action')
+  async writingTaskAction(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.action(request, signal) }) }
+  @Remote('writingTask.preferences')
+  async writingTaskPreferences(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.preferences(request, signal) }) }
+  @Remote('cowrite.propose')
+  async cowritePropose(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.propose(request, signal) }) }
+  @Remote('cowrite.list')
+  async cowriteList(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.suggestions(request, signal) }) }
+  @Remote('cowrite.decide')
+  async cowriteDecide(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.decideSuggestion(request, signal) }) }
+  @Remote('cowrite.decideBrief')
+  async cowriteDecideBrief(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.decideBrief(request, signal) }) }
+  @Remote('cowrite.adoptGenerated')
+  async cowriteAdoptGenerated(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.adoptGenerated(request, signal) }) }
+  @Remote('writingTask.format')
+  async writingTaskFormat(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.format(request, signal) }) }
 
   @Remote('writing.dismiss')
   async writingDismiss(request: unknown, _signal: AbortSignal) {

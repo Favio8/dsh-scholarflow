@@ -10,6 +10,7 @@ import { scratchKey, readScratch, writeScratch, ScratchQueue } from './scratch-b
 import type { DraftController, PaperView } from './paper-workspace.tsx'
 import type { ExportFormat } from '../shared/presentation.ts'
 import { SelectionDetails, type SelectionContext } from './selection-card.tsx'
+import { useCowrite } from './cowrite.tsx'
 import { SelectionMenu, sourceSelectionRect } from './selection-menu.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
@@ -19,9 +20,9 @@ function readLocalBuffer(key: string) {
     return readScratch(window.localStorage, key, 8 * 1024 * 1024)
   } catch { /* Host temporary buffer remains available when browser storage fails. */ }
 }
-export function Draft({ project, context, api, refresh, run, busy, issueLocation, view = 'split', format = 'markdown', tool, visible = true, onController, onTool, onReturnEditor, onAttachSelection, captureChatInsertion }: Props & {
+export function Draft({ project, context, api, refresh, run, busy, issueLocation, view = 'split', format = 'markdown', tool, visible = true, onController, onTool, onReview, onReturnEditor, onAttachSelection, captureChatInsertion }: Props & {
   issueLocation?: any; view?: PaperView; format?: ExportFormat; tool?: 'Changes' | 'History'; visible?: boolean;
-  onController?: (value: DraftController) => void; onTool?: () => void; onReturnEditor?: () => void
+  onController?: (value: DraftController) => void; onTool?: () => void; onReview?: () => void; onReturnEditor?: () => void
   onAttachSelection?: (card: SelectionContext, ask: boolean, insertion: any) => void; captureChatInsertion?: () => any
 }) {
   const projectId = project.binding.projectId
@@ -54,6 +55,14 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     if (!latest || (latest.text === edit.text && latest.baseHash === edit.baseHash)) setBufferMessage(edit.state === 'dirty' ? '未提交编辑已暂存到宿主；主稿尚未改变。' : '宿主暂存缓冲已清理；主稿版本保持一致。')
   }, error => { persistenceBlocked.current = true; setBufferMessage(`暂存未完成，保留本页面和浏览器备份：${(error as Error).message}`) })
   const root = useRef<HTMLDivElement>(null), gutter = useRef<HTMLDivElement>(null)
+  const sourceArea = useRef<HTMLTextAreaElement>(null)
+  const [editRange, setEditRange] = useState<{ start: number; end: number }>(), [rewriteScope, setRewriteScope] = useState('selection'), [rewriteInstruction, setRewriteInstruction] = useState('')
+  const liveText = useRef(text); liveText.current = text
+  const cowrite = useCowrite({ text, baseHash, api, context, refresh, merge: async (next: string, expected: string) => {
+    if (liveText.current !== expected) throw new Error('编辑内容已改变，请检查新的修改建议。')
+    setText(next); remember({ text: next, baseHash }); setSelectionAnchor(undefined)
+    persistence.current!.enqueue({ text: next, baseHash, state: 'dirty', context: context() }); await persistence.current!.flush()
+  } })
   const [saving, setSaving] = useState(false), [cursor, setCursor] = useState(0)
   const livePreview = useMemo(() => {
     try { return { projection: projectMarkdown(text), statistics: wordStats(text), error: '' } }
@@ -129,7 +138,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       payload.claimIds = [...new Set((Object.values(project.ledger.claimAnchors) as any[]).filter(anchor => anchor.status === 'current' && anchor.documentId === 'paper' &&
         anchor.documentHash === project.document.contentHash && payload.blockIds.includes(anchor.blockId)).flatMap(anchor => anchor.claimIds))] as string[]
       setAnchorClaimIds(payload.claimIds); setAnchorId('')
-      setSelection(payload)
+      setSelection(payload); setEditRange({ start: payload.sourceRange.startUtf16, end: payload.sourceRange.endUtf16 })
       const range = window.getSelection()!.getRangeAt(0)
       setSelectionAnchor(range.getClientRects()[0] ?? range.getBoundingClientRect())
     } catch (error) { setSelection(undefined); setSelectionAnchor(undefined); setMessage((error as Error).message) }
@@ -141,6 +150,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const save = async () => {
     setSaving(true)
     try {
+      await persistence.current!.flush()
       const result = await api('document.saveManual', { context: context(), text, baseHash })
       remember(); setBaseHash(result.documentHash); setMessage('正文已保存。'); await refresh()
     } finally { setSaving(false) }
@@ -166,7 +176,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       return project.document.lineEnding === 'crlf' ? prefix.replace(/\n/g, '\r\n').length : prefix.length
     }
     const from = offset(area.selectionStart), to = offset(area.selectionEnd)
-    setCursor(from)
+    setCursor(from); setEditRange(from === to ? undefined : { start: from, end: to })
     if (from === to || dirty) { setSelection(undefined); setSelectionAnchor(undefined); return }
     try {
       const selected = validateRange(projection, from, to)
@@ -188,6 +198,22 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       onAdd={attachSelection} onDetails={() => selectionAction('details')} onAsk={() => selectionAction('ask')} onClose={() => setSelectionAnchor(undefined)} />}
     {selectionDetail && <SelectionDetails card={selectionDetail} onClose={() => setSelectionDetail(undefined)} onTool={onTool} />}
     <div className="sf-editor-surface" hidden={!!tool}>
+      {cowrite.briefsView}{cowrite.generatedView}
+      <div className="sf-cowrite-bar"><details className="sf-chapter-nav"><summary>章节 ▾</summary><div>{headings.map(node => <button key={node.position!.start.offset} onClick={e => {
+        const offset = node.position!.start.offset!; setCursor(offset); e.currentTarget.closest('details')?.removeAttribute('open')
+        if (view === 'preview') root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${offset}"]`)?.scrollIntoView({ block: 'start' })
+        else { const area = sourceArea.current!; area.focus(); area.setSelectionRange(offset, offset); area.scrollTop = text.slice(0, offset).split('\n').length * 24 - 40 }
+      }}>{textOf(node)}</button>)}</div></details>
+        <select aria-label="AI 修改范围" value={rewriteScope} onChange={e => setRewriteScope(e.target.value)}><option value="selection">选中内容</option><option value="chapter">当前章节</option><option value="document">全文</option></select>
+        <input aria-label="AI 修改要求" placeholder="告诉 AI 怎样修改…" value={rewriteInstruction} onChange={e => setRewriteInstruction(e.target.value)} />
+        <button disabled={busy || cowrite.busy || !rewriteInstruction.trim() || baseHash !== project.document.contentHash || (rewriteScope === 'selection' && !editRange)} onClick={() => {
+          const start = rewriteScope === 'document' ? 0 : rewriteScope === 'selection' ? editRange!.start : currentHeading?.position?.start.offset ?? 0
+          const end = rewriteScope === 'document' ? text.length : rewriteScope === 'selection' ? editRange!.end : headings.find(node => (node.position?.start.offset ?? 0) > start)?.position?.start.offset ?? text.length
+          cowrite.request(start, end, rewriteInstruction)
+        }}>{cowrite.busy ? '正在修改…' : 'AI 修改'}</button>
+      </div>
+      {cowrite.message && <p className="sf-editor-notice" role="status">{cowrite.message}</p>}
+      {view === 'edit' && cowrite.suggestions.length > 0 && <div style={{ maxHeight: 300, overflow: 'auto' }}>{cowrite.annotations(0, text.length + 1)}</div>}
       {(recoverable || baseHash !== project.document.contentHash || project.document.externalChange) && <div className="sf-editor-notice" role="status">
         {recoverable ? '有暂存编辑可恢复' : '正文版本发生变化，当前编辑已保留'}<button onClick={onTool}>查看与处理</button>
       </div>}
@@ -195,7 +221,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         <div className="sf-source-pane" hidden={view === 'preview'}><div className="sf-pane-caption"><span>{project.config.paths.mainDocument.split('/').at(-1)} · Markdown</span>
           <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>{saving ? '保存中…' : '保存'}</button></div>
           <div className="sf-source-editor"><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
-            <textarea className="sf-source-input" aria-label="Markdown 手工编辑" wrap="off" spellCheck={false} disabled={busy || saving} value={text}
+            <textarea ref={sourceArea} className="sf-source-input" aria-label="Markdown 手工编辑" wrap="off" spellCheck={false} disabled={busy || saving} value={text}
               onScroll={e => { setSelectionAnchor(undefined); if (gutter.current) gutter.current.style.transform = `translateY(${-e.currentTarget.scrollTop}px)` }}
               onMouseDown={() => { selecting.current = true; setSelectionAnchor(undefined) }}
               onMouseUp={e => { selecting.current = false; selectSource(e.currentTarget) }}
@@ -203,7 +229,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
               onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (dirty && !busy && !saving && baseHash === project.document.contentHash) run(save) } }}
               onChange={e => {
                 const edited = project.document.lineEnding === 'crlf' ? e.target.value.replace(/\r\n|\r|\n/g, '\r\n') : e.target.value
-                setText(edited); setSelection(undefined); setSelectionAnchor(undefined); selectionRequest.current++; setMessage('')
+                setText(edited); setEditRange(undefined); setSelection(undefined); setSelectionAnchor(undefined); selectionRequest.current++; setMessage('')
                 if (edited === project.document.text && baseHash === project.document.contentHash) remember()
                 else remember({ text: edited, baseHash })
               }} />
@@ -211,7 +237,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         </div>
         <div className="sf-preview-pane" hidden={view === 'edit'}><div className="sf-pane-caption"><span>论文预览</span><span>{format === 'latex' ? 'LaTeX 排版' : format === 'docx' ? 'Word 排版' : 'Markdown'} · 实时</span></div>
           <div className="sf-paper-scroll"><div className="sf-paper-page" data-format={format} ref={root} onMouseUp={capture} onKeyUp={capture}>
-            {livePreview.projection ? <MarkdownView projection={livePreview.projection} /> : <p role="alert">{livePreview.error}</p>}
+            {livePreview.projection ? <MarkdownView projection={livePreview.projection} annotations={(start, end) => <>{cowrite.annotations(start, end)}{!dirty && (Object.values(project.ledger.reviewIssues) as any[]).filter(issue => !issue.stale && issue.state !== 'resolved' && issue.documentHash === project.document.contentHash && issue.location?.sourceRange.startUtf16 >= start && issue.location.sourceRange.startUtf16 < end).map(issue => <button className="sf-review-marker" key={issue.id} title={issue.explanation} onClick={onReview}>{issue.severity} · {issue.title}</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
             {!!livePreview.projection?.citationOrder.length && <section className="sf-paper-references"><h3>参考文献</h3><ol>{livePreview.projection.citationOrder.map(key => {
               const source = (Object.values(project.ledger.sources) as any[]).find(row => row.citeKey === key)
               return <li key={key}>{source ? [source.authors.map((author: any) => author.literal ?? [author.given, author.family].filter(Boolean).join(' ')).join(', '), source.title, source.year, source.venue].filter(Boolean).join('. ') : `待登记引用：${key}`}</li>

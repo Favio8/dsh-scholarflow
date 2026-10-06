@@ -3,14 +3,14 @@ import { type ParsedBody, parseRange } from '../../shared/materials.ts'
 import { ScholarError } from '../../shared/errors.ts'
 import { type z } from 'zod'
 
-export async function parseMaterialBytes(bytes: Uint8Array, mediaType: string, signal: AbortSignal, range?: z.infer<typeof parseRange>): Promise<ParsedBody> {
+export async function parseMaterialBytes(bytes: Uint8Array, mediaType: string, signal: AbortSignal, range?: z.infer<typeof parseRange>, fullDocument = false): Promise<ParsedBody> {
   signal.throwIfAborted()
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL(import.meta.resolve('#scholarflow-parser')), { workerData: { bytes, mediaType, range }, execArgv: [],
+    const worker = new Worker(new URL(import.meta.resolve('#scholarflow-parser')), { workerData: { bytes, mediaType, range, fullDocument }, execArgv: [],
       resourceLimits: { maxOldGenerationSizeMb: 128, stackSizeMb: 4 }, stdout: true, stderr: true })
     // Parser logs may contain source fragments. They are never forwarded to Host logs.
     worker.stdout.resume(); worker.stderr.resume()
-    const timer = setTimeout(() => finish(new ScholarError('PARSE_TIMEOUT', '解析超过 20 秒，请缩小资料或解析范围。')), 20000)
+    const timer = setTimeout(() => finish(new ScholarError('PARSE_TIMEOUT', '解析耗时超出限额，请缩小资料或解析范围。')), fullDocument ? 60000 : 20000)
     let done = false
     const abort = () => finish(new ScholarError('CANCELLED', '已取消资料解析；原始资料未改变。'))
     const finish = (error?: Error, data?: ParsedBody) => {

@@ -6,13 +6,16 @@ import { z } from 'zod'
 import { parseRange, PARSER_VERSION, type ParsedBody } from '../../shared/materials.ts'
 import { ScholarError, invariant } from '../../shared/errors.ts'
 import { inspectDocxZip } from './zip-limits.ts'
+import { Readability } from '@mozilla/readability'
+import { parseHTML } from 'linkedom'
+import { digest } from '../../core/store/files.ts'
 
-const inputSchema = z.object({ bytes: z.instanceof(Uint8Array), mediaType: z.string(), range: parseRange.optional() }).strict()
+const inputSchema = z.object({ bytes: z.instanceof(Uint8Array), mediaType: z.string(), range: parseRange.optional(), fullDocument: z.boolean().default(false) }).strict()
 const MAX_TEXT = 4 * 1024 * 1024
 const MAX_BLOCKS = 10000
 
 async function parse(): Promise<ParsedBody> {
-  const { bytes, mediaType, range } = inputSchema.parse(workerData)
+  const { bytes, mediaType, range, fullDocument } = inputSchema.parse(workerData)
   const blocks: ParsedBody['blocks'] = []
   const warnings: string[] = []
   let textBytes = 0
@@ -32,6 +35,22 @@ async function parse(): Promise<ParsedBody> {
     return { parser: { id: 'utf8-line-text', version: PARSER_VERSION }, blocks, coverage: from === 1 && to === lines.length ? 'complete' : 'partial',
       warnings: ['文本定位使用原文件的 1-based 行号；Markdown 保留原始标记，每行视作一个解析单元。'], unprocessedContent: [], ranges: to >= from ? [{ kind: 'paragraphs', from, to }] : [] }
   }
+  if (mediaType === 'text/html' || mediaType === 'application/xhtml+xml') {
+    const { document } = parseHTML(new TextDecoder().decode(bytes))
+    document.querySelectorAll('script,style,nav,footer,header,form').forEach(node => node.remove())
+    const article = new Readability(document as any).parse()
+    invariant(article?.content, 'FULLTEXT_BODY_MISSING', '网页没有可识别的文章正文。')
+    const content = parseHTML(article.content).document
+    let paragraphIndex = 0, heading = article.title ?? ''
+    for (const node of Array.from(content.querySelectorAll('h1,h2,h3,h4,p,li,blockquote,td'))) {
+      if (node.querySelector('p,li')) continue
+      const text = node.textContent?.trim(); if (!text) continue
+      const isHeading = /^H[1-6]$/.test(node.tagName); if (isHeading) heading = text
+      add({ text, kind: isHeading ? 'heading' : 'paragraph', locator: { kind: 'web', heading, paragraphIndex: ++paragraphIndex, snapshotHash: digest(bytes) } })
+    }
+    return { parser: { id: 'readability-html', version: PARSER_VERSION }, blocks, coverage: 'partial', warnings: ['已提取文章正文；图片与附件未读取。'],
+      unprocessedContent: [], ranges: paragraphIndex ? [{ kind: 'paragraphs', from: 1, to: paragraphIndex }] : [] }
+  }
   if (mediaType === 'application/pdf') {
     invariant(!range || range.kind === 'pages', 'INVALID_PARSE_RANGE', 'PDF 使用物理页码范围。')
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
@@ -40,7 +59,7 @@ async function parse(): Promise<ParsedBody> {
     try {
       const document = await task.promise
       invariant(document.numPages <= 2000, 'PARSE_PAGE_LIMIT', 'PDF 页数超过 2000 页，请拆分资料。')
-      const from = range?.from ?? 1, to = Math.min(range?.to ?? 20, document.numPages)
+      const from = range?.from ?? 1, to = Math.min(range?.to ?? (fullDocument ? document.numPages : 20), document.numPages)
       invariant(from <= to, 'INVALID_PARSE_RANGE', '解析范围超出 PDF 页数。')
       let empty = 0
       for (let pageNumber = from; pageNumber <= to; pageNumber++) {
