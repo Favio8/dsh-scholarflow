@@ -481,29 +481,32 @@ try {
   await page.setViewportSize({ width: 1440, height: 900 })
   record('AT-65～69 交互期间无客户端错误', clientErrors.length === 0, clientErrors.slice(0, 3).join(' | ') || 'none')
 
-  // ── AT-67/68/59 · these need a real project: the overlay, the candidate and the draft only
-  // exist once one does. Created and cancelled at once, so no generation is paid for.
-  const projectWorkspace = await workspaceOf(projectRoot)
-  const createdSession = payload((await rpc('session/create', { request: { workspaceId: projectWorkspace, agentPreset: 'scholarflow' } })).body)?.sessionId
-  const projectContext = { requestId: `req_at67_${Date.now()}`, workspaceId: projectWorkspace, sessionId: createdSession }
-  const projectSpec = { title: 'TEST_ONLY 交互验收', type: 'course-paper', language: 'zh-CN', format: 'markdown',
-    requirements: 'TEST_ONLY 交互验收用要求。', requirementSources: [], materials: [], online: false, targetLength: 1500,
-    countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
-    sections: [{ id: 'section_1', title: '第一节', purpose: '', targetLength: 1500, allocationMode: 'auto' }],
-    manuscriptDir: 'manuscript', overrides: [] }
+  // ── AT-67/68/59 · the project is created through the wizard itself (AT-67/68/59 need one).
+  // The workbench mounts only when the project's binding session is the conversation on
+  // screen, so creating it out of band would leave it permanently unready.
+  await wizard.locator('#sf-field-title').fill('TEST_ONLY 交互验收').catch(() => undefined)
+  // Earlier items left manual section lengths; a target below their sum blocks creation.
+  const lengthInput = wizard.locator('input[aria-label="目标篇幅"]')
+  await lengthInput.fill('4000').catch(() => undefined)
+  await page.waitForTimeout(300)
+  await page.evaluate(() => { const button = [...document.querySelectorAll('.sf-wizard-footer button')].find(el => (el.innerText ?? '').includes('创建')); return button ? { disabled: button.disabled, text: button.innerText } : { missing: true } })
+  await page.evaluate(() => { const third = document.querySelectorAll('.sf-wizard-steps button')[2]; if (third && third.getAttribute('aria-current') !== 'step') third.click() })
+  await page.waitForTimeout(900)
   let workbench = 0
   try {
-    const plan = payload((await rpc('scholarflow.v1/creation.prepare', { request: { context: projectContext, spec: projectSpec } })).body)
-    const started = payload((await rpc('scholarflow.v1/creation.start', { request: { context: projectContext, planId: plan.planId, planHash: plan.planHash } })).body)
-    record('AT-68 项目已创建以便驱动工作台', Boolean(started?.taskId), 'task=' + String(started?.taskId))
-    await rpc('scholarflow.v1/writingTask.action', { request: { context: { ...projectContext, projectId: started.projectId },
-      taskId: started.taskId, action: 'cancel' } })
-    await page.waitForTimeout(2000)
-    await page.locator('[class*="_sessionRow"]').first().click().catch(() => undefined)
-    await page.waitForTimeout(2500)
-    workbench = await page.locator('.sf-middle-column').count()
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('.sf-wizard-footer button')].find(el => (el.innerText ?? '').includes('创建'))
+      if (button) button.click()
+    })
+    for (let attempt = 0; attempt < 30 && !workbench; attempt += 1) {
+      await page.waitForTimeout(1000)
+      workbench = await page.locator('.sf-middle-column').count()
+    }
+    const wizardError = await page.locator('.sf-wizard-error').first().innerText().catch(() => '')
+    record('AT-68 通过向导创建项目以驱动工作台', workbench > 0,
+      'middle columns=' + workbench + ' 向导错误=' + String(wizardError).replace(/\s+/g, ' ').slice(0, 90))
   } catch (error) {
-    record('AT-68 项目已创建以便驱动工作台', 'FAIL', error.message)
+    record('AT-68 通过向导创建项目以驱动工作台', 'FAIL', error.message)
   }
   record('AT-67 正文工作台在真实客户端挂载', workbench > 0, 'middle columns=' + workbench)
   if (workbench > 0) {
