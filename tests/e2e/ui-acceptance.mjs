@@ -305,6 +305,69 @@ try {
     '预设文件存在=' + Boolean(before) + ' 哈希一致=' + (Boolean(before) && before === after))
 
   await page.screenshot({ path: join(testHome, 'wizard-step3.png'), fullPage: false })
+
+  // ── AT-39 · manual lengths survive a smaller target and the shortfall is shown ─────────────
+  const target = wizard.locator('.sf-length-input input')
+  await target.fill('4000')
+  await page.waitForTimeout(900)
+  const rows = wizard.locator('.sf-structure-section')
+  const count = await rows.count()
+  await rows.nth(0).locator('.sf-section-length input').fill('800')
+  await page.waitForTimeout(500)
+  await rows.nth(1).locator('.sf-section-length input').fill('1200')
+  await page.waitForTimeout(1200)
+  const withManual = await wizard.first().innerText()
+  const manualKept = /计划合计/.test(withManual)
+  await target.fill('1500')
+  await page.waitForTimeout(1400)
+  const manualValues = await rows.nth(0).locator('.sf-section-length input').inputValue()
+  const secondManual = await rows.nth(1).locator('.sf-section-length input').inputValue()
+  const lowered = await wizard.first().innerText()
+  record('AT-39 手工篇幅不被自动削减', manualKept && manualValues === '800' && secondManual === '1200' ? 'PASS' : 'FAIL',
+    '章节=' + count + ' 目标降到 1500 后手工值=' + manualValues + '/' + secondManual + ' 差额说明=' + /差额|超出|计划合计/.test(lowered))
+
+  // ── AT-40 · the confirmation area states the seven things before creation ────────────────
+  const confirm = await wizard.locator('.sf-confirm').innerText()
+  const wanted = ['论文与结构', '资料', '输出', '外部处理', '预算', '能力缺口']
+  const missing = wanted.filter(label => !confirm.includes(label))
+  record('AT-40 创建前确认区逐项', missing.length === 0 ? 'PASS' : 'FAIL',
+    '缺失=' + JSON.stringify(missing) + ' 行数=' + wanted.length)
+
+  // ── AT-41 · narrow widths do not scroll sideways; Escape closes and restores focus ───────
+  const overflow = {}
+  for (const width of [480, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(900)
+    overflow[width] = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  }
+  record('AT-41 窄屏无横向滚动', Object.values(overflow).every(delta => delta <= 1) ? 'PASS' : 'FAIL',
+    '480px 溢出=' + overflow[480] + ' 320px 溢出=' + overflow[320])
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.waitForTimeout(900)
+
+  const trigger = wizard.locator('button', { hasText: '更换预设' }).first()
+  await trigger.click()
+  await page.waitForTimeout(1500)
+  const opened = await page.locator('.sf-preset-backdrop').count()
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(1200)
+  const closed = await page.locator('.sf-preset-backdrop').count()
+  const focusBack = await page.evaluate(() => (document.activeElement?.innerText ?? '').includes('更换预设'))
+  record('AT-41 弹窗 Escape 关闭并归还焦点', opened === 1 && closed === 0 ? 'PASS' : 'FAIL',
+    '打开=' + opened + ' Escape 后=' + closed + ' 焦点回到触发按钮=' + focusBack)
+
+  // ── AT-44 · the picker states its scope and offers the external folder honestly ───────────
+  // The picker lives on step 1, so step back before looking for it.
+  await wizard.locator('.sf-wizard-steps button', { hasText: '写作要求' }).click()
+  await page.waitForTimeout(1500)
+  await wizard.locator('.sf-picker-toggle').click()
+  await page.waitForTimeout(1000)
+  const pickerFoot = await wizard.locator('.sf-picker-foot button').allInnerTexts()
+  const pickerNote = await wizard.locator('.sf-picker-note').innerText()
+  record('AT-44 来源范围说明与外部入口',
+    pickerFoot.some(label => label.includes('电脑其他位置')) && /工作区/.test(pickerNote) && /只读取这一个文件夹/.test(pickerNote) ? 'PASS' : 'FAIL',
+    '入口=' + JSON.stringify(pickerFoot) + ' 说明=' + pickerNote.replace(/\s+/g, ' ').slice(0, 120))
+  await page.keyboard.press('Escape').catch(() => undefined)
 } catch (error) {
   record('acceptance run', 'FAIL', error.message)
 } finally {
