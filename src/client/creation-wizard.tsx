@@ -498,7 +498,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     <p className="sf-wizard-step-compact" aria-current="step">第 {step + 1} 步 / 共 3 步 · {["写作要求", "资料范围", "行文结构"][step]}</p>
     <nav className="sf-wizard-steps" aria-label="创建步骤">{['写作要求', '资料范围', '行文结构'].map((title, index) => <button key={title} disabled={busy || index > step} aria-current={step === index ? 'step' : undefined}
       onClick={() => goToStep(index)}><span>{index + 1}</span>{title}</button>)}</nav>
-    <div className="sf-wizard-page" key={step}>
+    <div className="sf-wizard-page" key={step} data-direction={direction === 1 ? 'forward' : 'back'}>
       {step === 0 && <>
         <label>论文标题<input id="sf-field-title" placeholder="可以先留空，由写作要求生成" value={spec.title} maxLength={300} onChange={e => update({ title: e.target.value })} /></label>
         <div className="sf-wizard-row"><label>论文类型<select value={spec.type} onChange={e => { const type = e.target.value as CreationSpec['type']
@@ -675,7 +675,8 @@ export const WIZARD_CSS = `/* Text colours are tokens because they must clear WC
 .sf-wizard-steps span{display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:#8881}
 .sf-wizard-steps [aria-current=step]{color:var(--sf-accent-text)!important}
 .sf-wizard-steps [aria-current=step] span{background:var(--sf-accent);color:#fff}
-.sf-wizard-page{animation:sf-wizard-enter .22s ease-out}
+.sf-wizard-page[data-direction=forward]{animation:sf-step-forward var(--sf-dur-base,220ms) var(--sf-ease-out,ease-out)}
+.sf-wizard-page[data-direction=back]{animation:sf-step-back var(--sf-dur-base,220ms) var(--sf-ease-out,ease-out)}
 .sf-wizard-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:16px}
 .sf-wizard .sf-assignment-row{display:flex;align-items:flex-end;gap:12px}
 .sf-wizard .sf-assignment-row>.sf-assignment-field{flex:1 1 auto;min-width:0}
@@ -821,8 +822,9 @@ export const WIZARD_CSS = `/* Text colours are tokens because they must clear WC
 .sf-wizard-error{color:var(--sf-danger)!important}
 .sf-wizard button{cursor:pointer}
 .sf-wizard button:disabled{opacity:.45;cursor:default}
-@keyframes sf-wizard-enter{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
-@media(prefers-reduced-motion:reduce){.sf-wizard-page{animation:none}}
+@keyframes sf-step-forward{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
+@keyframes sf-step-back{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
+@media(prefers-reduced-motion:reduce){.sf-wizard-page[data-direction]{animation:none}}
 @media(max-width:720px){.sf-wizard{padding:20px}.sf-wizard-row{grid-template-columns:1fr}.sf-wizard-steps{gap:12px}.sf-wizard .sf-structure-caption{flex-wrap:wrap}.sf-wizard .sf-structure-actions{margin-left:0}
 .sf-wizard .sf-material-checklist{max-height:none}
 .sf-wizard .sf-structure-list{max-height:none}

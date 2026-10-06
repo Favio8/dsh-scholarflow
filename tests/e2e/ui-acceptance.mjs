@@ -17,7 +17,8 @@ const profile = join(testHome, 'profiles/scholarflow-probe')
 const emptyRoot = join(testHome, '空工作区 TEST_ONLY')
 const projectRoot = join(testHome, '已有项目 TEST_ONLY')
 const results = []
-const record = (name, verdict, detail) => { results.push({ name, verdict, detail }); console.log(`${verdict === 'PASS' ? '✔' : '✖'} ${name} — ${detail}`) }
+const record = (name, verdict, detail) => { const mark = verdict === true || verdict === 'PASS' ? 'PASS' : 'FAIL'
+  results.push({ name, verdict: mark, detail }); console.log(`${mark === 'PASS' ? '✔' : '✖'} ${name} — ${detail}`) }
 
 await mkdir(join(profile, 'node_modules'), { recursive: true })
 await mkdir(join(emptyRoot, '课程要求'), { recursive: true })
@@ -53,6 +54,10 @@ try {
   })
   page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage()
   page.setDefaultTimeout(20000)
+  // Collected so the motion section can assert that driving the UI did not break anything.
+  const clientErrors = []
+  page.on('pageerror', error => clientErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') clientErrors.push(message.text()) })
   await page.goto(url)
   await page.waitForTimeout(1500)
   const dismiss = async () => {
@@ -376,6 +381,105 @@ try {
     pickerFoot.some(label => label.includes('电脑其他位置')) && /工作区/.test(pickerNote) && /只读取这一个文件夹/.test(pickerNote) ? 'PASS' : 'FAIL',
     '入口=' + JSON.stringify(pickerFoot) + ' 说明=' + pickerNote.replace(/\s+/g, ' ').slice(0, 120))
   await page.keyboard.press('Escape').catch(() => undefined)
+
+  // ── AT-65 · three steps forward and back, direction-aware, then a burst of clicks ────────
+  // The transform is sampled while the transition is still running: an assertion that a step
+  // "changed" would pass even with no motion at all.
+  const sampleStep = async () => page.evaluate(() => {
+    const pages = document.querySelectorAll('.sf-wizard-page')
+    const node = pages[pages.length - 1]
+    const buttons = [...document.querySelectorAll('.sf-wizard-steps button')]
+    return { pages: pages.length, transform: node ? getComputedStyle(node).transform : 'none',
+      direction: node?.getAttribute('data-direction'),
+      current: buttons.findIndex(button => button.getAttribute('aria-current') === 'step') }
+  })
+  // Clicked through the page rather than through an actionability wait: the point is to sample
+  // a transition mid-flight, and a stability check would let it finish first.
+  const pressStep = async label => page.evaluate(text => {
+    const button = [...document.querySelectorAll('.sf-wizard-footer button')]
+      .find(el => (el.innerText ?? '').includes(text) && !el.disabled)
+    if (button) button.click()
+    return Boolean(button)
+  }, label)
+  // Return to step 1 first: the previous section ends on the source picker.
+  await page.keyboard.press('Escape').catch(() => undefined)
+  await page.evaluate(() => {
+    const first = document.querySelector('.sf-wizard-steps button')
+    if (first && first.getAttribute('aria-current') !== 'step') first.click()
+  })
+  await page.waitForTimeout(500)
+  const travel = []
+  for (let index = 0; index < 3; index++) {
+    await pressStep('下一步')
+    await page.waitForTimeout(70)
+    travel.push({ way: 'forward', during: await sampleStep() })
+    await page.waitForTimeout(320)
+  }
+  for (let index = 0; index < 3; index++) {
+    await pressStep('上一步')
+    await page.waitForTimeout(70)
+    travel.push({ way: 'back', during: await sampleStep() })
+    await page.waitForTimeout(320)
+  }
+  const offsetX = frame => {
+    const match = /matrix\(([^)]+)\)/.exec(frame.during.transform ?? '')
+    return match ? Number(match[1].split(',')[4]) : 0
+  }
+  const forwards = travel.filter(frame => frame.way === 'forward')
+  const backwards = travel.filter(frame => frame.way === 'back')
+  record('AT-65 前进与返回都实际播放过渡', travel.every(frame => frame.during.direction) && travel.some(frame => offsetX(frame) !== 0),
+    travel.map(frame => `${frame.way}:${frame.during.direction} x=${offsetX(frame).toFixed(1)}`).join(' | '))
+  record('AT-65 方向区分前进与返回',
+    forwards.every(frame => offsetX(frame) >= 0) && backwards.every(frame => offsetX(frame) <= 0) &&
+      forwards.some(frame => offsetX(frame) > 0) && backwards.some(frame => offsetX(frame) < 0),
+    '前进 x=' + forwards.map(frame => offsetX(frame).toFixed(1)).join(',') + ' 返回 x=' + backwards.map(frame => offsetX(frame).toFixed(1)).join(','))
+  record('AT-65 返回后停在第一步', (await sampleStep()).current === 0, '当前步骤=' + (await sampleStep()).current)
+
+  // Business state follows the click, not the animation: the step index must already be the
+  // new one while the transition is still playing.
+  await pressStep('下一步')
+  await page.waitForTimeout(40)
+  const immediate = await sampleStep()
+  record('AT-66 状态随点击立即改变，不等动画播完', immediate.current === 1, '40ms 后当前步骤=' + immediate.current)
+
+  // A burst of clicks must leave exactly one live page and a stage that is not blank.
+  for (let index = 0; index < 5; index++) { await pressStep('下一步'); await pressStep('上一步') }
+  await page.waitForTimeout(600)
+  const burst = await page.evaluate(() => ({ pages: document.querySelectorAll('.sf-wizard-page').length,
+    height: document.querySelector('.sf-wizard')?.getBoundingClientRect().height ?? 0,
+    text: (document.querySelector('.sf-wizard')?.innerText ?? '').length,
+    operable: [...document.querySelectorAll('.sf-wizard-page button')].filter(button => button.offsetParent !== null).length }))
+  record('AT-65 连续点击后只有一个可操作页面且不空白',
+    burst.pages === 1 && burst.height > 200 && burst.text > 40 && burst.operable > 0, JSON.stringify(burst))
+
+  // ── AT-69 · reduced motion collapses the transitions and leaves nothing running ──────────
+  const quiet = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
+  const quietPage = await quiet.newPage()
+  await quietPage.goto(url)
+  await quietPage.waitForTimeout(1400)
+  const quietTokens = await quietPage.evaluate(() => {
+    const style = getComputedStyle(document.documentElement)
+    return { base: style.getPropertyValue('--sf-dur-base').trim(), sweep: style.getPropertyValue('--sf-sweep').trim() }
+  })
+  record('AT-69 减少动态效果时令牌收敛', /^1ms$/.test(quietTokens.base) && (quietTokens.sweep === '0s' || quietTokens.sweep === '0'),
+    '--sf-dur-base=' + quietTokens.base + ' --sf-sweep=' + quietTokens.sweep)
+  await quiet.close()
+
+  // ── AT-69 · 200% zoom must not scroll sideways and must keep controls usable ─────────────
+  await page.setViewportSize({ width: 640, height: 450 })
+  await page.waitForTimeout(800)
+  const zoomed = await page.evaluate(() => {
+    const controls = [...document.querySelectorAll('.sf-wizard button, .sf-wizard input:not([type=checkbox]), .sf-wizard select, .sf-wizard textarea')]
+      .filter(el => el.offsetParent !== null && !el.hidden)
+      .map(el => el.getBoundingClientRect().height).filter(height => height > 0)
+    return { overflow: document.documentElement.scrollWidth - window.innerWidth, count: controls.length,
+      smallest: controls.length ? Math.min(...controls) : 0 }
+  })
+  record('AT-69 200% 缩放无横向滚动', zoomed.overflow <= 1, 'overflow=' + zoomed.overflow + 'px')
+  record('AT-69 200% 缩放控件仍可用', zoomed.count > 0 && zoomed.smallest >= 24,
+    '可见控件=' + zoomed.count + ' 最小高度=' + Math.round(zoomed.smallest) + 'px')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  record('AT-65～69 交互期间无客户端错误', clientErrors.length === 0, clientErrors.slice(0, 3).join(' | ') || 'none')
 } catch (error) {
   record('acceptance run', 'FAIL', error.message)
 } finally {
