@@ -110,6 +110,12 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     const result = await api('creation.suggest', { context: context(), spec: { ...readySpec(), title: readySpec().title || '待确定论文题目', requirements: spec.requirements.trim() || '根据所选要求来源提取写作要求。' } })
     update({ title: spec.title.trim() || result.title, ...(structure ? { sections: result.sections } : { requirements: result.requirements }) })
   }
+  const clearDraft = () => {
+    if (!window.confirm('清除本次填写的草稿？论文项目不会被创建，已有项目不受影响。')) return
+    try { localStorage.removeItem(key) } catch { /* storage may be unavailable */ }
+    setHistory([]); setIssues([]); setRecognition({}); setStep(0)
+    setSpec({ ...initial, sections: presetSections(spec.type, initial.targetLength) })
+  }
   const newSourceId = () => `req_${crypto.randomUUID().replaceAll('-', '')}`
   const addSource = (kind: 'file' | 'folder', path: string) => update({ requirementSources: [...spec.requirementSources,
     { resourceId: newSourceId(), origin: 'workspace' as const, kind, path, role: 'assignment' as const, state: 'selected' as const,
@@ -179,7 +185,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     ...(spec.requirementSources.some(source => source.origin === 'external') ? ['工作区外来源的读取尚未验证'] : []),
   ]
   return <div className="sf-wizard-scroll"><section className="sf-wizard" aria-label="创建论文向导">
-    <header><span className="sf-wizard-eyebrow">{workspaceTitle}</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p></header>
+    <header><span className="sf-wizard-eyebrow">{workspaceTitle}</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p>
+      <button className="sf-wizard-clear" disabled={busy} onClick={clearDraft}>清除草稿</button></header>
     <nav className="sf-wizard-steps" aria-label="创建步骤">{['写作要求', '资料范围', '行文结构'].map((title, index) => <button key={title} disabled={busy || index > step} aria-current={step === index ? 'step' : undefined}
       onClick={() => setStep(index)}><span>{index + 1}</span>{title}</button>)}</nav>
     <div className="sf-wizard-page" key={step}>
@@ -426,6 +433,7 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard .sf-confirm p{margin:6px 0 0;font-size:12px;color:#8b9099}
 .sf-wizard .sf-wizard-issues{list-style:none;margin:14px 0 0;padding:10px 14px;border:1px solid #d4515155;border-radius:9px;background:#d451510f;color:#b04a4a;font-size:12.5px;line-height:1.7}
 .sf-wizard .sf-wizard-issues li+li{margin-top:4px}
+.sf-wizard .sf-wizard-clear{margin-left:auto;height:30px;padding:0 10px;border:1px solid #8884;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary,#727780);font:inherit;font-size:12px;cursor:pointer}
 .sf-online-choice{flex-direction:row!important;align-items:center;padding:15px;border-radius:9px;background:#4475e708;margin-top:18px!important}
 .sf-online-choice span{display:flex;flex-direction:column;gap:4px}
 .sf-online-choice small{color:#888}
@@ -438,5 +446,8 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard button:disabled{opacity:.45;cursor:default}
 @keyframes sf-wizard-enter{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
 @media(prefers-reduced-motion:reduce){.sf-wizard-page{animation:none}}
-@media(max-width:720px){.sf-wizard{padding:20px}.sf-wizard-row{grid-template-columns:1fr}.sf-wizard-steps{gap:12px}.sf-wizard .sf-structure-caption{flex-wrap:wrap}.sf-wizard .sf-structure-actions{margin-left:0}}
+@media(max-width:720px){.sf-wizard{padding:20px}.sf-wizard-row{grid-template-columns:1fr}.sf-wizard-steps{gap:12px}.sf-wizard .sf-structure-caption{flex-wrap:wrap}.sf-wizard .sf-structure-actions{margin-left:0}
+.sf-wizard .sf-material-checklist{max-height:none}
+.sf-wizard .sf-structure-list{max-height:none}
+.sf-wizard button{min-height:44px}}
 `
