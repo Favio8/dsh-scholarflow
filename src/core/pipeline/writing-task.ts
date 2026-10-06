@@ -5,6 +5,7 @@ import { writingQuestion } from '../../shared/writing-task.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { snapshot, mutateLedger, CONFIG_PATH } from '../project/project.ts'
 import { registerMaterial, readParsed, materialCachePath } from '../materials/materials.ts'
+import { readApproval } from './spec-compat.ts'
 import { registerSource, confirmOutline, upsertClaim } from '../evidence/evidence.ts'
 import { saveManual, applyProposal, proposalImage } from '../editing/proposals.ts'
 import { sectionTarget } from '../editing/sections.ts'
@@ -123,13 +124,18 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
       if (services.pauseRequested()) { task.status = 'paused'; await checkpoint(); return }
       if (Date.now() - start >= current.config.workflow.budget.maxDurationMinutes * 60000) throw new ScholarError('BUDGET_EXHAUSTED', '本轮写作时间已到，已有内容已保留。')
       if (task.stage === 'materials') {
-        while (task.materialIndex < task.spec.materials.length) {
+        // Read the union of what the user authorised: requirement sources and reference
+        // materials are independent, and a requirement file keeps its assignment role
+        // instead of being promoted to a citation source.
+        const approval = readApproval(task.spec)
+        const requirementPaths = new Set(approval.sources.filter(source => source.origin === 'workspace' && source.path).map(source => source.path!))
+        while (task.materialIndex < approval.paths.length) {
           if (services.pauseRequested()) { task.status = 'paused'; await checkpoint(); return }
-          const path = task.spec.materials[task.materialIndex]
+          const path = approval.paths[task.materialIndex]
           try {
             const state = await snapshot(io)
             const material = Object.values(state.ledger.materials).find(row => row.projectRelativePath === path) ??
-              (await registerMaterial(io, { relativePath: path, role: path === task.spec.assignmentPath ? 'assignment' : /\.pdf$/i.test(path) ? 'paper' : 'notes', confirmExcludedFile: false }, state.ledger.revision)).material
+              (await registerMaterial(io, { relativePath: path, role: requirementPaths.has(path) ? 'assignment' : /\.pdf$/i.test(path) ? 'paper' : 'notes', confirmExcludedFile: false }, state.ledger.revision)).material
             if (!['ready', 'partial'].includes(material.parseStatus)) await services.parse(material.id)
           } catch (error) { if (services.signal.aborted) throw error; task.notes.push(`${path}：${(error as Error).message}`) }
           task.materialIndex++; await checkpoint()

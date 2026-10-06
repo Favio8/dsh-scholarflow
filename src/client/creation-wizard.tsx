@@ -42,7 +42,9 @@ function AssignmentPicker({ files, value, disabled, scanning, onSelect, onRescan
 export function CreationWizard({ scope, api, context, onCreated, workspaceTitle, defaults }: any) {
   const key = `scholarflow:creation:${scope}`
   const initial: CreationSpec = { title: '', type: defaults?.defaultProjectType ?? 'course-paper', language: defaults?.language === 'en' ? 'en' : 'zh-CN',
-    format: 'docx', requirements: '', materials: [], online: false, targetLength: 4000, sections: presetSections(defaults?.defaultProjectType ?? 'course-paper', 4000), manuscriptDir: 'manuscript' }
+    format: 'docx', requirements: '', requirementSources: [], materials: [], online: false, targetLength: 4000,
+    countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
+    sections: presetSections(defaults?.defaultProjectType ?? 'course-paper', 4000), manuscriptDir: 'manuscript' }
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') } catch { return null } })
   const [spec, setSpec] = useState<CreationSpec>(saved?.spec ?? initial), [step, setStep] = useState(saved?.step ?? 0)
   const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [conflict, setConflict] = useState(false)
@@ -115,7 +117,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
             <span>{spec.language === 'en' ? '词' : '字'}</span></div>
           <div className="sf-section-actions"><button aria-label="上移章节" disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label="下移章节" disabled={index === spec.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button><button aria-label="删除章节" disabled={spec.sections.length === 1} onClick={() => update({ sections: spec.sections.filter(row => row.id !== section.id) })}>×</button></div>
         </div>)}</div>
-        <button className="sf-structure-add" onClick={() => update({ sections: [...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500 }] })}>＋ 添加章节</button>
+        <button className="sf-structure-add" onClick={() => update({ sections: [...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500, allocationMode: 'auto' }] })}>＋ 添加章节</button>
         <p className="sf-wizard-summary">{TYPE_LABELS[spec.type]} · {FORMAT_LABELS[spec.format]} · {spec.materials.length} 份资料{spec.online && ' · 联网补充'}<br />创建 {spec.manuscriptDir}/ 与 .scholarflow/，并开始撰写。</p>
         {conflict && <label>论文输出目录<input value={spec.manuscriptDir} onChange={e => update({ manuscriptDir: e.target.value })} /><small>此处已有文件，请选择新的输出目录。</small></label>}
       </>}
