@@ -10,11 +10,11 @@ export function openExistingChat(ctx: any, options?: any) {
   else ctx.sidebarRight.openTab(CHAT_KIND, options)
 }
 
-// Only explicitly opened ScholarFlow surfaces shadow the reserved Conversation
-// cell. panelInfo remains null, so the native rightbar keeps its current Session.
+// The current session's preset determines its main surface. Observing it must
+// never select a panel: DSH's selectPanel also cancels pending native navigation.
 export function createWorkbenchNavigation(ctx: any, Workspace: React.ComponentType<any>) {
   const listeners = new Set<() => void>()
-  let enabledSession: string | undefined
+  let ordinarySession: string | undefined
   let chatRequest: { sessionId: string; afterOpen?: () => void } | undefined
   let shadow: (() => void) | undefined
   let snapshot = { sessionId: undefined as string | undefined, active: false }
@@ -27,47 +27,30 @@ export function createWorkbenchNavigation(ctx: any, Workspace: React.ComponentTy
   }
   const sync = () => {
     const sessionId = ctx.uiSession.adapter.current.getSnapshot().key
-    if (enabledSession !== sessionId || ctx.layout.panelInfo.getSnapshot().activePanelId !== null) enabledSession = undefined
-    const selected = !!sessionId && enabledSession === sessionId
+    if (sessionId !== snapshot.sessionId) ordinarySession = undefined
+    const preset = ctx.sessions.list.getSnapshot().byId[sessionId]?.projectionValues?.agentPreset
+    const selected = !!sessionId && preset === 'scholarflow' && ordinarySession !== sessionId && ctx.layout.panelInfo.getSnapshot().activePanelId === null
     if (!selected) chatRequest = undefined
     if (selected && !shadow) shadow = ctx.slots.register({ name: 'main', key: 'conversation', priority: -50 }, Workspace)
     else if (!selected && shadow) { shadow(); shadow = undefined }
-    const active = selected && ctx.layout.panelInfo.getSnapshot().activePanelId === null
+    const active = selected
     if (snapshot.sessionId !== sessionId || snapshot.active !== active) {
       snapshot = { sessionId, active }; listeners.forEach(listener => listener())
     }
   }
-  const selectedPreset = () => {
-    const sessionId = ctx.uiSession.adapter.current.getSnapshot().key
-    return ctx.sessions.list.getSnapshot().byId[sessionId]?.projectionValues?.agentPreset
-  }
   ctx.effect(() => {
+    let live = true
     const disposeSlot = ctx.slots.inject('main', () => { sync(); return () => { shadow?.(); shadow = undefined } })
     const disposeCurrent = ctx.uiSession.adapter.current.subscribe(sync), disposePanel = ctx.layout.panelInfo.subscribe(sync)
-    // rc.2 publishes a fresh selection for EVERY native navigation, including
-    // startSession reusing the same blank Session. Catalog refreshes are separate.
-    let navigatedSession = ctx.uiSession.adapter.current.getSnapshot().key
+    // Selection is published before DSH releases the previous main binding.
+    // Read the resulting binding after that synchronous navigation completes.
     const disposeNavigation = ctx.uiWorkspace.selection.subscribe(() => {
-      const previous = navigatedSession
-      enabledSession = undefined; sync()
-      queueMicrotask(() => {
-        const current = ctx.uiSession.adapter.current.getSnapshot().key; navigatedSession = current
-        const session = ctx.sessions.list.getSnapshot().byId[current]
-        if (selectedPreset() === 'scholarflow' && (current !== previous || !session?.blank)) { enabledSession = current; sync() }
-      })
+      ordinarySession = undefined
+      queueMicrotask(() => { if (live) sync() })
     })
-    let lastPreset = selectedPreset()
-    const disposePreset = ctx.sessions.list.subscribe(() => {
-      const preset = selectedPreset()
-      if (preset !== lastPreset) {
-        lastPreset = preset
-        if (preset === 'scholarflow') { ctx.layout.selectPanel(null); enabledSession = ctx.uiSession.adapter.current.getSnapshot().key }
-        else enabledSession = undefined
-        sync()
-      }
-    })
+    const disposePreset = ctx.sessions.list.subscribe(sync)
     const disposeMounted = ctx.sidebarRight.mounted.subscribe(revealChat)
-    return () => { disposePreset(); disposeMounted(); disposeNavigation(); disposeCurrent(); disposePanel(); disposeSlot(); listeners.clear() }
+    return () => { live = false; disposePreset(); disposeMounted(); disposeNavigation(); disposeCurrent(); disposePanel(); disposeSlot(); listeners.clear() }
   }, 'scholarflow: scoped native Conversation surface')
   return {
     source,
@@ -75,10 +58,15 @@ export function createWorkbenchNavigation(ctx: any, Workspace: React.ComponentTy
       // Without a session there is nothing to surface; the panel that used to stand in
       // for it was removed with the workbench entry (SPEC v1.1 §10).
       if (!sessionId) return
-      ctx.layout.selectPanel(null); enabledSession = sessionId; sync()
+      if (sessionId !== ctx.uiSession.adapter.current.getSnapshot().key) return
+      ordinarySession = undefined
+      if (ctx.layout.panelInfo.getSnapshot().activePanelId !== null) ctx.layout.selectPanel(null)
+      sync()
     },
     ordinary() {
-      enabledSession = undefined; sync(); ctx.layout.selectPanel(null)
+      ordinarySession = ctx.uiSession.adapter.current.getSnapshot().key
+      sync()
+      if (ctx.layout.panelInfo.getSnapshot().activePanelId !== null) ctx.layout.selectPanel(null)
     },
     openChat(sessionId: string, afterOpen?: () => void) {
       if (!snapshot.active || snapshot.sessionId !== sessionId) return
@@ -102,9 +90,9 @@ export function connectPresetEntry(ctx: any, navigation: ReturnType<typeof creat
       const Seat = entry.component
       function PresetSeat(props: any) {
         return <Seat {...props} select={async (id: string) => {
+          const sessionId = ctx.uiSession.adapter.current.getSnapshot().key
           const refusal = await props.select(id)
-          if (!refusal && id === 'scholarflow') navigation.open()
-          else if (!refusal) navigation.ordinary()
+          if (!refusal && id === 'scholarflow' && sessionId === ctx.uiSession.adapter.current.getSnapshot().key) navigation.open(sessionId)
           return refusal
         }} />
       }

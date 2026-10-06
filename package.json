@@ -90,6 +90,7 @@
     "audit:appearance": "node scripts/audit-appearance.mjs",
     "acceptance:ui": "node tests/e2e/ui-acceptance.mjs",
     "prepack": "pnpm build",
-    "verify:boundary": "node tests/e2e/surface-boundary.mjs"
+    "verify:boundary": "node tests/e2e/surface-boundary.mjs",
+    "verify:navigation": "node tests/e2e/native-navigation.mjs --desktop"
   }
 }
