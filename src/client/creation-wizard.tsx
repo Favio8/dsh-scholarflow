@@ -77,8 +77,9 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const [scanning, setScanning] = useState(false), [truncated, setTruncated] = useState(false)
   const [materialQuery, setMaterialQuery] = useState('')
   const [presetOpen, setPresetOpen] = useState(false)
+  const [issues, setIssues] = useState<string[]>([])
   const [recognition, setRecognition] = useState<Record<string, { state: 'idle' | 'running' | 'pending' | 'confirmed' | 'unavailable'; text?: string; note?: string }>>({})
-  const update = (change: Partial<CreationSpec>) => setSpec(previous => ({ ...previous, ...change }))
+  const update = (change: Partial<CreationSpec>) => { setIssues([]); setSpec(previous => ({ ...previous, ...change })) }
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify({ spec, step })) } catch { setError('创建信息暂未保存，请保留当前页面。') } }, [spec, step, key])
   const loadFiles = async (selectAll: boolean) => {
     setScanning(true)
@@ -183,7 +184,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       onClick={() => setStep(index)}><span>{index + 1}</span>{title}</button>)}</nav>
     <div className="sf-wizard-page" key={step}>
       {step === 0 && <>
-        <label>论文标题<input placeholder="可以先留空，由写作要求生成" value={spec.title} maxLength={300} onChange={e => update({ title: e.target.value })} /></label>
+        <label>论文标题<input id="sf-field-title" placeholder="可以先留空，由写作要求生成" value={spec.title} maxLength={300} onChange={e => update({ title: e.target.value })} /></label>
         <div className="sf-wizard-row"><label>论文类型<select value={spec.type} onChange={e => { const type = e.target.value as CreationSpec['type']
           if (type === spec.type) return
           // Switching the type replaces the structure, so an edited one asks first and can
@@ -197,7 +198,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <div className="sf-field"><span className="sf-field-label">引用样式</span>
           <p className="sf-choice-current">顺序编号 [1]</p>
           <p className="sf-field-hint">当前只支持这一种样式。作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></div>
-        <label>写作要求<textarea rows={6} placeholder="例如：机器学习课程论文，约4000字，结合课件和笔记讨论实际应用，需要参考文献。也可以粘贴老师的要求。" value={spec.requirements} maxLength={12000} onChange={e => update({ requirements: e.target.value })} /></label>
+        <label>写作要求<textarea id="sf-field-requirements" rows={6} placeholder="例如：机器学习课程论文，约4000字，结合课件和笔记讨论实际应用，需要参考文献。也可以粘贴老师的要求。" value={spec.requirements} maxLength={12000} onChange={e => update({ requirements: e.target.value })} /></label>
         <div className="sf-field"><span className="sf-field-label">写作要求来源</span>
           <div className="sf-assignment-row">
             <RequirementPicker files={files} disabled={busy} scanning={scanning} onPick={addSource} onRescan={() => loadFiles(false)} />
@@ -248,7 +249,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <div className="sf-structure-list">{spec.sections.map((section, index) => <div className="sf-structure-section" key={section.id}>
           <span className="sf-section-index">{index + 1}</span>
           <div className="sf-section-text">
-            <input className="sf-section-title" aria-label={`第${index + 1}章标题`} placeholder="章节标题" value={section.title} onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, title: e.target.value } : row))} />
+            <input id={`sf-section-title-${index}`} className="sf-section-title" aria-label={`第${index + 1}章标题`} placeholder="章节标题" value={section.title} onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, title: e.target.value } : row))} />
             <input className="sf-section-purpose" aria-label={`第${index + 1}章写作内容`} placeholder="本节写什么（可选）" value={section.purpose} onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, purpose: e.target.value } : row))} />
           </div>
           <div className="sf-section-length"><input aria-label={`第${index + 1}章篇幅`} type="number" min={50} value={section.targetLength}
@@ -288,15 +289,32 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       </>}
     </div>
     {error && <p className="sf-wizard-error" role="alert">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}
+    {issues.length > 0 && <ul className="sf-wizard-issues" role="alert">{issues.map(issue => <li key={issue}>{issue}</li>)}</ul>}
     <footer className="sf-wizard-footer">{step > 0 && <button disabled={busy} onClick={() => setStep(step - 1)}>← 上一步</button>}<span />
-      {step < 2 ? <button className="sf-primary" disabled={busy || !spec.requirements.trim()} onClick={() => { if (step === 1 && spec.sections.every(row => !row.purpose)) act(async () => { setStep(2); await suggest(true) }); else setStep(step + 1) }}>下一步 →</button>
-        : <button className="sf-primary" disabled={busy || !spec.sections.every(section => section.title.trim() && section.targetLength >= 50)} onClick={() => act(async () => {
-          const value = creationSpec.parse(readySpec())
-          try { const plan = await api('creation.prepare', { context: context(), spec: value }); await api('creation.start', { context: context(), planId: plan.planId, planHash: plan.planHash }) }
-          catch (error) { if ((error as Error).message.includes('OUTPUT_PATH_CONFLICT')) setConflict(true); throw error }
-          try { localStorage.removeItem(key) } catch {}
-          await onCreated()
-        })}>{busy ? '正在创建…' : '创建论文并开始撰写'}</button>}
+      {step < 2 ? <button className="sf-primary" disabled={busy} onClick={() => {
+        // The control stays reachable: a greyed-out button tells the user nothing
+        // (design 02 §9). Clicking reports what is missing and focuses the first field.
+        if (step === 0 && !spec.requirements.trim() && !spec.requirementSources.length) {
+          setIssues(['请填写写作要求，或添加至少一个要求来源。'])
+          document.getElementById('sf-field-requirements')?.focus(); return
+        }
+        if (step === 1 && spec.sections.every(row => !row.purpose)) act(async () => { setStep(2); await suggest(true) }); else setStep(step + 1) }}>下一步 →</button>
+        : <button className="sf-primary" disabled={busy} onClick={() => {
+          const empty = spec.sections.findIndex(section => !section.title.trim() || section.targetLength < 50)
+          const blockers = [
+            ...(spec.title.trim() ? [] : ['创建前必须填写论文题目（在第一步填写）。']),
+            ...(empty < 0 ? [] : [`第 ${empty + 1} 章还没有标题，或篇幅低于 50。`]),
+            ...(allocationPlan.minimumShortfall ? ['自动章节连最低篇幅都达不到，请提高目标篇幅或调整手工篇幅。'] : []),
+          ]
+          if (blockers.length) { setIssues(blockers)
+            document.getElementById(empty >= 0 ? `sf-section-title-${empty}` : 'sf-field-title')?.focus(); return }
+          void act(async () => {
+            const value = creationSpec.parse(readySpec())
+            try { const plan = await api('creation.prepare', { context: context(), spec: value }); await api('creation.start', { context: context(), planId: plan.planId, planHash: plan.planHash }) }
+            catch (error) { if ((error as Error).message.includes('OUTPUT_PATH_CONFLICT')) setConflict(true); throw error }
+            try { localStorage.removeItem(key) } catch {}
+            await onCreated()
+          }) }}>{busy ? '正在创建…' : '创建论文并开始撰写'}</button>}
     </footer>
     <PresetPicker open={presetOpen} language={spec.language} paperType={spec.type} applied={spec.preset} structure={structureForPreset}
       api={api} run={act} busy={busy} onClose={() => setPresetOpen(false)} onUse={applyPreset} />
@@ -406,6 +424,8 @@ export const WIZARD_CSS = `.sf-wizard-scroll{overflow:auto;flex:1;background:var
 .sf-wizard .sf-confirm summary{cursor:pointer;font-size:12px;color:#8b9099}
 .sf-wizard .sf-confirm ul{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--dsw-alias-label-secondary,#727780)}
 .sf-wizard .sf-confirm p{margin:6px 0 0;font-size:12px;color:#8b9099}
+.sf-wizard .sf-wizard-issues{list-style:none;margin:14px 0 0;padding:10px 14px;border:1px solid #d4515155;border-radius:9px;background:#d451510f;color:#b04a4a;font-size:12.5px;line-height:1.7}
+.sf-wizard .sf-wizard-issues li+li{margin-top:4px}
 .sf-online-choice{flex-direction:row!important;align-items:center;padding:15px;border-radius:9px;background:#4475e708;margin-top:18px!important}
 .sf-online-choice span{display:flex;flex-direction:column;gap:4px}
 .sf-online-choice small{color:#888}
