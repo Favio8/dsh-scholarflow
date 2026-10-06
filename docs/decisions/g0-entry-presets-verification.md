@@ -183,6 +183,15 @@ refused even when named directly, a bounded walk (200 members, depth 8) and a bo
 refusing any path outside the workspace root. A grant belongs to the operator who made it and
 lapses, which is why "reconnect" is a normal wizard state rather than an error.
 
+## Interface acceptance (2026-10-06 晚, `tests/e2e/ui-acceptance.mjs`)
+
+An earlier note in this record said driving the client from a probe "proved unreliable". That was
+wrong, and the reason is worth keeping: the wizard lives on a session's project surface and is
+reached through **a new conversation's mode chip**, which no script had clicked. Adding that one
+step makes the surfaces render, and `pnpm acceptance:ui` now drives the real client through the
+eight delivery items — **21/21 PASS**, no model call, no paid usage. The probe keeps only a
+non-navigating presence check and points here.
+
 ## Prototype run (2026-10-06, `tests/e2e/g0-probe.mjs`)
 
 Booted the installed Host with an isolated `DSH_HOME`, an isolated profile and a

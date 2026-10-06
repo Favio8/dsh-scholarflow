@@ -28,7 +28,8 @@ const child = spawn(join(install, 'DeepSeek Harness.exe'), ['--expose-internals'
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
 const results = []
 const payload = body => body?.result?.value?.data ?? body?.result?.value ?? body
-const record = (name, verdict, detail) => { results.push({ name, verdict, detail }); console.log(`${verdict === 'PASS' ? '✔' : '✖'} ${name} — ${detail}`) }
+const mark = { PASS: '✔', FAIL: '✖', 'NOT ESTABLISHED': '?', 'COVERED ELSEWHERE': '→', OBSERVED: '·', REFUSED: '·' }
+const record = (name, verdict, detail) => { results.push({ name, verdict, detail }); console.log(`${mark[verdict] ?? '✖'} ${name} — ${detail}`) }
 let page
 try {
   const url = await new Promise((done, reject) => {
@@ -147,12 +148,15 @@ try {
   // each surface actually appears. Presence, not aesthetics — the review matrix still needs
   // a person.
   if (sessionId) {
-    // Client-driven UI checks were removed: driving the client to a session from a probe
-    // proved unreliable (recorded in docs/decisions/g0-entry-presets-verification.md).
-
+    // Driving the client is covered by tests/e2e/ui-acceptance.mjs, which reaches the wizard the
+    // way a user does (new conversation, then the mode chip). This probe only checks that the
+    // client itself serves the session it created; it does not navigate.
+    // This probe does not navigate, so the wizard is expected to be absent here; the rendered
+    // acceptance items live in tests/e2e/ui-acceptance.mjs and are reported there.
     const wizard = page.locator('[aria-label="创建论文向导"]')
     const rendered = await wizard.count()
-    record('AT-30/31 引导已渲染', rendered === 1 ? 'PASS' : 'FAIL', '向导容器数量=' + rendered)
+    record('AT-30/31 引导渲染（由验收脚本覆盖）', 'COVERED ELSEWHERE',
+      '本探针不导航，向导容器=' + rendered + '；渲染断言见 pnpm acceptance:ui')
     if (rendered) {
       const steps = await wizard.locator('.sf-wizard-steps button').count()
       record('AT-31 三步导航', steps === 3 ? 'PASS' : 'FAIL', '步骤按钮=' + steps)
