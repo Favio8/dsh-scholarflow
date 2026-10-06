@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { creationSpec, presetSections, type CreationSpec } from '../shared/writing-task.ts'
+import { allocate } from '../core/presets/allocation.ts'
+import { sectionsFromPreset, selectionFromPreset } from '../core/presets/apply.ts'
 import { FORMAT_LABELS, TYPE_LABELS } from './paper-workspace.tsx'
+import { PresetPicker } from './preset-picker.tsx'
 
 const splitPath = (path: string) => {
   const cut = path.lastIndexOf('/')
@@ -73,6 +76,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [conflict, setConflict] = useState(false)
   const [scanning, setScanning] = useState(false), [truncated, setTruncated] = useState(false)
   const [materialQuery, setMaterialQuery] = useState('')
+  const [presetOpen, setPresetOpen] = useState(false)
   const [recognition, setRecognition] = useState<Record<string, { state: 'idle' | 'running' | 'pending' | 'confirmed' | 'unavailable'; text?: string; note?: string }>>({})
   const update = (change: Partial<CreationSpec>) => setSpec(previous => ({ ...previous, ...change }))
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify({ spec, step })) } catch { setError('创建信息暂未保存，请保留当前页面。') } }, [spec, step, key])
@@ -85,6 +89,18 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     } catch (failure) { setError((failure as Error).message) } finally { setScanning(false) }
   }
   useEffect(() => { void loadFiles(!saved) }, [key])
+  // A fresh wizard opens on the type's default built-in preset (design 02 §6); an
+  // existing draft keeps whatever the user had, and a missing library falls back to the
+  // offline structure without saying anything wrong.
+  useEffect(() => {
+    if (saved) return
+    let live = true
+    api('presets.list', {}).then((value: any) => {
+      const first = (value.byType?.[spec.type] ?? []).find((preset: any) => preset.source === 'builtin' && preset.order !== null)
+      if (live && first) update({ sections: sectionsFromPreset(first, spec.language, spec.targetLength), preset: selectionFromPreset(first) })
+    }).catch(() => undefined)
+    return () => { live = false }
+  }, [key])
   const act = async (fn: () => Promise<void>) => { setBusy(true); setError(''); try { await fn() } catch (error) { setError((error as Error).message) } finally { setBusy(false) } }
   // Requirement sources stand on their own: they are never merged into the materials
   // list, and extraction reads them under their own authorisation (SPEC v1.1 §7).
@@ -125,6 +141,24 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     if (target < 0 || target >= sections.length) return
     ;[sections[index], sections[target]] = [sections[target], sections[index]]; update({ sections })
   }
+  // Applying is atomic: the type (when the preset belongs to another one) and the
+  // structure change together, after the caller confirmed once (design 02 §7).
+  const applyPreset = (preset: any, switching: boolean) => {
+    update({ ...(switching ? { type: preset.paperType } : {}), sections: sectionsFromPreset(preset, spec.language, spec.targetLength),
+      preset: selectionFromPreset(preset) })
+    setPresetOpen(false)
+  }
+  const sectionKey = (id: string) => ('k-' + id.toLowerCase().replace(/[^a-z0-9-]/g, '-')).slice(0, 64)
+  // Saving stores the structure only: shares are derived on the host, so the paper's
+  // absolute lengths and title never enter the global library.
+  const structureForPreset = () => ({ title: spec.title.trim() || '未命名结构', summary: '按当前论文结构保存', paperType: spec.type,
+    sections: spec.sections.map(section => ({ key: sectionKey(section.id), title: section.title,
+      focus: section.purpose.trim() || '（尚未填写写作重点）', targetLength: section.targetLength })),
+    ...(spec.preset?.source === 'builtin' ? { derivedFrom: spec.preset.id } : {}) })
+  const allocationPlan = allocate(spec.sections.map(section => ({ id: section.id, targetLength: section.targetLength,
+    allocationMode: section.allocationMode ?? 'manual', ...(section.allocationWeight === undefined ? {} : { allocationWeight: section.allocationWeight }) })),
+    spec.targetLength, { abstractLength: 200, includeAbstract: spec.countingPolicy.includeAbstract })
+  const reallocate = () => update({ sections: allocationPlan.sections.map(row => ({ ...spec.sections.find(section => section.id === row.id)!, targetLength: row.targetLength })) })
   return <div className="sf-wizard-scroll"><section className="sf-wizard" aria-label="创建论文向导">
     <header><span className="sf-wizard-eyebrow">{workspaceTitle}</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p></header>
     <nav className="sf-wizard-steps" aria-label="创建步骤">{['写作要求', '资料范围', '行文结构'].map((title, index) => <button key={title} disabled={busy || index > step} aria-current={step === index ? 'step' : undefined}
@@ -175,23 +209,37 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       {step === 2 && <>
         <div className="sf-structure-caption">
           <label>目标篇幅<span className="sf-length-input"><input type="number" min={200} max={60000} aria-label="目标篇幅" value={spec.targetLength} onChange={e => update({ targetLength: Number(e.target.value) })} /><span>{spec.language === 'en' ? '词' : '汉字'}</span></span></label>
+          <label className="sf-online-choice" style={{ margin: 0 }}><input type="checkbox" checked={spec.countingPolicy.includeAbstract}
+            onChange={e => update({ countingPolicy: { ...spec.countingPolicy, includeAbstract: e.target.checked } })} /><span><strong>摘要计入</strong><small>默认不计入正文目标</small></span></label>
           <div className="sf-structure-actions">
-            <button disabled={busy} onClick={() => update({ sections: presetSections(spec.type, spec.targetLength) })}>使用类型预设</button>
+            <button disabled={busy || !spec.preset} onClick={() => setPresetOpen(true)}>更换预设</button>
+            <button disabled={busy || allocationPlan.minimumShortfall} onClick={reallocate}>重新分配</button>
             <button disabled={busy} onClick={() => act(() => suggest(true))}>AI 完善结构</button>
           </div>
         </div>
-        <p className="sf-field-hint">已按「{TYPE_LABELS[spec.type]}」预设 {spec.sections.length} 节，可直接修改标题、写作内容与篇幅。「AI 完善结构」会依据写作要求重排。</p>
+        <p className="sf-field-hint">当前预设：{spec.preset ? `${spec.preset.id}（${spec.preset.source === 'builtin' ? '内置' : '我的'}${spec.preset.modified ? ' · 已修改' : ''}）` : '尚未选择'}
+          ，计划合计 {allocationPlan.total} / {spec.targetLength}。手工章节保持原值，其余按建议比例分配；比例只是起点，任何一项都可以改。</p>
+        {allocationPlan.notes.map(note => <p className="sf-field-hint" key={note} role="status">{note}</p>)}
         <div className="sf-structure-list">{spec.sections.map((section, index) => <div className="sf-structure-section" key={section.id}>
           <span className="sf-section-index">{index + 1}</span>
           <div className="sf-section-text">
             <input className="sf-section-title" aria-label={`第${index + 1}章标题`} placeholder="章节标题" value={section.title} onChange={e => update({ sections: spec.sections.map(row => row.id === section.id ? { ...row, title: e.target.value } : row) })} />
             <input className="sf-section-purpose" aria-label={`第${index + 1}章写作内容`} placeholder="本节写什么（可选）" value={section.purpose} onChange={e => update({ sections: spec.sections.map(row => row.id === section.id ? { ...row, purpose: e.target.value } : row) })} />
           </div>
-          <div className="sf-section-length"><input aria-label={`第${index + 1}章篇幅`} type="number" min={50} value={section.targetLength} onChange={e => update({ sections: spec.sections.map(row => row.id === section.id ? { ...row, targetLength: Number(e.target.value) } : row) })} />
-            <span>{spec.language === 'en' ? '词' : '字'}</span></div>
+          <div className="sf-section-length"><input aria-label={`第${index + 1}章篇幅`} type="number" min={50} value={section.targetLength}
+            onChange={e => update({ sections: spec.sections.map(row => row.id === section.id ? { ...row, targetLength: Number(e.target.value), allocationMode: 'manual' } : row) })} />
+            <span>{spec.language === 'en' ? '词' : '字'} · {section.allocationMode === 'auto' ? '自动' : '手工'}</span></div>
           <div className="sf-section-actions"><button aria-label="上移章节" disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label="下移章节" disabled={index === spec.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button><button aria-label="删除章节" disabled={spec.sections.length === 1} onClick={() => update({ sections: spec.sections.filter(row => row.id !== section.id) })}>×</button></div>
         </div>)}</div>
-        <button className="sf-structure-add" onClick={() => update({ sections: [...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500, allocationMode: 'auto' }] })}>＋ 添加章节</button>
+        <div className="sf-structure-actions" style={{ marginTop: 14 }}>
+          <button onClick={() => update({ sections: [...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500, allocationMode: 'auto' }] })}>＋ 添加章节</button>
+          <button disabled={busy || !spec.sections.every(section => section.title.trim())} onClick={() => act(async () => {
+            const name = window.prompt('预设名称', spec.title.trim() || '我的结构'); if (!name?.trim()) return
+            await api('presets.save', { ...structureForPreset(), title: name.trim() }) })}>保存为我的预设</button>
+          {spec.preset?.source === 'user' && <button disabled={busy} onClick={() => act(async () => {
+            if (!window.confirm('用当前结构更新这个预设？已有论文不受影响。')) return
+            await api('presets.update', { ...structureForPreset(), id: spec.preset!.id, expectedVersion: spec.preset!.version }) })}>更新此预设</button>}
+        </div>
         <p className="sf-wizard-summary">{TYPE_LABELS[spec.type]} · {FORMAT_LABELS[spec.format]} · {spec.materials.length} 份资料{spec.online && ' · 联网补充'}<br />创建 {spec.manuscriptDir}/ 与 .scholarflow/，并开始撰写。</p>
         {conflict && <label>论文输出目录<input value={spec.manuscriptDir} onChange={e => update({ manuscriptDir: e.target.value })} /><small>此处已有文件，请选择新的输出目录。</small></label>}
       </>}
@@ -207,6 +255,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           await onCreated()
         })}>{busy ? '正在创建…' : '创建论文并开始撰写'}</button>}
     </footer>
+    <PresetPicker open={presetOpen} language={spec.language} paperType={spec.type} applied={spec.preset} structure={structureForPreset}
+      api={api} run={act} busy={busy} onClose={() => setPresetOpen(false)} onUse={applyPreset} />
   </section></div>
 }
 
