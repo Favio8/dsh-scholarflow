@@ -81,7 +81,7 @@ export function SelectionReferenceDetails({ sessionId }: { sessionId?: string })
   const card = useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener) } }, () => detail, () => undefined)
   const close = () => { detail = undefined; publish() }
   useEffect(() => { close() }, [sessionId])
-  return card?.binding.sessionId === sessionId ? <SelectionDetails card={card} onClose={close} /> : null
+  return card && card.binding.sessionId === sessionId ? <SelectionDetails card={card} onClose={close} /> : null
 }
 
 export const SELECTION_CSS = `
