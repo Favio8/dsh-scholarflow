@@ -10,6 +10,7 @@ import { ReviewExport } from './review-export.tsx'
 import { Overview } from './overview.tsx'
 import { AcademicSkills } from './academic-skills.tsx'
 import { WritingProfiles } from './writing-profiles.tsx'
+import { StructurePresets } from './structure-presets.tsx'
 import { ReadonlyProject } from './readonly-project.tsx'
 import { ProjectIdentity } from './project-identity.tsx'
 import { createSelectionReferences, SelectionReferenceDetails, SELECTION_CSS, type SelectionContext } from './selection-card.tsx'
@@ -283,7 +284,7 @@ export function apply(ctx: Host) {
         <label>新项目默认语言 <select aria-label="新项目默认语言" value={row.value.language} onChange={e => save('language', e.target.value)}><option value="zh">中文</option><option value="en">英文</option></select></label>
         <label>新项目默认模型调用上限 <select aria-label="新项目默认模型调用上限" value={row.value.maxModelCalls} onChange={e => save('maxModelCalls', Number(e.target.value))}>{Array.from({ length: 40 }, (_, i) => i + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
         <label><input type="checkbox" checked={row.value.networkEnabled} onChange={e => save('networkEnabled', e.target.checked)} />允许外部检索与公开 Skill 读取（每次操作展示发送范围）</label></>
-        : <p>正在读取宿主设置…</p>}<p role="status">{message}</p><WritingProfiles api={api} /><AcademicSkills api={api} /></section>
+        : <p>正在读取宿主设置…</p>}<p role="status">{message}</p><WritingProfiles api={api} /><StructurePresets api={api} run={async (fn: () => Promise<unknown>) => { try { await fn() } catch (error) { setMessage((error as Error).message) } }} busy={false} /><AcademicSkills api={api} /></section>
   }
   ctx.effect(() => ctx.slots.registerFactory({ name: 'scholarflow.workspace', scope: 'session-maybe', children: { 'scholarflow.project': { kind: 'single', scope: 'session-maybe' } } }, Workspace), 'scholarflow: project surface')
   ctx.effect(() => ctx.slots.inject('scholarflow.project', () => ctx.slots.register({ name: 'scholarflow.project' }, Project)), 'scholarflow: project')
