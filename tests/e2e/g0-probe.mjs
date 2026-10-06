@@ -235,6 +235,19 @@ try {
         row.requirementSources?.length === 1 && row.requirementSources[0].path === 'TEST_ONLY 原始资料.txt' ? 'PASS' : 'FAIL',
         '来源=' + JSON.stringify(row.requirementSources ?? null).slice(0, 120))
       record('AT-33 材料清单独立', Array.isArray(row.materials) && row.materials.length === 1 ? 'PASS' : 'FAIL', '材料=' + JSON.stringify(row.materials))
+      // AT-40: the same confirmed plan must not create a second project.
+      const again = payload((await rpc('scholarflow.v1/creation.start', { request: { context: creationContext, planId: prepared.planId, planHash: prepared.planHash } })).body)
+      record('AT-40 重复提交被拒', again?.ok === false ? 'PASS' : 'FAIL', '第二次提交返回 ok=' + String(again?.ok) + ' code=' + String(again?.error?.code))
+      // AT-38: rename and remove go through the host surface, not just the library class.
+      const savedForManage = payload((await rpc('scholarflow.v1/presets.save', { request: {
+        title: 'TEST_ONLY 管理检查', summary: '检查改名与删除', paperType: 'course-paper',
+        sections: [{ key: 'k-intro', title: '引言', focus: '开头', targetLength: 500 }] } })).body)
+      const renamed = payload((await rpc('scholarflow.v1/presets.rename', { request: { id: savedForManage?.id, title: 'TEST_ONLY 改过名' } })).body)
+      record('AT-38 改名经宿主生效', renamed?.title === 'TEST_ONLY 改过名' ? 'PASS' : 'FAIL', '新名称=' + String(renamed?.title))
+      const removed = payload((await rpc('scholarflow.v1/presets.remove', { request: { id: savedForManage?.id } })).body)
+      const listed = payload((await rpc('scholarflow.v1/presets.list', { request: {} })).body)
+      record('AT-38 删除经宿主生效', removed?.removed === true && !(listed?.all ?? []).some(row => row.id === savedForManage?.id) ? 'PASS' : 'FAIL',
+        'removed=' + String(removed?.removed) + ' 仍在列表=' + String((listed?.all ?? []).some(row => row.id === savedForManage?.id)))
       record('AT-34 预设随创建记录', row.preset?.id === 'course-argumentative' && row.sections?.length === 2 ? 'PASS' : 'FAIL',
         '预设=' + String(row.preset?.id) + ' 章节=' + String(row.sections?.length))
     }

@@ -256,5 +256,18 @@ level: 1 (one settings document), 2 (V6a/V6b), 3-5 (this), 6 (twelve built-ins),
 (AT-36). What remains for items 2-5 is a person looking at the rendered pages, and the top
 entry and mode chip were already observed rendering in the real client.
 
+**AT-40 and AT-38 — verified through the host surface.** Two more checks the probe now runs,
+both without a model call:
+
+| Check | Result |
+|---|---|
+| Submitting the same confirmed creation plan twice | **PASS** — the second call is refused with `INVALID_APPROVAL`, so a repeated click cannot create a second project |
+| Renaming a user preset through `presets.rename` | **PASS** — the stored title changes |
+| Removing a user preset through `presets.remove` | **PASS** — `removed: true` and it leaves the list |
+
+The rename and remove paths were previously only exercised against the library class in the
+integration tests; they now have evidence through the operator-only Remote surface the UI
+calls.
+
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.
