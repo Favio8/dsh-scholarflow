@@ -141,8 +141,23 @@ present, and that is where the external-source feature stays until it happens.
 workspace on this host, so reading an external source would have to go through whatever the
 OS chooser returns plus the host's own file service — neither has been exercised.
 
-**V5:** unchanged — source review only; the three-export consistency run still needs a
-project fixture.
+**V5 (partially verified):** a project was created through the public RPCs
+( → ) and all three exports ran through the installed
+host, delivering to :
+
+| Check | Result |
+|---|---|
+| Word delivery | **PASS** — real OOXML bytes ( header, 9717 bytes) |
+| LaTeX delivery | produced, uses ; the numbered bibliography block is absent because the fixture has no citations, and the exporter emits it only when citations exist |
+| Markdown delivery | produced |
+| Three deliveries in one project | **PASS** — each plan is built on a freshly read ledger revision |
+
+Two things the probe itself taught, both correct product behaviour rather than defects:
+a project context must carry , and every delivery advances the
+ledger so the next plan needs a fresh read ( otherwise).
+
+**Not yet exercised:** the numbered citation style itself, which needs a project with a
+registered source and a cited paragraph. That is the remaining part of V5.
 
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.

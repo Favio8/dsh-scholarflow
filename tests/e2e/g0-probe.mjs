@@ -2,7 +2,7 @@
 // Probes only what can be observed without a browser session or provider request.
 import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdir, writeFile, symlink, readdir } from 'node:fs/promises'
+import { mkdir, writeFile, symlink, readdir, readFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
@@ -25,6 +25,7 @@ const child = spawn(join(install, 'DeepSeek Harness.exe'), ['--expose-internals'
   windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
 const results = []
+const payload = body => body?.result?.value?.data ?? body?.result?.value ?? body
 const record = (name, verdict, detail) => { results.push({ name, verdict, detail }); console.log(`${verdict === 'PASS' ? '✔' : '✖'} ${name} — ${detail}`) }
 let page
 try {
@@ -61,18 +62,19 @@ try {
   // lists through the browse backend or refuses with the composed capability kind, which
   // is itself the answer to "which chooser does this host actually serve?".
   const listed = await rpc('directoryPicker/list', { path: workspaceRoot })
-  const listing = listed.body?.result?.value ?? listed.body?.result ?? listed.body
+  const listing = payload(listed.body)
   record('V3a directoryPicker/list', listed.status === 200 ? 'PASS' : 'OBSERVED',
     `${listed.status} ${JSON.stringify(listing).slice(0, 260)}`)
 
   // V6a — selecting the mode creates a conversation but no project files.
   const workspace = await rpc('workspace/create', { request: { path: workspaceRoot } })
   const workspaceId = workspace.body?.result?.value?.workspace?.workspaceId
+  let sessionId
   if (!workspaceId) record('V6a 工作区注册', 'FAIL', JSON.stringify(workspace.body).slice(0, 200))
   else {
     const before = (await readdir(workspaceRoot)).sort()
     const created = await rpc('session/create', { request: { workspaceId, agentPreset: 'scholarflow' } })
-    const sessionId = created.body?.result?.value?.sessionId
+    sessionId = created.body?.result?.value?.sessionId
     const after = (await readdir(workspaceRoot)).sort()
     record('V6a 选模式不创建目录', created.status === 200 && JSON.stringify(before) === JSON.stringify(after) ? 'PASS' : 'FAIL',
       `会话 ${sessionId ?? '未创建'}；工作区前后一致=${JSON.stringify(before) === JSON.stringify(after)}`)
@@ -80,10 +82,58 @@ try {
     // V6b — opening a session inspects the project and writes nothing.
     if (sessionId) {
       const inspect = await rpc('scholarflow.v1/project.inspect', { request: { context: { requestId: 'req_TEST_ONLY', workspaceId, sessionId } } })
-      const value = inspect.body?.result?.value ?? inspect.body?.result ?? inspect.body
+      const value = payload(inspect.body)
       const stillClean = JSON.stringify(before) === JSON.stringify((await readdir(workspaceRoot)).sort())
       record('V6b 打开不重新初始化', inspect.status === 200 && value?.initialized === false && stillClean ? 'PASS' : 'FAIL',
         `initialized=${value?.initialized}；工作区仍为空=${stillClean}`)
+    }
+  }
+
+  // V5 — build a real project through the public RPCs, then produce all three exports and
+  // inspect what the installed host actually wrote.
+  if (workspaceId) {
+    const context = { requestId: 'req_TEST_ONLY', workspaceId, sessionId }
+    const prepared = await rpc('scholarflow.v1/project.prepareInit', { request: { context, input: { title: 'TEST_ONLY 导出检查', type: 'course-paper' } } })
+    const plan = payload(prepared.body)
+    if (!plan?.planId) record('V5 项目预检', 'FAIL', JSON.stringify(prepared.body).slice(0, 200))
+    else {
+      const initialized = await rpc('scholarflow.v1/project.initialize', { request: { context, planId: plan.planId, planHash: plan.planHash } })
+      const created = payload(initialized.body)
+      record('V5 项目创建', initialized.status === 200 && created?.initialized !== false ? 'PASS' : 'FAIL',
+        `initialized=${created?.initialized} projectId=${created?.binding?.projectId ?? created?.ledger?.projectId ?? '?'}`)
+      const projectId = created?.binding?.projectId ?? created?.ledger?.projectId
+      const inspected = payload((await rpc('scholarflow.v1/project.inspect', { request: { context: { ...context, projectId } } })).body)
+      const projectContext = { ...context, projectId, expectedLedgerRevision: inspected?.ledger?.revision }
+      for (const format of ['markdown', 'latex', 'docx']) {
+        // Each delivery advances the ledger, so the plan must be built on a fresh revision.
+        const fresh = payload((await rpc('scholarflow.v1/project.inspect', { request: { context: { ...context, projectId } } })).body)
+        const attempt = { ...projectContext, expectedLedgerRevision: fresh?.ledger?.revision }
+        const preflight = await rpc('scholarflow.v1/export.preflight', { request: { context: attempt, format } })
+        const exportPlan = payload(preflight.body)
+        if (!exportPlan?.planId) { record(`V5 ${format} 预检`, 'FAIL', JSON.stringify(preflight.body).slice(0, 220)); continue }
+        const made = await rpc('scholarflow.v1/export.create', { request: { context: attempt, planId: exportPlan.planId, planHash: exportPlan.planHash, deliveryType: 'working-draft' } })
+        const delivery = payload(made.body)
+        const files = delivery?.files ?? delivery?.artifacts ?? []
+        const named = JSON.stringify(files).slice(0, 200)
+        record(`V5 ${format} 交付`, delivery?.ok === false ? 'FAIL' : made.status === 200 ? 'PASS' : 'FAIL', `plan=${exportPlan.planId} ok=${delivery?.ok} err=${delivery?.error?.code ?? ''} ${delivery?.error?.message ?? ''} files=${named}`)
+      }
+      // Inspect the delivered bytes on disk: the numbered style must actually be there.
+      const drafts = join(workspaceRoot, '.scholarflow')
+      const found = []
+      const walk = async directory => { for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name)
+        if (entry.isDirectory()) await walk(path); else if (/\.(tex|docx|md)$/i.test(entry.name)) found.push(path) } }
+      try { await walk(workspaceRoot) } catch { /* nothing written */ }
+      const tex = found.find(path => path.endsWith('.tex'))
+      const docx = found.find(path => path.endsWith('.docx'))
+      if (tex) { const text = await readFile(tex, 'utf8')
+        record('V5 LaTeX 编号式', /\\bibliographystyle\{unsrt\}/.test(text) && /ctexart/.test(text) ? 'PASS' : 'FAIL',
+          `bibliographystyle(unsrt)=${/\\bibliographystyle\{unsrt\}/.test(text)} ctexart=${/ctexart/.test(text)}`) }
+      else record('V5 LaTeX 编号式', 'FAIL', '未找到交付的 .tex')
+      if (docx) { const bytes = await readFile(docx)
+        record('V5 Word 真实字节', bytes.subarray(0, 2).toString('latin1') === 'PK' ? 'PASS' : 'FAIL', `前两字节=${bytes.subarray(0, 2).toString('latin1')} 大小=${bytes.length}`) }
+      else record('V5 Word 真实字节', 'FAIL', '未找到交付的 .docx')
+      record('V5 交付文件清单', found.length ? 'PASS' : 'FAIL', found.map(path => path.replace(workspaceRoot, '')).join(' | ').slice(0, 300))
     }
   }
 
