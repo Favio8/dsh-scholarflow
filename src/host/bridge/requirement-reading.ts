@@ -2,6 +2,20 @@ import type { RequirementRead, RequirementReadMember, RequirementSource } from '
 import { finishRead, failureNote, planRead, settleMember, startRead, pendingMembers } from '../../core/requirements/reading.ts'
 import { mediaType } from '../../core/materials/materials.ts'
 import { ScholarError } from '../../shared/errors.ts'
+import { appendFile } from 'node:fs/promises'
+
+/**
+ * Stage trace, off unless SCHOLARFLOW_TRACE names a file. A read that stops inside the host
+ * leaves no other mark — no model request is logged and the phase never changes — so the only
+ * way to tell which stage it stopped in is to write one line per stage and see which line is
+ * missing. Not a log for users: nothing is written unless the variable is set.
+ */
+export function trace(stage: string, detail: Record<string, unknown> = {}) {
+  const target = process.env.SCHOLARFLOW_TRACE
+  if (!target) return
+  void appendFile(target, `[${new Date().toISOString()}] ${stage} ${JSON.stringify(detail).slice(0, 300)}${String.fromCharCode(10)}`)
+    .catch(() => undefined)
+}
 
 /**
  * Reads one requirement source set (SPEC v1.2 §5). The operation is long, so it is a job: it
@@ -41,8 +55,10 @@ export async function runRead(input: ReadRun): Promise<RequirementRead> {
   const sourceOf = (member: { sourceId: string }) => input.sources.find(source => source.resourceId === member.sourceId)!
   const stop = () => finishRead({ ...read, elapsedMs: clock() - started }, 'stopped', iso())
 
+  trace('read:start', { readId: input.readId, members: read.members.length })
   for (const member of read.members) {
     if (input.signal.aborted) return stop()
+    trace('read:member:begin', { name: member.name })
     read = settleMember(read, member.name, { state: 'reading' }, iso())
     input.onUpdate?.(read)
     try {
@@ -53,8 +69,10 @@ export async function runRead(input: ReadRun): Promise<RequirementRead> {
       read = settleMember(read, member.name, await withBound(
         signal => readOneMember(member, sourceOf(member), input.services, signal),
         input.signal, input.memberTimeoutMs), iso())
+      trace('read:member:settled', { name: member.name, state: read.members.find(row => row.name === member.name)?.state })
     } catch (error) {
       if (input.signal.aborted) return stop()
+      trace('read:member:failed', { name: member.name, error: (error as Error)?.message?.slice(0, 200) })
       const timedOut = (error as Error)?.name === 'TimeoutError'
       read = settleMember(read, member.name, timedOut
         ? { state: 'failed', ...failureNote({ kind: 'read', name: member.name,
@@ -64,6 +82,7 @@ export async function runRead(input: ReadRun): Promise<RequirementRead> {
     read.elapsedMs = clock() - started
     input.onUpdate?.(read)
   }
+  trace('read:finished', { readId: input.readId })
   return finishRead({ ...read, elapsedMs: clock() - started }, 'ready', iso())
 }
 
@@ -88,23 +107,32 @@ async function withBound<T>(run: (signal: AbortSignal) => Promise<T>, outer: Abo
 }
 
 export async function readOneMember(member: RequirementReadMember, source: RequirementSource, services: ReadServices, signal: AbortSignal) {
+  trace('member:enter', { name: member.name, kind: member.kind, origin: source.origin })
   if (member.kind === 'unsupported') return { state: 'failed' as const, ...failureNote({ kind: 'format', name: member.name }) }
+  trace('member:bytes:start', { name: member.name })
   const bytes = source.origin === 'workspace'
     ? await services.readWorkspace(member.name, signal)
     : await services.readExternal(source, member.name, signal)
+  trace('member:bytes:done', { name: member.name, bytes: bytes.length })
   if (member.kind === 'image') {
+    trace('member:recognition:start', { name: member.name })
     const capability = await services.recognition()
+    trace('member:recognition:done', { name: member.name, imageInput: capability.imageInput, candidates: capability.candidates.length })
     // Sending an image to a text-only model silently degrades it in the host, so this is the
     // one place the plugin must refuse before spending anything (SPEC v1.2 §5.2).
     if (capability.imageInput !== true && !capability.candidates.length) {
       return { state: 'failed' as const, bytes: bytes.length,
         ...failureNote({ kind: 'capability', name: member.name, model: capability.model }) }
     }
+    trace('member:transcribe:start', { name: member.name })
     const result = await services.transcribeImage({ bytes, mediaType: mediaType(member.name), name: member.name, signal })
+    trace('member:transcribe:done', { name: member.name, chars: result.text.length, model: result.model })
     if (!result.text.trim()) return { state: 'failed' as const, bytes: bytes.length, ...failureNote({ kind: 'read', name: member.name }) }
     return { state: 'ready' as const, text: result.text.slice(0, 12000), bytes: bytes.length }
   }
+  trace('member:parse:start', { name: member.name })
   const parsed = await services.parseText(bytes, mediaType(member.name), signal)
+  trace('member:parse:done', { name: member.name, chars: parsed.text.length })
   const text = parsed.text.trim()
   if (!text) return { state: 'failed' as const, bytes: bytes.length,
     ...failureNote({ kind: 'read', name: member.name, pages: { read: 0, total: parsed.pages.total } }) }
@@ -121,10 +149,21 @@ export function failureFor(member: RequirementReadMember, error: unknown) {
   return failureNote({ kind: 'read', name: member.name, reason: userFacing(message) })
 }
 
+/**
+ * True for text that came from a runtime rather than from a sentence written for the reader.
+ * Kept as its own predicate so the same judgement is reused instead of re-spelled.
+ */
+function looksLikeRuntime(text: string) {
+  return /cannot get|without inject|is not a function|undefined is not|at\s+\w|\/src\/|node:|ECONN|ETIMEDOUT|fetch failed|status\s*\d{3}/i.test(text)
+}
+
 /** Keeps a raw error string out of the sentence a person reads (SPEC v1.2 §5.3). */
 function userFacing(message: string) {
   const cleaned = message.replace(/^[A-Z_]{3,}:\s*/, '').trim()
-  if (!cleaned || /Error|ENOENT|at Object|\bat\s|\/src\/|node:/.test(cleaned)) return ''
+  if (!cleaned) return ''
+  // A runtime complaint is withheld, not shown: "cannot get property … without inject"
+  // is not something the reader can act on, and it is not this product's words.
+  if (looksLikeRuntime(cleaned)) return ''
   return cleaned.length > 120 ? cleaned.slice(0, 120) + '…' : cleaned
 }
 
@@ -156,7 +195,12 @@ export class ReadingJobs {
     const controller = new AbortController()
     const job: Job = { controller, promise: undefined as unknown as Promise<RequirementRead>, owner: input.owner, session: input.session }
     this.jobs.set(input.readId, job)
-    job.promise = input.run(controller.signal, read => { job.read = read })
+    job.promise = input.run(controller.signal, read => { job.read = read }).then(read => {
+      // `onUpdate` carries progress, and each snapshot still says `reading`; only the
+      // resolved value has the terminal state, so it has to be recorded too.
+      job.read = read
+      return read
+    })
     job.promise.catch(() => undefined)
     return { readId: input.readId }
   }

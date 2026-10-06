@@ -16,7 +16,12 @@ export function excludedPath(path: string, config: ProjectConfig) {
 }
 export function mediaType(path: string) {
   const ext = path.split('.').at(-1)?.toLowerCase()
-  return ({ md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', html: 'text/html', htm: 'text/html', pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'
+  // Images carry their real type: the host's attachment service refuses `octet-stream`, so a
+  // scanned requirement page would never reach the model without this.
+  return ({ md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', html: 'text/html', htm: 'text/html',
+    pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+    bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'
 }
 export async function scanMaterials(io: FileStore, directory = '', cursor = 0, limit = 50) {
   const { config } = await snapshot(io)

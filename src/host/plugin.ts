@@ -87,7 +87,10 @@ import { prepareResearchBatch, executeResearchBatch, readResearchBatch, prepareR
 // Runtime-owned Cordis objects stay inside this adapter. Core never imports them.
 type Host = any
 export const name = 'scholarflow'
-export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools', 'skills', 'systemPrompt', 'agentPresets', 'llm', 'agentDefaultModel', 'sessionProjections', 'web']
+// `attachments` is required, not optional: the image channel admits every upload through it,
+// and a service that is used but not declared throws the moment it is touched — which is how
+// image recognition failed while every unit test, with a stand-in host, passed.
+export const inject = ['fs', 'sandboxPolicy', 'workspaceRegistry', 'sessionController', 'sessions', 'settings', 'connection', 'tools', 'skills', 'systemPrompt', 'agentPresets', 'llm', 'agentDefaultModel', 'sessionProjections', 'web', 'attachments']
 export const Config = Schema.object({
   defaultProjectType: Schema.union(['course-paper', 'literature-review', 'research-paper']).default('course-paper').volatile(),
   language: Schema.union(['zh', 'en']).default('zh').volatile(),

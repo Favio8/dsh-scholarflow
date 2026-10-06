@@ -69,7 +69,8 @@ record('setup', { home, profile, workspaceRoot, outDir, originals: Object.keys(b
 const child = spawn(join(install, 'DeepSeek Harness.exe'), ['--expose-internals',
   join(install, 'resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'),
   'scholarflow-assignment', '--no-open', '--port', String(port)], {
-  env: { ...process.env, DSH_HOME: home, ELECTRON_RUN_AS_NODE: '1', DSH_PERMISSION_MODE: 'workspace-write' },
+  env: { ...process.env, DSH_HOME: home, ELECTRON_RUN_AS_NODE: '1', DSH_PERMISSION_MODE: 'workspace-write',
+    SCHOLARFLOW_TRACE: join(outDir, 'stage-trace.log') },
   windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 let hostLog = ''
 child.stdout.on('data', chunk => { hostLog += chunk.toString() })
@@ -83,9 +84,13 @@ const finish = async (code) => {
   await writeFile(join(outDir, 'host.log'), hostLog)
   child.kill()
   try { await browser.close() } catch { /* already closed */ }
-  console.log(`\njournal: ${join(outDir, 'journal.json')}`)
+  console.log(String.fromCharCode(10) + `journal: ${join(outDir, 'journal.json')}`)
   process.exitCode = code
+  // Thrown so the run unwinds here instead of driving a browser that is already closed.
+  throw new StopRun()
 }
+/** Sentinel used to unwind once `finish` has recorded its journal and cleaned up. */
+class StopRun extends Error { constructor() { super('run finished') } }
 
 try {
   const url = await new Promise((done, reject) => {
@@ -133,7 +138,7 @@ try {
   const must = async (name, request, ms) => {
     record('call', { name })
     const result = await withTimeout(remote(name, request), name, ms)
-    if (result.ok === false) throw new Error(`${name} refused: ${result.error?.code} ${result.error?.message}`)
+    if (result.ok === false) throw new Error(`${name} refused: ${result.error?.code} ${result.error?.message} ${JSON.stringify(result.error?.details ?? {})}`)
     return result.data
   }
 
@@ -191,6 +196,8 @@ try {
   const withMaterials = { ...adopted, materials: [PAPER], targetLength: adopted.brief?.length?.value ?? adopted.targetLength }
   record('adopted', { targetLength: withMaterials.targetLength, typography: withMaterials.typography, cover: withMaterials.cover,
     overrides: withMaterials.overrides, coverage: withMaterials.brief?.coverage?.length })
+  const adoptedCheck = creationSpec.safeParse(withMaterials)
+  if (!adoptedCheck.success) { record('adopted-spec-invalid', adoptedCheck.error.issues.slice(0, 6)); await finish(1) }
 
   // ── 6. outline candidate with the coverage matrix ────────────────────────────────────────
   const outlined = await must('outline.suggest', { context: contextBody, spec: withMaterials })
@@ -212,10 +219,27 @@ try {
 
   let task, elapsed = 0
   while (elapsed < timeoutMinutes * 60000) {
-    task = (await must('writingTask.inspect', { context: projectContext })).task
+    // A running task commits as it writes, so a poll can race its own writes and come back
+    // stale. Retrying is what the client does too: the project simply moved on mid-read.
+    try { task = (await must('writingTask.inspect', { context: projectContext })).task }
+    catch (error) {
+      if (/STALE_LEDGER_REVISION/.test(String(error && error.message))) { await page.waitForTimeout(2000); elapsed += 2000; continue }
+      throw error
+    }
     if (!task) break
     console.log(`  ${task.status}/${task.stage} · sections ${task.sectionIndex}/${finalSpec.sections.length} · calls ${task.usedModelCalls} · ${Math.round(task.elapsedMs / 1000)}s`)
-    if (['completed', 'cancelled', 'failed'].includes(task.status) && (task.questions ?? []).every(row => row.answered !== undefined)) break
+    // The driver stands in for the user here. A question still has to be *asked* — that is the
+    // behaviour under test — but this run has to reach the end, so it answers the way a user
+    // continuing the work would: keep the draft and carry on, never invent a missing fact.
+    const pending = (task.questions ?? []).find(row => row.answered === undefined)
+    if (pending) {
+      const answer = ['保留待补并继续', '已保存，继续', '已处理，继续', '继续', '先创建结构草稿']
+        .find(option => (pending.options ?? []).includes(option)) ?? (pending.options ?? [])[0]
+      record('answer', { question: String(pending.title).slice(0, 120), options: pending.options, answer })
+      await must('writingTask.action', { context: projectContext, taskId: task.id, action: 'answer', questionId: pending.id, answer: String(answer) })
+      await page.waitForTimeout(2000); elapsed += 2000; continue
+    }
+    if (['completed', 'cancelled', 'failed'].includes(task.status)) break
     await page.waitForTimeout(5000); elapsed += 5000
   }
   record('task', { status: task?.status, stage: task?.stage, usedModelCalls: task?.usedModelCalls, sectionIndex: task?.sectionIndex,
@@ -228,6 +252,9 @@ try {
     headings: (document?.document?.text ?? '').split('\n').filter(line => /^#{1,2} /.test(line)).length })
 
   // ── 8. export the Word file and measure the real pages ───────────────────────────────────
+  // A mutating call has to name the ledger revision it is based on; the driver reads it from
+  // the document the same way the client does.
+  projectContext.expectedLedgerRevision = document.revision
   const preflight = await must('export.preflight', { context: projectContext, format: 'docx' })
   if (!preflight?.planId) throw new Error(`preflight failed: ${JSON.stringify(preflight).slice(0, 200)}`)
   record('preflight', { format: preflight.format, reviewState: preflight.reviewState, notes: preflight.formatNotes })
@@ -249,8 +276,17 @@ try {
   await writeFile(join(outDir, 'originals-after.json'), JSON.stringify(after, null, 2))
   const changed = Object.keys(before).filter(key => before[key].sha256 !== after[key].sha256 || before[key].mtimeMs !== after[key].mtimeMs)
   record('originals', { checked: Object.keys(before).length, changed })
+  if (docx) {
+    const { spawnSync } = await import('node:child_process')
+    const measured = spawnSync(process.execPath, ['scripts/measure-pagination.mjs', join(outDir, 'paper.docx'), '--json', join(outDir, 'pagination.json')],
+      { encoding: 'utf8' })
+    record('pagination', { exit: measured.status, out: (measured.stdout ?? '').slice(0, 900), err: (measured.stderr ?? '').slice(0, 300) })
+  }
   await finish(docx ? 0 : 1)
 } catch (error) {
-  record('error', { message: error.message, stack: String(error.stack).slice(0, 600) })
-  await finish(1)
+  if (error instanceof StopRun) { /* already recorded and cleaned up */ }
+  else {
+    record('error', { message: error.message, stack: String(error.stack).slice(0, 600) })
+    try { await finish(1) } catch { /* StopRun */ }
+  }
 }

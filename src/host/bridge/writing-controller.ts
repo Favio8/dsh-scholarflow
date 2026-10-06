@@ -182,7 +182,12 @@ export class WritingController {
       system: STRUCTURE_SYSTEM, instruction: '把这些已经读到的要求文字整理成结构化候选。', context: {
         userDescription: input.spec.requirements, read: material,
         unread: read.members.filter(member => member.state !== 'ready').map(member => ({ name: member.name, note: member.note })) } })
-    const brief = requirementBrief.parse(JSON.parse(raw))
+    const parsed = requirementBrief.parse(JSON.parse(raw))
+    // Coverage items are keyed locally; fill in any key the model left out rather than
+    // rejecting an otherwise usable requirements candidate.
+    const brief = { ...parsed,
+      coverage: parsed.coverage.map((item, index) => ({ ...item, id: item.id ?? `c${index + 1}` })),
+      decisions: parsed.decisions.filter(row => row.question || row.topic) }
     const briefWithText = { ...brief, origins: originsOf(brief, { readText: material, userText: input.spec.requirements }), readIds: [read.readId], model: `${model.selected.provider}/${model.selected.model}` }
     const basis = requirementsBasis({ spec: input.spec, specHash: digest(json(input.spec)), requirementsHash: digest(input.spec.requirements), readsHash: digest(json(read.members.map(member => [member.name, member.state, member.text ?? '']))) })
     const candidate = this.candidates.put(requirementCandidate.parse({ schemaVersion: 1, candidateId: newId('cand'), kind: 'requirements',
@@ -204,7 +209,10 @@ export class WritingController {
       system: OUTLINE_SYSTEM, instruction: '按要求覆盖与篇幅约束给出章节结构候选。',
       context: { requirements: input.spec.requirements, brief: input.spec.brief, currentSections: input.spec.sections,
         language: input.spec.language, targetLength: input.spec.targetLength } })
-    const sections = creationSpec.shape.sections.parse(JSON.parse(raw))
+    // The outline is a proposal the user edits: clamp a length the model wrote oddly and drop
+    // an empty heading rather than refusing the whole candidate.
+    const sections = creationSpec.shape.sections.parse(JSON.parse(raw)).filter(section => section.title.trim())
+      .map(section => ({ ...section, targetLength: Math.min(30000, Math.max(50, Math.round(section.targetLength))) }))
     const coverage = coverageOf(sections, input.spec.brief)
     const changes = outlineDiff(input.spec.sections, sections)
     const gaps = outlineGaps(sections, coverage, { coverageRequired: Boolean(input.spec.brief?.coverage.length) })
@@ -232,7 +240,14 @@ export class WritingController {
     const projectId = input.context.projectId ?? `draft_${input.context.sessionId}`
     const current = this.candidates.live(this.candidates.get(input.candidateId, projectId, input.context.sessionId),
       requirementsBasis({ spec: input.spec, specHash: digest(json(input.spec)), requirementsHash: digest(input.spec.requirements), readsHash: undefined }))
-    invariant(current.kind === 'requirements', 'CANDIDATE_KIND_MISMATCH', '这个候选不是要求候选。')
+    if (current.kind === 'outline') {
+      // Adopting a structure replaces the sections and marks the preset as derived rather than
+      // equal. The requirement text is untouched: this candidate only proposes章节.
+      const spec = { ...input.spec, sections: current.sections,
+        ...(input.spec.preset ? { preset: { ...input.spec.preset, modified: true } } : {}) }
+      this.candidates.decide(input.candidateId, projectId, input.context.sessionId, 'adopted')
+      return { spec, groups: [] }
+    }
     const groups = adoptGroups({ groups: input.groups, all: input.all || !input.groups?.length && !input.resolveLength })
     const chosen = input.resolveLength === 'current'
     const lengthConflict = current.brief.length.value !== undefined && current.brief.length.value !== input.spec.targetLength

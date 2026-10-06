@@ -32,10 +32,12 @@ export const countingPolicy = z.object({ unit: z.enum(['zh-CN', 'en']).optional(
  * Typography is an executable field, not prose about fonts (SPEC v1.2 §16.1): every value
  * here maps onto a DOCX property the exporter actually writes.
  */
+// Model-authored and user-editable: a number written as a string is coerced, extra keys are
+// stripped, and an absent field keeps its default. `.strict()` here rejected usable 排版 values.
 export const typographySpec = z.object({ bodyFontZh: z.string().trim().min(1).max(80).default('宋体'),
-  bodyFontEn: z.string().trim().min(1).max(80).default('Times New Roman'), bodySizePt: z.number().min(6).max(36).default(12),
-  bodySizeLabel: z.string().trim().max(20).default('小四'), lineSpacing: z.number().min(1).max(3).default(1.2),
-  marginsMm: z.number().min(10).max(50).default(25) }).strict().prefault({})
+  bodyFontEn: z.string().trim().min(1).max(80).default('Times New Roman'), bodySizePt: z.coerce.number().min(6).max(36).default(12),
+  bodySizeLabel: z.string().trim().max(20).default('小四'), lineSpacing: z.coerce.number().min(1).max(3).default(1.2),
+  marginsMm: z.coerce.number().min(10).max(50).default(25) }).prefault({})
 export type TypographySpec = z.infer<typeof typographySpec>
 
 /** Cover fields start empty: no reference document may leak a name or a date in (SPEC §18). */
@@ -56,18 +58,22 @@ export const lengthSpec = z.object({ value: z.number().int().min(50).max(200000)
 export type LengthSpec = z.infer<typeof lengthSpec>
 
 const briefOrigin = z.enum(['teacher', 'user', 'suggestion', 'unspecified', 'unread'])
-export const briefCoverageItem = z.object({ id, text: z.string().trim().min(1).max(2000),
+export const briefCoverageItem = z.object({ id: id.optional(), text: z.string().trim().min(1).max(2000),
   kind: z.enum(['question', 'dimension', 'rubric']).default('dimension'), sourceRef: z.string().max(400).optional() }).strict()
-export const briefDecision = z.object({ topic: z.string().trim().min(1).max(200), question: z.string().trim().min(1).max(2000),
-  options: z.array(z.string().trim().min(1).max(400)).min(1).max(6), blocked: z.boolean().default(false),
+/** Model-authored text can be empty or absent; an unusable decision is dropped, not fatal. */
+const loose = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(value => value === null || value === undefined ? undefined : value, schema)
+export const briefDecision = z.object({ topic: z.string().trim().max(200).default(''), question: z.string().trim().max(2000).default(''),
+  options: z.array(z.string().trim().min(1).max(400)).max(6).default([]), blocked: z.boolean().default(false),
   values: z.array(z.object({ label: z.string().trim().min(1).max(200), value: z.string().trim().max(2000), origin: briefOrigin }).strict()).max(6).default([]) }).strict()
 /** The six groups PRD §3.2 asks for; a group the source never mentioned stays absent. */
 export const requirementBrief = z.object({ schemaVersion: z.literal(2).default(2),
-  task: z.object({ nature: z.string().max(2000).optional(), subject: z.string().max(2000).optional(), deliverable: z.string().max(2000).optional() }).strict().prefault({}),
+  task: z.object({ nature: loose(z.string().max(2000).optional()), subject: loose(z.string().max(2000).optional()),
+    deliverable: loose(z.string().max(2000).optional()) }).prefault({}),
   coverage: z.array(briefCoverageItem).max(60).default([]), length: lengthSpec.prefault({}),
-  format: z.object({ fileFormat: z.string().max(200).optional(), citationStyle: z.string().max(200).optional(), cover: z.boolean().optional() }).strict().prefault({}),
-  submission: z.object({ when: z.string().max(500).optional(), where: z.string().max(500).optional(), how: z.string().max(500).optional(),
-    needsConfirmation: z.array(z.string().max(200)).max(20).default([]) }).strict().prefault({}),
+  format: z.object({ fileFormat: loose(z.string().max(200).optional()), citationStyle: loose(z.string().max(200).optional()),
+    cover: loose(z.boolean().optional()) }).prefault({}),
+  submission: z.object({ when: loose(z.string().max(500).optional()), where: loose(z.string().max(500).optional()), how: loose(z.string().max(500).optional()),
+    needsConfirmation: z.array(z.string().max(200)).max(20).default([]) }).prefault({}),
   typography: typographySpec.optional(), decisions: z.array(briefDecision).max(20).default([]),
   origins: z.record(z.string().max(200), briefOrigin).default({}), text: z.string().max(12000).optional(),
   readIds: z.array(id).max(20).default([]), model: z.string().max(200).optional() }).strict().prefault({})

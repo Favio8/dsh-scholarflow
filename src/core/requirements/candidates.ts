@@ -145,11 +145,13 @@ export function adoptionSummary(brief: RequirementBrief, adopted: AdoptableGroup
 /** Which confirmed must-cover items the proposed structure actually covers. */
 export function coverageOf(sections: Section[], brief?: RequirementBrief): OutlineCoverage[] {
   if (!brief) return []
-  return brief.coverage.map(item => {
+  return brief.coverage.map((item, index) => {
+    // The key is local to this comparison; a candidate without one still compares by position.
+    const itemId = item.id ?? `c${index + 1}`
     const terms = significantTerms(item.text)
     const hits = sections.filter(section => terms.some(term =>
       section.title.includes(term) || section.purpose.includes(term))).map(section => section.id)
-    return { itemId: item.id, text: item.text, sectionIds: hits, covered: hits.length > 0 }
+    return { itemId, text: item.text, sectionIds: hits, covered: hits.length > 0 }
   })
 }
 

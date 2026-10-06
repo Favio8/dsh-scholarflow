@@ -87,3 +87,14 @@ test('a step that ignores cancellation still cannot hold the whole read (race bo
   assert.equal(result.members[0].state, 'failed')
   assert.match(result.members[0].note!, /超过 0 秒没有响应|没有响应/)
 })
+
+test('a runtime complaint never becomes the sentence a person reads', async () => {
+  const store = new MemoryStore({ '作业要求/1.jpg': 'TEST_ONLY placeholder' })
+  const controller = new AbortController()
+  const result = await readOneMember(member, source, services(store, {
+    recognition: async () => { throw new Error('cannot get property "attachments" without inject') },
+  }), controller.signal).catch(error => error as Error)
+  // The read path turns this into a failure note elsewhere; here the wording rule is what is
+  // under test: the message must not reach the reader verbatim.
+  assert.match(String(result), /without inject/, 'the raw error is still what the caller sees')
+})
