@@ -69,8 +69,10 @@ import { readRun, inspectRuns, prepareRunMigration, migrateRun } from '../core/p
 import { prepareRunAction, validateRunAction, closeRun, readGenerationCheckpoint, type RunActionPlan } from '../core/pipeline/run-control.ts'
 import { newProjectDefaultsSchema, resolveInitDefaults } from '../shared/project-defaults.ts'
 import { profileImportRequest, profileReadRequest, profileCopyRequest, profileConfirmRequest, profileCopyConfirmRequest, writingProfileSchema, type WritingProfile } from '../shared/profiles.ts'
+import { presetSelectionRequest, presetSaveRequest, presetUpdateRequest, presetCopyRequest, presetRenameRequest, presetRemoveRequest } from '../shared/presets.ts'
 import { builtinProfiles, profileDigest, verifyProfile, profileText, prepareProfileCopy, applyProfileCopy, projectProfile, type ProfileCopyPlan } from '../core/project/profiles.ts'
 import { PrivateProfileLibrary } from './profiles/library.ts'
+import { PresetLibrary } from './presets/library.ts'
 import { prepareManualReview, submitManualReview, type ManualReviewPlan } from '../core/review/manual.ts'
 import { prepareModelReview, type ModelReviewPlan } from '../core/review/model.ts'
 import { executeModelReview, readModelReviewCheckpoint, prepareModelReviewAction, linkModelReviewRetry, type ModelReviewAction } from '../core/review/model-run.ts'
@@ -118,6 +120,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private lookupPlans = new Map<string, { plan: LookupPlan; context: RequestContext; peerId: string; expires: number }>()
   private skillLibrary = new PrivateSkillLibrary()
   private profileLibrary = new PrivateProfileLibrary()
+  private presetLibrary = new PresetLibrary()
   private profilePlans = new Map<string, { profile: WritingProfile; hash: string; peerId: string; expires: number }>()
   private profileCopyPlans = new Map<string, { plan: ProfileCopyPlan; context: RequestContext; peerId: string; expires: number }>()
   private manualReviewPlans = new Map<string, { plan: ManualReviewPlan; context: RequestContext; peerId: string; expires: number }>()
@@ -566,6 +569,47 @@ export class ScholarFlowRemote extends TypertRemoteService {
   @Remote('profiles.read')
   async profilesRead(request: unknown) {
     return applicationResult(async () => { this.requireOperator(); const input = profileReadRequest.parse(request); return this.readProfile(input.id, input.sourceDigest) })
+  }
+
+  // Structure presets: a plugin-level resource. Reads are open to the operator; every
+  // write is an explicit operator action and never reaches a model tool (SPEC v1.1 §6).
+  @Remote('presets.list')
+  async presetsList(request: unknown) {
+    return applicationResult(async () => { this.requireOperator(); z.object({}).strict().parse(request); return this.presetLibrary.list() })
+  }
+
+  @Remote('presets.read')
+  async presetsRead(request: unknown) {
+    return applicationResult(async () => { this.requireOperator(); const { id } = presetSelectionRequest.parse(request); return this.presetLibrary.read(id) })
+  }
+
+  @Remote('presets.save')
+  async presetsSave(request: unknown) {
+    return applicationResult(async () => { this.requireOperator(); const input = presetSaveRequest.parse(request)
+      return this.presetLibrary.save(input, new Date().toISOString()) })
+  }
+
+  @Remote('presets.update')
+  async presetsUpdate(request: unknown) {
+    return applicationResult(async () => { this.requireOperator(); const { id, expectedVersion, ...input } = presetUpdateRequest.parse(request)
+      return this.presetLibrary.update(id, input, new Date().toISOString(), expectedVersion) })
+  }
+
+  @Remote('presets.copy')
+  async presetsCopy(request: unknown) {
+    return applicationResult(async () => { this.requireOperator(); const { id, title } = presetCopyRequest.parse(request)
+      return this.presetLibrary.copy(id, new Date().toISOString(), title) })
+  }
+
+  @Remote('presets.rename')
+  async presetsRename(request: unknown) {
+    return applicationResult(async () => { this.requireOperator(); const { id, title } = presetRenameRequest.parse(request)
+      return this.presetLibrary.rename(id, title, new Date().toISOString()) })
+  }
+
+  @Remote('presets.remove')
+  async presetsRemove(request: unknown) {
+    return applicationResult(async () => { this.requireOperator(); const { id } = presetRemoveRequest.parse(request); return this.presetLibrary.remove(id) })
   }
 
   @Remote('profiles.project')

@@ -65,8 +65,11 @@ export const presetSummary = z.object({
 }).strict()
 
 export const presetSelectionRequest = z.object({ id: presetId }).strict()
+/** What the wizard sends: the paper's own structure, with absolute chapter lengths. */
+export const presetStructureSection = z.object({ key: presetSectionKey, title: localizedText, focus: localizedText,
+  targetLength: z.number().int().min(50).max(30000) }).strict()
 export const presetSaveRequest = z.object({ title: localizedText, summary: localizedText, paperType: projectType,
-  sections: z.array(presetSection).min(1).max(40), supplementalParts: z.array(supplementalPart).max(12).default([]),
+  sections: z.array(presetStructureSection).min(1).max(40), supplementalParts: z.array(supplementalPart).max(12).default([]),
   tags: z.array(z.string().min(1).max(40)).max(20).default([]), derivedFrom: presetId.optional() }).strict()
 export const presetUpdateRequest = presetSaveRequest.extend({ id: presetId, expectedVersion: z.string().regex(/^\d+\.\d+\.\d+$/) }).strict()
 export const presetCopyRequest = z.object({ id: presetId, title: localizedText.optional() }).strict()
