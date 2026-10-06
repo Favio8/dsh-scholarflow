@@ -133,13 +133,17 @@ export function apply(ctx: Host) {
     </div></>
   }
   function Workspace(props: Host) {
-    // This surface replaces the Host's conversation slot, so an error inside it would otherwise
-    // leave an empty pane with nothing to report; the boundary renders the failure instead.
     return <div className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS}</style>
       <SelectionReferenceDetails sessionId={props.sessionId} />
-      <main className="sf-body"><SurfaceBoundary label="项目面" onEscape={() => navigation.ordinary()}>{props.renderSlot('scholarflow.project', {
+      <main className="sf-body">{props.renderSlot('scholarflow.project', {
         renderNativeTools: (extra: React.ReactNode) => <NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} extra={extra} />,
-      })}</SurfaceBoundary></main></div>
+      })}</main></div>
+  }
+
+  function ProjectSurface(props: Host) {
+    // DSH catches and hides failed Slot entries. The boundary must be inside the
+    // registered entry to show its error before the Host handles it.
+    return <SurfaceBoundary label="项目面" onEscape={() => navigation.ordinary()}><Project {...props} /></SurfaceBoundary>
   }
 
   function Project(props: Host) {
@@ -292,7 +296,7 @@ export function apply(ctx: Host) {
         : <p>正在读取宿主设置…</p>}<p role="status">{message}</p><WritingProfiles api={api} /><StructurePresets api={api} run={async (fn: () => Promise<unknown>) => { try { await fn() } catch (error) { setMessage((error as Error).message) } }} busy={false} /><AcademicSkills api={api} /></section>
   }
   ctx.effect(() => ctx.slots.registerFactory({ name: 'scholarflow.workspace', scope: 'session-maybe', children: { 'scholarflow.project': { kind: 'single', scope: 'session-maybe' } } }, Workspace), 'scholarflow: project surface')
-  ctx.effect(() => ctx.slots.inject('scholarflow.project', () => ctx.slots.register({ name: 'scholarflow.project' }, Project)), 'scholarflow: project')
+  ctx.effect(() => ctx.slots.inject('scholarflow.project', () => ctx.slots.register({ name: 'scholarflow.project' }, ProjectSurface)), 'scholarflow: project')
   // The workbench entry is gone: the surface appears for ScholarFlow conversations and is
   // never reached by selecting a panel, so no `main` cell registers it any more.
   // A persisted panel from the removed workbench entry is not an explicit click in this

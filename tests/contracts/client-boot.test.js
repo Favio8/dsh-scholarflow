@@ -101,6 +101,12 @@ for (const platform of [undefined, 'win32']) test(`slot registrations use the DS
       register(options, component) {
         assert.equal(typeof component, 'function', 'component must be the second argument')
         assert.equal('component' in options, false)
+        if (options.name === 'scholarflow.project') {
+          const entry = component({ useWorkspaces: () => [] })
+          assert.equal(typeof entry.type.getDerivedStateFromError, 'function', 'project errors must be caught inside the Host Slot entry')
+          assert.equal(entry.props.label, '项目面')
+          assert.equal(typeof entry.props.onEscape, 'function')
+        }
         const html = render(component)
         assert.equal(typeof html, 'string')
         const cell = { options, disposed: false }

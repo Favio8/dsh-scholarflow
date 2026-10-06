@@ -124,6 +124,33 @@ try {
   await page.locator('.sf-wizard').waitFor({ timeout: 30000 })
   assert.equal(await page.locator('#sf-field-title').inputValue(), 'TEST_ONLY retained wizard draft')
   console.log('PASS reloading an existing ScholarFlow session restores the wizard')
+  // Fresh isolated profiles masked the production crash: the user's existing
+  // localStorage contained drafts written before requirementSources was added.
+  await page.evaluate(sessionId => {
+    const key = Object.keys(localStorage).find(key => key.startsWith('scholarflow:creation:') && key.endsWith(`:${sessionId}`))
+    const saved = JSON.parse(localStorage.getItem(key))
+    delete saved.spec.requirementSources
+    delete saved.spec.countingPolicy
+    delete saved.spec.preset
+    saved.spec.sections.forEach(section => { delete section.allocationMode; delete section.allocationWeight })
+    saved.step = 2
+    localStorage.setItem(key, JSON.stringify(saved))
+  }, sessionId)
+  await page.reload()
+  await page.locator('.sf-wizard').waitFor({ timeout: 30000 })
+  assert.match(await page.locator('.sf-wizard-step-compact').textContent(), /第 3 步/)
+  const migrated = await page.evaluate(sessionId => JSON.parse(localStorage.getItem(Object.keys(localStorage)
+    .find(key => key.startsWith('scholarflow:creation:') && key.endsWith(`:${sessionId}`)))), sessionId)
+  assert.equal(migrated.spec.title, 'TEST_ONLY retained wizard draft')
+  assert.deepEqual(migrated.spec.requirementSources, [])
+  assert.equal(migrated.spec.countingPolicy.scope, 'body')
+  assert.ok(migrated.spec.sections.every(section => section.allocationMode === 'manual'))
+  await workspaceRow.hover()
+  await createFrom(workspaceNew)
+  await createFrom(globalNew)
+  await page.locator('.sf-wizard').waitFor()
+  assert.equal(await page.locator('[data-slot-error="scholarflow.project"]').count(), 0)
+  console.log('PASS pre-upgrade wizard draft survives reload and both native new buttons')
   const ordinaryRow = page.locator('[role="treeitem"][data-row-key^="workspace:"]').filter({ hasText: '默认工作区' })
   await ordinaryRow.hover()
   await createFrom(page.getByRole('button', { name: '在“默认工作区”中新建会话', exact: true }))

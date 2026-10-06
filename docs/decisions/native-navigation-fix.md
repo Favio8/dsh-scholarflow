@@ -55,3 +55,46 @@ no longer displays an ordinary surface while that session's mode is ScholarFlow.
 The test does not copy the user's sessions, credentials or saved provider patches.
 It does not send prompts, initialize a paper project, or modify the user's workspaces.
 The linked Desktop installation uses the rebuilt `dist/client.js` on renderer reload.
+
+## Follow-up: blank pane with existing local drafts (2026-10-06)
+
+The user still saw a blank main pane after the navigation fix. Read-only inspection
+of the running production Electron renderer found the actual failure:
+`CreationWizard` threw `TypeError: Cannot read properties of undefined (reading 'map')`.
+The existing `scholarflow:creation:<workspace>:<session>` localStorage records
+predated `requirementSources`, `countingPolicy` and section allocation fields.
+The wizard restored their raw objects, bypassing the shared schema defaults.
+Earlier navigation tests used fresh Electron storage and therefore missed this case.
+
+DSH's own `SlotErrorBoundary` handled the exception inside `scholarflow.project`,
+rendering only an empty `data-slot-error` marker. Our boundary around `renderSlot`
+was outside this Host boundary, so it never received the failure. It now wraps
+`Project` inside the registered entry (`src/client/plugin.tsx:143–147,299`).
+
+`restoreCreationDraft` normalizes the known missing fields once at the storage
+boundary (`src/client/creation-wizard.tsx:71–86,90`). It preserves unfinished titles,
+requirements, selected materials, wizard step and chapter lengths. Old chapter lengths
+are manual, preventing automatic redistribution. A legacy assignment selection becomes
+one visible requirement source; the old field is removed from this local draft so
+removing the source cannot leave a hidden read selection. Stored project files are
+not migrated. No generic validation of unfinished drafts or scattered null guards
+are introduced.
+
+Verification after the follow-up:
+
+- Build and typecheck pass; **413/413** unit/contract/integration/fault-injection
+  tests pass, including rendering every wizard step with a pre-upgrade draft.
+- The Desktop navigation test adds restoration of a pre-upgrade third-step draft,
+  checks its title and manual lengths, and clicks both native new buttons again.
+  **8 Desktop scenario checks pass**, with no client errors; ordinary conversations
+  still render the native mode picker. Artifacts:
+  `.dsh-tmp/native-navigation/1791278276042/`.
+- The actual user's running Desktop was reloaded. Its original old draft in
+  `dsh-scholarflow-ai` restored with the new fields and unchanged manual lengths.
+  The global new button and new buttons in `dsh-scholarflow-ai` and
+  `科技论文写作` each emitted a native `session/create` request and displayed the
+  ScholarFlow wizard with no Slot errors or console errors. Native blank-session
+  reuse kept their existing session IDs. The initially selected session was restored.
+
+Inspection does not read credentials, send prompts, initialize a project or change
+the installed DSH archive. Temporary debugger connections are removed afterward.

@@ -66,6 +66,20 @@ function RequirementPicker({ files, disabled, scanning, onPick, onRescan, onPick
   </div>
 }
 
+// Local drafts predate the requirement-source and allocation fields. Restore those
+// additions once, without validating unfinished input as a submitted creation request.
+export function restoreCreationDraft(spec: CreationSpec): CreationSpec {
+  const { assignmentPath, ...draft } = spec
+  const requirementSources = spec.requirementSources ?? (assignmentPath ? [{
+    resourceId: 'req_legacy_assignment', origin: 'workspace' as const, kind: 'file' as const,
+    path: assignmentPath, members: [], role: 'assignment' as const, state: 'selected' as const,
+  }] : [])
+  return { ...draft, requirementSources,
+    countingPolicy: spec.countingPolicy ?? { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
+    sections: spec.sections.map(section => ({ ...section, allocationMode: section.allocationMode ?? 'manual' })),
+  }
+}
+
 export function CreationWizard({ scope, api, context, onCreated, workspaceTitle, defaults }: any) {
   const key = `scholarflow:creation:${scope}`
   const initial: CreationSpec = { title: '', type: defaults?.defaultProjectType ?? 'course-paper', language: defaults?.language === 'en' ? 'en' : 'zh-CN',
@@ -73,7 +87,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
     sections: presetSections(defaults?.defaultProjectType ?? 'course-paper', 4000), manuscriptDir: 'manuscript' }
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') } catch { return null } })
-  const [spec, setSpec] = useState<CreationSpec>(saved?.spec ?? initial), [step, setStep] = useState(saved?.step ?? 0)
+  const [spec, setSpec] = useState<CreationSpec>(() => saved?.spec ? restoreCreationDraft(saved.spec) : initial), [step, setStep] = useState(saved?.step ?? 0)
   const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [conflict, setConflict] = useState(false)
   const [scanning, setScanning] = useState(false), [truncated, setTruncated] = useState(false)
   const [materialQuery, setMaterialQuery] = useState('')
