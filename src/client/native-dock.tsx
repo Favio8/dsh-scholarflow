@@ -91,7 +91,9 @@ export function connectPresetEntry(ctx: any, navigation: ReturnType<typeof creat
   ctx.effect(() => ctx.slots.inject('conversation.hero.agentPreset', () => {
     let original: any, dispose: (() => void) | undefined
     const sync = () => {
-      const entry = ctx.slots.entriesOfSlot('conversation.hero.agentPreset').find((entry: any) => entry.options.id !== 'scholarflow-preset-entry')
+      // The rendered winner is our wrapper. Inspect the registration ledger so
+      // shadowing the native seat does not repeatedly remove and reinstall us.
+      const entry = ctx.slots.entries('conversation.hero.agentPreset').find((entry: any) => entry.options.id !== 'scholarflow-preset-entry')
       if (entry === original) return
       original = entry; dispose?.(); dispose = undefined
       if (!entry) return

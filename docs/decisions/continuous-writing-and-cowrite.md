@@ -8,6 +8,8 @@ The native ScholarFlow preset opens a three-page wizard. Choosing it grants no f
 
 The native preset seat is wrapped through the public Slot registry; the original component, injection and locale remain intact. The right sidebar stays under native DSH ownership and opens only on an explicit chat action. Native New Session navigation retracts the workbench even when DSH reuses a blank session. No core files are patched.
 
+2026-10-06 startup correction: the wrapper and caption shortcut inspect the public `slots.entries()` registration ledger. In the installed rc.2 source (`@deepseek-ai/dsh-client-ui-slots/lib/index.js`, `SlotCore.entriesOfSlot`), `entriesOfSlot()` exposes only the winning entry in this single slot. Looking for the native seat through that projection after shadowing it alternated wrapper disposal and registration on every queued slot notification, starving startup. Reading the ledger preserves the same native entry identity while its wrapper wins and stops that cycle. This correction is based on source inspection; no runtime or automated tests were performed.
+
 ## Persistent writing
 
 `writing/requirements.json` holds the shared creation specification; `writing/tasks/` holds the job and checkpoints. Core coordinates material parsing, evidence selection, outline planning, existing controlled section generation, proposal publication and review. It does not create a second Agent Loop. Paid call attempts stay charged across interruption; an explicit budget continuation extends allowance instead of erasing usage. Pause stops after the current operation. Questions are answered in the center pane; resume after application restart is explicit.

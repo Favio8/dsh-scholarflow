@@ -106,7 +106,7 @@ export function apply(ctx: Host) {
         const session = ctx.sessions.list.getSnapshot().byId[current]
         if (session?.projectionValues?.agentPreset === 'scholarflow') { navigation.open(current); return }
         if (session?.blank) {
-          const seat = ctx.slots.entriesOfSlot('conversation.hero.agentPreset').find((entry: Host) => entry.options.id !== 'scholarflow-preset-entry')
+          const seat = ctx.slots.entries('conversation.hero.agentPreset').find((entry: Host) => entry.options.id !== 'scholarflow-preset-entry')
           if (seat?.inject) { const refusal = await seat.inject(current).select('scholarflow'); if (refusal) throw new Error(refusal); navigation.open(current); return }
         }
         const workspace = ctx.workspaces.list.getSnapshot().items.find((item: Host) => item.sessionIds.includes(current))
