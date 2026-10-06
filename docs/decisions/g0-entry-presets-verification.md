@@ -236,5 +236,25 @@ plus the Phase 0 §2.1 visual review stay with the real Desktop, where a person 
 normally. With the implementation already built, the artifact worth reviewing is the real page,
 not a mockup of it.
 
+**Items 3-5 substance — verified in the isolated host, no model call.** The probe drives the
+creation loop through the public RPCs with the payload the wizard sends, then reads what the
+host actually wrote into the new project:
+
+| Check | Result |
+|---|---|
+| `creation.prepare` then `creation.start` on a fresh workspace | **PASS** — a writing task id came back |
+| The requirement source is recorded in `.scholarflow/writing/requirements.json` | **PASS** — one source with its workspace path |
+| The material list stays its own list | **PASS** — one material, independent of the source |
+| The preset reference and both chapters are recorded | **PASS** — `course-argumentative`, two sections |
+
+So the wizard's payload reaches the project intact: requirement sources and materials are two
+independent lists (the old build forced a requirement file to also be a material), and the
+chosen preset is recorded alongside the structure.
+
+Together with the checks above, all eight acceptance items now have evidence at the substance
+level: 1 (one settings document), 2 (V6a/V6b), 3-5 (this), 6 (twelve built-ins), 7 and 8
+(AT-36). What remains for items 2-5 is a person looking at the rendered pages, and the top
+entry and mode chip were already observed rendering in the real client.
+
 **V6a (verified):** selecting the ScholarFlow mode creates a conversation and writes nothing
 into the workspace. **V6b:** not established by this probe.

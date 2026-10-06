@@ -143,27 +143,9 @@ try {
   // each surface actually appears. Presence, not aesthetics — the review matrix still needs
   // a person.
   if (sessionId) {
-    // A session created over RPC reaches the sidebar only after the client reloads.
-    await page.reload(); await page.waitForTimeout(2500)
-    const shots = resolve('.dsh-tmp/ui-review')
-    await mkdir(shots, { recursive: true })
-    // The real path for item 2: choose the mode in a new conversation, which is what the
-    // hero chip does. A session created over RPC never renders the workbench on its own.
-    // The chip shows the CURRENT mode (标准模式 on a fresh session), so open it and pick
-    // ScholarFlow from the list — this is the real path for item 2.
-    const mode = page.getByRole('button', { name: /模式/ }).first()
-    console.log('模式芯片:', await mode.count(), await mode.innerText().catch(() => ''))
-    if (await mode.count()) {
-      await mode.click(); await page.waitForTimeout(1200)
-      const option = page.getByText('ScholarFlow', { exact: true }).first()
-      console.log('列表里的 ScholarFlow 选项:', await option.count())
-      if (await option.count()) { await option.click(); await page.waitForTimeout(4000) }
-    }
-    console.log('选模式后: sf-wizard=' + await page.locator('.sf-wizard').count() + ' sf-app=' + await page.locator('.sf-app').count())
-    await page.screenshot({ path: join(shots, 'wizard-wide.png') })
-    await page.setViewportSize({ width: 420, height: 900 }); await page.waitForTimeout(1200)
-    await page.screenshot({ path: join(shots, 'wizard-narrow.png') })
-    await page.setViewportSize({ width: 1500, height: 960 }); await page.waitForTimeout(1200)
+    // Client-driven UI checks were removed: driving the client to a session from a probe
+    // proved unreliable (recorded in docs/decisions/g0-entry-presets-verification.md).
+
     const wizard = page.locator('[aria-label="创建论文向导"]')
     const rendered = await wizard.count()
     record('AT-30/31 引导已渲染', rendered === 1 ? 'PASS' : 'FAIL', '向导容器数量=' + rendered)
@@ -216,6 +198,46 @@ try {
     const after = await readSettings()
     record('AT-29 设置同源', after?.value?.defaultProjectType === wanted ? 'PASS' : 'FAIL',
       '经 settings/update 写入 ' + wanted + '，诊断读回 ' + String(after?.value?.defaultProjectType) + '；写入 ok=' + String(written?.ok))
+  }
+
+  // Items 3-5, substance: what actually lands in the created project. The wizard's own
+  // payload is used, so the check covers the contract the UI depends on, not the UI itself.
+  {
+    // A fresh workspace: the V5 block above already created a project elsewhere.
+    const freshRoot = join(testHome, '创建检查 TEST_ONLY')
+    await mkdir(freshRoot, { recursive: true })
+    await writeFile(join(freshRoot, 'TEST_ONLY 原始资料.txt'), 'TEST_ONLY source stays unchanged.')
+    const fresh = payload((await rpc('workspace/create', { request: { path: freshRoot } })).body)
+    const freshWorkspaceId = fresh?.workspace?.workspaceId
+    const freshSessionId = freshWorkspaceId
+      ? payload((await rpc('session/create', { request: { workspaceId: freshWorkspaceId, agentPreset: 'scholarflow' } })).body)?.sessionId : undefined
+    const creationContext = { requestId: 'req_TEST_ONLY', workspaceId: freshWorkspaceId, sessionId: freshSessionId }
+    const spec = {
+      title: 'TEST_ONLY 要求来源与材料独立', type: 'course-paper', language: 'zh-CN', format: 'markdown',
+      requirements: '按要求文件里的规定完成；材料只作参考。',
+      requirementSources: [{ resourceId: 'req_probe1', origin: 'workspace', kind: 'file', path: 'TEST_ONLY 原始资料.txt',
+        members: [], role: 'assignment', state: 'selected' }],
+      materials: ['TEST_ONLY 原始资料.txt'],
+      online: false, targetLength: 4000, countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
+      preset: { id: 'course-argumentative', source: 'builtin', version: '1.0.0', modified: false },
+      sections: [{ id: 'section_1_intro', title: '引言', purpose: '交代问题', targetLength: 1000, allocationMode: 'auto', allocationWeight: 0.25 },
+        { id: 'section_2_body', title: '主题论证', purpose: '展开论证', targetLength: 3000, allocationMode: 'auto', allocationWeight: 0.75 }],
+      manuscriptDir: 'manuscript',
+    }
+    const prepared = payload((await rpc('scholarflow.v1/creation.prepare', { request: { context: creationContext, spec } })).body)
+    if (!prepared?.planId) record('AT-31/33 创建预检', 'FAIL', String(JSON.stringify(prepared)).slice(0, 200))
+    else {
+      const started = payload((await rpc('scholarflow.v1/creation.start', { request: { context: creationContext, planId: prepared.planId, planHash: prepared.planHash } })).body)
+      record('AT-31/33 创建闭环', started?.taskId ? 'PASS' : 'FAIL', 'taskId=' + String(started?.taskId))
+      const written = JSON.parse(await readFile(join(freshRoot, '.scholarflow', 'writing', 'requirements.json'), 'utf8'))
+      const row = written.spec ?? written
+      record('AT-31 要求来源独立落入项目',
+        row.requirementSources?.length === 1 && row.requirementSources[0].path === 'TEST_ONLY 原始资料.txt' ? 'PASS' : 'FAIL',
+        '来源=' + JSON.stringify(row.requirementSources ?? null).slice(0, 120))
+      record('AT-33 材料清单独立', Array.isArray(row.materials) && row.materials.length === 1 ? 'PASS' : 'FAIL', '材料=' + JSON.stringify(row.materials))
+      record('AT-34 预设随创建记录', row.preset?.id === 'course-argumentative' && row.sections?.length === 2 ? 'PASS' : 'FAIL',
+        '预设=' + String(row.preset?.id) + ' 章节=' + String(row.sections?.length))
+    }
   }
 
   // V3b — can the picker's browse backend reach a directory outside the workspace?
