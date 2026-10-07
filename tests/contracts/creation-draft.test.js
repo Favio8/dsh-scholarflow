@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { build } from 'esbuild'
-import { resolve } from 'node:path'
+import { mkdir } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 const output = resolve('.dsh-tmp/contracts/creation-draft.mjs')
+// A fresh clone has no .dsh-tmp yet; esbuild does not create the directory of `outfile` for us.
+await mkdir(dirname(output), { recursive: true })
 await build({ entryPoints: ['src/client/creation-wizard.tsx'], bundle: true, outfile: output,
   platform: 'node', format: 'esm', packages: 'external', define: { __SF_KATEX_CSS__: '""' } })
 const { CreationWizard, restoreCreationDraft } = await import(pathToFileURL(output).href)

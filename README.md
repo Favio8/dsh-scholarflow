@@ -111,6 +111,14 @@ Overview 的七阶段引导目标可整体预览／取消，按已保存事实�
 
 ## 开发与验证
 
+`.github/workflows/ci.yml` 在每次推送到 `main` 与每个 PR 上跑 `pnpm install --frozen-lockfile`、
+`pnpm build`、`pnpm typecheck`、`pnpm test`（windows-latest，固定 pnpm 11.5.2 与 Node 24）。
+`pnpm typecheck` 现在同时检查 `src/**` 与 `tests/**/*.ts`；6 个 `.js` 测试仍在检查范围外，
+原因写在 `tsconfig.json` 的 `include` 旁。
+**CI 不含** `tests/e2e/**`（需要装好的 DSH Desktop、私有 `DSH_HOME` 与操作者凭据，部分会产生
+真实费用）、`pnpm audit:appearance`（需要真实客户端与主题）与 `pnpm render:surfaces`（产物是
+给人看的截图，不是门禁）——这些仍需按下面的命令手动执行。
+
 ```powershell
 pnpm install --frozen-lockfile
 pnpm build

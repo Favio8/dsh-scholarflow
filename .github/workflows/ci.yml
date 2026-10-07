@@ -1,0 +1,38 @@
+name: CI
+
+# The domain suite covers the unit, contract, integration and fault-injection layers. It needs no
+# network and no credentials, and one of its contracts reads the built dist/client.js, so the build
+# has to run before it.
+#
+# Deliberately not run here:
+#   - tests/e2e/**: they drive an installed DeepSeek Harness desktop app with a private DSH_HOME and
+#     the operator's own credentials, and some make paid model requests.
+#   - pnpm audit:appearance: it measures the real client under a real host theme.
+#   - pnpm render:surfaces: its screenshots are review material, not a gate.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gates:
+    # The only supported target is Windows DSH Desktop 0.2.0-rc.2 (docs/compatibility.md) and the
+    # suite branches on the platform (symlink type, case-folded root fingerprints), so Windows is
+    # the faithful runner. The repository is public, so runner minutes are free.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # package.json has no packageManager field, so pin the pnpm that wrote pnpm-lock.yaml.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `pnpm test` builds too; the separate step keeps a build failure distinguishable from a test
+      # failure in the run summary.
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
