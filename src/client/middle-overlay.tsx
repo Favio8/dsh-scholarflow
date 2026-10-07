@@ -30,7 +30,7 @@ export function OverlayHost({ open, tabs, active, onTab, children, onCollapse, c
     observer.observe(node)
     return () => observer.disconnect()
   }, [open, collapsed, active, children])
-  return <SfPresence open={open} offset={SCENE.overlayShift}>
+  return <SfPresence open={open} offset={SCENE.overlayShift} className="sf-overlay-presence">
     <div className="sf-overlay" ref={root} role="region" aria-label={label} data-sf-overlay-space={Math.round(height + 20)}>
       {!!tabs?.length && tabs.length > 1 && <div className="sf-overlay-tabs" role="tablist">
         {tabs.map(tab => <button key={tab.id} role="tab" type="button" aria-selected={tab.id === active} aria-pressed={tab.id === active}
@@ -72,12 +72,17 @@ export function useOverlaySpace(container: React.RefObject<HTMLElement | null>, 
 }
 
 export const OVERLAY_CSS = `
-.sf-middle-column{position:relative}
+/* Carry the draft viewport through this wrapper; a block with auto height grows with the
+   manuscript and leaves the inner editor/preview with no overflow of their own. */
+.sf-middle-column{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden}
+/* Motion's transform establishes a containing block. Give it the full viewport, and allow
+   pointer input through the empty part of that layer to the editor underneath. */
+.sf-overlay-presence{position:absolute;inset:0;z-index:30;pointer-events:none}
 /* Bottom space is added only while the overlay is present, so the resting editor has none. */
 .sf-middle-column[data-overlay-open=true] .sf-editor-scroll{padding-bottom:calc(var(--sf-overlay-space,0px) + 8px)}
 .sf-overlay{position:absolute;left:10px;right:10px;bottom:10px;z-index:30;box-sizing:border-box;
   background:var(--dsw-alias-bg-base,#fff);border:1px solid #8884;border-radius:11px;box-shadow:0 10px 28px #0000001a;
-  padding:10px 12px;font-size:13px;max-height:60%;overflow:auto}
+  padding:10px 12px;font-size:13px;max-height:60%;overflow:auto;pointer-events:auto}
 .sf-app[data-theme=dark] .sf-overlay,html[data-theme=dark] .sf-overlay{background:#1c1d20}
 .sf-overlay-tabs{display:flex;gap:4px;margin-bottom:8px}
 .sf-overlay-tabs button{font:inherit;font-size:12px;padding:4px 9px;border:1px solid #8884;border-radius:999px;background:transparent;color:inherit;cursor:pointer}

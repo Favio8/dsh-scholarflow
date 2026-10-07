@@ -342,7 +342,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     {selection && selectionAnchor && !tool && visible && <SelectionMenu anchor={selectionAnchor} busy={busy}
       onAction={openRewrite} onClose={() => setSelectionAnchor(undefined)} />}
     {selectionDetail && <SelectionDetails card={selectionDetail} onClose={() => setSelectionDetail(undefined)} onTool={onTool} />}
-    <div className="sf-middle-column" ref={middleColumn}>
+    <div className="sf-middle-column" ref={middleColumn} hidden={!!tool}>
     <div className="sf-editor-surface sf-editor-scroll" hidden={!!tool}>
       {cowrite.briefsView}{cowrite.generatedView}
       {/* Chapter navigation is its own entry; the fixed 选区／要求／AI 修改 bar is gone. */}
