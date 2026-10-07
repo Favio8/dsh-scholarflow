@@ -7,7 +7,7 @@ import { skillManifestSchema, type SkillBundle, type SkillManifest } from '../..
 import { relativePath } from '../../shared/schema.ts'
 import { digest, json } from '../../core/store/files.ts'
 import { verifySkill, MAX_SKILL_BYTES, MAX_SKILL_FILES } from '../../core/skills/package.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 
 const key = (qualifiedId: string) => digest(qualifiedId).slice(7)
 const same = (left: string, right: string) => process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right)
@@ -85,7 +85,7 @@ export class PrivateSkillLibrary {
   private async manifest(version: string) {
     const path = join(version, 'manifest.json'), info = await observed(path)
     invariant(info?.isFile() && !info.isSymbolicLink() && info.nlink === 1 && info.size <= 512 * 1024, 'SKILL_MANIFEST_INVALID', '版本清单缺失、过大或不是普通文件。')
-    return skillManifestSchema.parse(JSON.parse(await readFile(path, 'utf8')))
+    return parseStored(skillManifestSchema, await readFile(path, 'utf8'), 'SKILL_MANIFEST_INVALID', 'skills.library')
   }
   async list() {
     const root = await this.root()

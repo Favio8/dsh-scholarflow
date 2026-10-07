@@ -224,7 +224,7 @@ try {
   assert.equal(verification.ok, true, JSON.stringify(verification))
   assert.equal(resolve(verification.value.root), fixture, JSON.stringify(verification.value))
   assert.equal(verification.value.recovered, true)
-  assert.deepEqual([...verification.value.allowedTools].sort(), [...academicToolNames].sort(), 'ScholarFlow exposes only its nine controlled academic tools')
+  assert.deepEqual([...verification.value.allowedTools].sort(), [...academicToolNames].sort(), 'ScholarFlow exposes only its declared controlled academic tools')
   assert.equal(verification.value.hasAcademicPolicy, true)
   const ordinary = await rpc('session/create', { request: { workspaceId: workspace.value.workspace.workspaceId, agentPreset: 'standard' } })
   assert.equal(ordinary.ok, true, JSON.stringify(ordinary))

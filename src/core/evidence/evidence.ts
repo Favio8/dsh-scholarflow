@@ -6,7 +6,7 @@ import { normalizeArxiv, sourceMatches } from '../research/source-matching.ts'
 import { newId, digest, json, type FileStore } from '../store/files.ts'
 import { mutateLedger, invalidateReviews, snapshot } from '../project/project.ts'
 import { readParsed, MAX_MATERIAL_BYTES } from '../materials/materials.ts'
-import { invariant, ScholarError } from '../../shared/errors.ts'
+import { invariant, ScholarError, parseStored } from '../../shared/errors.ts'
 
 export async function registerSource(io: FileStore, input: z.infer<typeof sourceInput>, revision: number, duplicateReview?: z.infer<typeof duplicateSourceReview>, sourceSessionId?: string, expected?: { configHash: string; ledgerHash: string }) {
   input = sourceInput.parse(input)
@@ -113,8 +113,8 @@ export async function saveOutline(io: FileStore, input: z.infer<typeof outlineSc
     invariant(confirmation !== 'confirmed' || input.researchQuestion.trim() && input.thesis.trim() && input.sections.length,
       'OUTLINE_CONFIRMATION_REQUIRED', '确认大纲需要研究问题、中心论点及至少一个章节；未完成结构可以先保存草稿。')
     const previous = structuredClone(ledger.outline), projection = await io.read('.scholarflow/planning/outline.md'), projectionManifest = await io.read('.scholarflow/planning/outline-projection.json')
-    const projectionMetadata = projectionManifest && z.object({ schemaVersion: z.literal(1), projectId: z.string(), version: z.number().int().min(0),
-      hash: z.string().regex(/^sha256:[0-9a-f]{64}$/) }).strict().parse(JSON.parse(projectionManifest.text))
+    const projectionMetadata = projectionManifest && parseStored(z.object({ schemaVersion: z.literal(1), projectId: z.string(), version: z.number().int().min(0),
+      hash: z.string().regex(/^sha256:[0-9a-f]{64}$/) }).strict(), projectionManifest.text, 'OUTLINE_PROJECTION_INVALID', 'outline.confirm')
     invariant(projectionMetadata ? projection && projectionMetadata.projectId === ledger.projectId && projectionMetadata.version === previous.version &&
       digest(projection.text) === projectionMetadata.hash : !projection || projection.text === outlineProjection(previous),
       'OUTLINE_PROJECTION_CHANGED', '大纲可读投影被外部编辑；保留该文件，请先按 ledger 大纲核对，不会自动覆盖。')
@@ -122,7 +122,7 @@ export async function saveOutline(io: FileStore, input: z.infer<typeof outlineSc
     for (const state of Object.values(ledger.proposalStates).filter(row => row.state === 'pending')) {
       const file = await io.read(`.scholarflow/proposals/${state.proposalId}.json`)
       invariant(file, 'PROPOSAL_NOT_FOUND', '待审阅建议文件缺失，先检查项目。')
-      const proposal = proposalSchema.parse(JSON.parse(file.text))
+      const proposal = parseStored(proposalSchema, file.text, 'PROPOSAL_INVALID', 'outline.confirm')
       invariant(proposal.projectId === ledger.projectId, 'PROJECT_ID_CONFLICT', '待审阅建议身份不属于项目。')
       if (proposal.scope !== 'selection') { state.state = 'stale'; state.updatedAt = new Date().toISOString() }
     }

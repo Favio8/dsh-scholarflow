@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { snapshot, CONFIG_PATH } from '../project/project.ts'
 import { digest, newId, json, type FileStore } from '../store/files.ts'
 import { generationRequest, runSnapshotSchema, runStateSchema, modelOutputSchema, generationCheckpointSchema, type GenerationCheckpoint, type RunState } from '../../shared/runs.ts'
-import { invariant, ScholarError } from '../../shared/errors.ts'
+import { invariant, ScholarError, parseModel, parseStored } from '../../shared/errors.ts'
 import { buildProposal, storeProposal, proposalImage } from '../editing/proposals.ts'
 import { validateSelection, projectMarkdown, citationKeys } from '../editing/markdown.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
@@ -125,7 +125,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
     if (plan.snapshot.draftSequenceId) {
       invariant(await workflowAssociation(io) === plan.snapshot.workflowId, 'DRAFT_SEQUENCE_INPUT_CHANGED', '原累计引导目标改变，不能重放章节计划。')
       const pointer = await io.read('.scholarflow/drafting/current.json'), file = await io.read(`.scholarflow/runs/${plan.snapshot.draftSequenceId}/checkpoint.json`)
-      const progress = file && draftSequenceCheckpointSchema.parse(JSON.parse(file.text))
+      const progress = file && parseStored(draftSequenceCheckpointSchema, file.text, 'DRAFT_SEQUENCE_INVALID', 'runs.resume')
       invariant(pointer && JSON.parse(pointer.text).sequenceId === plan.snapshot.draftSequenceId && progress &&
         progress.sequenceId === plan.snapshot.draftSequenceId && progress.projectId === plan.snapshot.projectId && progress.status === 'waiting-input' &&
         progress.steps.some(row => row.state === 'dispatched' && row.childRunId === plan.snapshot.runId && row.childPlanHash === plan.contentHash),
@@ -197,7 +197,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
       return
     }
     if (active && !await isDetachedProjectPointer(io, ACTIVE, active)) {
-      const previous = runStateSchema.parse(JSON.parse(active.text))
+      const previous = parseStored(runStateSchema, active.text, 'RUN_STATE_INVALID', 'runs.start')
       const authoritative = await readRun(io, previous.runId, current.ledger.projectId)
       invariant(json(authoritative.run) === json(previous), 'RUN_STATE_CHANGED', '活动运行投影与实际运行事实源不同；请检查运行记录，不会据此开始并行写作。')
       invariant(!['running', 'queued', 'paused', 'waiting-input', 'interrupted'].includes(previous.status), ownerAlive(previous.owner) ? 'RUN_IN_PROGRESS' : 'RUN_INTERRUPTED',
@@ -272,7 +272,7 @@ export async function executeGeneration(io: FileStore, plan: GenerationPlan, own
       budgetSignal.throwIfAborted()
       checkpoint.pendingCall = false; checkpoint.formatAttempts++
       try {
-        const candidate = modelOutputSchema.parse(JSON.parse(raw)); validateOutput(candidate)
+        const candidate = parseModel(modelOutputSchema, raw, 'runs.generation'); validateOutput(candidate)
         output = candidate; checkpoint.output = candidate
       }
       catch (error) {

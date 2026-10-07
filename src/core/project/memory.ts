@@ -1,14 +1,14 @@
 import { z } from 'zod'
 import { hash, id } from '../../shared/schema.ts'
 import { digest, type FileStore } from '../store/files.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 
 export const MEMORY_APPROVALS = '.scholarflow/context/approvals.json'
 export const memoryNames = ['decisions', 'terminology', 'writing-memory'] as const
 export const memoryApprovalsSchema = z.object({ schemaVersion: z.literal(1), projectId: id,
   entries: z.record(z.string(), z.object({ contentHash: hash, source: z.enum(['initialization', 'user']), sourceSessionId: id.optional(), confirmedAt: z.string() }).strict()) }).strict()
 export async function approvedMemory(io: FileStore, projectId: string) {
-  const file = await io.read(MEMORY_APPROVALS), approvals = file ? memoryApprovalsSchema.parse(JSON.parse(file.text)) : undefined
+  const file = await io.read(MEMORY_APPROVALS), approvals = file ? parseStored(memoryApprovalsSchema, file.text, 'MEMORY_RECORD_INVALID', 'project.inspect') : undefined
   invariant(!approvals || approvals.projectId === projectId, 'PROJECT_ID_CONFLICT', '确认记忆记录不属于当前项目。')
   const memory: Record<string, string> = {}
   for (const name of memoryNames) {

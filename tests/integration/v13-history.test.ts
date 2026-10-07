@@ -8,6 +8,11 @@ import { digest } from '../../src/core/store/files.ts'
 import { creationSpec, pendingQuestion, writingQuestion } from '../../src/shared/writing-task.ts'
 import { requirementsFallback } from '../../src/core/pipeline/requirements-fallback.ts'
 import { parseModel, parseStored } from '../../src/shared/errors.ts'
+import { applicationResult } from '../../src/host/bridge/project-api.ts'
+import { readRun, runFile } from '../../src/core/pipeline/run-store.ts'
+import { currentWorkflow } from '../../src/core/pipeline/workflow.ts'
+import { inspectDraftSequence } from '../../src/core/pipeline/draft-sequence.ts'
+import { readEditorBuffer } from '../../src/core/editing/buffer.ts'
 import { projectMarkdown } from '../../src/core/editing/markdown.ts'
 import { proposeCowrite } from '../../src/core/editing/cowrite.ts'
 import { readFile } from 'node:fs/promises'
@@ -73,6 +78,32 @@ test('model, stored JSON and request validation are separate boundaries and neve
   for (const raw of ['{bad', '{"replacementText":""}', '{"replacementText":42,"secret":"PRIVATE_TEST_ONLY"}']) {
     assert.throws(() => parseModel(schema, raw, 'cowrite.propose'), (e: any) => e.code === 'INVALID_MODEL_OUTPUT' && e.details.category === 'model-response' && !JSON.stringify(e).includes('PRIVATE_TEST_ONLY'))
     assert.throws(() => parseStored(schema, raw, 'WRITING_TASK_INVALID', 'writingTask.inspect'), (e: any) => e.details.category === 'stored-data')
+  }
+})
+test('damaged persisted records keep their own boundary instead of being reported as request errors', async () => {
+  const { io } = await setup(), current = await snapshot(io), sessionId = 'session_TEST_ONLY'
+  // Each row is a real stored record read through the same boundary the Remote uses.
+  const cases = [
+    { label: 'run state', path: runFile('run_TEST_ONLY_damaged'), code: 'RUN_STATE_INVALID',
+      read: () => readRun(io, 'run_TEST_ONLY_damaged', current.ledger.projectId) },
+    { label: 'workflow pointer', path: '.scholarflow/workflows/current.json', code: 'WORKFLOW_INVALID', read: () => currentWorkflow(io) },
+    { label: 'draft sequence pointer', path: '.scholarflow/drafting/current.json', code: 'DRAFT_SEQUENCE_INVALID', read: () => inspectDraftSequence(io) },
+    { label: 'editor buffer', path: `.scholarflow/drafts/editor-buffers/${sessionId}.json`, code: 'EDITOR_BUFFER_INVALID', read: () => readEditorBuffer(io, sessionId) },
+  ]
+  for (const row of cases) {
+    // An incompatible record carrying a private marker: the failure must name the record,
+    // never the user's input, and never echo the rejected bytes.
+    await io.write(row.path, JSON.stringify({ schemaVersion: 99, PRIVATE_TEST_ONLY: true, projectId: current.ledger.projectId }), await io.read(row.path))
+    const result = await applicationResult(row.read)
+    assert.equal(result.ok, false, row.label)
+    if (result.ok) continue
+    assert.equal(result.error.code, row.code, row.label)
+    const details = result.error.details as { category?: string; fields?: string[]; operation?: string }
+    assert.equal(details.category, 'stored-data', row.label)
+    // The failing schema fields are named; the rejected values never are.
+    assert.ok(details.fields?.length, row.label)
+    assert.ok(details.operation, row.label)
+    assert.equal(JSON.stringify(result).includes('PRIVATE_TEST_ONLY'), false, row.label)
   }
 })
 test('candidate citations follow manuscript numbering, and empty model output cannot become a deletion proposal', async () => {

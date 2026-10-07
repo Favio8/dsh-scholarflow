@@ -1,7 +1,7 @@
 import { parseDocument } from 'yaml'
 import { materialSchema, type Material, type ProjectConfig } from '../../shared/schema.ts'
 import { parsedMaterialSchema, type ParsedMaterial } from '../../shared/materials.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { digest, newId, json, type FileStore } from '../store/files.ts'
 import { snapshot, mutateLedger, CONFIG_PATH, invalidateReviews } from '../project/project.ts'
 
@@ -62,7 +62,7 @@ export async function readParsed(io: FileStore, materialId: string) {
   invariant(material.parser, 'MATERIAL_CACHE_INVALID', '缺少解析版本。')
   const file = await io.read(materialCachePath(materialId, material.contentHash, material.parser, material.parsedRanges))
   invariant(file, 'MATERIAL_CACHE_MISSING', '解析缓存已清除，请重新解析；已有证据摘录仍保留。')
-  const parsed = parsedMaterialSchema.parse(JSON.parse(file.text))
+  const parsed = parseStored(parsedMaterialSchema, file.text, 'MATERIAL_CACHE_INVALID', 'materials.read')
   invariant(parsed.materialId === materialId && parsed.sourceContentHash === material.contentHash, 'MATERIAL_CACHE_INVALID', '解析缓存身份不一致。')
   return parsed
 }
@@ -85,7 +85,7 @@ export async function recordParsed(io: FileStore, parsed: ParsedMaterial, revisi
     if (material.contentHash === parsed.sourceContentHash && material.parser?.version === parsed.parser.version) {
       const previousFile = await io.read(materialCachePath(material.id, material.contentHash, material.parser, material.parsedRanges))
       if (previousFile) {
-        const previous = parsedMaterialSchema.parse(JSON.parse(previousFile.text))
+        const previous = parseStored(parsedMaterialSchema, previousFile.text, 'MATERIAL_CACHE_INVALID', 'materials.parse')
         const blocks = new Map([...previous.blocks, ...parsed.blocks].map(block => [JSON.stringify(block.locator), block]))
         const ranges = new Map([...previous.ranges, ...parsed.ranges].map(range => [JSON.stringify(range), range]))
         parsed = parsedMaterialSchema.parse({ ...parsed, blocks: [...blocks.values()], ranges: [...ranges.values()],

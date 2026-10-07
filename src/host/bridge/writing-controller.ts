@@ -9,7 +9,7 @@ import { sensitivePath, mediaType } from '../../core/materials/materials.ts'
 import { parseRegisteredMaterial } from '../../core/materials/parse.ts'
 import { parseMaterialBytes } from '../parsers/parse.ts'
 import { selectedModel, callStageModel, callStageModelWithImage } from '../executor/model.ts'
-import { invariant, ScholarError, parseModel } from '../../shared/errors.ts'
+import { invariant, ScholarError, parseModel, parseStored } from '../../shared/errors.ts'
 import { pendingQuestion, writingRequirementsRequest, writingPreferencesRequest } from '../../shared/writing-task.ts'
 import { createWritingTask, readWritingTask, readWritingSpec, readWritingSpecImage, saveWritingTask, saveWritingSpec, taskPath, specPath, noteTask } from '../../core/pipeline/writing-task-store.ts'
 import { driveWritingTask, registerDownloadedText } from '../../core/pipeline/writing-task.ts'
@@ -778,7 +778,7 @@ export class WritingController {
     const suggestions = [], briefs = []
     for (const row of await io.stat('.scholarflow/writing/suggestions') ? await io.list('.scholarflow/writing/suggestions') : []) {
       const file = await io.read(row.path); if (!file) continue
-      const item = cowriteSuggestion.parse(JSON.parse(file.text))
+      const item = parseStored(cowriteSuggestion, file.text, 'COWRITE_SUGGESTION_INVALID', 'cowrite.list')
       if (item.sessionId === context.sessionId && item.state === 'pending') suggestions.push(item)
     }
     for (const row of await io.stat('.scholarflow/writing/brief-suggestions') ? await io.list('.scholarflow/writing/brief-suggestions') : []) {
@@ -818,7 +818,7 @@ export class WritingController {
     const input = z.object({ context: requestContext, suggestionId: id, state: z.enum(['accepted', 'rejected']) }).parse(request)
     const { io } = await resolveStore(this.ctx, input.context, signal), path = `.scholarflow/writing/suggestions/${input.suggestionId}.json`
     await io.lock(async () => { const before = await io.read(path); invariant(before, 'PROPOSAL_NOT_FOUND', '修改建议不存在。')
-      const suggestion = cowriteSuggestion.parse(JSON.parse(before.text))
+      const suggestion = parseStored(cowriteSuggestion, before.text, 'COWRITE_SUGGESTION_INVALID', 'cowrite.decide')
       invariant(suggestion.sessionId === input.context.sessionId && suggestion.projectId === (await snapshot(io)).ledger.projectId, 'SESSION_BINDING_CHANGED', '建议属于另一会话。')
       invariant(suggestion.state === 'pending', 'PROPOSAL_ALREADY_DECIDED', '建议已经处理。')
       if (input.state === 'accepted') {

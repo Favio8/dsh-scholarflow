@@ -1,6 +1,6 @@
 import { parseDocument } from 'yaml'
 import { writingProfileSchema, projectProfileSourceSchema, type WritingProfile } from '../../shared/profiles.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { snapshot, mutateLedger, invalidateReviews, CONFIG_PATH, parseConfig } from './project.ts'
 
@@ -40,7 +40,7 @@ export async function projectProfile(io: FileStore) {
   invariant(file, 'PROFILE_NOT_FOUND', '当前项目文风文件缺失。')
   let source: Record<string, unknown> | undefined, warning: string | undefined
   if (provenance) {
-    try { const value = projectProfileSourceSchema.parse(JSON.parse(provenance.text))
+    try { const value = parseStored(projectProfileSourceSchema, provenance.text, 'PROFILE_SOURCE_INVALID', 'project.profile')
       invariant(value.schemaVersion === 1 && value.projectId === current.ledger.projectId && value.path === PATH, 'PROFILE_INVALID', '来源身份无效。')
       verifyProfile(value.profile); source = value
     } catch { warning = '文风来源记录未通过校验，原文件保留；当前文本按项目自定义显示。' }

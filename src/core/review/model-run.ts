@@ -3,7 +3,7 @@ import { id, hash, projectType, outlineSchema, claimSchema, evidenceSchema, sour
 import { skillMetadataSchema } from '../../shared/skills.ts'
 import { modelReviewRequest, modelReviewOutputSchema, reviewReportSchema } from '../../shared/review.ts'
 import { runSnapshotSchema, runStateSchema, type RunState } from '../../shared/runs.ts'
-import { invariant, ScholarError } from '../../shared/errors.ts'
+import { invariant, ScholarError, parseStored } from '../../shared/errors.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
 import { reviewInput } from './review.ts'
@@ -55,7 +55,7 @@ export async function readFrozenModelReview(io: FileStore, runId: string, projec
 export async function readModelReviewCheckpoint(io: FileStore, state: RunState) {
   const file = await io.read(checkpointFile(state.runId))
   invariant(file && state.checkpointHash && digest(file.text) === state.checkpointHash, 'RUN_CHECKPOINT_CHANGED', '审查运行检查点缺失或改变。')
-  const checkpoint = checkpointSchema.parse(JSON.parse(file.text))
+  const checkpoint = parseStored(checkpointSchema, file.text, 'RUN_CHECKPOINT_INVALID', 'review.inspect')
   invariant(checkpoint.runId === state.runId && checkpoint.projectId === state.projectId && checkpoint.planHash === state.planHash && (!checkpoint.published || checkpoint.output),
     'RUN_CHECKPOINT_CHANGED', '审查检查点身份或已保存产物不一致。')
   return { checkpoint, file }
@@ -144,7 +144,7 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
     }
     await checkInputs()
     if (active && !await isDetachedProjectPointer(io, ACTIVE_RUN, active)) {
-      const previous = runStateSchema.parse(JSON.parse(active.text)), authoritative = await readRun(io, previous.runId, state.projectId)
+      const previous = parseStored(runStateSchema, active.text, 'RUN_STATE_INVALID', 'review.inspect'), authoritative = await readRun(io, previous.runId, state.projectId)
       invariant(authoritative.file.text === active.text, 'RUN_STATE_CHANGED', '活动投影与运行事实源不同。')
       invariant(!['running', 'queued', 'paused', 'waiting-input', 'interrupted'].includes(previous.status), ownerAlive(previous.owner) ? 'RUN_IN_PROGRESS' : 'RUN_INTERRUPTED', '本项目有未结束运行，请先处理检查点。')
     }

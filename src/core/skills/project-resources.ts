@@ -1,6 +1,6 @@
 import { projectSkillSidecar, type ResourceBinding, type SkillFile, type SkillManifest } from '../../shared/skills.ts'
 import { relativePath } from '../../shared/schema.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { snapshot } from '../project/project.ts'
 import { type FileStore } from '../store/files.ts'
 import { packageSkill, MAX_SKILL_BYTES, MAX_SKILL_FILES } from './package.ts'
@@ -48,7 +48,8 @@ export async function readProjectSkill(io: FileStore, qualifiedId: string, charg
   await visit(root, '', 0)
   const sidecar = files.find(file => file.relativePath === 'scholarflow.json')
   invariant(sidecar && sidecar.bytes.byteLength <= 65536, 'SKILL_METADATA_REQUIRED', '项目 Skill 需要 scholarflow.json 侧车声明 schemaVersion、capabilities 与 suggestedStages；不修改上游 SKILL.md。')
-  const options = projectSkillSidecar.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(sidecar.bytes)))
+  const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(sidecar.bytes)
+  const options = parseStored(projectSkillSidecar, decoded, 'SKILL_METADATA_INVALID', 'skills.project')
   return packageSkill(qualifiedId, files, { kind: 'project', projectId: current.ledger.projectId, namespace: parts[1], resourceId: parts[2] },
     { capabilities: options.capabilities, suggestedStages: options.suggestedStages })
 }

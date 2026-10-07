@@ -5,7 +5,7 @@ import { draftSequenceRequest, draftSequenceActionRequest, draftSequenceInputSch
   type DraftSequenceInput, type DraftSequenceCheckpoint } from '../../shared/draft-sequence.ts'
 import { json, digest, newId, type FileStore } from '../store/files.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
-import { invariant, ScholarError } from '../../shared/errors.ts'
+import { invariant, ScholarError, parseStored } from '../../shared/errors.ts'
 import { reviewInput } from '../review/review.ts'
 import { snapshot } from '../project/project.ts'
 import { outlineOrder, sectionTarget } from '../editing/sections.ts'
@@ -43,7 +43,7 @@ async function scope(io: FileStore, skillReader?: SkillReader) {
 async function noStageRunning(io: FileStore, projectId: string) {
   const active = await io.read(ACTIVE_RUN)
   if (!active || await isDetachedProjectPointer(io, ACTIVE_RUN, active)) return
-  const projected = runStateSchema.parse(JSON.parse(active.text)), stored = await readRun(io, projected.runId, projectId)
+  const projected = parseStored(runStateSchema, active.text, 'RUN_STATE_INVALID', 'draftSequence.read'), stored = await readRun(io, projected.runId, projectId)
   invariant(json(stored.run) === json(projected), 'RUN_STATE_CHANGED', '活动阶段投影与事实源不一致，未继续按节调度。')
   invariant(['failed', 'cancelled', 'succeeded', 'completed-with-issues'].includes(stored.run.status),
     'RUN_IN_PROGRESS', '先暂停并处理或恢复未结束的章节运行，再操作初稿顺序。')
@@ -51,11 +51,13 @@ async function noStageRunning(io: FileStore, projectId: string) {
 export async function readDraftSequence(io: FileStore, sequenceId: string) {
   const location = prefix(sequenceId), [inputFile, checkpointFile, planFile] = await Promise.all(['input.json', 'checkpoint.json', 'plan.json'].map(path => io.read(`${location}/${path}`)))
   invariant(inputFile && checkpointFile && planFile, 'DRAFT_SEQUENCE_INVALID', '按节初稿记录缺失；没有重建或重放。')
-  const input = draftSequenceInputSchema.parse(JSON.parse(inputFile.text)), checkpoint = draftSequenceCheckpointSchema.parse(JSON.parse(checkpointFile.text))
+  const input = parseStored(draftSequenceInputSchema, inputFile.text, 'DRAFT_SEQUENCE_INVALID', 'draftSequence.read')
+  const checkpoint = parseStored(draftSequenceCheckpointSchema, checkpointFile.text, 'DRAFT_SEQUENCE_INVALID', 'draftSequence.read')
   const current = await snapshot(io)
   const record = await io.read(`${location}/run.json`)
   invariant(record, 'DRAFT_SEQUENCE_INVALID', '初稿运行事实源缺失。')
-  const run = draftSequenceRunSchema.parse(JSON.parse(record.text)), { contentHash, ...savedPlan } = draftSequencePlanSchema.parse(JSON.parse(planFile.text))
+  const run = parseStored(draftSequenceRunSchema, record.text, 'DRAFT_SEQUENCE_INVALID', 'draftSequence.read')
+  const { contentHash, ...savedPlan } = parseStored(draftSequencePlanSchema, planFile.text, 'DRAFT_SEQUENCE_INVALID', 'draftSequence.read')
   invariant(input.sequenceId === sequenceId && checkpoint.sequenceId === sequenceId &&
     input.projectId === current.ledger.projectId && checkpoint.projectId === input.projectId && checkpoint.inputHash === digest(inputFile.text) &&
     savedPlan.sequenceId === sequenceId && savedPlan.projectId === input.projectId && savedPlan.inputHash === checkpoint.inputHash &&
@@ -130,7 +132,7 @@ async function acceptedChild(io: FileStore, stored: Awaited<ReturnType<typeof re
 export async function inspectDraftSequence(io: FileStore) {
   const file = await io.read(DRAFT_SEQUENCE_POINTER)
   if (!file || await isDetachedProjectPointer(io, DRAFT_SEQUENCE_POINTER, file)) return { sequence: undefined }
-  const pointer = pointerSchema.parse(JSON.parse(file.text)), stored = await readDraftSequence(io, pointer.sequenceId)
+  const pointer = parseStored(pointerSchema, file.text, 'DRAFT_SEQUENCE_INVALID', 'draftSequence.inspect'), stored = await readDraftSequence(io, pointer.sequenceId)
   invariant(pointer.projectId === stored.input.projectId, 'PROJECT_ID_CONFLICT', '初稿顺序不属于当前项目。')
   let observation: Awaited<ReturnType<typeof acceptedChild>> | undefined, diagnostic: string | undefined
   try { observation = await acceptedChild(io, stored) } catch (error) { diagnostic = error instanceof ScholarError ? error.message : '章节进度记录无法校验；保留原记录。' }
@@ -144,7 +146,7 @@ export async function prepareDraftSequence(io: FileStore, request: z.infer<typeo
   invariant(current.ledger.projectId === request.context.projectId && current.ledger.revision === request.context.expectedLedgerRevision,
     'STALE_LEDGER_REVISION', '先重新读取当前项目再预览初稿顺序。')
   invariant(!current.document.externalChange && current.ledger.outline.confirmation === 'confirmed', 'OUTLINE_CONFIRMATION_REQUIRED', '先确认大纲和实际保存正文。')
-  if (pointer && !await isDetachedProjectPointer(io, DRAFT_SEQUENCE_POINTER, pointer)) invariant(terminal((await readDraftSequence(io, pointerSchema.parse(JSON.parse(pointer.text)).sequenceId)).checkpoint),
+  if (pointer && !await isDetachedProjectPointer(io, DRAFT_SEQUENCE_POINTER, pointer)) invariant(terminal((await readDraftSequence(io, parseStored(pointerSchema, pointer.text, 'DRAFT_SEQUENCE_INVALID', 'draftSequence.prepare').sequenceId)).checkpoint),
     'DRAFT_SEQUENCE_IN_PROGRESS', '先恢复或明确取消已有初稿顺序。')
   const ordered = outlineOrder(current.ledger.outline), summaries = new Set(request.summarySectionIds)
   invariant(summaries.size === request.summarySectionIds.length && request.summarySectionIds.every(value => ordered.some(row => row.id === value)) &&
@@ -206,7 +208,7 @@ export async function startDraftSequence(io: FileStore, plan: DraftSequenceStart
 export async function prepareDraftSequenceAction(io: FileStore, request: z.infer<typeof draftSequenceActionRequest>, skillReader?: SkillReader) {
   request = draftSequenceActionRequest.parse(request)
   const stored = await readDraftSequence(io, request.sequenceId), pointer = await io.read(DRAFT_SEQUENCE_POINTER)
-  invariant(pointer && pointerSchema.parse(JSON.parse(pointer.text)).sequenceId === request.sequenceId && !terminal(stored.checkpoint),
+  invariant(pointer && parseStored(pointerSchema, pointer.text, 'DRAFT_SEQUENCE_INVALID', 'draftSequence.action').sequenceId === request.sequenceId && !terminal(stored.checkpoint),
     'DRAFT_SEQUENCE_TERMINAL', '仅可操作当前未结束初稿顺序；旧记录保持只读。')
   invariant(request.context.projectId === stored.input.projectId && request.context.expectedLedgerRevision === stored.current.ledger.revision,
     'STALE_LEDGER_REVISION', '请重新读取当前项目。')

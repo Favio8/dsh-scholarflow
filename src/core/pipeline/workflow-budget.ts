@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { id, stage } from '../../shared/schema.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { type FileStore } from '../store/files.ts'
 import { commit } from '../store/transactions.ts'
 import { readWorkflowRecord, workflowCheckpointMutations, WORKFLOW_POINTER } from './workflow.ts'
@@ -31,7 +31,7 @@ function statistics(checkpoint: WorkflowCheckpoint, now = Date.now()) {
 async function binding(io: FileStore, expected?: string) {
   const image = await io.read(WORKFLOW_POINTER)
   if (!image || await isDetachedProjectPointer(io, WORKFLOW_POINTER, image)) { invariant(!expected, 'WORKFLOW_BINDING_CHANGED', '原引导任务索引缺失或已归档为副本历史；未调用提供方。'); return }
-  const pointer = pointerSchema.parse(JSON.parse(image.text)), stored = await readWorkflowRecord(io, pointer.workflowId)
+  const pointer = parseStored(pointerSchema, image.text, 'WORKFLOW_INVALID', 'workflow.budget'), stored = await readWorkflowRecord(io, pointer.workflowId)
   invariant(stored.current.ledger.projectId === pointer.projectId, 'PROJECT_ID_CONFLICT', '引导预算不属于当前项目。')
   const terminal = ['cancelled', 'succeeded', 'completed-with-issues'].includes(stored.checkpoint.status)
   if (terminal) { invariant(!expected, 'WORKFLOW_TERMINAL', '原引导任务已结束，不能重放其中的执行计划。'); return }
@@ -43,7 +43,7 @@ async function binding(io: FileStore, expected?: string) {
 export async function workflowBudgetInfo(io: FileStore) {
   const image = await io.read(WORKFLOW_POINTER)
   if (!image || await isDetachedProjectPointer(io, WORKFLOW_POINTER, image)) return
-  const pointer = pointerSchema.parse(JSON.parse(image.text)), stored = await readWorkflowRecord(io, pointer.workflowId)
+  const pointer = parseStored(pointerSchema, image.text, 'WORKFLOW_INVALID', 'workflow.budget'), stored = await readWorkflowRecord(io, pointer.workflowId)
   invariant(pointer.projectId === stored.current.ledger.projectId, 'PROJECT_ID_CONFLICT', '累计预算索引不属于当前项目。')
   if (['cancelled', 'succeeded', 'completed-with-issues'].includes(stored.checkpoint.status)) return
   const used = stored.checkpoint.budget ? statistics(stored.checkpoint) : undefined

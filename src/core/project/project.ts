@@ -1,6 +1,6 @@
 import { parseDocument, stringify } from 'yaml'
 import { configSchema, ledgerSchema, relativePath, projectType, type ProjectConfig, type Ledger } from '../../shared/schema.ts'
-import { ScholarError, invariant } from '../../shared/errors.ts'
+import { ScholarError, invariant, parseStored } from '../../shared/errors.ts'
 import { digest, newId, json, type FileStore, type FileImage } from '../store/files.ts'
 import { commit, inspectRecovery, type Mutation } from '../store/transactions.ts'
 import { MEMORY_APPROVALS, memoryApprovalsSchema } from './memory.ts'
@@ -207,7 +207,7 @@ export async function updateProjectText(io: FileStore, path: string, text: strin
       const previousProjection = await verifiedMemoryProjection(io, ledger, path, file.text)
       mutations.push(...memoryEntryMutations(ledger, path, file.text, text, sourceSessionId, changeReason, previousProjection.current))
       const previous = await io.read(MEMORY_APPROVALS)
-      const approvals = previous ? memoryApprovalsSchema.parse(JSON.parse(previous.text)) : { schemaVersion: 1 as const, projectId: ledger.projectId, entries: {} as MemoryEntries }
+      const approvals = previous ? parseStored(memoryApprovalsSchema, previous.text, 'MEMORY_RECORD_INVALID', 'project.memory') : { schemaVersion: 1 as const, projectId: ledger.projectId, entries: {} as MemoryEntries }
       invariant(approvals.projectId === ledger.projectId, 'PROJECT_ID_CONFLICT', '确认记忆记录的项目身份不同。')
       approvals.entries[path] = { contentHash: digest(text), source: 'user', ...(sourceSessionId && { sourceSessionId }), confirmedAt: new Date().toISOString() }
       mutations.push({ path: MEMORY_APPROVALS, before: previous, after: json(memoryApprovalsSchema.parse(approvals)) })

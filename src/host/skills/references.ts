@@ -6,7 +6,7 @@ import { runSnapshotSchema } from '../../shared/runs.ts'
 import { draftSequenceInputSchema, draftSequencePlanSchema, draftSequenceRunSchema, draftSequenceCheckpointSchema } from '../../shared/draft-sequence.ts'
 import { workflowInputSchema, workflowPlanSchema, workflowRunSchema } from '../../core/pipeline/workflow.ts'
 import { workflowCheckpointSchema } from '../../shared/workflow.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { verifiedIdentityLineage } from '../../core/project/identity.ts'
 import { automaticInputSchema, automaticStateSchema } from '../../shared/workflow-automatic.ts'
 import { validateFrozenModelReview } from '../../core/review/model-run.ts'
@@ -81,8 +81,10 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
         const [planText, checkpointText, stateText] = await Promise.all(['plan.json', 'checkpoint.json', 'run.json'].map(file => read(`.scholarflow/runs/${row.name}/${file}`)))
         invariant(planText && checkpointText && stateText, 'SKILL_REFERENCES_UNAVAILABLE', '父流程记录不完整，引用状态未知，未卸载。')
         if (row.name.startsWith('workflow_')) {
-          const input = workflowInputSchema.parse(JSON.parse(text)), plan = workflowPlanSchema.parse(JSON.parse(planText)), state = workflowRunSchema.parse(JSON.parse(stateText))
-          const checkpoint = workflowCheckpointSchema.parse(JSON.parse(checkpointText)), { contentHash, ...body } = plan
+          const input = parseStored(workflowInputSchema, text, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references')
+          const plan = parseStored(workflowPlanSchema, planText, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references')
+          const state = parseStored(workflowRunSchema, stateText, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references')
+          const checkpoint = parseStored(workflowCheckpointSchema, checkpointText, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references'), { contentHash, ...body } = plan
           invariant(historicalIdentity(input.projectId) && [input, plan, state, checkpoint].every(value => value.projectId === input.projectId && value.workflowId === row.name) &&
             plan.inputHash === digest(text) && contentHash === digest(json(body)) && state.planHash === contentHash && checkpoint.planHash === contentHash &&
             state.checkpointHash === digest(checkpointText) && state.status === checkpoint.status,
@@ -99,7 +101,8 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
                 'SKILL_REFERENCES_UNAVAILABLE', '自动推进包含未知记录，未卸载。')
               const prefix = `${automaticPath}/${attempt.name}`, [automaticText, automaticStateText] = await Promise.all([read(`${prefix}/input.json`), read(`${prefix}/run.json`)])
               invariant(automaticText && automaticStateText, 'SKILL_REFERENCES_UNAVAILABLE', '自动推进快照不完整，未卸载。')
-              const automatic = automaticInputSchema.parse(JSON.parse(automaticText)), automaticState = automaticStateSchema.parse(JSON.parse(automaticStateText))
+              const automatic = parseStored(automaticInputSchema, automaticText, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references')
+              const automaticState = parseStored(automaticStateSchema, automaticStateText, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references')
               invariant([automatic, automaticState].every(value => value.projectId === input.projectId && value.workflowId === row.name && value.automaticId === attempt.name) &&
                 automatic.workflowPlanHash === contentHash && automaticState.inputHash === digest(automaticText), 'SKILL_REFERENCES_UNAVAILABLE', '自动推进摘要或身份改变，未卸载。')
               if (automatic.modelReview) {
@@ -129,8 +132,10 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
             }
           }
         } else {
-          const input = draftSequenceInputSchema.parse(JSON.parse(text)), plan = draftSequencePlanSchema.parse(JSON.parse(planText)), state = draftSequenceRunSchema.parse(JSON.parse(stateText))
-          const checkpoint = draftSequenceCheckpointSchema.parse(JSON.parse(checkpointText)), { contentHash, ...body } = plan
+          const input = parseStored(draftSequenceInputSchema, text, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references')
+          const plan = parseStored(draftSequencePlanSchema, planText, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references')
+          const state = parseStored(draftSequenceRunSchema, stateText, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references')
+          const checkpoint = parseStored(draftSequenceCheckpointSchema, checkpointText, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references'), { contentHash, ...body } = plan
           invariant(input.skillDigests && historicalIdentity(input.projectId) && [input, plan, state, checkpoint].every(value => value.projectId === input.projectId && value.sequenceId === row.name) &&
             plan.inputHash === digest(text) && state.inputHash === plan.inputHash && checkpoint.inputHash === plan.inputHash && contentHash === digest(json(body)) &&
             state.planHash === contentHash && checkpoint.planHash === contentHash && state.checkpointHash === digest(checkpointText) && state.status === checkpoint.status,
@@ -139,7 +144,7 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
         }
         continue
       }
-      const run = runSnapshotSchema.parse(JSON.parse(text))
+      const run = parseStored(runSnapshotSchema, text, 'SKILL_REFERENCES_UNAVAILABLE', 'skills.references')
       invariant(historicalIdentity(run.projectId) && run.runId === row.name, 'SKILL_REFERENCES_UNAVAILABLE', '历史运行快照的身份不同，未卸载。')
       if (run.skillDigests.some(skill => skill.qualifiedId === qualifiedId && skill.digest === resourceDigest)) references.push({ workspaceId: workspace.id, kind: 'run', recordId: run.runId })
     }

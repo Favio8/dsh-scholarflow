@@ -1,6 +1,6 @@
 import { snapshot, mutateLedger } from '../project/project.ts'
 import { digest, newId, json, type FileStore } from '../store/files.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { reviewReportSchema, semanticReviewChecks, type ReviewReport } from '../../shared/review.ts'
 import { projectMarkdown, walk, textOf, wordStats, citationMarkers } from '../editing/markdown.ts'
 import type { Ledger } from '../../shared/schema.ts'
@@ -37,7 +37,7 @@ export async function inspectReview(io: FileStore, observedInput?: Awaited<Retur
   invariant(typeof pointer.reviewId === 'string' && /^review_[\w]+$/.test(pointer.reviewId), 'REVIEW_INVALID', '当前审查索引损坏。')
   const file = await io.read(`.scholarflow/reviews/${pointer.reviewId}/report.json`)
   invariant(file && digest(file.text) === pointer.reportHash, 'REVIEW_INVALID', '审查快照缺失或已被修改。')
-  const report = reviewReportSchema.parse(JSON.parse(file.text)), input = observedInput ?? await reviewInput(io)
+  const report = parseStored(reviewReportSchema, file.text, 'REVIEW_INVALID', 'review.inspect'), input = observedInput ?? await reviewInput(io)
   invariant(report.projectId === input.current.ledger.projectId, 'PROJECT_ID_CONFLICT', '审查不属于当前项目。')
   return { report, stale: report.dependencyHash !== input.dependencyHash || input.current.document.externalChange,
     issues: Object.values(input.current.ledger.reviewIssues).filter(issue => issue.reviewId === report.id),

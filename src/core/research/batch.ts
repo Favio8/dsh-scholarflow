@@ -1,7 +1,7 @@
 import { batchPrepareRequest, batchPlanSchema, batchCheckpointSchema, type ResearchBatchPlan, type ResearchBatchCheckpoint } from '../../shared/research-batch.ts'
 import { searchRecordSchema, type SearchRecord, type ResearchProvider } from '../../shared/online-research.ts'
 import { runSnapshotSchema, runStateSchema, type RunState } from '../../shared/runs.ts'
-import { invariant, ScholarError } from '../../shared/errors.ts'
+import { invariant, ScholarError, parseStored } from '../../shared/errors.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { commit, inspectRecovery, type Mutation } from '../store/transactions.ts'
 import { snapshot } from '../project/project.ts'
@@ -47,7 +47,8 @@ export async function readResearchBatch(io: FileStore, runId: string) {
   const file = await io.read(frozenPlanFile(runId)), checkpointFileImage = await io.read(checkpointFile(runId))
   invariant(file && checkpointFileImage && Buffer.byteLength(file.text) <= 100000 && Buffer.byteLength(checkpointFileImage.text) <= 100000,
     'RUN_CHECKPOINT_UNAVAILABLE', '检索计划或检查点缺失、过大，未猜测恢复。')
-  const plan = batchPlanSchema.parse(JSON.parse(file.text)), checkpoint = batchCheckpointSchema.parse(JSON.parse(checkpointFileImage.text))
+  const plan = parseStored(batchPlanSchema, file.text, 'RESEARCH_BATCH_INVALID', 'researchBatch.read')
+  const checkpoint = parseStored(batchCheckpointSchema, checkpointFileImage.text, 'RESEARCH_BATCH_INVALID', 'researchBatch.read')
   verifyPlan(plan)
   invariant(plan.snapshot.runId === runId && plan.snapshot.projectId === current.ledger.projectId && stored.run.planHash === plan.contentHash &&
     json((await readRunInput(io, runId, current.ledger.projectId)).snapshot) === json(plan.snapshot) &&
@@ -150,7 +151,7 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
       'INVALID_APPROVAL', '重试计划没有关联原失败运行。'); await validateAction(io, control.action, ownerAlive) }
     invariant(current.configHash === plan.snapshot.configHash && current.ledgerHash === plan.ledgerHash, 'STALE_LEDGER_REVISION', '确认后项目输入改变，请重新预览。')
     if (active && !await isDetachedProjectPointer(io, ACTIVE_RUN, active)) {
-      const previous = runStateSchema.parse(JSON.parse(active.text)), stored = await readRun(io, previous.runId, state.projectId)
+      const previous = parseStored(runStateSchema, active.text, 'RUN_STATE_INVALID', 'researchBatch.start'), stored = await readRun(io, previous.runId, state.projectId)
       invariant(json(stored.run) === json(previous), 'RUN_STATE_CHANGED', '活动运行与事实源不同。')
       invariant(terminal(previous.status), ownerAlive(previous.owner) ? 'RUN_IN_PROGRESS' : 'RUN_INTERRUPTED', '项目已有未结束运行，请先明确恢复或结束。')
     }

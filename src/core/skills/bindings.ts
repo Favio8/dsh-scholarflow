@@ -6,7 +6,7 @@ import type { Mutation } from '../store/transactions.ts'
 import { resourceLockSchema, resourceBindingSchema, type ResourceBinding, type SkillBundle } from '../../shared/skills.ts'
 import { stage, type ProjectConfig } from '../../shared/schema.ts'
 import { verifySkill } from './package.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 
 export const RESOURCE_LOCK = '.scholarflow/resources.lock.json'
 const legacyLock = z.object({ schemaVersion: z.literal(1), projectId: z.string(), skills: z.array(z.unknown()), profiles: z.array(z.unknown()) }).strict()
@@ -17,7 +17,7 @@ const stageRecord = z.object({ schemaVersion: z.literal(1), projectId: z.string(
 export async function currentSkillStage(io: FileStore) {
   const current = await snapshot(io), file = await io.read(STAGE_PATH)
   if (!file) return { stage: 'drafting' as const, source: 'default' }
-  const row = stageRecord.parse(JSON.parse(file.text))
+  const row = parseStored(stageRecord, file.text, 'SKILL_STAGE_INVALID', 'skills.stage')
   invariant(row.projectId === current.ledger.projectId, 'PROJECT_ID_CONFLICT', 'Skill 调用阶段不属于当前项目。')
   return { stage: row.stage, source: 'operator' }
 }

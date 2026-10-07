@@ -1,6 +1,6 @@
 import { id } from '../../shared/schema.ts'
 import { runStateSchema, runSnapshotSchema, type RunState } from '../../shared/runs.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
 import { snapshot } from '../project/project.ts'
@@ -12,7 +12,7 @@ export const inputFile = (runId: string) => `.scholarflow/runs/${id.parse(runId)
 export async function readRun(io: FileStore, runId: string, projectId: string) {
   const primary = await io.read(runFile(runId)), legacyPath = `.scholarflow/runs/${id.parse(runId)}/state.json`, legacy = await io.read(legacyPath)
   invariant(primary || legacy, 'RUN_NOT_FOUND', '运行状态不存在。')
-  const row = runStateSchema.parse(JSON.parse((primary ?? legacy)!.text))
+  const row = parseStored(runStateSchema, (primary ?? legacy)!.text, 'RUN_STATE_INVALID', 'runs.inspect')
   invariant(row.runId === runId && row.projectId === projectId, 'PROJECT_ID_CONFLICT', '运行状态身份不属于当前项目或运行目录。')
   // Once run.json exists it is the only authority. A preserved legacy state is
   // an archive, not an automatically synchronized second state file.
@@ -21,7 +21,7 @@ export async function readRun(io: FileStore, runId: string, projectId: string) {
 export async function readRunInput(io: FileStore, runId: string, projectId: string) {
   const primary = await io.read(inputFile(runId)), legacy = await io.read(`.scholarflow/runs/${id.parse(runId)}/snapshot.json`)
   invariant(primary || legacy, 'RUN_INPUT_MISSING', '运行输入快照缺失，不能猜测或重建。')
-  const row = runSnapshotSchema.parse(JSON.parse((primary ?? legacy)!.text))
+  const row = parseStored(runSnapshotSchema, (primary ?? legacy)!.text, 'RUN_INPUT_INVALID', 'runs.inspect')
   invariant(row.runId === runId && row.projectId === projectId, 'PROJECT_ID_CONFLICT', '运行输入不属于当前项目或运行目录。')
   return { snapshot: row, file: (primary ?? legacy)!, legacy: !primary }
 }
@@ -35,7 +35,7 @@ export async function inspectRuns(io: FileStore) {
     try {
       const runId = entry.path.split('/').at(-1)!, image = await io.read(runFile(runId)) ?? await io.read(`.scholarflow/runs/${runId}/state.json`)
       invariant(image, 'RUN_NOT_FOUND', '历史运行缺失。')
-      const identity = runStateSchema.parse(JSON.parse(image.text)).projectId
+      const identity = parseStored(runStateSchema, image.text, 'RUN_STATE_INVALID', 'runs.list').projectId
       invariant(lineage.projectIds.includes(identity), 'PROJECT_ID_CONFLICT', '历史运行不属于当前项目或已校验的副本来源。')
       const stored = await readRun(io, runId, identity)
       rows.push({ ...stored.run, legacyStorage: stored.legacy, inheritedArchive: identity !== current.ledger.projectId }) }

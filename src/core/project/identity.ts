@@ -8,7 +8,7 @@ import { commit, inspectRecovery, readTransactionJournals } from '../store/trans
 import { snapshot, parseConfig, parseLedger, CONFIG_PATH, LEDGER_PATH } from './project.ts'
 import { MEMORY_APPROVALS, memoryApprovalsSchema } from './memory.ts'
 import { readBindings } from '../skills/bindings.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 
 export const IDENTITY_CURRENT = '.scholarflow/identity/current.json'
 export const detachedPaths = ['.scholarflow/runs/active.json', '.scholarflow/workflows/current.json',
@@ -85,7 +85,7 @@ export async function pendingCopyTransition(io: FileStore): Promise<IdentityTran
   invariant(candidates.length === 1 && journals.length === 1, 'RECOVERY_CONFLICT', '副本身份恢复不能混合多个未完成事务。')
   const row = candidates[0], pointer = row.txn.changes.find(change => change.path === IDENTITY_CURRENT)?.after
   invariant(pointer, 'PROJECT_COPY_ARCHIVE_INVALID', '副本恢复缺少新身份索引快照。')
-  const parsed = pointerSchema.parse(JSON.parse(pointer.text)), archive = row.txn.changes.find(change => change.path === archivePath(parsed.operationId))
+  const parsed = parseStored(pointerSchema, pointer.text, 'PROJECT_COPY_ARCHIVE_INVALID', 'project.recover'), archive = row.txn.changes.find(change => change.path === archivePath(parsed.operationId))
   invariant(archive?.after && archive.before === null, 'PROJECT_COPY_ARCHIVE_INVALID', '副本恢复缺少不可变原始档案。')
   const record = validatedRecord(archive.after.text, parsed), expected = publicationTexts(record).map(change => ({ path: change.path,
     before: change.before === null ? null : { text: change.before, hash: digest(change.before) }, after: { text: change.after, hash: digest(change.after) } }))
@@ -177,9 +177,9 @@ export async function prepareProjectCopy(io: FileStore, input: { sourceSessionId
   invariant(originals.find(row => row.path === CONFIG_PATH)?.contentHash === current.configHash && originals.find(row => row.path === LEDGER_PATH)?.contentHash === current.ledgerHash,
     'STALE_LEDGER_REVISION', '读取副本原始身份期间项目改变。')
   const approvals = originals.find(row => row.path === MEMORY_APPROVALS)!.text
-  if (approvals) invariant(memoryApprovalsSchema.parse(JSON.parse(approvals)).projectId === current.ledger.projectId, 'PROJECT_ID_CONFLICT', '原记忆确认记录身份不符。')
+  if (approvals) invariant(parseStored(memoryApprovalsSchema, approvals, 'PROJECT_COPY_ARCHIVE_INVALID', 'project.copy').projectId === current.ledger.projectId, 'PROJECT_ID_CONFLICT', '原记忆确认记录身份不符。')
   const profile = originals.find(row => row.path === '.scholarflow/profiles/writing-source.json')!.text
-  if (profile) invariant(projectProfileSourceSchema.parse(JSON.parse(profile)).projectId === current.ledger.projectId, 'PROJECT_ID_CONFLICT', '原文风来源身份不符。')
+  if (profile) invariant(parseStored(projectProfileSourceSchema, profile, 'PROJECT_COPY_ARCHIVE_INVALID', 'project.copy').projectId === current.ledger.projectId, 'PROJECT_ID_CONFLICT', '原文风来源身份不符。')
   const skillStage = originals.find(row => row.path === '.scholarflow/skills/current-stage.json')!.text
   if (skillStage) {
     const row = JSON.parse(skillStage)

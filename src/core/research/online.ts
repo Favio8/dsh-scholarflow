@@ -2,7 +2,7 @@ import { candidateSchema, searchInput, searchRecordSchema, lookupRecordSchema, d
 import { id, sourceSchema, type Source } from '../../shared/schema.ts'
 import { digest, newId, json, type FileStore, type FileImage } from '../store/files.ts'
 import { snapshot, mutateLedger, invalidateReviews } from '../project/project.ts'
-import { ScholarError, invariant } from '../../shared/errors.ts'
+import { ScholarError, invariant, parseStored } from '../../shared/errors.ts'
 import { workflowAssociation, workflowCall } from '../pipeline/workflow-budget.ts'
 import type { RunState } from '../../shared/runs.ts'
 
@@ -53,7 +53,7 @@ export async function executeSearch(io: FileStore, plan: SearchPlan, provider: R
 export async function readSearch(io: FileStore, searchId: string) {
   const current = await snapshot(io), file = await io.read(searchPath(searchId))
   invariant(file, 'RESEARCH_NOT_FOUND', '检索记录不存在。')
-  const record = searchRecordSchema.parse(JSON.parse(file.text))
+  const record = parseStored(searchRecordSchema, file.text, 'SEARCH_RECORD_INVALID', 'research.read')
   invariant(record.projectId === current.ledger.projectId && record.id === searchId, 'PROJECT_ID_CONFLICT', '检索记录身份与当前项目不同。')
   return { record, file }
 }

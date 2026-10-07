@@ -3,7 +3,7 @@ import { projectTextBufferSchema } from '../../shared/project-text-buffer.ts'
 import { projectTextPaths } from '../../shared/requirements.ts'
 import { snapshot } from '../project/project.ts'
 import { digest, json, type FileStore } from '../store/files.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 
 type ProjectTextPath = typeof projectTextPaths[number]
 function bufferPath(sessionId: string, path: ProjectTextPath) {
@@ -16,7 +16,7 @@ async function readBoundBuffer(io: FileStore, sessionId: string, path: ProjectTe
   invariant(!info || info.type === 'file' && info.size <= 512 * 1024, 'PROJECT_TEXT_BUFFER_INVALID', '暂存文件不是普通文件或超过读取限额。')
   const file = await io.read(target)
   if (!file) return { buffer: undefined, bufferHash: null, file }
-  const buffer = projectTextBufferSchema.parse(JSON.parse(file.text))
+  const buffer = parseStored(projectTextBufferSchema, file.text, 'PROJECT_TEXT_BUFFER_INVALID', 'projectBuffer.read')
   invariant(buffer.projectId === projectId && buffer.sessionId === sessionId && buffer.path === path &&
     buffer.text.isWellFormed() && Buffer.byteLength(buffer.text) <= 65536,
     'EDITOR_BUFFER_IDENTITY_CHANGED', '暂存缓冲的项目、会话或文件身份不符，已保留原文件。')

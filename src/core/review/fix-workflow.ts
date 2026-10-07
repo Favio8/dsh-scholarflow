@@ -1,6 +1,6 @@
 import { applyProposal, proposalImage } from '../editing/proposals.ts'
 import { runReview } from './review.ts'
-import { ScholarError, invariant } from '../../shared/errors.ts'
+import { ScholarError, invariant, parseStored } from '../../shared/errors.ts'
 import { digest, json, type FileStore } from '../store/files.ts'
 import { snapshot } from '../project/project.ts'
 import { reviewReportSchema } from '../../shared/review.ts'
@@ -20,7 +20,7 @@ export async function acceptAndRecheck(io: FileStore, proposalId: string, revisi
     if (record.state === 'completed') {
       const report = await io.read(`.scholarflow/reviews/${reviewReportSchema.shape.id.parse(record.reviewId)}/report.json`)
       invariant(report && digest(report.text) === record.reportHash, 'RECHECK_RECORD_CHANGED', '复查完成记录没有可验证的报告。')
-      const parsed = reviewReportSchema.parse(JSON.parse(report.text))
+      const parsed = parseStored(reviewReportSchema, report.text, 'RECHECK_RECORD_INVALID', 'review.fix')
       invariant(parsed.projectId === record.projectId && parsed.documentHash === accepted.documentHash && parsed.revisionId === accepted.revisionId, 'RECHECK_RECORD_CHANGED', '复查报告与接受修订不符。')
       return accepted
     }

@@ -5,7 +5,7 @@ import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
 import { snapshot } from '../project/project.ts'
 import { workflowGates } from './workflow-gates.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { ACTIVE_RUN } from './run-store.ts'
 import { readRun } from './run-store.ts'
 import { runStateSchema, runSnapshotSchema } from '../../shared/runs.ts'
@@ -48,9 +48,10 @@ export async function readWorkflowRecord(io: FileStore, workflowId: string) {
   const current = await snapshot(io), prefix = root(workflowId)
   const [inputFile, planFile, checkpointFile, runFile] = await Promise.all(['input.json', 'plan.json', 'checkpoint.json', 'run.json'].map(path => io.read(`${prefix}/${path}`)))
   invariant(inputFile && planFile && checkpointFile && runFile, 'WORKFLOW_INVALID', '引导任务快照缺失；未重建历史。')
-  const input = inputSchema.parse(JSON.parse(inputFile.text)), plan = planSchema.parse(JSON.parse(planFile.text))
-  const checkpoint = workflowCheckpointSchema.parse(JSON.parse(checkpointFile.text)), { contentHash, ...body } = plan
-  const run = runSchema.parse(JSON.parse(runFile.text))
+  const input = parseStored(inputSchema, inputFile.text, 'WORKFLOW_INVALID', 'workflow.read')
+  const plan = parseStored(planSchema, planFile.text, 'WORKFLOW_INVALID', 'workflow.read')
+  const checkpoint = parseStored(workflowCheckpointSchema, checkpointFile.text, 'WORKFLOW_INVALID', 'workflow.read'), { contentHash, ...body } = plan
+  const run = parseStored(runSchema, runFile.text, 'WORKFLOW_INVALID', 'workflow.read')
   invariant(input.workflowId === workflowId && plan.workflowId === workflowId && checkpoint.workflowId === workflowId &&
     [input.projectId, plan.projectId, checkpoint.projectId].every(value => value === current.ledger.projectId) &&
     plan.inputHash === digest(inputFile.text) && digest(json(body)) === contentHash && checkpoint.planHash === contentHash &&
@@ -86,7 +87,7 @@ export function workflowCheckpointMutations(stored: Awaited<ReturnType<typeof re
 export async function currentWorkflow(io: FileStore) {
   const current = await snapshot(io), file = await io.read(POINTER)
   if (!file || await isDetachedProjectPointer(io, POINTER, file)) return { workflow: undefined }
-  const pointer = pointerSchema.parse(JSON.parse(file.text))
+  const pointer = parseStored(pointerSchema, file.text, 'WORKFLOW_INVALID', 'workflow.inspect')
   invariant(pointer.projectId === current.ledger.projectId, 'PROJECT_ID_CONFLICT', '引导任务索引不属于当前项目。')
   const stored = await readWorkflow(io, pointer.workflowId)
   const { checkpointFile, runFile, current: _current, ...workflow } = stored
@@ -96,7 +97,7 @@ export async function prepareWorkflow(io: FileStore, goal: WorkflowGoal, session
   goal = workflowGoalSchema.parse(goal); id.parse(sessionId)
   const facts = await workflowGates(io, goal), active = await io.read(POINTER)
   if (active && !await isDetachedProjectPointer(io, POINTER, active)) {
-    const pointer = pointerSchema.parse(JSON.parse(active.text)), previous = await readWorkflow(io, pointer.workflowId)
+    const pointer = parseStored(pointerSchema, active.text, 'WORKFLOW_INVALID', 'workflow.prepare'), previous = await readWorkflow(io, pointer.workflowId)
     invariant(terminal(previous.checkpoint.status), 'WORKFLOW_IN_PROGRESS', '当前引导任务尚未结束；请恢复或明确取消。')
   }
   const body = { id: newId('workflow_plan'), workflowId: newId('workflow'), projectId: facts.current.ledger.projectId, sessionId, goal,
@@ -140,7 +141,7 @@ export async function startWorkflow(io: FileStore, plan: WorkflowStartPlan) {
 export async function prepareWorkflowAction(io: FileStore, input: z.infer<typeof workflowActionRequest>, ownerAlive: (owner: { pid: number; bootInstance: string }) => boolean = () => true) {
   input = workflowActionRequest.parse(input)
   const stored = await readWorkflow(io, input.workflowId), pointer = await io.read(POINTER)
-  invariant(pointer && pointerSchema.parse(JSON.parse(pointer.text)).workflowId === input.workflowId, 'WORKFLOW_NOT_CURRENT', '只可变更当前引导任务；历史记录保持只读。')
+  invariant(pointer && parseStored(pointerSchema, pointer.text, 'WORKFLOW_INVALID', 'workflow.action').workflowId === input.workflowId, 'WORKFLOW_NOT_CURRENT', '只可变更当前引导任务；历史记录保持只读。')
   invariant(!terminal(stored.checkpoint.status), 'WORKFLOW_TERMINAL', '引导任务已结束，原历史不能重新执行。')
   const completing = ['complete-stage', 'skip-stage', 'stop-revision'].includes(input.action)
   if (input.action === 'close-unknown-call') {

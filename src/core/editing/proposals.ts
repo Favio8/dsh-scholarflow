@@ -4,7 +4,7 @@ import { commit, inspectRecovery, type Mutation } from '../store/transactions.ts
 import { proposalSchema, selectionSchema, type EditProposal, type SelectionPayload } from '../../shared/editing.ts'
 import { sectionEdit } from './sections.ts'
 import { ledgerSchema, id, type Ledger } from '../../shared/schema.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { citationKeys, citationMarkers, unicodeBoundary, validateSelection, wordStats, parseMarkdown, projectMarkdown, walk } from './markdown.ts'
 import { bibliography } from '../export/bibliography.ts'
 import { MAX_MATERIAL_BYTES, sensitivePath } from '../materials/materials.ts'
@@ -131,7 +131,7 @@ export async function readProposal(io: FileStore, proposalId: string) {
 export async function proposalImage(io: FileStore, proposalId: string) {
   const file = await io.read(proposalPath(proposalId))
   invariant(file, 'PROPOSAL_NOT_FOUND', '建议文件不存在。')
-  return { proposal: proposalSchema.parse(JSON.parse(file.text)), contentHash: digest(file.text) }
+  return { proposal: parseStored(proposalSchema, file.text, 'PROPOSAL_INVALID', 'edits.read'), contentHash: digest(file.text) }
 }
 
 async function documentMutation(io: FileStore, current: Snapshot, ledger: Ledger, text: string, origin: string, edits?: EditProposal['edits']) {

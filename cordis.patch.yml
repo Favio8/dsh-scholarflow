@@ -29,7 +29,7 @@
         name: ScholarFlow
         description: 学术项目工作区：以项目文件夹为中心、以可追溯证据为基础的论文写作会话。
         order: 50
-        # The agent entry registers nine controlled academic tools and its
+        # The agent entry registers ten controlled academic tools and its
         # scoped policy. Body changes still require a real operator's acceptance.
         plugins:
           - id: scholarflow-controlled-tools

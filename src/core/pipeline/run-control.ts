@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { id, hash } from '../../shared/schema.ts'
 import { generationRequest, runSnapshotSchema, runStateSchema, generationCheckpointSchema, type RunState } from '../../shared/runs.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { snapshot } from '../project/project.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
@@ -40,7 +40,7 @@ export async function readFrozenGeneration(io: FileStore, runId: string, project
 export async function readGenerationCheckpoint(io: FileStore, state: RunState) {
   const file = await io.read(checkpointFile(state.runId))
   invariant(file && state.checkpointHash && digest(file.text) === state.checkpointHash, 'RUN_CHECKPOINT_CHANGED', '运行检查点缺失或改变，不能猜测恢复。')
-  const checkpoint = generationCheckpointSchema.parse(JSON.parse(file.text))
+  const checkpoint = parseStored(generationCheckpointSchema, file.text, 'RUN_CHECKPOINT_INVALID', 'runs.inspect')
   invariant(checkpoint.projectId === state.projectId && checkpoint.runId === state.runId && checkpoint.planHash === state.planHash,
     'RUN_CHECKPOINT_CHANGED', '运行检查点身份不一致。')
   invariant(!checkpoint.proposal || checkpoint.proposal.runId === state.runId && checkpoint.proposal.projectId === state.projectId,

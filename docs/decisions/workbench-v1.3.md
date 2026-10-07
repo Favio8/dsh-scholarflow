@@ -115,3 +115,39 @@ actual workbench session through the native UI before invoking a helper. Geometr
 fixtures remain unsaved TEST_ONLY text and are restored; project preparation uses
 public initialization without starting a paid writing task. Keep each invocation's
 operation log: an earlier partially failed runner is not a whole-suite pass.
+
+## Layered error classification, completed at every stored boundary
+
+v1.3 introduced `parseStored`/`parseModel` and applied them to the writing task,
+spec, pointer and creation/cowrite model boundaries. Every other persisted read
+still threw a bare `ZodError`, and the one Remote boundary
+(`src/host/bridge/project-api.ts:158`) classified such a value as
+`request-validation` / `INVALID_REQUEST` — shown to the user as
+"输入有无效字段，请修改后重试。" although their own input was fine. That is what
+SPEC v1.3 §5 and AT-77 forbid: an incompatible stored record is not a user input
+error. Measured before this change: a damaged `.scholarflow/runs/<id>/run.json`
+reached the boundary as `INVALID_REQUEST`.
+
+Every persisted record now validates through `parseStored` at its own boundary, so
+the failure names the record rather than the request: run state and input
+(`RUN_STATE_INVALID`, `RUN_INPUT_INVALID`), generation and review checkpoints
+(`RUN_CHECKPOINT_INVALID`), draft sequence, workflow and automatic advance
+(`DRAFT_SEQUENCE_INVALID`, `WORKFLOW_INVALID`, `AUTOMATIC_INVALID`), research batch
+and search records, review reports and rechecks, editor and project-text buffers,
+proposals, memory records and history, the material cache, and private/project
+skill records — each with its own existing code where the module already had one.
+
+The distinction stays real inside a single function: `id.parse(runId)` rejects the
+request, while the record read that follows it reports stored data. Three
+deliberate exceptions keep a raw parse. The model-reply repair loop in
+`host/bridge/writing-controller.ts` and the generation format-repair loop turn the
+failure into a repair instruction, so they must still see a `ZodError`. The
+provider response body in `host/providers/openalex.ts` belongs to
+provider/transport, not to stored data. `host/tools/academic.ts` is called by the
+model, so naming the failing fields is the useful answer.
+
+`tests/integration/v13-history.test.ts` drives a damaged run state, workflow
+pointer, draft-sequence pointer and editor buffer through the actual
+`applicationResult` boundary and asserts `stored-data`, a named failing field, and
+that the rejected private value is never echoed.
+

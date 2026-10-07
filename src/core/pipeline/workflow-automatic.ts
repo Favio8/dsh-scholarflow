@@ -3,7 +3,7 @@ import { id } from '../../shared/schema.ts'
 import { automaticInputSchema, automaticStateSchema, automaticPolicySchema, type AutomaticPolicy, type AutomaticState, type AutomaticChildGrant } from '../../shared/workflow-automatic.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { commit, inspectRecovery } from '../store/transactions.ts'
-import { invariant, ScholarError } from '../../shared/errors.ts'
+import { invariant, ScholarError, parseStored } from '../../shared/errors.ts'
 import { readWorkflow, readWorkflowRecord, workflowCheckpointMutations, prepareWorkflowAction, applyWorkflowAction, ensureNoStageExecuting, WORKFLOW_POINTER } from './workflow.ts'
 import { workflowBudgetInfo, syncWorkflowDuration } from './workflow-budget.ts'
 import { reviewInput, runReview } from '../review/review.ts'
@@ -73,7 +73,8 @@ export async function readAutomatic(io: FileStore, workflowId: string, automatic
   const root = await readWorkflowRecord(io, workflowId), prefix = location(workflowId, automaticId)
   const [inputFile, stateFile] = await Promise.all([io.read(`${prefix}/input.json`), io.read(`${prefix}/run.json`)])
   invariant(inputFile && stateFile, 'AUTOMATIC_INVALID', '自动推进输入或状态缺失；没有重建。')
-  const input = automaticInputSchema.parse(JSON.parse(inputFile.text)), state = automaticStateSchema.parse(JSON.parse(stateFile.text))
+  const input = parseStored(automaticInputSchema, inputFile.text, 'AUTOMATIC_INVALID', 'automatic.read')
+  const state = parseStored(automaticStateSchema, stateFile.text, 'AUTOMATIC_INVALID', 'automatic.read')
   invariant(input.automaticId === automaticId && state.automaticId === automaticId && input.workflowId === workflowId && state.workflowId === workflowId &&
     input.projectId === root.current.ledger.projectId && state.projectId === input.projectId && state.inputHash === digest(inputFile.text) &&
     input.workflowPlanHash === root.plan.contentHash && new Set(state.steps.map(row => row.stepId)).size === state.steps.length &&
@@ -84,7 +85,7 @@ export async function readAutomatic(io: FileStore, workflowId: string, automatic
 export async function inspectAutomatic(io: FileStore, workflowId: string) {
   const file = await io.read(`${base(workflowId)}/current.json`)
   if (!file) return { automatic: undefined }
-  const pointer = pointerSchema.parse(JSON.parse(file.text)), stored = await readAutomatic(io, workflowId, pointer.automaticId)
+  const pointer = parseStored(pointerSchema, file.text, 'AUTOMATIC_INVALID', 'automatic.inspect'), stored = await readAutomatic(io, workflowId, pointer.automaticId)
   invariant(pointer.workflowId === workflowId && pointer.projectId === stored.input.projectId, 'AUTOMATIC_INVALID', '自动推进索引身份不符。')
   return { automatic: { input: stored.input, state: stored.state, limits: stored.root.checkpoint.automaticBudget } }
 }
@@ -154,7 +155,7 @@ export async function prepareAutomaticAction(io: FileStore, workflowId: string, 
   action: 'resume' | 'close', reason: string, ownerAlive: (owner: AutomaticState['owner']) => boolean) {
   id.parse(sessionId); invariant(reason.trim().length >= 10 && reason.length <= 4000, 'AUTOMATIC_REASON_REQUIRED', '恢复或结束推进须明确说明理由。')
   const stored = await readAutomatic(io, workflowId, automaticId), pointer = await io.read(`${base(workflowId)}/current.json`)
-  invariant(pointer && pointerSchema.parse(JSON.parse(pointer.text)).automaticId === automaticId && !terminal(stored.state),
+  invariant(pointer && parseStored(pointerSchema, pointer.text, 'AUTOMATIC_INVALID', 'automatic.action').automaticId === automaticId && !terminal(stored.state),
     'AUTOMATIC_TERMINAL', '仅可操作当前未结束推进；原终态保持不变，新尝试保留原额度。')
   if (['running', 'queued'].includes(stored.state.status) || stored.state.steps.some(row => row.state === 'pending'))
     invariant(!ownerAlive(stored.state.owner), 'RUN_OWNER_ALIVE', '原调度进程仍存活，不能接管或结束其登记；先在原会话停止或等待其保存。')
@@ -275,7 +276,7 @@ export async function driveAutomatic(io: FileStore, workflowId: string, automati
       const stored = await readWorkflow(io, workflowId), auto = await readAutomatic(io, workflowId, automaticId), limits = stored.checkpoint.automaticBudget!
       await currentGoal(io, workflowId, stored.current.ledger.projectId)
       const pointer = await io.read(`${base(workflowId)}/current.json`)
-      invariant(pointer && pointerSchema.parse(JSON.parse(pointer.text)).automaticId === automaticId, 'AUTOMATIC_STATE_CHANGED', '当前自动推进索引改变，未继续旧调度。')
+      invariant(pointer && parseStored(pointerSchema, pointer.text, 'AUTOMATIC_INVALID', 'automatic.action').automaticId === automaticId, 'AUTOMATIC_STATE_CHANGED', '当前自动推进索引改变，未继续旧调度。')
       invariant(auto.state.status === 'running', 'AUTOMATIC_STATE_CHANGED', '自动推进状态已由其他操作改变，未继续。')
       if (signal.aborted) return await stop(timedOut() ? 'completed-with-issues' : signal.reason === 'plugin-unload' ? 'interrupted' : 'cancelled',
         timedOut() ? 'WORKFLOW_BUDGET_EXHAUSTED' : 'AUTOMATIC_ABORTED', '调度已停止；原稿、问题、原额度和已完成结果保留。')
