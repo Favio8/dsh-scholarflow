@@ -1,13 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, symlink, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, symlink, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ExternalRequirementSource, externalMemberKind, MAX_EXTERNAL_MEMBERS } from '../../src/host/sources/external.ts'
 import { ExternalSourceRegistry } from '../../src/host/sources/registry.ts'
 import { readApproval } from '../../src/core/pipeline/spec-compat.ts'
 import { creationSpec } from '../../src/shared/writing-task.ts'
-import { checkWritablePath } from '../../src/core/paths/containment.js'
 
 const signal = () => new AbortController().signal
 
@@ -157,20 +156,17 @@ test('V3b: an external source informs the requirements but is never copied into 
     origin: 'external', kind: 'folder', path: 'C:/elsewhere', members: [] }] }))
 })
 
-test('V3b: reading outside the workspace does not make the workspace writable there', async () => {
+test('V3b: an authorised external read leaves the chosen folder and the workspace byte-identical', async () => {
   const f = await fixture()
   const workspace = join(f.base, 'workspace')
   await mkdir(workspace)
-  // The read grant is read-only by construction: the write gate still measures against the
-  // workspace root, so the folder the user picked can never become an output directory and
-  // no manuscript path can be redirected into it.
-  const outside = checkWritablePath(workspace, join(f.outside, 'manuscript'))
-  assert.equal(outside.allowed, false)
-  assert.equal(outside.code, 'PATH_OUTSIDE_ALLOWED_ROOT')
-  // A path that merely shares a prefix with the workspace is outside it too.
-  assert.equal(checkWritablePath(workspace, `${workspace}-elsewhere/manuscript`).allowed, false)
-  // The same gate still admits the workspace's own output directory.
-  assert.equal(checkWritablePath(workspace, join(workspace, 'manuscript')).allowed, true)
+  // The read grant is read-only by construction: reading a member copies nothing, so the folder
+  // the user picked can never become an output directory and no manuscript path can be
+  // redirected into it. The write gate that keeps it un-writable is asserted against the real
+  // gateway in tests/contracts/project-resource-gateway.test.ts.
+  const source = await ExternalRequirementSource.open(f.outside, 'folder')
+  assert.equal(new TextDecoder().decode(await source.read('作业说明.md', signal())), 'TEST_ONLY 要求：四页，第一页封面')
   // Reading the chosen folder left it byte-identical: nothing was written or moved.
   assert.equal(await readFile(join(f.outside, '作业说明.md'), 'utf8'), 'TEST_ONLY 要求：四页，第一页封面')
+  assert.deepEqual(await readdir(workspace), [], '外部读取不在工作区留下任何产物')
 })

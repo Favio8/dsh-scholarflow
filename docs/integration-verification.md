@@ -279,6 +279,14 @@ export interface PresetDefinition {
 
 ### 03.4 `WorkspaceBinding` 适配实现 + 离线测试【已实测，15/15 通过】
 
+> **2026-10-07 修订：本节所述模块已在本轮移除。**
+> SPEC 5.1／5.2 的重校验要求由 `src/host/bridge/project-api.ts:30-48` 的生产路径满足
+> （`sessionTarget === root` 且 `workspace.sessionIds.includes(sessionId)`；`.scholarflow/project.yaml`
+> 以 `fs.contains` 校验），并非依赖被移除的模块。下文的 15/15 验证的是该模块自身的离线行为，
+> **不代表生产路径行为**；删除判定与影响说明见
+> [retired-path-policy-modules.md](./decisions/retired-path-policy-modules.md)。
+> 原结论不改写，保留为当日证据。
+
 实现：[`src/core/project/binding.js`](../src/core/project/binding.js)（Core，零宿主依赖）
 与测试：[`tests/unit/binding.test.js`](../tests/unit/binding.test.js)。
 
@@ -693,6 +701,16 @@ host-plane 插件在无会话／权限上下文时，`ctx.fs` 写入被沙箱默
   用户测试工作区恢复为原有 7 项内容，无任何文件被修改或新增。
 
 ### 07.6 自建 FileGateway 边界策略 + 离线测试【已实测，**19/19 通过**】
+
+> **2026-10-07 修订：本节所述策略模块已在本轮移除。**
+> 边界策略的实际执行点是 `src/host/gateway/file-store.ts`（`:30` 前缀限定 `.scholarflow/` 与
+> `<manuscriptDir>/`、`:36` `fs.contains(root, target)`、`:40` canonical 路径仍须位于专属目录内，
+> 三者均抛 `PATH_OUTSIDE_ALLOWED_ROOT`），由
+> [`tests/contracts/project-resource-gateway.test.ts`](../tests/contracts/project-resource-gateway.test.ts)
+> 的 "the write gate refuses anything outside the owned project directories" 一项断言。
+> 下文的 19/19 验证的是被移除模块自身的离线行为，**不代表生产路径行为**；其余断言已迁至上述真实闸门。
+> 删除判定与影响说明见 [retired-path-policy-modules.md](./decisions/retired-path-policy-modules.md)。
+> 原结论不改写，保留为当日证据。
 
 既然 `fs.resolve` **不做授权**（07.2），边界必须自建。已实现零宿主依赖的 Core 策略
 （[`src/core/paths/containment.js`](../src/core/paths/containment.js)）与离线测试

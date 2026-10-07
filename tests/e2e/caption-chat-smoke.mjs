@@ -11,7 +11,7 @@ assert.ok(page, 'Desktop renderer is available')
 page.setDefaultTimeout(15000)
 const out = resolve('.dsh-tmp/ui-refinement')
 await mkdir(out, { recursive: true })
-let originalDraft, layoutPreference, cdp
+let originalDraft, cdp
 const input = page.locator('.sf-agent [data-composer-input]')
 async function replaceDraft(text) {
   // Native Lexical owns editor state; direct DOM fill is not a reliable clear.
@@ -28,7 +28,6 @@ try {
   assert.equal(await page.locator('button[aria-label="ScholarFlow"]').count(), 1)
   await entry.click()
   await page.getByRole('status').filter({ hasText: '已连接 Host' }).waitFor()
-  layoutPreference = await page.evaluate(() => localStorage.getItem('sf-workbench-layout:v1'))
   const pane = page.locator('.sf-agent')
   if (!await pane.isVisible()) await page.getByRole('button', { name: '展开当前会话面板', exact: true }).click()
   const caption = await page.evaluate(() => {
@@ -80,8 +79,5 @@ try {
     if (!await page.locator('.sf-agent').isVisible()) await page.getByRole('button', { name: '展开当前会话面板', exact: true }).click()
     await replaceDraft(originalDraft)
   }
-  if (layoutPreference !== undefined) await page.evaluate(value => {
-    if (value === null) localStorage.removeItem('sf-workbench-layout:v1'); else localStorage.setItem('sf-workbench-layout:v1', value)
-  }, layoutPreference).catch(() => {})
   await browser.close()
 }

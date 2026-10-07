@@ -74,6 +74,14 @@ policy (`src/core/paths/containment.js` refuses paths outside the root), not the
 sandbox. A prototype must still confirm the read path, member set, cancellation,
 revocation and refusal of parent-directory expansion.
 
+> **2026-10-07 修订**：上段提到的 `src/core/paths/containment.js` 已在本轮移除；它从未被
+> `src/` 导入，也从未进入任何构建产物（判定证据见
+> [retired-path-policy-modules.md](./retired-path-policy-modules.md)）。外部读取的实际拒绝来自
+> `src/host/sources/external.ts` 与 `registry.ts`（必须是绝对路径、真实目录，并拒绝链接与父目录扩张），
+> 由 [`tests/integration/external-requirement-source.test.ts`](../../tests/integration/external-requirement-source.test.ts)
+> 用生产代码断言；写入侧的实际闸门是 `src/host/gateway/file-store.ts`。
+> 原结论不改写，保留为当日证据。
+
 **V3c (single file, upload fallback).** `dsh-client-file-upload` stores a Blob, exact
 bytes or a stream for one Session and returns a receipt, which is the documented route
 for remote hosts where the desktop chooser is unreachable. Both routes need a real

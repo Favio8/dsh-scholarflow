@@ -110,3 +110,22 @@ test('resource creation rejects directory junctions and existing hardlinks witho
   assert.deepEqual(new Uint8Array(await readFile(join(outside, 'source.bin'))), original)
   await assert.rejects(stat(join(outside, 'new.bin')), { code: 'ENOENT' })
 })
+// The write gate measures against the workspace root and the owned subdirectories, not against a
+// path's spelling. Migrated from the retired standalone containment helper (see
+// docs/decisions/retired-path-policy-modules.md): an externally authorised read must never make
+// the chosen folder writable, and the folder the user picked can never become an output directory.
+test('the write gate refuses anything outside the owned project directories, including prefix-sharing siblings', async () => {
+  const { root, io } = await writerFixture()
+  // A sibling that merely shares a prefix with the manuscript directory is outside it.
+  await assert.rejects(io.write('manuscript-elsewhere/paper.md', 'TEST_ONLY', undefined), { code: 'PATH_OUTSIDE_ALLOWED_ROOT' })
+  await assert.rejects(io.write('raw-materials/notes.md', 'TEST_ONLY', undefined), { code: 'PATH_OUTSIDE_ALLOWED_ROOT' })
+  // A spelling that tries to walk back into an owned directory never reaches the gate: the
+  // relative-path contract refuses the spelling itself, so these are not PATH_OUTSIDE_ALLOWED_ROOT.
+  await assert.rejects(io.write('.scholarflow/../manuscript/paper.md', 'TEST_ONLY', undefined))
+  await assert.rejects(io.write('.scholarflow\\manuscript\\paper.md', 'TEST_ONLY', undefined))
+  // The allow direction still holds for the project's own directory, so this is a gate and not a
+  // reject-everything check.
+  await io.write('manuscript/paper.md', 'TEST_ONLY', undefined)
+  assert.equal(await readFile(join(root, 'manuscript/paper.md'), 'utf8'), 'TEST_ONLY')
+  for (const refused of ['manuscript-elsewhere', 'raw-materials']) await assert.rejects(stat(join(root, refused)), { code: 'ENOENT' })
+})
