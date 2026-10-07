@@ -148,6 +148,9 @@ export type CountingPolicy = z.infer<typeof countingPolicy>
 export type PresetSelection = z.infer<typeof presetSelection>
 export const writingQuestion = z.object({ id, title: z.string().min(1).max(2000), options: z.array(z.string().min(1).max(1000)).max(6),
   kind: z.enum(['requirements', 'materials', 'conflict', 'failure']), answered: z.string().max(12000).optional() }).strict()
+// Only persisted history accepts budget; producers still use writingQuestion above.
+const storedWritingQuestion = writingQuestion.extend({ kind: z.enum(['requirements', 'materials', 'conflict', 'failure', 'budget']) })
+export const pendingQuestion = (row: { kind: string; answered?: string }) => row.kind !== 'budget' && row.answered === undefined
 /**
  * `usedModelCalls` and `elapsedMs` are telemetry (SPEC v1.2 §8): they are reported, never
  * enforced. `modelCallAllowance` survives only so a stored v1.1 task still parses.
@@ -165,7 +168,7 @@ export const writingTaskSchema = z.object({ schemaVersion: z.literal(1), id, pro
   lastSemanticReviewSignature: hash.optional(), semanticReviewStalls: z.number().int().nonnegative().default(0),
   researchComplete: z.boolean().default(false), usedSearchQueries: z.number().int().nonnegative(), elapsedMs: z.number().nonnegative(),
   owner: z.string(), expectedDocumentHash: hash, childRunId: id.optional(), pendingProposalId: id.optional(),
-  questions: z.array(writingQuestion), notes: z.array(z.string()), issues: z.array(taskIssue).max(200).default([]),
+  questions: z.array(storedWritingQuestion), notes: z.array(z.string()), issues: z.array(taskIssue).max(200).default([]),
   consecutiveFailures: z.number().int().nonnegative().default(0), progressMark: z.number().int().nonnegative().default(0), onlineSources: z.array(id),
   createdAt: z.string(), updatedAt: z.string() }).strict()
 export type WritingTask = z.infer<typeof writingTaskSchema>
@@ -183,6 +186,8 @@ export function writingReadPaths(spec: CreationSpec) {
 }
 export const creationPrepareRequest = z.object({ context: requestContext, spec: creationSpec }).strict()
 export const writingTaskRequest = z.object({ context: requestContext, taskId: id.optional() }).strict()
+export const writingRequirementsRequest = z.object({ context: requestContext }).strict()
+export const writingPreferencesRequest = z.object({ context: requestContext, spec: creationSpec, baseSpecHash: hash.nullable().optional() }).strict()
 export const writingTaskAction = writingTaskRequest.extend({ action: z.enum(['pause', 'resume', 'cancel', 'answer']),
   materials: z.array(relativePath).max(500).optional(), questionId: id.optional(), answer: z.string().trim().max(12000).optional() }).strict()
 export const cowriteRequest = z.object({ context: requestContext, text: z.string().max(2 * 1024 * 1024), baseDocumentHash: hash,

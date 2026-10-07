@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { writingReadPaths, type WritingTask } from '../shared/writing-task.ts'
+import { writingReadPaths, pendingQuestion, type WritingTask } from '../shared/writing-task.ts'
 import { groupIssues, mapLegacyNotes } from '../core/pipeline/task-issues.ts'
 
 const STAGES: Record<string, string> = { materials: '读取工作区资料', research: '检索公开文献', evidence: '整理证据与引用', outline: '规划章节内容', drafting: '撰写正文', review: '检查全文', completed: '初稿已生成' }
@@ -17,12 +17,12 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
   useEffect(() => { let live = true
     const load = async () => { try { const result = await api('writingTask.inspect', { context: latest.current.context() }); if (!live) return
       if (revision.current !== result.task?.revision) { revision.current = result.task?.revision; latest.current.refresh().catch((error: Error) => live && setError(error.message)) }
-      setTask(result.task); setElapsed(result.task?.elapsedMs ?? 0); latest.current.onTask?.(result)
+      setTask(result.task); setError(result.taskDiagnostic?.message ?? ''); setElapsed(result.task?.elapsedMs ?? 0); latest.current.onTask?.(result)
     } catch (error) { if (live) setError((error as Error).message) } }
     load(); const timer = window.setInterval(load, 2000)
     return () => { live = false; clearInterval(timer) }
   }, [context().sessionId, taskRevision])
-  const question = task?.questions.find(row => row.answered === undefined)
+  const question = task?.questions.find(pendingQuestion)
   // A running task's elapsed time is shown as it grows; it is telemetry, never a deadline.
   useEffect(() => {
     if (task?.status !== 'running') return
@@ -30,7 +30,8 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
     const timer = window.setInterval(() => setElapsed(base + Date.now() - started), 1000)
     return () => clearInterval(timer)
   }, [task?.status, task?.revision])
-  if (!task || task.status === 'cancelled') return null
+  if (!task) return error ? <details className="sf-writing-progress"><summary>历史任务进度暂不可用</summary>{error}</details> : null
+  if (task.status === 'cancelled') return null
   const action = async (name: string) => { setBusy(true); setError('')
     try { const result = await api('writingTask.action', { context: context(), taskId: task.id, action: name }); setTask(result.task); await refresh() }
     catch (error) { setError((error as Error).message) } finally { setBusy(false) }
@@ -51,6 +52,7 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
   const { needsAction, inProgress, handled } = groupIssues(issues)
   const main = task.status === 'paused' ? '写作已暂停'
     : task.status === 'interrupted' ? '写作进度已保留'
+    : task.status === 'waiting-input' && !question ? '进度已保留，可继续'
     : question ? '等待你的决定：已放到中栏底部'
     : task.status === 'completed' ? (needsAction.length ? '生成结束，仍有待处理问题' : '已完成本次可验证检查')
     : STAGES[task.stage]
@@ -72,8 +74,6 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
           </div></details>}
       </div>
     </div>
-    {task.status === 'completed' && <p className="sf-progress-note" role="status">
-      执行结束、内容检查结果和导出状态分别报告；「已完成本次可验证检查」不代表老师认可或引用已全部人工核验。</p>}
     {error && <p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}
   </section>
 }

@@ -63,7 +63,10 @@ export function captureSelection(root: HTMLElement, projection: Projection, docu
   const a = point(root, range.startContainer, range.startOffset, 'start'), b = point(root, range.endContainer, range.endOffset, 'end')
   const from = mapLeafPoint(projection, a.leafId, a.offset, 'start'), to = mapLeafPoint(projection, b.leafId, b.offset, 'end')
   const validated = local ? validateProseRange(projection, from, to) : (() => { const range = validateRange(projection, from, to); return { ...range, blockIds: [range.block.id] } })()
-  if (validated.renderedText !== selection.toString()) throw new Error('渲染选区与源码映射不一致，请明确选择普通段落或使用源码选择。')
+  // Chromium inserts one or two visual newlines between paragraphs. Validate each leaf's
+  // exact text, allowing only that DOM paragraph separator to differ from source spacing.
+  const separators = (text: string) => text.replace(/\r\n/g, '\n').replace(/\n{2,}/g, '\n')
+  if (separators(validated.renderedText) !== separators(selection.toString())) throw new Error('选区包含非正文内容，请重新选择普通段落。')
   return { projectId, documentId: 'paper', documentHash: documentSnapshot.contentHash, revisionId: documentSnapshot.revisionId, blockIds: validated.blockIds,
     sourceRange: { startUtf16: from, endUtf16: to }, sourceText: projection.source.slice(from, to), renderedText: validated.renderedText,
     prefixContext: projection.source.slice(Math.max(0, from - 200), from), suffixContext: projection.source.slice(to, to + 200),

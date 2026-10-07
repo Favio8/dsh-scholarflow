@@ -1,36 +1,27 @@
-import React, { useLayoutEffect, useRef, useState } from 'react'
+import React, { useLayoutEffect } from 'react'
 import { sourceRangeRect } from './selection-menu.tsx'
 
-/** A source textarea cannot contain a block widget. Anchor its proposal just below the
- * target line, above the following source lines; preview uses a normal block after the
- * selected paragraph. Neither surface inserts proposal text into the manuscript. */
+/** Keep the source target above a readable reserved row; the textarea has no inline
+ * widget API. Preview uses an AST block after the selected paragraph. */
 export function SourceCandidate({ area, end, identity, children }: {
   area: React.RefObject<HTMLTextAreaElement | null>; end: number; identity: string; children: React.ReactNode
 }) {
-  const root = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState({ top: 0, height: 180, visible: false })
   useLayoutEffect(() => {
-    const input = area.current!, parent = input.parentElement!
-    const locate = () => {
-      const box = parent.getBoundingClientRect(), target = sourceRangeRect(input, end, end)
-      const top = target.bottom - box.top + 6
-      setPosition({ top, height: Math.max(80, box.height - top - 8), visible: target.bottom >= box.top && target.top < box.bottom })
-    }
-    // Make room below a target near the bottom, without jumping to the start of the paper.
-    const box = parent.getBoundingClientRect(), target = sourceRangeRect(input, end, end)
-    const needed = target.bottom - box.top + 186 - box.height
-    if (needed > 0 && target.top < box.bottom && target.bottom >= box.top) input.scrollTop += needed
-    locate()
-    input.addEventListener('scroll', locate)
-    const observer = new ResizeObserver(locate); observer.observe(parent)
-    return () => { input.removeEventListener('scroll', locate); observer.disconnect() }
+    const input = area.current
+    if (!input) return
+    // A textarea has no block-widget API. Reserve a readable row below the panes rather
+    // than cover the following source lines; keep the captured target immediately above it.
+    const target = sourceRangeRect(input, end, end), box = input.getBoundingClientRect()
+    input.scrollTop += target.bottom - box.bottom + 24
   }, [area, end, identity])
-  return <div ref={root} className="sf-source-candidate" style={{ top: position.top, maxHeight: position.height }} hidden={!position.visible}
+  return <div className="sf-source-candidate"
     onMouseUp={event => event.stopPropagation()}>{children}</div>
 }
 
 export const SOURCE_CANDIDATE_CSS = `
-.sf-source-candidate{position:absolute;left:46px;right:10px;z-index:3;overflow:auto;overscroll-behavior:contain;background:var(--dsw-alias-bg-layer-1,#fff);border-radius:10px;box-shadow:0 4px 16px #0002}
-.sf-source-candidate .sf-rewrite{margin:0}
-.sf-source-editor[data-candidate=true] .sf-source-input{padding-bottom:220px}
+.sf-source-candidate{flex:none;min-height:0;max-height:42%;margin:6px 12px;overflow:auto;overscroll-behavior:contain;background:var(--dsw-alias-bg-layer-1,#fff);border-radius:10px}
+.sf-source-candidate .sf-rewrite{margin:0;max-height:320px;display:flex;flex-direction:column}
+.sf-source-candidate .sf-rewrite-reading{flex:1;min-height:0}
+.sf-source-candidate .sf-rewrite>header,.sf-source-candidate .sf-rewrite-actions,.sf-source-candidate .sf-rewrite-technical{flex:none}
+.sf-middle-column[data-overlay-open=true] .sf-source-candidate{margin-bottom:var(--sf-overlay-space,0px)}
 `

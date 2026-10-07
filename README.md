@@ -2,6 +2,8 @@
 
 DeepSeek Harness 学术项目工作区插件。当前版本 **1.0.0**，实现 PRD/SPEC v1.0 的 35 项 P0。实际支持 Windows DSH Desktop **0.2.0-rc.2**；验收证据见 [最终验证记录](docs/final-runtime-validation.md)。
 
+2026-10-07：已落地工作台 v1.3 合同：编辑／预览独立 Ctrl＋滚轮缩放、轻薄底部输入、可读引用候选、失败／停止的真实状态、旧 budget 历史兼容和独立写作要求读取。实际开始页 AI Chat 点击、中文发送和用户当前 `opencode-go` 模型路径均验证；源文件与 Word 排版不随阅读比例改变。485 项分层回归通过，桌面与真实提供方证据分别记录；旧 TRANSPORT 的具体网络原因未复现。见 [v1.3 实现与验收说明](docs/decisions/workbench-v1.3.md)。包版本未变，本轮未正式发布。
+
 [三类本地证据练习](examples/local-evidence/README.md)提供课程、有限资料综述与研究待补分支。
 素材为教学说明，测试使用固定适配器，均标记 TEST_ONLY；不会冒充出版资料、实验成果或真实模型验收。
 

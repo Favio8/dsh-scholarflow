@@ -59,6 +59,18 @@ test('quality repair produces a proposal for human content and waits for an expl
   assert.deepEqual(counts(), { calls: 1, revisions: 1 })
 })
 
+test('invalid semantic model output preserves the manuscript and asks for model recovery without exposing raw values', async () => {
+  const { io, task, services } = await setup(false)
+  task.spec.targetLength = 1300; task.spec.sections[0].targetLength = 1300
+  const before = (await snapshot(io)).document.text
+  services.model = async () => '{"issues":null,"summary":"PRIVATE_TEST_ONLY"}'
+  await driveWritingTask(io, task, services)
+  assert.equal(task.status, 'waiting-input'); assert.equal(task.questions.at(-1)?.kind, 'failure')
+  assert.match(task.questions.at(-1)!.title, /模型未返回可用结果/)
+  assert.equal(JSON.stringify(task.questions).includes('PRIVATE_TEST_ONLY'), false)
+  assert.equal((await snapshot(io)).document.text, before)
+})
+
 test('located semantic findings return to the protected revision path before completion', async () => {
   const { io, task, services, counts } = await setup(true)
   let reviews = 0

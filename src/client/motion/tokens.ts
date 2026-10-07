@@ -11,4 +11,4 @@ export const MOTION_CSS = `:root{--sf-dur-instant:90ms;--sf-dur-quick:150ms;--sf
 
 /** Scene durations from PRD §10.2, kept together so the table is reviewable in one place. */
 export const SCENE = { wizardStep: 200, wizardShift: 10, viewSwitch: 190, press: 100, listShift: 190,
-  menu: 150, overlay: 210, overlayShift: 10, panel: 210, candidate: 200, status: 150 } as const
+  menu: 150, overlay: 180, overlayShift: 6, panel: 180, candidate: 160, status: 150 } as const

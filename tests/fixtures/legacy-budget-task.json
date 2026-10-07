@@ -1,0 +1,255 @@
+{
+  "schemaVersion": 1,
+  "id": "writing_TEST_ONLY_legacy",
+  "projectId": "prj_TEST_ONLY_legacy",
+  "sessionId": "session_TEST_ONLY_legacy",
+  "spec": {
+    "title": "Legacy TEST_ONLY",
+    "type": "course-paper",
+    "language": "zh-CN",
+    "format": "docx",
+    "requirements": "TEST_ONLY historical requirements; preserve the original numeric length and chapter plan.",
+    "requirementSources": [],
+    "materials": [
+      "material_TEST_ONLY_0.md",
+      "material_TEST_ONLY_1.md",
+      "material_TEST_ONLY_2.pdf",
+      "material_TEST_ONLY_3.html"
+    ],
+    "online": true,
+    "targetLength": 4000,
+    "countingPolicy": {
+      "scope": "body",
+      "includeAbstract": false,
+      "algorithmVersion": 1
+    },
+    "sections": [
+      {
+        "id": "section_TEST_ONLY_0",
+        "title": "Historical chapter TEST_ONLY 0",
+        "purpose": "TEST_ONLY historical purpose",
+        "targetLength": 480,
+        "allocationMode": "auto",
+        "allocationWeight": 0.12
+      },
+      {
+        "id": "section_TEST_ONLY_1",
+        "title": "Historical chapter TEST_ONLY 1",
+        "purpose": "TEST_ONLY historical purpose",
+        "targetLength": 2600,
+        "allocationMode": "auto",
+        "allocationWeight": 0.65
+      },
+      {
+        "id": "section_TEST_ONLY_2",
+        "title": "Historical chapter TEST_ONLY 2",
+        "purpose": "TEST_ONLY historical purpose",
+        "targetLength": 520,
+        "allocationMode": "auto",
+        "allocationWeight": 0.13
+      },
+      {
+        "id": "section_TEST_ONLY_3",
+        "title": "Historical chapter TEST_ONLY 3",
+        "purpose": "TEST_ONLY historical purpose",
+        "targetLength": 400,
+        "allocationMode": "auto",
+        "allocationWeight": 0.1
+      }
+    ],
+    "preset": {
+      "id": "course-argumentative",
+      "source": "builtin",
+      "version": "1.0.0",
+      "modified": false
+    },
+    "manuscriptDir": "manuscript"
+  },
+  "status": "completed",
+  "stage": "completed",
+  "revision": 201,
+  "materialIndex": 8,
+  "sectionIndex": 4,
+  "usedModelCalls": 55,
+  "modelCallAllowance": 80,
+  "searchQueries": [
+    "TEST_ONLY historical query 0",
+    "TEST_ONLY historical query 1",
+    "TEST_ONLY historical query 2"
+  ],
+  "searchQueryIndex": 3,
+  "evidenceMaterialIndex": 16,
+  "evidenceBlockIndex": 0,
+  "materialSummaries": [
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary",
+    "TEST_ONLY historical summary"
+  ],
+  "modelReviewComplete": true,
+  "researchComplete": true,
+  "usedSearchQueries": 12,
+  "elapsedMs": 1165858,
+  "owner": "TEST_ONLY",
+  "expectedDocumentHash": "sha256:4eb1fa7c077ed067ef5b7d9113dc12907dfd3247acd1d9eeeb1fca5593177ab2",
+  "questions": [
+    {
+      "id": "question_TEST_ONLY_0",
+      "title": "TEST_ONLY historical budget question",
+      "options": [
+        "TEST_ONLY choice 0"
+      ],
+      "kind": "budget",
+      "answered": "继续"
+    },
+    {
+      "id": "question_TEST_ONLY_1",
+      "title": "TEST_ONLY historical question",
+      "options": [
+        "TEST_ONLY choice 0",
+        "TEST_ONLY choice 1",
+        "TEST_ONLY choice 2",
+        "TEST_ONLY choice 3"
+      ],
+      "kind": "requirements",
+      "answered": "TEST_ONLY historical answer"
+    },
+    {
+      "id": "question_TEST_ONLY_2",
+      "title": "TEST_ONLY historical question",
+      "options": [
+        "TEST_ONLY choice 0"
+      ],
+      "kind": "conflict",
+      "answered": "TEST_ONLY historical answer"
+    },
+    {
+      "id": "question_TEST_ONLY_3",
+      "title": "TEST_ONLY historical question",
+      "options": [
+        "TEST_ONLY choice 0"
+      ],
+      "kind": "conflict",
+      "answered": "TEST_ONLY historical answer"
+    },
+    {
+      "id": "question_TEST_ONLY_4",
+      "title": "TEST_ONLY historical question",
+      "options": [
+        "TEST_ONLY choice 0"
+      ],
+      "kind": "conflict",
+      "answered": "TEST_ONLY historical answer"
+    },
+    {
+      "id": "question_TEST_ONLY_5",
+      "title": "TEST_ONLY historical question",
+      "options": [
+        "TEST_ONLY choice 0"
+      ],
+      "kind": "conflict",
+      "answered": "TEST_ONLY historical answer"
+    },
+    {
+      "id": "question_TEST_ONLY_6",
+      "title": "TEST_ONLY historical question",
+      "options": [
+        "TEST_ONLY choice 0"
+      ],
+      "kind": "conflict",
+      "answered": "TEST_ONLY historical answer"
+    },
+    {
+      "id": "question_TEST_ONLY_7",
+      "title": "TEST_ONLY historical question",
+      "options": [
+        "TEST_ONLY choice 0"
+      ],
+      "kind": "conflict",
+      "answered": "TEST_ONLY historical answer"
+    }
+  ],
+  "notes": [
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note",
+    "TEST_ONLY historical note"
+  ],
+  "onlineSources": [
+    "source_TEST_ONLY_0",
+    "source_TEST_ONLY_1",
+    "source_TEST_ONLY_2",
+    "source_TEST_ONLY_3",
+    "source_TEST_ONLY_4",
+    "source_TEST_ONLY_5",
+    "source_TEST_ONLY_6",
+    "source_TEST_ONLY_7",
+    "source_TEST_ONLY_8",
+    "source_TEST_ONLY_9",
+    "source_TEST_ONLY_10",
+    "source_TEST_ONLY_11"
+  ],
+  "createdAt": "2026-10-06T09:58:33.706Z",
+  "updatedAt": "2026-10-06T10:30:20.248Z"
+}

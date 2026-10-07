@@ -31,21 +31,12 @@ export function OverlayHost({ open, tabs, active, onTab, children, onCollapse, c
     return () => observer.disconnect()
   }, [open, collapsed, active, children])
   return <SfPresence open={open} offset={SCENE.overlayShift} className="sf-overlay-presence">
-    <div className="sf-overlay" ref={root} role="region" aria-label={label} data-sf-overlay-space={Math.round(height + 20)}>
+    <div className={`sf-overlay${collapsed ? ' sf-overlay-mini' : ''}`} ref={root} role="region" aria-label={label} data-sf-overlay-space={Math.round(height + 20)}>
       {!!tabs?.length && tabs.length > 1 && <div className="sf-overlay-tabs" role="tablist">
         {tabs.map(tab => <button key={tab.id} role="tab" type="button" aria-selected={tab.id === active} aria-pressed={tab.id === active}
           onClick={() => onTab?.(tab.id)}>{tab.label}{tab.badge ? ` · ${tab.badge}` : ''}</button>)}
       </div>}
-      {collapsed ? <div className="sf-overlay-collapsed">
-        <span>已收起；任务等待状态保持可见。</span>
-        <button type="button" onClick={onCollapse}>展开</button>
-      </div> : <>
-        <header className="sf-overlay-head">
-          <span className="sf-overlay-title">{label}</span>
-          {collapsed === false && onCollapse && <button type="button" onClick={onCollapse}>收起</button>}
-        </header>
-        {children}
-      </>}
+      {collapsed ? <button type="button" onClick={onCollapse} aria-label="恢复修改输入">{active === 'task' ? '待答问题' : '继续修改'} ↗</button> : children}
     </div>
   </SfPresence>
 }
@@ -79,7 +70,8 @@ export const OVERLAY_CSS = `
    pointer input through the empty part of that layer to the editor underneath. */
 .sf-overlay-presence{position:absolute;inset:0;z-index:30;pointer-events:none}
 /* Bottom space is added only while the overlay is present, so the resting editor has none. */
-.sf-middle-column[data-overlay-open=true] .sf-editor-scroll{padding-bottom:calc(var(--sf-overlay-space,0px) + 8px)}
+.sf-middle-column[data-overlay-open=true] .sf-source-input{padding-bottom:calc(var(--sf-overlay-space,0px) + 220px)}
+.sf-middle-column[data-overlay-open=true] .sf-paper-scroll{padding-bottom:calc(var(--sf-overlay-space,0px) + 40px)}
 .sf-overlay{position:absolute;left:10px;right:10px;bottom:10px;z-index:30;box-sizing:border-box;
   background:var(--dsw-alias-bg-base,#fff);border:1px solid #8884;border-radius:11px;box-shadow:0 10px 28px #0000001a;
   padding:10px 12px;font-size:13px;max-height:60%;overflow:auto;pointer-events:auto}
@@ -97,5 +89,12 @@ export const OVERLAY_CSS = `
 .sf-overlay-row button{flex:none;font:inherit;font-size:12.5px;padding:7px 12px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;cursor:pointer}
 .sf-overlay-row button.sf-primary{background:var(--sf-accent,#3f68d8);border-color:var(--sf-accent,#3f68d8);color:#fff}
 .sf-overlay-note{margin:7px 0 0;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary,#8b9099)}
-@container (max-width:640px){.sf-overlay{left:6px;right:6px;bottom:6px}}
+.sf-overlay{left:14px;right:14px;bottom:14px;padding:8px 10px;max-height:45%;border-color:#8883;border-radius:14px}
+.sf-overlay-mini{left:auto;width:auto;padding:4px 8px}.sf-overlay-mini button{border:0!important;font-size:12px!important}
+.sf-overlay-row{margin:0;align-items:center;gap:6px}
+.sf-app .sf-overlay-row textarea{min-height:32px;max-height:96px;resize:none;line-height:22px;font-size:13px;border:0;padding:5px 6px;border-radius:6px;overflow-y:auto}
+.sf-overlay-row select{width:70px;flex:none;border:0!important;padding:6px 0!important;font-size:12px!important;white-space:nowrap}
+.sf-overlay-row button{white-space:nowrap;min-width:32px;min-height:32px;padding:4px 8px!important}
+.sf-overlay-row .sf-overlay-close{border:0!important;background:transparent!important;color:inherit!important}
+@container (max-width:640px){.sf-overlay{left:8px;right:8px;bottom:8px}.sf-overlay-mini{left:auto}}
 `

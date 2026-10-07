@@ -1,10 +1,12 @@
 import { creationSpec, writingTaskSchema, type WritingTask, type CreationSpec } from '../../shared/writing-task.ts'
-import { json, newId, type FileStore } from '../store/files.ts'
+import { json, newId, digest, type FileStore } from '../store/files.ts'
 import { commit } from '../store/transactions.ts'
 import { snapshot, mutateLedger } from '../project/project.ts'
 import { parseDocument } from 'yaml'
 import { CONFIG_PATH } from '../project/project.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, parseStored } from '../../shared/errors.ts'
+import { z } from 'zod'
+import { id } from '../../shared/schema.ts'
 import { classifyNote, handledIssue, mergeIssue, progressIssue } from './task-issues.ts'
 
 const POINTER = '.scholarflow/writing/current.json'
@@ -40,14 +42,23 @@ export function reconcileReviewIssues(task: WritingTask, object: '要求检查' 
   for (const detail of details) noteTask(task, `${object}：${detail}`)
 }
 
-export async function readWritingSpec(io: FileStore) { const file = await io.read(specPath); return file ? creationSpec.parse(JSON.parse(file.text).spec) : undefined }
+export async function readWritingSpecImage(io: FileStore) {
+  const file = await io.read(specPath)
+  if (!file) return { spec: undefined, baseSpecHash: null }
+  const row = parseStored(z.object({ schemaVersion: z.literal(1), projectId: id, spec: creationSpec }).strict(), file.text, 'WRITING_SPEC_INVALID', 'writingTask.requirements')
+  invariant(row.projectId === (await snapshot(io)).ledger.projectId, 'SESSION_BINDING_CHANGED', '写作要求不属于当前论文。')
+  return { spec: row.spec, baseSpecHash: digest(file.text) }
+}
+export async function readWritingSpec(io: FileStore) { return (await readWritingSpecImage(io)).spec }
 export async function readWritingTask(io: FileStore, taskId?: string) {
   const pointer = await io.read(POINTER)
-  const selected = taskId ?? (pointer && JSON.parse(pointer.text).taskId)
+  const header = pointer ? parseStored(z.object({ taskId: id, projectId: id }).strict(), pointer.text, 'WRITING_TASK_INVALID', 'writingTask.inspect') : undefined
+  if (header) invariant(header.projectId === (await snapshot(io)).ledger.projectId, 'SESSION_BINDING_CHANGED', '任务指针不属于当前论文。')
+  const selected = taskId ?? header?.taskId
   if (!selected) return undefined
   const file = await io.read(taskPath(selected))
-  if (!file) return undefined
-  const state = writingTaskSchema.parse(JSON.parse(file.text)), current = await snapshot(io)
+  invariant(file, 'WRITING_TASK_INVALID', '历史任务文件缺失，正文和写作要求仍可查看。')
+  const state = parseStored(writingTaskSchema, file.text, 'WRITING_TASK_INVALID', 'writingTask.inspect'), current = await snapshot(io)
   invariant(state.projectId === current.ledger.projectId, 'SESSION_BINDING_CHANGED', '写作任务不属于当前论文。')
   return state
 }

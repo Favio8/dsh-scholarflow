@@ -23,9 +23,10 @@ import { useConfirmationFocus } from './confirmation-focus.ts'
 import { CAPTION_CSS, CHAT_CSS, WorkbenchIcon } from './workbench-chrome.tsx'
 import { PAPER_CSS, MATH_CSS, ProjectSettings, TYPE_LABELS, FORMAT_LABELS, type PaperView, type DraftController } from './paper-workspace.tsx'
 import type { ExportFormat } from '../shared/presentation.ts'
-import { CHAT_ID, CHAT_KIND, NATIVE_DOCK_CSS, NativeTools, createNativeHeader, createWorkbenchNavigation, connectPresetEntry, openExistingChat } from './native-dock.tsx'
+import { CHAT_ID, CHAT_KIND, NATIVE_DOCK_CSS, NativeTools, createNativeHeader, createWorkbenchNavigation, connectPresetEntry } from './native-dock.tsx'
 import { SurfaceBoundary, SURFACE_BOUNDARY_CSS } from './surface-boundary.tsx'
 import { connectNewSessionEntry } from './new-session-entry.tsx'
+import { ApplicationError } from './application-error.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export', 'Settings', 'Changes', 'History'] as const
@@ -56,7 +57,7 @@ export function apply(ctx: Host) {
   }
   const api = async (method: string, request: Host, signal?: AbortSignal) => {
     const result = await call(method, { request }, signal)
-    if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+    if (!result.ok) throw new ApplicationError(result.error)
     return result.data
   }
   const navigation = createWorkbenchNavigation(ctx, WorkspaceSurface)
@@ -83,9 +84,10 @@ export function apply(ctx: Host) {
   }
   function ChatGuide(props: Host) {
     const scope = useSyncExternalStore(navigation.source.subscribe, navigation.source.getSnapshot, navigation.source.getSnapshot)
+    const { tab } = props.useTabInfo()
     if (!scope.active || scope.sessionId !== props.sessionId) return null
     return <><style>{NATIVE_DOCK_CSS}</style><button className="sf-chat-guide" data-sidebar-right-guide-entry={CHAT_KIND}
-      onClick={() => openExistingChat(ctx, { replaceTab: true })}><WorkbenchIcon kind="chat" /><span>{props.title}{props.description && <small>{props.description}</small>}</span></button></>
+      onClick={() => tab.actions.openTab(CHAT_KIND, { replaceTab: true })}><WorkbenchIcon kind="chat" /><span>{props.title}{props.description && <small>{props.description}</small>}</span></button></>
   }
   function Agent(props: Host) {
     const session = props.useSession((s: Host) => s)
@@ -149,10 +151,12 @@ export function apply(ctx: Host) {
     const visualRoot = useRef<HTMLDivElement>(null)
     useEffect(() => {
       // A visual pause must not rerender the Host Slot and recreate the editor/request.
-      const sync = () => { if (visualRoot.current) visualRoot.current.dataset.sfHidden = String(document.hidden || !document.hasFocus()) }
+      const pause = (hidden: boolean) => { if (visualRoot.current) visualRoot.current.dataset.sfHidden = String(hidden) }
+      const sync = () => pause(document.hidden || !document.hasFocus())
+      const blur = () => pause(true)
       sync(); document.addEventListener('visibilitychange', sync)
-      window.addEventListener('blur', sync); window.addEventListener('focus', sync)
-      return () => { document.removeEventListener('visibilitychange', sync); window.removeEventListener('blur', sync); window.removeEventListener('focus', sync) }
+      window.addEventListener('blur', blur); window.addEventListener('focus', sync)
+      return () => { document.removeEventListener('visibilitychange', sync); window.removeEventListener('blur', blur); window.removeEventListener('focus', sync) }
     }, [])
     return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS}</style>
       <SelectionReferenceDetails sessionId={props.sessionId} />
@@ -250,7 +254,7 @@ export function apply(ctx: Host) {
         {ready && <><button className="sf-type-chip" title="写作要求" onClick={() => setTab('Overview')}>{TYPE_LABELS[project.config.project.type]} ▾</button>
           <select aria-label="排版与导出格式" title="排版与导出格式" value={format} onChange={e => changeFormat(e.target.value as ExportFormat)}>
             {Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></>}
-        {props.renderNativeTools?.(ready && <div className="sf-export-split"><button disabled={busy} onClick={() => requestExport(format)}>导出 {FORMAT_LABELS[format]}</button><details className="sf-paper-menu sf-paper-export"><summary aria-label="更多导出选项">▾</summary><div className="sf-paper-menu-popover">
+        {props.renderNativeTools?.(ready && <div className="sf-export-split"><button disabled={busy} onClick={() => requestExport(format)}>导出<span className="sf-export-format-label"> {FORMAT_LABELS[format]}</span></button><details className="sf-paper-menu sf-paper-export"><summary aria-label="更多导出选项">▾</summary><div className="sf-paper-menu-popover">
           {Object.entries(FORMAT_LABELS).filter(([value]) => value !== format).map(([value, label]) => <button key={value} disabled={busy} onClick={e => { closeMenu(e.currentTarget); requestExport(value as ExportFormat) }}>导出 {label}</button>)}
           <button onClick={e => { closeMenu(e.currentTarget); setTab('Export') }}>引用库、报告与交付历史</button>
         </div></details></div>)}

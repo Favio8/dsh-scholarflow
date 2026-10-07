@@ -40,7 +40,8 @@ export function sourceRangeRect(area: HTMLTextAreaElement, start: number, end: n
   mirror.append(span); document.body.append(mirror)
   try {
     const rect = span.getClientRects()[0] ?? span.getBoundingClientRect()
-    return new DOMRect(rect.left, rect.top, Math.min(rect.width, bounds.width), Math.min(rect.height, 24))
+    const left = Math.max(bounds.left + 8, Math.min(rect.left, bounds.right - 16))
+    return new DOMRect(left, rect.top, Math.max(0, Math.min(rect.right, bounds.right) - left), Math.min(rect.height, parseFloat(style.lineHeight)))
   } finally { mirror.remove() }
 }
 
@@ -53,8 +54,8 @@ export function renderedSelectionRect(range: Range): DOMRect {
   return rects[0] ?? range.getBoundingClientRect()
 }
 
-export function SelectionMenu({ anchor, busy, onAction, onClose, hasModels = true }: {
-  anchor: DOMRect; busy: boolean; hasModels?: boolean; onAction: (action: RewriteAction) => void; onClose: () => void
+export function SelectionMenu({ anchor, busy, onAction, onClose, hasModels = true, getAnchor }: {
+  anchor: DOMRect; busy: boolean; hasModels?: boolean; onAction: (action: RewriteAction) => void; onClose: () => void; getAnchor?: () => DOMRect
 }) {
   const root = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: anchor.left, top: anchor.top, ready: false })
@@ -70,7 +71,13 @@ export function SelectionMenu({ anchor, busy, onAction, onClose, hasModels = tru
   useEffect(() => {
     const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) onClose() }
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }
-    const scroll = (event: Event) => { if (!root.current?.contains(event.target as Node)) onClose() }
+    const scroll = (event: Event) => {
+      if (root.current?.contains(event.target as Node)) return
+      if (!getAnchor) { onClose(); return }
+      const actual = getAnchor(), box = root.current!.getBoundingClientRect()
+      setPosition({ left: Math.max(8, Math.min(actual.left, window.innerWidth - box.width - 8)),
+        top: Math.max(8, actual.top > box.height + 9 ? actual.top - box.height - 9 : actual.bottom + 9), ready: true })
+    }
     document.addEventListener('pointerdown', outside)
     window.addEventListener('keydown', escape)
     window.addEventListener('scroll', scroll, true)
@@ -98,7 +105,7 @@ export function SelectionMenu({ anchor, busy, onAction, onClose, hasModels = tru
       if (event.key === 'End') { event.preventDefault(); focusAt(list.length - 1) }
     }}>
     {REWRITE_ACTIONS.map((entry, index) => <button key={entry.action} type="button" disabled={busy || !hasModels}
-      autoFocus={index === 0 && position.ready} onClick={() => onAction(entry.action)}
+      onClick={() => onAction(entry.action)}
       title={entry.instruction || '自己写修改要求'}>{entry.label}</button>)}
   </div>, document.body)
 }

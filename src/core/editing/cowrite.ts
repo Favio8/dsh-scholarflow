@@ -22,6 +22,7 @@ export async function proposeCowrite(io: FileStore, sessionId: string, input: {
   action?: 'rewrite' | 'polish' | 'shorten' | 'expand' | 'custom'; blockId?: string; baseBufferHash?: string
 }, signal?: AbortSignal) {
   const current = await snapshot(io), before = input.text.slice(input.start, input.end)
+  invariant(input.replacementText.trim(), 'INVALID_MODEL_OUTPUT', '模型未返回可用的改写结果，请重试。')
   invariant(input.baseDocumentHash === current.document.contentHash && input.start <= input.end && input.end <= input.text.length &&
     unicodeBoundary(input.text, input.start) && unicodeBoundary(input.text, input.end), 'STALE_DOCUMENT_VERSION', '编辑基础或范围已改变。')
   const keys = new Set(Object.values(current.ledger.sources).map(row => row.citeKey))

@@ -1,6 +1,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { callStageModel } from '../../src/host/executor/model.ts'
+import { callStageModel, selectedModel } from '../../src/host/executor/model.ts'
+
+test('each operation follows the current Host selection and keeps a frozen request without a plugin default', async () => {
+  let projection: any = { pending: { provider: 'TEST_ONLY-current', model: 'model-A', reasoningEffort: 'high' }, lastUsed: { provider: 'TEST_ONLY-old', model: 'old' } }
+  const session = { id: 'session_TEST_ONLY' }, seen: string[] = []
+  const ctx = { sessionController: { resolveAgent: async () => ({ agent: { session } }) },
+    sessionProjections: { stateOf: () => projection }, agentDefaultModel: { currentSelection: () => ({ provider: 'TEST_ONLY-default', model: 'default' }) },
+    llm: { resolveModelInfo: async (provider: string, model: string) => { seen.push(`${provider}/${model}`); return { context: { contextWindow: 100000 }, inputModalities: ['text'] } } } }
+  const first = await selectedModel(ctx, session.id, new AbortController().signal)
+  projection.pending.model = 'model-B'
+  const next = await selectedModel(ctx, session.id, new AbortController().signal)
+  assert.equal(first.selected.model, 'model-A'); assert.equal(next.selected.model, 'model-B')
+  assert.deepEqual(seen, ['TEST_ONLY-current/model-A', 'TEST_ONLY-current/model-B'])
+  projection = { lastUsed: { provider: 'TEST_ONLY-old', model: 'old' } }
+  assert.equal((await selectedModel(ctx, session.id, new AbortController().signal)).selected.model, 'old')
+})
 
 test('stage adapter retains only validated retry facts and does not retry or expose provider failure bodies', async () => {
   let calls = 0, flushed = false
@@ -11,7 +26,8 @@ test('stage adapter retains only validated retry facts and does not retry or exp
   await assert.rejects(callStageModel(ctx, session, { provider: 'TEST_ONLY', model: 'TEST_ONLY' }, { system: 'TEST_ONLY', instruction: 'TEST_ONLY',
     context: {}, runId: 'run_TEST_ONLY', signal: new AbortController().signal }), error => {
     assert.equal((error as any).code, 'RATE_LIMIT')
-    assert.deepEqual((error as any).details, { status: 429, providerRetryAfterMs: 12000 })
+    assert.deepEqual((error as any).details, { status: 429, providerRetryAfterMs: 12000, category: 'provider/transport', operation: 'model.request',
+      phase: 'provider-stream', runId: 'run_TEST_ONLY', provider: 'TEST_ONLY', model: 'TEST_ONLY' })
     assert.ok(!(error as Error).message.includes('private provider')); return true
   })
   assert.equal(calls, 1, 'Core owns the bounded retry policy, not the single-call Host adapter')

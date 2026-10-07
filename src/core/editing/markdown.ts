@@ -68,7 +68,7 @@ function decodeUnits(raw: string, value: string, base: number) {
   return { units, mappable: rendered === value }
 }
 
-export function projectMarkdown(source: string): Projection {
+export function projectMarkdown(source: string, numbering: readonly string[] = []): Projection {
   const tree = parseMarkdown(source), leaves: Leaf[] = [], blocks: Block[] = [], citationOrder: string[] = []
   const addText = (node: AstNode, blockId?: string) => {
     const value = (node.value ?? '').replace(/\r\n|\r/g, '\n'), base = start(node), last = end(node)
@@ -82,7 +82,8 @@ export function projectMarkdown(source: string): Projection {
       if (from > cursor) chunks.push({ from: cursor, to: from, text: value.slice(cursor, from) })
       const keys = [...match[0].matchAll(/@(sf_[a-zA-Z0-9_]+)/g)].map(item => item[1])
       for (const key of keys) if (!citationOrder.includes(key)) citationOrder.push(key)
-      chunks.push({ from, to, text: `[${keys.map(key => citationOrder.indexOf(key) + 1).join(', ')}]`, citationKeys: keys }); cursor = to
+      const order = [...numbering, ...citationOrder.filter(key => !numbering.includes(key))]
+      chunks.push({ from, to, text: `[${keys.map(key => order.indexOf(key) + 1).join(', ')}]`, citationKeys: keys }); cursor = to
     }
     if (cursor < value.length) chunks.push({ from: cursor, to: value.length, text: value.slice(cursor) })
     node.leafIds = []

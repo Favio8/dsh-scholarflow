@@ -3,6 +3,19 @@ import { invariant, ScholarError } from '../../shared/errors.ts'
 import type { ModelCall } from '../../core/pipeline/generation.ts'
 
 type Host = any
+function modelFailure(failure: Host, selected: { provider: string; model: string }, runId: string) {
+  const code = /^[A-Z_]{1,64}$/.test(failure?.code ?? '') ? failure.code : 'MODEL_CALL_FAILED'
+  const details: Record<string, unknown> = { category: 'provider/transport', operation: 'model.request', phase: 'provider-stream', runId,
+    provider: selected.provider, model: selected.model }
+  if (Number.isInteger(failure?.status) && failure.status >= 100 && failure.status <= 599) details.status = failure.status
+  if (Number.isFinite(failure?.providerRetryAfterMs) && failure.providerRetryAfterMs > 0) details.providerRetryAfterMs = failure.providerRetryAfterMs
+  const message = failure?.status === 401 ? '当前模型服务拒绝了身份认证，请检查 DSH 当前提供方的授权。'
+    : failure?.status === 403 ? '当前模型服务拒绝访问，请检查 DSH 当前提供方的权限。'
+    : failure?.status === 429 ? '当前模型服务正在限流，请稍后重试。'
+    : code === 'TRANSPORT' ? '当前模型请求的连接中断，本次未改动正文；可以重试。'
+    : '当前模型未能完成请求，本次未改动正文；可以重试或查看详情。'
+  return new ScholarError(code, message, details)
+}
 declare module '@deepseek-ai/dsh-llm/message' {
   interface MessageSourceMap {
     'scholarflow-stage-audit': { kind: 'scholarflow-stage-audit'; runId: string; phase: 'request' | 'result' }
@@ -63,13 +76,12 @@ export async function callStageModelWithImage(ctx: Host, session: Host, selected
   }
   logStage(session, call.runId, 'result', { text, finish: finish?.kind ?? 'missing', ...(usage && { usage }) })
   invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认结果日志持久化；未发布识别结果。')
-  if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '宿主模型调用已取消。')
+  if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '操作已停止。', { category: 'cancelled', operation: 'model.request' })
   if (finish?.kind === 'max-tokens') throw new ScholarError('MODEL_OUTPUT_LIMIT_REACHED', '模型输出达到提供方上限而未完整返回；本次调用已计费，请重试或缩小范围。')
   if (finish?.kind === 'error') {
-    const code = /^[A-Z_]{1,64}$/.test(finish.failure?.code ?? '') ? finish.failure.code : 'MODEL_CALL_FAILED'
-    throw new ScholarError(code, '宿主模型调用失败；请在 DSH 中检查模型、凭据或服务状态。')
+    throw modelFailure(finish.failure, selected, call.runId)
   }
-  invariant(finish?.kind === 'stop' && text.trim(), 'MODEL_OUTPUT_INCOMPLETE', '模型输出未正常结束或为空；未发布识别结果。')
+  if (!(finish?.kind === 'stop' && text.trim())) throw new ScholarError('MODEL_OUTPUT_INCOMPLETE', '模型输出未正常结束或为空，请重试。', { category: 'model-response', operation: 'model.request' })
   return text
 }
 
@@ -95,15 +107,11 @@ export async function callStageModel(ctx: Host, session: Host, selected: { provi
   }
   logStage(session, call.runId, 'result', { text, finish: finish?.kind ?? 'missing', ...(usage && { usage }) })
   invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认结果日志持久化；未发布正文建议。')
-  if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '宿主模型调用已取消。')
+  if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '操作已停止。', { category: 'cancelled', operation: 'model.request' })
   if (finish?.kind === 'max-tokens') throw new ScholarError('MODEL_OUTPUT_LIMIT_REACHED', '模型输出达到提供方上限而未完整返回；本次调用已计费，请重试或缩小范围。')
   if (finish?.kind === 'error') {
-    const code = /^[A-Z_]{1,64}$/.test(finish.failure?.code ?? '') ? finish.failure.code : 'MODEL_CALL_FAILED'
-    const facts: Record<string, number> = {}, failure = finish.failure
-    if (Number.isInteger(failure?.status) && failure.status >= 100 && failure.status <= 599) facts.status = failure.status
-    if (Number.isFinite(failure?.providerRetryAfterMs) && failure.providerRetryAfterMs > 0) facts.providerRetryAfterMs = failure.providerRetryAfterMs
-    throw new ScholarError(code, '宿主模型调用失败；请在 DSH 中检查模型、凭据或服务状态。', facts)
+    throw modelFailure(finish.failure, selected, call.runId)
   }
-  invariant(finish?.kind === 'stop' && text.trim(), 'MODEL_OUTPUT_INCOMPLETE', '模型输出未正常结束或为空；未应用任何正文修改。')
+  if (!(finish?.kind === 'stop' && text.trim())) throw new ScholarError('MODEL_OUTPUT_INCOMPLETE', '模型输出未正常结束或为空，请重试。', { category: 'model-response', operation: 'model.request' })
   return text
 }

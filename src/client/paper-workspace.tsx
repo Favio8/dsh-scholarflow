@@ -77,7 +77,7 @@ export const PAPER_CSS = `
 .sf-source-editor{display:flex;flex:1;min-height:0;overflow:hidden;position:relative}
 .sf-line-gutter{width:48px;flex-shrink:0;box-sizing:border-box;overflow:hidden;padding:20px 10px 20px 0;text-align:right;user-select:none;color:#a4a9b3;background:#88803}
 .sf-line-gutter>div{will-change:transform}
-.sf-line-gutter,.sf-app textarea.sf-source-input{font:13px/24px Consolas,'SFMono-Regular',monospace!important;tab-size:2}
+.sf-line-gutter,.sf-app textarea.sf-source-input{font:var(--sf-editor-font,13px)/var(--sf-editor-line,24px) Consolas,'SFMono-Regular',monospace!important;tab-size:2}
 .sf-app textarea.sf-source-input{flex:1;width:0;min-width:0;height:100%;resize:none!important;border:0!important;border-radius:0;padding:20px 18px;white-space:pre;overflow:auto;outline:none!important;background:transparent}
 .sf-preview-pane{background:var(--dsw-alias-bg-layer-2,#f4f5f7)}
 .sf-paper-scroll{flex:1;min-height:0;overflow:auto;padding:24px 20px 40px}
@@ -113,4 +113,11 @@ export const PAPER_CSS = `
 .sf-export-choice button{display:block;width:100%;margin-top:10px}
 @container (max-width:700px){.sf-paper-header{padding:0 12px;gap:6px}.sf-paper-title{max-width:26%}.sf-paper-page{padding:28px 24px}.sf-paper-scroll{padding:16px 12px}.sf-line-gutter{width:36px}}
 .sf-paper-project{position:relative;container-type:inline-size}
+.sf-pane-caption>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.sf-pane-zoom{display:flex;align-items:center;flex:none;white-space:nowrap;gap:1px}
+.sf-paper-project .sf-pane-zoom button{padding:3px;min-width:22px;border:0;font-size:11px;font-variant-numeric:tabular-nums}
+.sf-paper-header{flex-wrap:nowrap}.sf-type-chip,.sf-export-split>button{white-space:nowrap;flex-shrink:0}
+.sf-paper-title{min-width:0;flex:1}.sf-paper-header .sf-native-tools{gap:4px}.sf-paper-header select{flex-shrink:0;width:82px}
+@container(max-width:640px){.sf-paper-title{display:none}.sf-paper-header{padding:0 8px;gap:4px}.sf-native-tools{gap:4px}.sf-pane-caption{padding:0 5px}.sf-line-gutter{width:28px}.sf-source-input{padding-left:8px!important}.sf-paper-page{padding:22px 18px}}
+@container(max-width:420px){.sf-paper-header select{width:64px}.sf-export-format-label{display:none}.sf-paper-toolbar{padding:0 8px}}
 `

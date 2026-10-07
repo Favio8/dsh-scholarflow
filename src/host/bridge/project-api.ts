@@ -153,8 +153,9 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
 export async function applicationResult<T>(operation: () => Promise<T>) {
   try { return { ok: true as const, data: await operation() } }
   catch (error) {
+    if ((error as Error).name === 'AbortError') return { ok: false as const, error: { code: 'CANCELLED', message: '操作已停止。', retryable: false, details: { category: 'cancelled' } } }
     if (error instanceof ScholarError) return { ok: false as const, error: { code: error.code, message: error.message, retryable: false, details: error.details } }
-    if (error instanceof z.ZodError) return { ok: false as const, error: { code: 'INVALID_REQUEST', message: '请求未通过校验。', retryable: false, details: { fields: error.issues.map(i => i.path.join('.')) } } }
+    if (error instanceof z.ZodError) return { ok: false as const, error: { code: 'INVALID_REQUEST', message: '输入有无效字段，请修改后重试。', retryable: false, details: { category: 'request-validation', fields: error.issues.map(i => i.path.join('.')) } } }
     const code = (error as { code?: string }).code
     return { ok: false as const, error: { code: code?.startsWith('FS_') ? code : 'OPERATION_FAILED',
       message: code === 'FS_SANDBOX_DENIED' ? '宿主文件权限拒绝写入；请在 DSH 中检查当前会话权限。' : '操作未完成，现有文件已保留。', retryable: false } }

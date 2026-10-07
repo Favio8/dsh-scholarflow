@@ -1,5 +1,5 @@
 import React from 'react'
-import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, MotionConfig, motion, useReducedMotion, useIsPresent } from 'motion/react'
 import { SCENE } from './tokens.ts'
 
 /**
@@ -21,14 +21,17 @@ export type SfPresenceProps = { open: boolean; children: React.ReactNode; classN
 
 /** Vertical enter/exit: the bottom overlay must not push the text above it while it moves. */
 export function SfPresence({ open, children, className, offset = SCENE.overlayShift, role, label }: SfPresenceProps) {
-  const reduce = useReducedMotion()
   return <AnimatePresence>
-    {open && <motion.div className={className} role={role} aria-label={label}
+    {open && <PresenceContent className={className} role={role} label={label} offset={offset}>{children}</PresenceContent>}
+  </AnimatePresence>
+}
+function PresenceContent({ children, className, role, label, offset = SCENE.overlayShift }: Omit<SfPresenceProps, 'open'>) {
+  const reduce = useReducedMotion(), present = useIsPresent()
+  return <motion.div className={className} role={role} aria-label={label} inert={!present} aria-hidden={!present || undefined}
       initial={{ opacity: reduce ? 1 : 0, y: reduce ? 0 : offset }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reduce ? 0 : offset }}
       transition={{ duration: reduce ? .001 : SCENE.overlay / 1000, ease }}>
       {children}
-    </motion.div>}
-  </AnimatePresence>
+    </motion.div>
 }
 
 /**
