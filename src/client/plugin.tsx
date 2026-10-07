@@ -4,6 +4,7 @@ import { PaperMaterials, MATERIALS_CSS } from './paper-materials.tsx'
 import { MOTION_CSS } from './motion/tokens.ts'
 import { OVERLAY_CSS } from './middle-overlay.tsx'
 import { REWRITE_CSS } from './rewrite-candidate.tsx'
+import { SOURCE_CANDIDATE_CSS } from './source-candidate.tsx'
 import { SELECTION_MENU_CSS } from './selection-menu.tsx'
 import { OutlineEditor } from './research.tsx'
 import { CreationWizard, WIZARD_CSS } from './creation-wizard.tsx'
@@ -48,13 +49,13 @@ const SETTINGS_CSS = `.sf-caption-settings{position:absolute;top:calc(100% + 4px
 .sf-caption-settings .sf-settings{max-width:none;padding:16px}`
 
 export function apply(ctx: Host) {
-  const call = async (method: string, args: unknown = {}) => {
-    const result = await ctx.connection.rpc.call('/api', `scholarflow.v1/${method}`, { args })
+  const call = async (method: string, args: unknown = {}, signal?: AbortSignal) => {
+    const result = await ctx.connection.rpc.call('/api', `scholarflow.v1/${method}`, { args }, signal)
     if (!result.ok) throw new Error(result.error.message)
     return result.value
   }
-  const api = async (method: string, request: Host) => {
-    const result = await call(method, { request })
+  const api = async (method: string, request: Host, signal?: AbortSignal) => {
+    const result = await call(method, { request }, signal)
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
     return result.data
   }
@@ -145,7 +146,15 @@ export function apply(ctx: Host) {
     </div></>
   }
   function Workspace(props: Host) {
-    return <div className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS}</style>
+    const visualRoot = useRef<HTMLDivElement>(null)
+    useEffect(() => {
+      // A visual pause must not rerender the Host Slot and recreate the editor/request.
+      const sync = () => { if (visualRoot.current) visualRoot.current.dataset.sfHidden = String(document.hidden || !document.hasFocus()) }
+      sync(); document.addEventListener('visibilitychange', sync)
+      window.addEventListener('blur', sync); window.addEventListener('focus', sync)
+      return () => { document.removeEventListener('visibilitychange', sync); window.removeEventListener('blur', sync); window.removeEventListener('focus', sync) }
+    }, [])
+    return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS}</style>
       <SelectionReferenceDetails sessionId={props.sessionId} />
       <main className="sf-body">{props.renderSlot('scholarflow.project', {
         renderNativeTools: (extra: React.ReactNode) => <NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} extra={extra} />,
@@ -263,7 +272,7 @@ export function apply(ctx: Host) {
           {(['Overview', 'Research', 'History'] as const).map(name => <button key={name} onClick={e => { closeMenu(e.currentTarget); setTab(name) }}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
         </div></details></div>
         {tab !== 'Draft' && <div className="sf-tool-back"><button onClick={() => setTab('Draft')}>← 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
-        <WritingProgress api={api} context={context} refresh={refresh} />
+        <WritingProgress api={api} context={context} refresh={refresh} onManage={setTab} />
         <div className="sf-paper-content">
           <div id="sf-panel-Overview" role="tabpanel" aria-label="概览" hidden={tab !== 'Overview'}><WritingRequirements key={`requirements_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} onFormat={setFormat} /></div>
           <div id="sf-panel-Research" role="tabpanel" aria-label="资料与研究" hidden={tab !== 'Research'}><PaperMaterials key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
@@ -303,7 +312,7 @@ export function apply(ctx: Host) {
       {row ? <><label>新项目默认类型 <select aria-label="新项目默认类型" value={row.value.defaultProjectType} onChange={e => save('defaultProjectType', e.target.value)}>
         <option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></label>
         <label>新项目默认语言 <select aria-label="新项目默认语言" value={row.value.language} onChange={e => save('language', e.target.value)}><option value="zh">中文</option><option value="en">英文</option></select></label>
-        <label>新项目默认模型调用上限 <select aria-label="新项目默认模型调用上限" value={row.value.maxModelCalls} onChange={e => save('maxModelCalls', Number(e.target.value))}>{Array.from({ length: 40 }, (_, i) => i + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+        <p>模型调用次数和任务耗时仅用于统计；可随时暂停或停止。</p>
         <label><input type="checkbox" checked={row.value.networkEnabled} onChange={e => save('networkEnabled', e.target.checked)} />允许外部检索与公开 Skill 读取（每次操作展示发送范围）</label></>
         : <p>正在读取宿主设置…</p>}<p role="status">{message}</p><WritingProfiles api={api} /><StructurePresets api={api} run={async (fn: () => Promise<unknown>) => { try { await fn() } catch (error) { setMessage((error as Error).message) } }} busy={false} /><AcademicSkills api={api} /></section>
   }

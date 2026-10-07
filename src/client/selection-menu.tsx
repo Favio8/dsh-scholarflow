@@ -24,6 +24,10 @@ export const REWRITE_ACTIONS: { action: RewriteAction; label: string; instructio
  * menu can be placed without a transform on any ancestor of the editor.
  */
 export function sourceSelectionRect(area: HTMLTextAreaElement): DOMRect {
+  return sourceRangeRect(area, area.selectionStart, area.selectionEnd)
+}
+
+export function sourceRangeRect(area: HTMLTextAreaElement, start: number, end: number): DOMRect {
   const mirror = document.createElement('div'), span = document.createElement('span')
   const style = window.getComputedStyle(area), bounds = area.getBoundingClientRect()
   for (const property of ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'tab-size', 'padding', 'border', 'box-sizing']) {
@@ -31,13 +35,12 @@ export function sourceSelectionRect(area: HTMLTextAreaElement): DOMRect {
   }
   Object.assign(mirror.style, { position: 'fixed', visibility: 'hidden', pointerEvents: 'none', whiteSpace: 'pre',
     left: `${bounds.left - area.scrollLeft}px`, top: `${bounds.top - area.scrollTop}px`, width: `${bounds.width}px` })
-  mirror.append(document.createTextNode(area.value.slice(0, area.selectionStart)))
-  span.textContent = area.value.slice(area.selectionStart, area.selectionEnd) || '\u200b'
+  mirror.append(document.createTextNode(area.value.slice(0, start)))
+  span.textContent = area.value.slice(start, end) || '\u200b'
   mirror.append(span); document.body.append(mirror)
   try {
     const rect = span.getClientRects()[0] ?? span.getBoundingClientRect()
-    const top = Math.max(bounds.top, Math.min(rect.top, bounds.bottom - 22))
-    return new DOMRect(Math.max(bounds.left, Math.min(rect.left, bounds.right - 20)), top, Math.min(rect.width, bounds.width), Math.min(rect.height, 24))
+    return new DOMRect(rect.left, rect.top, Math.min(rect.width, bounds.width), Math.min(rect.height, 24))
   } finally { mirror.remove() }
 }
 

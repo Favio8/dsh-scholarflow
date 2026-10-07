@@ -159,12 +159,28 @@ export const writingTaskSchema = z.object({ schemaVersion: z.literal(1), id, pro
   usedModelCalls: z.number().int().nonnegative(), modelCallAllowance: z.number().int().positive().optional(),
   searchQueries: z.array(z.string()).default([]), searchQueryIndex: z.number().int().nonnegative().default(0),
   evidenceMaterialIndex: z.number().int().nonnegative().default(0), evidenceBlockIndex: z.number().int().nonnegative().default(0),
-  materialSummaries: z.array(z.string()).default([]), modelReviewComplete: z.boolean().default(false), researchComplete: z.boolean().default(false), usedSearchQueries: z.number().int().nonnegative(), elapsedMs: z.number().nonnegative(),
+  materialSummaries: z.array(z.string()).default([]), modelReviewComplete: z.boolean().default(false),
+  revisionPlan: z.object({ inputHash: hash, items: z.array(z.object({ sectionId: id, instruction: z.string().max(4000) }).strict()), index: z.number().int().nonnegative() }).strict().optional(),
+  lastReviewSignature: hash.optional(), reviewStalls: z.number().int().nonnegative().default(0), generatedSectionHashes: z.record(id, hash).default({}),
+  lastSemanticReviewSignature: hash.optional(), semanticReviewStalls: z.number().int().nonnegative().default(0),
+  researchComplete: z.boolean().default(false), usedSearchQueries: z.number().int().nonnegative(), elapsedMs: z.number().nonnegative(),
   owner: z.string(), expectedDocumentHash: hash, childRunId: id.optional(), pendingProposalId: id.optional(),
   questions: z.array(writingQuestion), notes: z.array(z.string()), issues: z.array(taskIssue).max(200).default([]),
   consecutiveFailures: z.number().int().nonnegative().default(0), progressMark: z.number().int().nonnegative().default(0), onlineSources: z.array(id),
   createdAt: z.string(), updatedAt: z.string() }).strict()
 export type WritingTask = z.infer<typeof writingTaskSchema>
+/** File work units only: a selected folder authorises its members, not a material
+ * called after the folder itself. Shared by scheduling and progress counters. */
+export function writingReadPaths(spec: CreationSpec) {
+  const paths = new Set(spec.materials)
+  if (!spec.requirementSources.length && spec.assignmentPath) paths.add(spec.assignmentPath)
+  for (const source of spec.requirementSources) {
+    if (source.origin !== 'workspace') continue
+    if (source.kind === 'file' && source.path) paths.add(source.path)
+    if (source.kind === 'folder') for (const member of source.members) paths.add(member.name)
+  }
+  return [...paths]
+}
 export const creationPrepareRequest = z.object({ context: requestContext, spec: creationSpec }).strict()
 export const writingTaskRequest = z.object({ context: requestContext, taskId: id.optional() }).strict()
 export const writingTaskAction = writingTaskRequest.extend({ action: z.enum(['pause', 'resume', 'cancel', 'answer']),

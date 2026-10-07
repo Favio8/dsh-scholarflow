@@ -67,7 +67,7 @@ test('read approval is the union of requirement sources and materials, never one
   const both = spec({ assignmentPath: '要求/说明.md', materials: ['课件/第3讲.pdf'],
     requirementSources: [{ resourceId: 'req_dir', origin: 'workspace', kind: 'folder', path: '要求', members: [{ name: '要求/说明.md' }] }] })
   const approval = readApproval(both)
-  assert.deepEqual([...approval.paths].sort(), ['要求', '要求/说明.md', '课件/第3讲.pdf'].sort())
+  assert.deepEqual([...approval.paths].sort(), ['要求/说明.md', '课件/第3讲.pdf'].sort(), 'folder itself is not a readable material work unit')
   assert.deepEqual(approval.materials, ['课件/第3讲.pdf'], '材料清单本身不被要求来源改写')
 
   const onlyRequirements = readApproval(spec({ assignmentPath: '要求/说明.md' }))

@@ -24,6 +24,11 @@ export function classifyNote(note: string, at: string): TaskIssue {
   const object = failure?.groups?.object ?? '本次任务'
   const reason = failure?.groups?.reason ?? trimmed
 
+  if (/^(?:待检查|AI 全文检查|要求检查|全文审查)：/.test(trimmed)) return issue({
+    object, at, group: 'needs-action', what: reason.length > 160 ? reason.slice(0, 160) : reason,
+    impact: '这是实际检查记录；查看依据并处理，未知不会当作通过。',
+    actions: [{ label: '查看检查结果', op: 'view-review' }], detail: trimmed })
+
   if (/仅找到文献信息|未获得可读全文|未取得全文/.test(trimmed)) return issue({
     object, at, group: 'needs-action', what: '这篇补充文献暂未取得全文（目前只有文献信息）',
     impact: '依赖未见正文的论断不会被写入；其余分析继续使用已取得的材料。',
@@ -54,7 +59,7 @@ export function classifyNote(note: string, at: string): TaskIssue {
   if (/待检查|AI 全文检查/.test(trimmed)) return issue({
     object, at, group: 'needs-action', what: reason.length > 160 ? reason.slice(0, 160) : reason,
     impact: '这是模型辅助检查提出的问题，需要人工判断或修正；未知不能当作通过。',
-    actions: [], detail: trimmed })
+    actions: [{ label: '查看检查结果', op: 'view-review' }], detail: trimmed })
   // Exception text, stack frames and protocol codes belong in the secondary detail: a reader
   // cannot act on "Error: ENOENT at Object.readFile", and it is not the product's words.
   if (looksTechnical(reason)) return issue({

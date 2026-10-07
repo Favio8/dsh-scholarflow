@@ -1,5 +1,6 @@
 import { digest } from '../store/files.ts'
 import type { CreationSpec, RequirementSource } from '../../shared/writing-task.ts'
+import { writingReadPaths } from '../../shared/writing-task.ts'
 
 // Read-time compatibility for stored projects (SPEC v1.1 §13). Nothing here writes:
 // opening an old project must not migrate it. The new fields win when present; a
@@ -19,13 +20,7 @@ export function readRequirementSources(spec: CreationSpec): RequirementSource[] 
  */
 export function readApproval(spec: CreationSpec) {
   const sources = readRequirementSources(spec)
-  const paths = new Set<string>(spec.materials)
-  for (const source of sources) {
-    if (source.origin !== 'workspace') continue
-    if (source.path) paths.add(source.path)
-    if (source.kind === 'folder') for (const member of source.members) paths.add(member.name)
-  }
-  return { sources, materials: [...spec.materials], paths: [...paths] }
+  return { sources, materials: [...spec.materials], paths: writingReadPaths(spec) }
 }
 
 /** Files a folder source contributes, in the order they were confirmed. */

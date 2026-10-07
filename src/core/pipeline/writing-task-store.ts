@@ -25,8 +25,19 @@ export function showProgress(task: WritingTask, input: { object: string; what: s
   return task
 }
 export function markHandled(task: WritingTask, input: { object: string; what: string; impact: string }) {
-  task.issues = mergeIssue(task.issues, handledIssue({ ...input, at: new Date().toISOString() }))
+  const resolved = handledIssue({ ...input, at: new Date().toISOString() })
+  task.issues = mergeIssue(task.issues, resolved).map(row => row.key === resolved.key
+    ? { ...row, group: 'handled', impact: resolved.impact, actions: [] } : row)
   return task
+}
+
+/** A fresh full review supersedes findings from its own previous review, while unrelated
+ * reading failures and unknown checks stay open. Raw notes remain an audit trail. */
+export function reconcileReviewIssues(task: WritingTask, object: '要求检查' | '全文审查', details: string[]) {
+  const keys = new Set(details.map(detail => classifyNote(`${object}：${detail}`, task.updatedAt).key))
+  for (const row of [...task.issues]) if (row.object === object && row.group === 'needs-action' && !keys.has(row.key))
+    markHandled(task, { object, what: row.what, impact: '本轮完整复查已不再提出这一问题；原检查记录保留在技术详情。' })
+  for (const detail of details) noteTask(task, `${object}：${detail}`)
 }
 
 export async function readWritingSpec(io: FileStore) { const file = await io.read(specPath); return file ? creationSpec.parse(JSON.parse(file.text).spec) : undefined }
@@ -69,7 +80,9 @@ export async function saveWritingSpec(io: FileStore, spec: CreationSpec, revisio
       origin: { type: 'user' }, confirmation: 'confirmed', verificationMethod: 'model-assisted', confirmedAt: now }
     ledger.requirements.writing_length = { id: 'writing_length', kind: 'length', description: `目标篇幅约 ${spec.targetLength} ${spec.language === 'en' ? '词' : '汉字'}`,
       origin: { type: 'user' }, confirmation: 'confirmed', verificationMethod: 'deterministic', confirmedAt: now,
-      constraint: { operator: 'min', value: Math.floor(spec.targetLength * .8), unit: spec.language === 'en' ? 'words' : 'zh-characters' } }
+      constraint: { operator: 'min', value: Math.floor(spec.targetLength * .9), unit: spec.language === 'en' ? 'words' : 'zh-characters', countingPolicyId: 'sf-body-han-western-v1' } }
+    ledger.requirements.writing_length_max = { ...ledger.requirements.writing_length, id: 'writing_length_max',
+      constraint: { ...ledger.requirements.writing_length.constraint!, operator: 'max', value: Math.ceil(spec.targetLength * 1.1) } }
     if (/(?:禁止|不允许|不得)\s*(?:使用\s*)?(?:AI|人工智能|生成式)/i.test(spec.requirements))
       ledger.requirements.writing_ai_policy = { id: 'writing_ai_policy', kind: 'ai-policy', description: spec.requirements, origin: { type: 'user' }, confirmation: 'confirmed', verificationMethod: 'manual', confirmedAt: now, constraint: { operator: 'equals', value: 'forbidden' } }
     else delete ledger.requirements.writing_ai_policy

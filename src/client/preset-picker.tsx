@@ -1,3 +1,4 @@
+import { useTextPrompt } from './text-prompt.tsx'
 import React, { useEffect, useState } from 'react'
 import { localized, type Preset } from '../shared/presets.ts'
 import { sectionsFromPreset } from '../core/presets/apply.ts'
@@ -72,6 +73,7 @@ export const PRESET_CSS = `
 `
 
 export function PresetPicker({ open, language, paperType, applied, structure, api, run, busy, onClose, onUse }: any) {
+  const textPrompt = useTextPrompt()
   const [library, setLibrary] = useState<{ all: Preset[]; issues: { message: string }[] }>({ all: [], issues: [] })
   const [tab, setTab] = useState<string>(paperType)
   const [query, setQuery] = useState('')
@@ -110,7 +112,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
       : '当前结构已被修改，使用该预设会替换它。继续？')) return
     onUse(selected, switching)
   }
-  return <div className="sf-preset-backdrop" onClick={event => { if (event.target === event.currentTarget) onClose() }}>
+  return <>{textPrompt.dialog}<div className="sf-preset-backdrop" onClick={event => { if (event.target === event.currentTarget) onClose() }}>
     <section className="sf-preset-dialog" role="dialog" aria-modal="true" aria-label="选择结构预设">
       <style>{PRESET_CSS}</style>
       <header><strong>结构预设</strong>
@@ -161,7 +163,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
                   {applied?.id === preset.id && <em>当前</em>}
                 </button>
                 {source === 'user' && <div className="sf-preset-manage">
-                  <button disabled={busy} onClick={() => { const next = window.prompt('新的预设名称', localized(preset.title, language)); if (next?.trim())
+                  <button disabled={busy} onClick={async () => { const next = await textPrompt.ask('新的预设名称', localized(preset.title, language)); if (next?.trim())
                     void manage(() => api('presets.rename', { id: preset.id, title: next.trim() })) }}>改名</button>
                   <button disabled={busy} onClick={() => { if (window.confirm(`删除预设「${localized(preset.title, language)}」？已有论文不受影响。`))
                     void manage(() => api('presets.remove', { id: preset.id })) }}>删除</button>
@@ -196,5 +198,5 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
         <button className="sf-primary" disabled={busy || !selected} onClick={apply}>使用此预设</button>
       </footer>
     </section>
-  </div>
+  </div></>
 }

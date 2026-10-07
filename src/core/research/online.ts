@@ -10,8 +10,6 @@ const searchPath = (searchId: string) => `.scholarflow/research/${id.parse(searc
 export interface SearchPlan { id: string; projectId: string; configHash: string; ledgerRevision: number; search: ReturnType<typeof searchInput.parse>; contentHash: string; workflowId?: string }
 export async function prepareSearch(io: FileStore, input: unknown): Promise<SearchPlan> {
   const current = await snapshot(io), search = searchInput.parse(input)
-  invariant(current.config.workflow.budget.maxSearchQueries >= 1 && search.limit <= current.config.workflow.budget.maxCandidateSources,
-    'RESEARCH_BUDGET_EXHAUSTED', '本项目检索预算不足，未发起外部请求。')
   invariant(!current.config.research.providerRefs.length || current.config.research.providerRefs.includes('crossref'), 'RESEARCH_PROVIDER_NOT_APPROVED', '项目未选择 Crossref 提供方。')
   const workflowId = await workflowAssociation(io)
   const plan = { id: newId('search'), projectId: current.ledger.projectId, configHash: current.configHash, ledgerRevision: current.ledger.revision, search, ...(workflowId && { workflowId }) }
@@ -128,7 +126,6 @@ export async function prepareLookup(io: FileStore, sourceId: string): Promise<Lo
   const current = await snapshot(io), source = current.ledger.sources[sourceId]
   invariant(source?.identifiers.doi, 'SOURCE_IDENTIFIER_REQUIRED', '所选来源没有 DOI，不能进行 DOI 查询。')
   invariant(!current.config.research.providerRefs.length || current.config.research.providerRefs.includes('crossref'), 'RESEARCH_PROVIDER_NOT_APPROVED', '项目未选择 Crossref 提供方。')
-  invariant(current.config.workflow.budget.maxSearchQueries > 0, 'RESEARCH_BUDGET_EXHAUSTED', '本项目在线查询预算为零。')
   const workflowId = await workflowAssociation(io)
   const plan = { id: newId('lookup'), projectId: current.ledger.projectId, configHash: current.configHash, ledgerRevision: current.ledger.revision, ...(workflowId && { workflowId }),
     sourceId: source.id, sourceHash: digest(json(source)), doi: doi.parse(source.identifiers.doi) }

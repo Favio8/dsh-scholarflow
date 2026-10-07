@@ -29,8 +29,8 @@ export const automaticStateSchema = z.object({ schemaVersion: z.literal(1), auto
   revision: z.number().int().nonnegative(), startedAt: z.string(), updatedAt: z.string(), reason: z.string().max(4000), code: id.optional(),
   owner: z.object({ pid: z.number().int().min(1), bootInstance: z.string().min(1).max(200) }).strict(),
   executionSessionId: id.optional(),
-  steps: z.array(z.object({ stepId: id, number: z.number().int().min(1).max(64), stage: stage.optional(), operation: automaticOperation,
+  steps: z.array(z.object({ stepId: id, number: z.number().int().min(1), stage: stage.optional(), operation: automaticOperation,
     beforeProgress: hash, afterProgress: hash.optional(), child: z.object({ runId: id, planHash: hash }).strict().optional(), state: z.enum(['pending', 'settled', 'interrupted']),
-    startedAt: z.string(), completedAt: z.string().optional() }).strict()).max(64) }).strict()
+    startedAt: z.string(), completedAt: z.string().optional() }).strict()) }).strict()
 export type AutomaticPolicy = z.infer<typeof automaticPolicySchema>
 export type AutomaticState = z.infer<typeof automaticStateSchema>

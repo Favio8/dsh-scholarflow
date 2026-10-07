@@ -4,7 +4,7 @@
 // The earlier attempt recorded this as unreliable. It was not the client: the wizard is reached
 // through a *new conversation's mode chip*, which nothing had clicked. With that one step the
 // surfaces render and can be asserted on. No model call is made and no paid usage occurs.
-import { chromium } from '@playwright/test'
+import { chromium, _electron as electron } from '@playwright/test'
 import { spawn } from 'node:child_process'
 import { mkdir, writeFile, readFile, symlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -13,7 +13,8 @@ import { resolve, join } from 'node:path'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
 const testHome = resolve('.dsh-tmp/ui-acceptance', String(Date.now()))
-const profile = join(testHome, 'profiles/scholarflow-probe')
+const nativeDesktop = process.argv.includes('--desktop')
+const profile = join(testHome, 'profiles', nativeDesktop ? 'desktop' : 'scholarflow-probe')
 const emptyRoot = join(testHome, '空工作区 TEST_ONLY')
 const projectRoot = join(testHome, '已有项目 TEST_ONLY')
 const results = []
@@ -33,18 +34,37 @@ await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'scholarfl
 await writeFile(join(profile, 'cordis.yml'), '[]\n')
 try { await symlink(resolve('.'), join(profile, 'node_modules/dsh-scholarflow'), 'junction') } catch (error) { if (error.code !== 'EEXIST') throw error }
 
-const child = spawn(join(install, 'DeepSeek Harness.exe'), ['--expose-internals',
+if (nativeDesktop) {
+  const desktop = JSON.parse(await readFile(join(process.env.USERPROFILE, '.dsh/profiles/desktop/package.json'), 'utf8'))
+  const manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
+  await writeFile(join(profile, 'package.json'), JSON.stringify({ ...manifest, dsh: desktop.dsh }))
+  await writeFile(join(profile, 'cordis.patch.yml'), '- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 19381\n')
+}
+const child = nativeDesktop ? undefined : spawn(join(install, 'DeepSeek Harness.exe'), ['--expose-internals',
   join(install, 'resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'),
   'scholarflow-probe', '--no-open', '--port', '19381'], {
   env: { ...process.env, DSH_HOME: testHome, ELECTRON_RUN_AS_NODE: '1', DSH_PERMISSION_MODE: 'workspace-write' },
   windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
+const browser = nativeDesktop ? undefined : await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
+let desktopApp
 const payload = body => body?.result?.value?.data ?? body?.result?.value ?? body
 let page
 const text = el => (el.innerText ?? '').replace(/\s+/g, ' ').trim()
 
 try {
-  const url = await new Promise((done, reject) => {
+  if (nativeDesktop) {
+    const env = { ...process.env, DSH_HOME: testHome, DSH_PERMISSION_MODE: 'workspace-write' }; delete env.ELECTRON_RUN_AS_NODE
+    desktopApp = await electron.launch({ executablePath: join(install, 'DeepSeek Harness.exe'), args: [`--user-data-dir=${join(testHome, 'electron')}`], env })
+    page = await desktopApp.firstWindow()
+    await page.locator('button[aria-label="新建会话"]').first().waitFor({ timeout: 45000 })
+    await desktopApp.evaluate(({ BrowserWindow }) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.setBackgroundThrottling(false)
+        window.setSize(1440, 960); window.showInactive()
+      }
+    })
+  }
+  const url = nativeDesktop ? page.url() : await new Promise((done, reject) => {
     const timeout = setTimeout(() => reject(new Error('Host boot timed out')), 30000)
     let output = ''
     child.stdout.on('data', chunk => { output += chunk.toString()
@@ -52,13 +72,13 @@ try {
       if (match) { clearTimeout(timeout); done(match[1]) } })
     child.on('exit', code => { clearTimeout(timeout); reject(new Error(`Host exited ${code}`)) })
   })
-  page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage()
+  if (!nativeDesktop) page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage()
   page.setDefaultTimeout(20000)
   // Collected so the motion section can assert that driving the UI did not break anything.
   const clientErrors = []
   page.on('pageerror', error => clientErrors.push(error.message))
   page.on('console', message => { if (message.type() === 'error') clientErrors.push(message.text()) })
-  await page.goto(url)
+  if (!nativeDesktop) await page.goto(url)
   await page.waitForTimeout(1500)
   const dismiss = async () => {
     const dialogs = page.getByRole('dialog')
@@ -85,7 +105,7 @@ try {
   await dismiss()
 
   // ── AT-29 · the top entry opens the plugin's own settings surface ─────────────────────────
-  await page.locator('button', { hasText: 'ScholarFlow 设置' }).first().click()
+  await page.getByRole('button', { name: 'ScholarFlow 设置', exact: true }).first().click()
   await page.waitForTimeout(1500)
   const settings = await page.evaluate(() => {
     const body = (document.body.innerText ?? '').replace(/\s+/g, ' ')
@@ -281,11 +301,13 @@ try {
     '出现手工标记=' + /手工/.test(edited) + ' 撤销按钮=' + await undo.count())
 
   // ── AT-36 · a user preset is saved from the structure and outlives the project ────────────
-  // The button asks for a name through a native prompt, so answer it. A dialog Playwright does
-  // not handle is auto-dismissed, which would silently cancel the save.
+  // Electron has no native prompt: exercise the actual plugin name dialog.
   const dialogs = []
   page.on('dialog', dialog => { dialogs.push(dialog.message()); void dialog.accept('TEST_ONLY 我的结构') })
   await wizard.locator('button', { hasText: '保存为我的预设' }).first().click()
+  const nameDialog = page.getByRole('dialog', { name: '预设名称', exact: true })
+  await nameDialog.getByRole('textbox').fill('TEST_ONLY 我的结构')
+  await nameDialog.getByRole('button', { name: '确认', exact: true }).click()
   await page.waitForTimeout(2500)
   const wizardError = await wizard.locator('.sf-wizard-error').allInnerTexts().catch(() => [])
   const savedList = payload((await rpc('scholarflow.v1/presets.list', { request: {} })).body)
@@ -308,6 +330,15 @@ try {
   const after = presetFile && existsSync(presetFile) ? createHash('sha256').update(await readFile(presetFile)).digest('hex') : ''
   record('AT-36 改结构不覆盖全局预设', Boolean(before) && before === after ? 'PASS' : 'FAIL',
     '预设文件存在=' + Boolean(before) + ' 哈希一致=' + (Boolean(before) && before === after))
+
+  await wizard.getByRole('button', { name: '更换预设', exact: true }).click()
+  await dialog.getByRole('button', { name: '改名', exact: true }).first().click()
+  const renameDialog = page.getByRole('dialog', { name: '新的预设名称', exact: true })
+  await renameDialog.getByRole('textbox').fill('TEST_ONLY 桌面改名后的结构')
+  await renameDialog.getByRole('button', { name: '确认', exact: true }).click()
+  await page.waitForTimeout(500)
+  record('AT-42 桌面预设改名落盘', (await readFile(presetFile, 'utf8')).includes('TEST_ONLY 桌面改名后的结构'), '使用插件对话框并检查实际预设文件')
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
 
   await page.screenshot({ path: join(testHome, 'wizard-step3.png'), fullPage: false })
 
@@ -453,17 +484,14 @@ try {
     burst.pages === 1 && burst.height > 200 && burst.text > 40 && burst.operable > 0, JSON.stringify(burst))
 
   // ── AT-69 · reduced motion collapses the transitions and leaves nothing running ──────────
-  const quiet = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
-  const quietPage = await quiet.newPage()
-  await quietPage.goto(url)
-  await quietPage.waitForTimeout(1400)
-  const quietTokens = await quietPage.evaluate(() => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const quietTokens = await page.evaluate(() => {
     const style = getComputedStyle(document.documentElement)
     return { base: style.getPropertyValue('--sf-dur-base').trim(), sweep: style.getPropertyValue('--sf-sweep').trim() }
   })
   record('AT-69 减少动态效果时令牌收敛', /^1ms$/.test(quietTokens.base) && (quietTokens.sweep === '0s' || quietTokens.sweep === '0'),
     '--sf-dur-base=' + quietTokens.base + ' --sf-sweep=' + quietTokens.sweep)
-  await quiet.close()
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
 
   // ── AT-69 · 200% zoom must not scroll sideways and must keep controls usable ─────────────
   await page.setViewportSize({ width: 640, height: 450 })
@@ -495,7 +523,11 @@ try {
   await page.waitForTimeout(700)
   await pressStep('下一步')
   await page.waitForTimeout(1000)
-  for (let round = 0; round < 3 && !workbench; round += 1) {
+  // Earlier manual-length checks deliberately over-allocate at 1500. Restore a valid
+  // target before testing creation, instead of retrying the same invalid structure.
+  await wizard.locator('.sf-length-input input').fill('8000')
+  await page.waitForTimeout(700)
+  for (let round = 0; round < 2 && !workbench; round += 1) {
     const state = await page.evaluate(() => {
       const button = [...document.querySelectorAll('.sf-wizard-footer button')].find(el => (el.innerText ?? '').includes('创建'))
       const sections = [...document.querySelectorAll('.sf-section-title')].map(el => el.value)
@@ -572,9 +604,9 @@ try {
         rightLeft: opened.rightLeft === undefined ? null : Math.round(opened.rightLeft) }))
     record('AT-67 浮层打开时滚动区获得留白', (opened.padBottom ?? 0) > 0, 'padBottom=' + Math.round(opened.padBottom ?? 0))
     for (let index = 0; index < 6; index++) {
-      await page.locator('.sf-overlay button:has-text("收起"), .sf-overlay-head button').first().click().catch(() => undefined)
+      await page.locator('.sf-overlay').getByRole('button', { name: '收起', exact: true }).click()
       await page.waitForTimeout(90)
-      await page.locator('.sf-selection-menu button').first().click().catch(() => undefined)
+      await page.locator('.sf-overlay').getByRole('button', { name: '展开', exact: true }).click()
       await page.waitForTimeout(90)
     }
     await page.waitForTimeout(500)
@@ -621,7 +653,7 @@ try {
       status: (document.querySelector('.sf-draft-status')?.innerText ?? '').replace(/s+/g, ' ').slice(0, 160) }))
     record('AT-57 提交后界面状态', true, JSON.stringify(afterSubmit))
     record('AT-57 提交后真实进入生成状态', generating, 'generating=' + generating)
-    await page.locator('.sf-rewrite button:has-text("停止")').first().click().catch(() => undefined)
+    await page.locator('.sf-overlay').getByRole('button', { name: '停止生成', exact: true }).click()
     await page.waitForTimeout(2000)
     const afterStop = await page.evaluate(() => ({ state: document.querySelector('.sf-rewrite')?.dataset.state,
       text: document.querySelector('.sf-source-input')?.value ?? '', accept: Boolean(document.querySelector('[data-sf-accept]')) }))
@@ -630,7 +662,9 @@ try {
     record('AT-67 停止后正文不变', afterStop.text === before, '文本一致=' + (afterStop.text === before))
     const urlBefore = page.url()
     for (let index = 0; index < 4; index++) {
-      await page.locator('[class*="right"], [title*="右栏"], [title*="侧边"]').first().click().catch(() => undefined)
+      const close = page.getByRole('button', { name: '收起右侧边栏', exact: true })
+      if (await close.isVisible()) await close.click()
+      else await page.getByRole('button', { name: '打开右侧边栏', exact: true }).click()
       await page.waitForTimeout(160)
     }
     await page.waitForTimeout(700)
@@ -642,11 +676,14 @@ try {
   }
 } catch (error) {
   record('acceptance run', 'FAIL', error.message)
+  await page?.screenshot({ path: join(testHome, 'failure.png') }).catch(() => undefined)
 } finally {
   await writeFile(resolve('.dsh-tmp/ui-acceptance/result.json'), JSON.stringify({ at: new Date().toISOString(), testHome, results }, null, 2))
   await page?.context().close().catch(() => undefined)
-  await browser.close().catch(() => undefined)
-  if (child.exitCode === null) { child.kill(); await new Promise(done => child.once('exit', done)) }
+  await browser?.close().catch(() => undefined)
+  await desktopApp?.close().catch(() => undefined)
+  if (child && child.exitCode === null) { child.kill(); await new Promise(done => child.once('exit', done)) }
   const failed = results.filter(row => row.verdict !== 'PASS').length
   console.log(`\n${results.length - failed}/${results.length} 项通过；隔离目录：${testHome}`)
+  process.exitCode = failed ? 1 : 0
 }

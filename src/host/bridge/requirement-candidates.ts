@@ -41,7 +41,7 @@ export class CandidateStore {
   decide(candidateId: string, projectId: string, sessionId: string, state: 'adopted' | 'discarded', current?: Partial<CandidateBasis>) {
     const row = this.get(candidateId, projectId, sessionId)
     if (current) this.live(row, current)
-    else if (row.state !== 'pending') throw new ScholarError('CANDIDATE_ALREADY_DECIDED', '这个候选已经处理过了。')
+    else if (row.state !== 'pending' && !(state === 'discarded' && row.state === 'stale')) throw new ScholarError('CANDIDATE_ALREADY_DECIDED', '这个候选已经处理过了。')
     const next = { ...row, state, updatedAt: new Date().toISOString() } as StoredCandidate
     this.rows.set(candidateId, next)
     return next

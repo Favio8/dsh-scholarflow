@@ -128,7 +128,7 @@ try {
   const settingsDialog = page.getByRole('dialog', { name: '设置', exact: true })
   await settingsDialog.getByRole('button', { name: 'ScholarFlow', exact: true }).click()
   assert.equal(await settingsDialog.getByRole('combobox', { name: '新项目默认语言', exact: true }).inputValue(), 'en')
-  assert.equal(await settingsDialog.getByRole('combobox', { name: '新项目默认模型调用上限', exact: true }).inputValue(), '7')
+  assert.equal(await settingsDialog.getByRole('combobox', { name: '新项目默认模型调用上限', exact: true }).count(), 0)
   const profilesUi = settingsDialog.getByRole('region', { name: 'Writing Profiles 私有模板库', exact: true })
   const profileName = `TEST_ONLY 文风 ${Date.now()}`, profileInstructions = '\uFEFF# TEST_ONLY 项目文风\r\n保留引用、数字与限定范围，不编造实验结果。\r\n'
   const profileFile = join(skillSource, `${profileName}.md`)

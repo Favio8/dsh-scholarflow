@@ -36,7 +36,7 @@ export function AutomaticWorkflow({ project, workflow, context, api, refresh, in
       {state.steps.some((row: any) => row.state === 'pending') && <p role="alert">一个已登记步骤尚无完成确认；不会重放。请核对实际产物，保留原额度并明确规划新尝试。</p>}
       <details><summary>查看已登记步骤</summary><ol>{state.steps.map((row: any) => <li key={row.stepId}>步骤 {row.number} · {row.stage ?? '结束'} · {row.operation} · {row.state}</li>)}</ol></details>
     </>}
-    {limits && <p role="status" aria-label="自动推进原任务额度">步骤 {limits.usedSteps}/{limits.maxSteps} · 无进展 {limits.noProgress}/{limits.maxNoProgress}；新尝试不重置上限。</p>}
+    {limits && <p role="status" aria-label="自动推进原任务额度">已执行 {limits.usedSteps} 步 · 无进展 {limits.noProgress}/{limits.maxNoProgress}；连续无进展时保留结果并暂停。</p>}
     {!taskEnded && (!state || ended(state)) && <>
       <label><input type="checkbox" aria-label="授权自动规则审查" checked={ruleReview} disabled={busy} onChange={e => setRuleReview(e.target.checked)} />自动运行缺少的同版规则审查</label>
       <label>本次固定阶段<select aria-label="自动推进固定阶段" value={work} disabled={busy || !!preview} onChange={e => { setWork(e.target.value); setModelReview(false) }}>
@@ -56,7 +56,7 @@ export function AutomaticWorkflow({ project, workflow, context, api, refresh, in
       <label><input type="checkbox" aria-label="授权自动工作草稿交付" checked={delivery} disabled={busy} onChange={e => setDelivery(e.target.checked)} />自动创建同版工作草稿交付（不标记已审查）</label>
       <label><input type="checkbox" aria-label="明确保留检索不足继续" checked={insufficient} disabled={busy} onChange={e => setInsufficient(e.target.checked)} />未达证据数量时，按以下理由保留不足继续；不允许编造正文</label>
       <label><input type="checkbox" aria-label="明确保留问题结束修订" checked={stopRevision} disabled={busy} onChange={e => setStopRevision(e.target.checked)} />没有可执行修复时，按以下理由保留问题结束修订</label>
-      <label>整份目标步骤上限<input aria-label="自动推进步骤上限" type="number" min={7} max={64} value={limits?.maxSteps ?? steps} disabled={busy || !!limits} onChange={e => setSteps(Number(e.target.value))} /></label>
+
       <label>连续无进展上限<input aria-label="自动推进无进展上限" type="number" min={1} max={3} value={limits?.maxNoProgress ?? noProgress} disabled={busy || !!limits} onChange={e => setNoProgress(Number(e.target.value))} /></label>
       <button disabled={busy || workflow.configChanged || workflow.checkpoint.status !== 'waiting-input' || (insufficient || stopRevision) && reason.trim().length < 10 ||
         work === 'sequence' && !sequence || work === 'section' && !sectionId || work === 'revision' && !issueId || work === 'research' && !queries.trim()}
@@ -74,7 +74,7 @@ export function AutomaticWorkflow({ project, workflow, context, api, refresh, in
       {(['pause', 'cancel'] as const).map(action => <button key={action} onClick={() => api('automatic.control', { context: active.context, workflowId, automaticId: active.automaticId, action }).catch(e => setError(e.message))}>{action === 'pause' ? '暂停自动推进' : '取消自动推进'}</button>)}</div>}
     {preview && <section role="dialog" aria-label="自动推进确认"><h4>{preview.action ? '确认恢复／结束' : '确认有限推进范围'}</h4>
       {preview.input && <><p>推进当前已保存事实{preview.input.work ? '及所列固定阶段' : ''}；规则审查 {preview.input.policy.ruleReview ? '允许' : '不允许'} · 工作草稿交付 {preview.input.policy.workingDraftDelivery ? '允许' : '不允许'}。</p>
-        <p>原步骤上限 {preview.input.policy.maxSteps} · 无进展上限 {preview.input.policy.maxNoProgress}。</p>
+        <p>连续无进展阈值 {preview.input.policy.maxNoProgress}。</p>
         {preview.input.policy.insufficientResearchReason && <p>保留检索不足：{preview.input.policy.insufficientResearchReason}</p>}
         {preview.input.policy.stopRevisionReason && <p>保留问题结束修订：{preview.input.policy.stopRevisionReason}</p>}
         {preview.input.modelReview ? <><p>模型 {preview.input.modelReview.modelDescriptor.providerId} / {preview.input.modelReview.modelDescriptor.modelId} · 当前范围 {preview.input.modelReview.inputBytes} 字节 · 五项检查：论证、文风、术语、贡献项、摘要／结论与实际正文。</p>

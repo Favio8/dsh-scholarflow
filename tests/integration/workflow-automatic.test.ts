@@ -142,27 +142,23 @@ test('automatic pause waits for the finite model result, then explicit resume in
   assert.ok(after.root.checkpoint.stamps.filter(row => ['review', 'revision', 'delivery'].includes(row.stage)).every(row => row.sessionId === 'session_TEST_ONLY_actual_resume'))
 })
 
-test('the original total time deadline cancels a slow child preparation as well as model IO, without refunding time or replaying the registered step', async () => {
+test('legacy elapsed time does not cancel a child; explicit cancellation still preserves its registered step', async () => {
   const { io, workflowId } = await setup(), frozen = await modelPlan(io), body = (await snapshot(io)).document.text
   const automaticId = (await startAutomatic(io, await prepareAutomatic(io, workflowId, sessionId, policy, frozen), owner)).automaticId
   const root = await readWorkflow(io, workflowId), checkpoint = structuredClone(root.checkpoint)
-  // TEST_ONLY represents already consumed original time; it is not a claim
-  // that the fixture actually ran for thirty minutes or made paid requests.
-  checkpoint.budget!.childDurationMs.run_TEST_ONLY_prior_time = root.input.budget!.maxDurationMinutes * 60000 - 1000
+  checkpoint.budget!.childDurationMs.run_TEST_ONLY_prior_time = 31 * 60000
   checkpoint.revision++; await io.lock(() => commit(io, workflowCheckpointMutations(root, checkpoint)))
-  let preparations = 0
-  await assert.rejects(execute(io, workflowId, automaticId, { modelReview: async (_plan: unknown, _grant: unknown, signal: AbortSignal) => {
-    preparations++; signal.throwIfAborted()
-    await new Promise((_, reject) => {
-      const deadline = setTimeout(() => reject(new Error('TEST_ONLY original time deadline was not enforced')), 5000)
-      signal.addEventListener('abort', () => { clearTimeout(deadline); reject(signal.reason) }, { once: true })
-    })
-  } }))
+  const controller = new AbortController(); let preparations = 0
+  await assert.rejects(driveAutomatic(io, workflowId, automaticId, controller.signal, { pauseRequested: () => false }, {
+    modelReview: async (_plan, _grant, signal) => {
+      preparations++; assert.equal(signal.aborted, false)
+      controller.abort('TEST_ONLY explicit stop'); signal.throwIfAborted()
+    }
+  }))
   const saved = await readAutomatic(io, workflowId, automaticId)
-  assert.equal(preparations, 1); assert.equal(saved.state.status, 'completed-with-issues'); assert.equal(saved.state.code, 'WORKFLOW_BUDGET_EXHAUSTED')
+  assert.equal(preparations, 1); assert.equal(saved.state.code, 'AUTOMATIC_ABORTED')
   assert.equal(saved.state.steps.at(-1)!.state, 'pending'); assert.equal(saved.root.checkpoint.budget!.calls.length, 0)
-  assert.equal(saved.root.checkpoint.budget!.childDurationMs.run_TEST_ONLY_prior_time, checkpoint.budget!.childDurationMs.run_TEST_ONLY_prior_time)
-  assert.ok(saved.root.checkpoint.budget!.childDurationMs[automaticId]! >= 1000)
+  assert.equal(saved.root.checkpoint.budget!.childDurationMs.run_TEST_ONLY_prior_time, 31 * 60000)
   assert.equal((await snapshot(io)).document.text, body)
 })
 
@@ -208,15 +204,14 @@ test('unchanged executor outcomes stop at the original no-progress cap without c
   await assert.rejects(start(io, workflowId, { ...policy, maxNoProgress: 3 }), { code: 'AUTOMATIC_LIMIT_CHANGED' })
 })
 
-test('step exhaustion retains completed artifacts and original totals across a new explicit attempt without renewing the overall quota', async () => {
+test('legacy step exhaustion does not prevent delivery while no-progress protection remains', async () => {
   const { io, workflowId } = await setup(), automaticId = await start(io, workflowId, { ...policy, maxSteps: 7 })
   const result = await execute(io, workflowId, automaticId)
-  assert.equal(result.code, 'WORKFLOW_BUDGET_EXHAUSTED'); assert.equal(result.status, 'completed-with-issues')
-  assert.equal((await readWorkflow(io, workflowId)).checkpoint.automaticBudget!.usedSteps, 7)
-  assert.equal(Object.keys((await snapshot(io)).ledger.deliveries).length, 0)
-  await assert.rejects(start(io, workflowId, { ...policy, maxSteps: 7 }), { code: 'WORKFLOW_BUDGET_EXHAUSTED' })
-  await assert.rejects(start(io, workflowId, policy), { code: 'AUTOMATIC_LIMIT_CHANGED' })
-  assert.equal((await workflowBudgetInfo(io))!.used!.modelCalls, 0)
+  assert.equal(result.status, 'completed-with-issues'); assert.notEqual(result.code, 'WORKFLOW_BUDGET_EXHAUSTED')
+  const root = await readWorkflow(io, workflowId)
+  assert.ok(root.checkpoint.automaticBudget!.usedSteps > 7)
+  assert.equal(Object.keys((await snapshot(io)).ledger.deliveries).length, 1)
+  assert.equal(root.checkpoint.budget!.calls.length, 0)
 })
 
 test('pause before dispatch and stale approvals preserve original body, pending scope and all source bytes', async () => {

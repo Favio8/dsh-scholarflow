@@ -157,7 +157,7 @@ test('rejecting a chapter never advances or automatically retries it, and cancel
   await applyDraftSequenceAction(io, await action(io, sequenceId, 'cancel', 'TEST_ONLY 用户拒绝该节，明确取消顺序保留所有产物。'))
   assert.equal((await snapshot(io)).document.text, before); assert.equal((await snapshot(io)).ledger.proposalStates[result.proposal!.id].state, 'rejected')
 })
-test('a later section cannot renew an exhausted overall model quota and retains the earlier accepted body', async () => {
+test('a later section exceeds legacy model quotas while preserving earlier accepted body', async () => {
   const { io, citeKey, claimIds } = await setup({ evidence: true, modelCalls: 1 }), sequenceId = await begin(io)
   let calls = 0
   const result = await execute(io, await dispatch(io, sequenceId), async () => {
@@ -166,9 +166,9 @@ test('a later section cannot renew an exhausted overall model quota and retains 
   })
   await accept(io, result)
   const body = (await snapshot(io)).document.text, second = await dispatch(io, sequenceId)
-  await assert.rejects(execute(io, second, async () => { calls++; return '{}' }), { code: 'WORKFLOW_BUDGET_EXHAUSTED' })
-  assert.equal(calls, 1); assert.equal((await snapshot(io)).document.text, body)
-  assert.equal((await workflowBudgetInfo(io))!.used!.modelCalls, 1)
+  const next = await execute(io, second, async () => { calls++; return JSON.stringify({ replacementText: `TEST_ONLY 总结 [@${citeKey}]。`, sectionId: second.input.sectionId, paragraphClaims: [{ paragraphIndex: 0, claimIds }], limitations: [] }) })
+  assert.ok(next.proposal); assert.equal(calls, 2); assert.equal((await snapshot(io)).document.text, body)
+  assert.equal((await workflowBudgetInfo(io))!.used!.modelCalls, 2)
 })
 test('concurrent sequence starts and stale confirmations cannot replace the current sequence or overwrite human edits', async () => {
   const { io } = await setup()

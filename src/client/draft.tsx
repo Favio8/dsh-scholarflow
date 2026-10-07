@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { projectMarkdown, wordStats, textOf, validateRange } from '../core/editing/markdown.ts'
+import { projectMarkdown, wordStats, textOf, validateRange, validateProseRange } from '../core/editing/markdown.ts'
 import { sectionTarget } from '../core/editing/sections.ts'
 import { MarkdownView, captureSelection } from './markdown.tsx'
 import type { SelectionPayload } from '../shared/editing.ts'
@@ -11,13 +11,13 @@ import type { DraftController, PaperView } from './paper-workspace.tsx'
 import type { ExportFormat } from '../shared/presentation.ts'
 import { SelectionDetails, type SelectionContext } from './selection-card.tsx'
 import { useCowrite } from './cowrite.tsx'
-import { REWRITE_ACTIONS, SelectionMenu, renderedSelectionRect, sourceSelectionRect, type RewriteAction } from './selection-menu.tsx'
+import { REWRITE_ACTIONS, SelectionMenu, renderedSelectionRect, sourceSelectionRect, sourceRangeRect, type RewriteAction } from './selection-menu.tsx'
 import { OverlayHost, useOverlaySpace } from './middle-overlay.tsx'
 import { RewriteCandidateView, protectedChanges, type RewriteCandidate } from './rewrite-candidate.tsx'
-import { SfPresence } from './motion/presence.tsx'
-import { SCENE } from './motion/tokens.ts'
+import { SourceCandidate } from './source-candidate.tsx'
+import { trackRange, type TextRange } from './rewrite-range.ts'
 
-type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
+type Props = { project: any; context: () => any; api: (method: string, request: any, signal?: AbortSignal) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
 function readLocalBuffer(key: string) {
   try {
@@ -66,7 +66,28 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   // running candidate replaces it, and neither writes to the document until the user accepts.
   const [rewrite, setRewrite] = useState<{ action: RewriteAction; instruction: string }>()
   const [candidate, setCandidate] = useState<RewriteCandidate>()
-  const [undoSnapshot, setUndoSnapshot] = useState<{ text: string; start: number; end: number }>()
+  const [undoSnapshot, setUndoSnapshot] = useState<{ start: number; before: string; after: string }>()
+  const selectionOrigin = useRef<'source' | 'preview'>('source')
+  const inputEdit = useRef<TextRange | undefined>(undefined)
+  const rewriteRestored = useRef(false)
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`${bufferKey}:rewrite`)
+      if (raw) {
+        const stored = JSON.parse(raw)
+        setRewrite(stored.rewrite); setEditRange(stored.editRange); setUndoSnapshot(stored.undoSnapshot)
+        const row: RewriteCandidate | undefined = stored.candidate
+        if (row) {
+          const expected = row.state === 'accepted' ? row.after : row.before
+          setCandidate(row.state === 'generating' ? { ...row, state: 'stopped', note: '页面已重开，未自动重复请求；可以重新生成。' }
+            : text.slice(row.start, row.start + expected.length) === expected ? row
+            : { ...row, state: 'failed', note: '正文已改变，旧候选已保留供比较；请重新生成。' })
+          selectionOrigin.current = row.origin ?? 'source'
+        }
+      }
+    } catch { setMessage('局部改写备份未能恢复；正文备份保持可用。') }
+    rewriteRestored.current = true
+  }, [bufferKey])
   const [overlayTask, setOverlayTask] = useState(false)
   const [overlayCollapsed, setOverlayCollapsed] = useState(false)
   const [answer, setAnswer] = useState('')
@@ -109,6 +130,12 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     return '选中正文后从菜单选择功能，或在这里写修改要求。'
   }
   const [editRange, setEditRange] = useState<{ start: number; end: number }>(), [rewriteScope, setRewriteScope] = useState('selection'), [rewriteInstruction, setRewriteInstruction] = useState('')
+  useEffect(() => {
+    if (!rewriteRestored.current) return
+    try {
+      window.localStorage.setItem(`${bufferKey}:rewrite`, JSON.stringify({ rewrite, candidate, undoSnapshot, editRange }))
+    } catch { setMessage('局部改写备份未完成，请保留页面直到正文保存。') }
+  }, [bufferKey, rewrite, candidate, undoSnapshot, editRange])
   const liveText = useRef(text); liveText.current = text
   const rewriteController = useRef<AbortController | undefined>(undefined)
   useEffect(() => () => rewriteController.current?.abort('unmounted'), [])
@@ -118,7 +145,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   }
   const cowrite = useCowrite({ text, baseHash, api, context, refresh, merge: async (next: string, expected: string) => {
     if (liveText.current !== expected) throw new Error('编辑内容已改变，请检查新的修改建议。')
-    setText(next); remember({ text: next, baseHash }); setSelectionAnchor(undefined)
+    liveText.current = next; setText(next); remember({ text: next, baseHash }); setSelectionAnchor(undefined)
     persistence.current!.enqueue({ text: next, baseHash, state: 'dirty', context: context() }); await persistence.current!.flush()
   } })
   const [saving, setSaving] = useState(false), [cursor, setCursor] = useState(0)
@@ -167,6 +194,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   }, [bufferKey])
   useEffect(() => {
     if (!bufferReady || persistenceBlocked.current || recoverable || (!dirty && !hostDirty.current)) return
+    // A host revision renders once with the previous local text before the adoption
+    // effect settles. Only explicit local edits may create a dirty host buffer.
+    if (dirty && !buffers.has(bufferKey)) return
     persistence.current!.enqueue({ text, baseHash, state: dirty ? 'dirty' : 'cleared', context: context() })
   }, [text, baseHash, project.document.contentHash, bufferReady, recoverable])
   const remember = (value?: { text: string; baseHash: string }) => {
@@ -194,19 +224,20 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     // reference the range is validated against.
     try {
       if (!window.getSelection()?.toString()) { setSelectionAnchor(undefined); return }
-      const payload = captureSelection(root.current!, projection, project.document, projectId)
+      const payload = captureSelection(root.current!, livePreview.projection!, project.document, projectId, true)
       payload.claimIds = [...new Set((Object.values(project.ledger.claimAnchors) as any[]).filter(anchor => anchor.status === 'current' && anchor.documentId === 'paper' &&
         anchor.documentHash === project.document.contentHash && payload.blockIds.includes(anchor.blockId)).flatMap(anchor => anchor.claimIds))] as string[]
       setAnchorClaimIds(payload.claimIds); setAnchorId('')
-      setSelection(payload); setEditRange({ start: payload.sourceRange.startUtf16, end: payload.sourceRange.endUtf16 })
+      selectionOrigin.current = 'preview'
+      setSelection(dirty || payload.blockIds.length > 1 ? undefined : payload); setEditRange({ start: payload.sourceRange.startUtf16, end: payload.sourceRange.endUtf16 })
       const range = window.getSelection()!.getRangeAt(0)
       setSelectionAnchor(renderedSelectionRect(range))
     } catch (error) { setSelection(undefined); setSelectionAnchor(undefined); setMessage((error as Error).message) }
   }
   /** Range and text of the current target, from the rendered selection or the source textarea. */
   const targetRange = () => {
-    if (selection) return { start: selection.sourceRange.startUtf16, end: selection.sourceRange.endUtf16, text: text }
     if (editRange) return { start: editRange.start, end: editRange.end, text }
+    if (selection) return { start: selection.sourceRange.startUtf16, end: selection.sourceRange.endUtf16, text: text }
     return undefined
   }
   const openRewrite = (action: RewriteAction) => {
@@ -220,35 +251,42 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
    * The request is sent when the user submits, not when an animation ends (PRD §10.1); the
    * stop control cancels the same call rather than hiding it.
    */
-  const submitRewrite = () => {
-    const target = targetRange()
+  const submitRewrite = (range?: TextRange) => {
+    if (rewriteController.current && !rewriteController.current.signal.aborted) return
+    const target = range ?? targetRange()
     if (!target || !rewrite) { setMessage('请先选中一段正文，再选择改写功能。'); return }
     const before = text.slice(target.start, target.end)
     if (!before.trim()) { setMessage('选中的范围没有文字。'); return }
     const controller = new AbortController()
     const startedAt = Date.now()
+    const requestId = `local_${crypto.randomUUID()}`
     setOverlayTask(false)
-    setCandidate({ id: `local_${startedAt}`, action: rewrite.action, instruction: rewrite.instruction,
+    setUndoSnapshot(undefined)
+    setCandidate({ id: requestId, origin: selectionOrigin.current, action: rewrite.action, instruction: rewrite.instruction,
       start: target.start, end: target.end, before, after: '', state: 'generating', elapsedMs: 0, phase: '正在生成候选…' })
-    const timer = window.setInterval(() => setCandidate(current => current && current.state === 'generating'
+    const timer = window.setInterval(() => setCandidate(current => current && current.id === requestId && current.state === 'generating'
       ? { ...current, elapsedMs: Date.now() - startedAt } : current), 200)
     rewriteController.current = controller
     void (async () => {
       try {
         const result = await api('cowrite.propose', { context: context(), text, baseDocumentHash: baseHash,
           baseBufferHash: await textHash(text), action: rewrite.action, instruction: rewrite.instruction,
-          start: target.start, end: target.end })
+          start: target.start, end: target.end }, controller.signal)
         if (controller.signal.aborted) return
         const row = result.suggestion
-        setCandidate(current => current && current.id === `local_${startedAt}`
+        setCandidate(current => current && current.id === requestId && current.state === 'generating'
           ? { ...current, id: row.id, after: row.after, state: 'ready', elapsedMs: Date.now() - startedAt,
               protectedFactChanges: row.protectedFactChanges, citationChanges: row.citationChanges }
           : current)
       } catch (error) {
         if (controller.signal.aborted) return
-        setCandidate(current => current && current.id === `local_${startedAt}`
+        setCandidate(current => current && current.id === requestId && current.state === 'generating'
           ? { ...current, state: 'failed', note: (error as Error).message, elapsedMs: Date.now() - startedAt } : current)
-      } finally { window.clearInterval(timer); rewriteController.current = undefined; await cowrite.reload() }
+      } finally {
+        window.clearInterval(timer)
+        if (rewriteController.current === controller) rewriteController.current = undefined
+        if (!controller.signal.aborted) await cowrite.reload()
+      }
     })()
   }
   const stopRewrite = () => {
@@ -263,14 +301,14 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       return
     }
     const before = text.slice(0, candidate.start) + candidate.after + text.slice(candidate.end)
-    setUndoSnapshot({ text, start: candidate.start, end: candidate.end })
     await cowrite.merge(before, text)
+    setUndoSnapshot({ start: candidate.start, before: candidate.before, after: candidate.after })
     await api('cowrite.decide', { context: context(), suggestionId: candidate.id, state: 'accepted' }).catch(() => undefined)
-    setCandidate({ ...candidate, state: 'accepted', note: '已接受进入编辑缓冲，主稿尚未保存；可在下方撤销。' })
+    setCandidate({ ...candidate, end: candidate.start + candidate.after.length, state: 'accepted', note: '已接受进入编辑缓冲，主稿尚未保存；可在下方撤销。' })
     await cowrite.reload()
   }
   const discardRewrite = async () => {
-    if (candidate && candidate.state !== 'generating') {
+    if (candidate && !candidate.id.startsWith('local_')) {
       await api('cowrite.decide', { context: context(), suggestionId: candidate.id, state: 'rejected' }).catch(() => undefined)
     }
     rewriteController.current?.abort('discarded')
@@ -278,13 +316,14 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   }
   const undoRewrite = async () => {
     if (!undoSnapshot) return
-    if (text !== undoSnapshot.text + '' && text.length !== undoSnapshot.text.length + (candidate?.after.length ?? 0) - (candidate?.before.length ?? 0)) {
-      // The buffer moved on since the accept; restoring blindly would drop those edits.
-      if (!window.confirm('接受之后正文又有改动。用撤销会回到接受之前的内容，继续？')) return
+    const { start, before, after } = undoSnapshot
+    if (text.slice(start, start + after.length) !== after) {
+      setMessage('接受的段落已被修改，无法直接撤销；你的编辑已保留。')
+      return
     }
-    await cowrite.merge(undoSnapshot.text, text)
+    await cowrite.merge(text.slice(0, start) + before + text.slice(start + after.length), text)
     setUndoSnapshot(undefined)
-    setCandidate(current => current ? { ...current, state: 'ready', note: '已撤销，正文回到接受前的内容。' } : current)
+    setCandidate(current => current ? { ...current, start, end: start + before.length, state: 'ready', note: '已撤销这次改写；其他人工编辑已保留。' } : current)
   }
   const prepare = (whole: boolean) => run(async () => {
     if (!whole && !selection) throw new Error('请先选择已保存的渲染正文。')
@@ -319,9 +358,16 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       return project.document.lineEnding === 'crlf' ? prefix.replace(/\n/g, '\r\n').length : prefix.length
     }
     const from = offset(area.selectionStart), to = offset(area.selectionEnd)
+    selectionOrigin.current = 'source'
     setCursor(from); setEditRange(from === to ? undefined : { start: from, end: to })
-    if (from === to || dirty) { setSelection(undefined); setSelectionAnchor(undefined); return }
+    if (from === to) { setSelection(undefined); setSelectionAnchor(undefined); return }
     try {
+      const prose = validateProseRange(dirty ? livePreview.projection! : projection, from, to)
+      if (dirty || prose.blockIds.length > 1) {
+        setSelection(undefined)
+        if (!selecting.current) setSelectionAnchor(sourceSelectionRect(area))
+        return
+      }
       const selected = validateRange(projection, from, to)
       const claimIds = [...new Set((Object.values(project.ledger.claimAnchors) as any[]).filter(anchor => anchor.status === 'current' &&
         anchor.documentHash === project.document.contentHash && anchor.blockId === selected.block.id).flatMap(anchor => anchor.claimIds))] as string[]
@@ -336,10 +382,24 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const headings = livePreview.projection?.tree.children?.filter(node => node.type === 'heading') ?? []
   const currentHeading = [...headings].reverse().find(node => (node.position?.start.offset ?? 0) <= cursor)
   const statistics = livePreview.statistics
+  const candidateView = candidate && <RewriteCandidateView candidate={candidate} busy={busy}
+    canAccept={candidate.before === text.slice(candidate.start, candidate.end)}
+    onAccept={() => run(acceptRewrite)} onDiscard={() => run(discardRewrite)} onUndo={undoSnapshot ? () => run(undoRewrite) : undefined}
+    onStop={stopRewrite} onRegenerate={() => submitRewrite({ start: candidate.start, end: candidate.end })} />
+  const sourceCandidate = candidate && (view === 'edit' || view === 'split' && candidate.origin !== 'preview')
+  const previewCandidate = candidate && (view === 'preview' || view === 'split' && candidate.origin === 'preview')
+  const candidateBlock = livePreview.projection?.blocks.filter(block => block.node.type === 'paragraph' && block.start < (candidate?.end ?? 0)).at(-1)
+  const revealCandidate = () => {
+    if (sourceCandidate && sourceArea.current) {
+      const area = sourceArea.current, index = text.slice(0, candidate!.end).replace(/\r\n/g, '\n').length
+      const target = sourceRangeRect(area, index, index)
+      area.scrollTop += target.top - area.getBoundingClientRect().top - 40
+    } else if (candidateBlock) root.current?.querySelector(`[data-sf-block="${CSS.escape(candidateBlock.id)}"]`)?.scrollIntoView({ block: 'center' })
+  }
   return <section className="sf-draft" aria-label="正文编辑">
     {/* The menu appears next to the selection and calls no model; the chosen function becomes
         an instruction in the bottom overlay (PRD §5.2). */}
-    {selection && selectionAnchor && !tool && visible && <SelectionMenu anchor={selectionAnchor} busy={busy}
+    {(selection || editRange) && selectionAnchor && !tool && visible && <SelectionMenu anchor={selectionAnchor} busy={busy}
       onAction={openRewrite} onClose={() => setSelectionAnchor(undefined)} />}
     {selectionDetail && <SelectionDetails card={selectionDetail} onClose={() => setSelectionDetail(undefined)} onTool={onTool} />}
     <div className="sf-middle-column" ref={middleColumn} hidden={!!tool}>
@@ -355,38 +415,49 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       <span className="sf-cowrite-hint">选中正文后出现改写菜单；局部入口只作用于选中范围，整篇讨论在右栏。</span>
     </div>
     {cowrite.message && <p className="sf-editor-notice" role="status">{cowrite.message}</p>}
-    {/* In edit mode the target lives in the source pane, so the candidate is rendered directly
-    {/* The candidate belongs to the current target, not to one view: in 分屏 or 预览 the
-        reader must not have to switch pages to find it (PRD §5.3). */}
-    {candidate && <RewriteCandidateView candidate={candidate} busy={busy}
-      canAccept={candidate.before === text.slice(candidate.start, candidate.end)}
-      onAccept={() => void acceptRewrite()} onDiscard={() => void discardRewrite()} onUndo={() => void undoRewrite()}
-      onStop={stopRewrite} onRegenerate={() => { setCandidate(undefined); submitRewrite() }} />}
-    {!candidate && cowrite.suggestions.length > 0 && <div className="sf-pending-list">{cowrite.annotations(0, text.length + 1)}</div>}
       {(recoverable || baseHash !== project.document.contentHash || project.document.externalChange) && <div className="sf-editor-notice" role="status">
         {recoverable ? '有暂存编辑可恢复' : '正文版本发生变化，当前编辑已保留'}<button onClick={onTool}>查看与处理</button>
       </div>}
       <div className="sf-editor-grid" data-view={view}>
         <div className="sf-source-pane" hidden={view === 'preview'}><div className="sf-pane-caption"><span>{project.config.paths.mainDocument.split('/').at(-1)} · Markdown</span>
           <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>{saving ? '保存中…' : '保存'}</button></div>
-          <div className="sf-source-editor"><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
+          <div className="sf-source-editor" data-candidate={!!sourceCandidate}><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
             <textarea ref={sourceArea} className="sf-source-input" aria-label="Markdown 手工编辑" wrap="off" spellCheck={false} disabled={busy || saving} value={text}
               onScroll={e => { setSelectionAnchor(undefined); if (gutter.current) gutter.current.style.transform = `translateY(${-e.currentTarget.scrollTop}px)` }}
               onMouseDown={() => { selecting.current = true; setSelectionAnchor(undefined) }}
               onMouseUp={e => { selecting.current = false; selectSource(e.currentTarget) }}
               onSelect={e => selectSource(e.currentTarget)}
+              onBeforeInput={e => {
+                const kind = (e.nativeEvent as InputEvent).inputType ?? ''
+                const area = e.currentTarget
+                const offset = (value: number) => project.document.lineEnding === 'crlf' ? area.value.slice(0, value).replace(/\n/g, '\r\n').length : value
+                inputEdit.current = kind.startsWith('insert') || kind === 'deleteByCut' ? { start: offset(area.selectionStart), end: offset(area.selectionEnd) } : undefined
+              }}
               onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (dirty && !busy && !saving && baseHash === project.document.contentHash) run(save) } }}
               onChange={e => {
                 const edited = project.document.lineEnding === 'crlf' ? e.target.value.replace(/\r\n|\r|\n/g, '\r\n') : e.target.value
+                if (candidate && candidate.state !== 'accepted') {
+                  const range = trackRange(candidate, text, edited, inputEdit.current)
+                  if (range) setCandidate({ ...candidate, ...range })
+                  else { rewriteController.current?.abort('target-edited'); setCandidate({ ...candidate, state: 'failed', note: '选中内容已被修改，请基于新内容重新生成。' }) }
+                }
+                if (undoSnapshot) {
+                  const range = trackRange({ start: undoSnapshot.start, end: undoSnapshot.start + undoSnapshot.after.length }, text, edited, inputEdit.current)
+                  setUndoSnapshot(range ? { ...undoSnapshot, start: range.start } : undefined)
+                }
+                inputEdit.current = undefined; liveText.current = edited
                 setText(edited); setEditRange(undefined); setSelection(undefined); setSelectionAnchor(undefined); selectionRequest.current++; setMessage('')
                 if (edited === project.document.text && baseHash === project.document.contentHash) remember()
                 else remember({ text: edited, baseHash })
               }} />
+            {sourceCandidate && <SourceCandidate area={sourceArea} end={text.slice(0, candidate.end).replace(/\r\n/g, '\n').length} identity={candidate.id}>{candidateView}</SourceCandidate>}
           </div>
         </div>
         <div className="sf-preview-pane" hidden={view === 'edit'}><div className="sf-pane-caption"><span>论文预览</span><span>{format === 'latex' ? 'LaTeX 排版' : format === 'docx' ? 'Word 排版' : 'Markdown'} · 实时</span></div>
           <div className="sf-paper-scroll"><div className="sf-paper-page" data-format={format} ref={root} onMouseUp={capture} onKeyUp={capture}>
-            {livePreview.projection ? <MarkdownView projection={livePreview.projection} annotations={(start, end) => <>{cowrite.annotations(start, end)}{!dirty && (Object.values(project.ledger.reviewIssues) as any[]).filter(issue => !issue.stale && issue.state !== 'resolved' && issue.documentHash === project.document.contentHash && issue.location?.sourceRange.startUtf16 >= start && issue.location.sourceRange.startUtf16 < end).map(issue => <button className="sf-review-marker" key={issue.id} title={issue.explanation} onClick={onReview}>{issue.severity} · {issue.title}</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
+            {livePreview.projection ? <MarkdownView projection={livePreview.projection}
+              afterBlock={(start) => previewCandidate && candidateBlock?.start === start ? candidateView : null}
+              annotations={(start, end) => <>{cowrite.annotations(start, end, candidate?.id)}{!dirty && (Object.values(project.ledger.reviewIssues) as any[]).filter(issue => !issue.stale && issue.state !== 'resolved' && issue.documentHash === project.document.contentHash && issue.location?.sourceRange.startUtf16 >= start && issue.location.sourceRange.startUtf16 < end).map(issue => <button className="sf-review-marker" key={issue.id} title={issue.explanation} onClick={onReview}>{issue.severity} · {issue.title}</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
             {!!livePreview.projection?.citationOrder.length && <section className="sf-paper-references"><h3>参考文献</h3><ol>{livePreview.projection.citationOrder.map(key => {
               const source = (Object.values(project.ledger.sources) as any[]).find(row => row.citeKey === key)
               return <li key={key}>{source ? [source.authors.map((author: any) => author.literal ?? [author.given, author.family].filter(Boolean).join(' ')).join(', '), source.title, source.year, source.venue].filter(Boolean).join('. ') : `待登记引用：${key}`}</li>
@@ -415,10 +486,12 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         <p className="sf-overlay-note">只对确实影响本次目标的冲突或缺失提问；其他章节的编辑不会逐节打断你。</p>
       </div> : <>
         <p className="sf-overlay-note" style={{ margin: '0 0 8px' }}>{targetPreview()}</p>
+        {candidate && <button type="button" onClick={revealCandidate}>查看候选</button>}
+        {candidate?.state === 'generating' && <button type="button" onClick={stopRewrite}>停止生成</button>}
         <div className="sf-overlay-row">
           <input id="sf-rewrite-input" aria-label="局部修改要求" placeholder="可选：补充要求（不填也可以提交已选择的功能）"
             value={rewrite?.instruction ?? ''} onChange={event => setRewrite(current => ({ action: current?.action ?? 'custom', instruction: event.target.value }))} />
-          <button type="button" className="sf-primary" disabled={busy || !rewrite || candidate?.state === 'generating'} onClick={submitRewrite}>
+          <button type="button" className="sf-primary" disabled={busy || !rewrite || candidate?.state === 'generating'} onClick={() => submitRewrite(candidate && candidate.state !== 'accepted' ? { start: candidate.start, end: candidate.end } : undefined)}>
             {candidate?.state === 'generating' ? '正在生成…' : '提交'}</button>
         </div>
         <p className="sf-overlay-note">仅点选功能不会调用模型；提交时请求立即发出，不等动画播完。接受前不会写入正文。</p>
@@ -498,9 +571,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     <DraftSequence project={project} context={context} api={api} run={run} busy={busy} dirty={dirty} onGenerationPlan={setPlan} onProposal={setProposal} />
     {plan && <section role="dialog" aria-modal="false" aria-label="模型生成确认"><h4>{plan.structuralGap ? '确认待补结构建议（不调用模型）' : '确认宿主模型调用'}</h4>
       <p>{plan.model.providerId} / {plan.model.modelId} · 输入约 {plan.inputBytes} bytes · 源码范围 [{plan.scope.startUtf16}, {plan.scope.endUtf16})</p>
-      <p>模型调用预算 {plan.budget.maxModelCalls}；运行时限 {plan.budget.maxDurationMinutes} 分钟；仅生成待审阅建议。</p>
+      <p>调用次数与耗时仅用于统计；仅生成待审阅建议。</p>
       <p>本次固定输出上限 {plan.model.maxOutputTokens ?? 4096} token（包含提供方计入的推理输出）；额度耗尽时保留调用，不自动重试截断结果。</p>
-      {plan.workflowId && <p>计入引导任务 {plan.workflowId} 的原累计预算。{plan.workflowBudget?.used && `已用模型调用 ${plan.workflowBudget.used.modelCalls}；阶段开始或重试不重置总额度。`}</p>}
+      {plan.workflowId && <p>计入引导任务 {plan.workflowId} 的调用与耗时统计。{plan.workflowBudget?.used && `已用模型调用 ${plan.workflowBudget.used.modelCalls}；调用次数仅用于统计，不设累计上限。`}</p>}
       {plan.sectionTarget && <p>目标章节：{plan.sectionTarget.title} · {plan.sectionTarget.mode === 'insert' ? '插入新章节' : '替换本节正文并保留标题及子章节'}</p>}
       <p>本次固定 Skill：{plan.skillDigests?.map((row: any) => `${row.qualifiedId} · ${row.digest}`).join('；') || '无'}</p>
       {plan.sourceText && <pre>{plan.sourceText}</pre>}{plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
@@ -530,7 +603,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       {history && !history.runs.length && <p>本项目暂无写作运行记录。</p>}</section>
     {actionPlan && <section role="dialog" aria-label="运行操作确认"><h4>确认{actionPlan.action === 'resume' ? '恢复' : actionPlan.action === 'retry' ? '关联重试' : '结束未完成运行'}</h4>
       <p>原运行 {actionPlan.previousRunId} · 已调用模型 {actionPlan.usedModelCalls} 次{actionPlan.action === 'retry' ? `；新运行 ${actionPlan.runId}` : ''}</p>
-      {actionPlan.model && <p>{actionPlan.model.providerId} / {actionPlan.model.modelId} · 输入约 {actionPlan.inputBytes} bytes · 调用预算 {actionPlan.budget.maxModelCalls} · {actionPlan.budget.maxDurationMinutes} 分钟</p>}
+      {actionPlan.model && <p>{actionPlan.model.providerId} / {actionPlan.model.modelId} · 输入约 {actionPlan.inputBytes} bytes · 可随时停止</p>}
       {actionPlan.existingProposalId && <p>已有建议 {actionPlan.existingProposalId}，保留当前接受／拒绝状态。</p>}
       {actionPlan.retryNotBefore && <p>提供方重试窗口：{new Date(actionPlan.retryNotBefore).toLocaleString()} 之后才会调度新调用。</p>}
       <p>固定 Skill：{actionPlan.skillDigests?.map((row: any) => `${row.qualifiedId} · ${row.digest}`).join('；') || '无模型调用或无 Skill'}</p>

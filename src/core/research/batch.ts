@@ -20,9 +20,6 @@ export async function prepareResearchBatch(io: FileStore, request: unknown, pare
   const input = batchPrepareRequest.parse(request), current = await snapshot(io)
   invariant(input.context.projectId === current.ledger.projectId && input.context.expectedLedgerRevision === current.ledger.revision,
     'STALE_LEDGER_REVISION', '请为当前项目版本预览检索计划。')
-  invariant(input.searches.length <= current.config.workflow.budget.maxSearchQueries &&
-    input.searches.reduce((sum, search) => sum + search.limit, 0) <= current.config.workflow.budget.maxCandidateSources,
-    'RESEARCH_BUDGET_EXHAUSTED', '查询数量或候选总上限超过本次项目预算。')
   invariant(!current.config.research.providerRefs.length || current.config.research.providerRefs.includes('crossref'),
     'RESEARCH_PROVIDER_NOT_APPROVED', '项目未选择 Crossref 提供方。')
   const profile = await io.read(current.config.writing.projectProfile)
@@ -41,9 +38,8 @@ export function verifyPlan(plan: ResearchBatchPlan) {
   batchPlanSchema.parse(plan); const { contentHash, ...body } = plan
   invariant(digest(json(body)) === contentHash && plan.snapshot.stage === 'research' && plan.snapshot.networkScope === 'approved-providers',
     'RUN_CHECKPOINT_CHANGED', '冻结检索计划摘要或阶段不匹配。')
-  invariant(new Set(plan.searches.map(row => row.queryId)).size === plan.searches.length &&
-    plan.searches.length <= plan.snapshot.budget.maxSearchQueries && plan.searches.reduce((n, row) => n + row.search.limit, 0) <= plan.snapshot.budget.maxCandidateSources,
-    'RUN_CHECKPOINT_CHANGED', '冻结计划的查询身份或预算不一致。')
+  invariant(new Set(plan.searches.map(row => row.queryId)).size === plan.searches.length,
+    'RUN_CHECKPOINT_CHANGED', '冻结计划的查询身份重复。')
 }
 export async function readResearchBatch(io: FileStore, runId: string) {
   const current = await snapshot(io), stored = await readRun(io, runId, current.ledger.projectId)
@@ -59,8 +55,7 @@ export async function readResearchBatch(io: FileStore, runId: string) {
     checkpoint.projectId === current.ledger.projectId && json(checkpoint.queries.map(row => row.queryId)) === json(plan.searches.map(row => row.queryId)),
     'RUN_CHECKPOINT_CHANGED', '检索记录的身份、输入或检查点不一致。')
   let candidates = 0
-  invariant(checkpoint.queriesUsed === checkpoint.queries.reduce((sum, query) => sum + query.attempts.length, 0) &&
-    checkpoint.queriesUsed <= plan.snapshot.budget.maxSearchQueries, 'RUN_CHECKPOINT_CHANGED', '查询次数与已保存尝试不一致。')
+  invariant(checkpoint.queriesUsed === checkpoint.queries.reduce((sum, query) => sum + query.attempts.length, 0), 'RUN_CHECKPOINT_CHANGED', '查询次数与已保存尝试不一致。')
   for (const query of checkpoint.queries) {
     invariant(query.state !== 'completed' || query.attempts.at(-1)?.state === 'completed', 'RUN_CHECKPOINT_CHANGED', '成功查询缺少成功快照。')
     invariant(query.state !== 'running' || query.attempts.at(-1)?.state === 'running', 'RUN_CHECKPOINT_CHANGED', '运行查询缺少调用检查点。')
@@ -71,7 +66,7 @@ export async function readResearchBatch(io: FileStore, runId: string) {
       candidates += search.record.records.length
     }
   }
-  invariant(candidates === checkpoint.candidatesReceived && candidates <= plan.snapshot.budget.maxCandidateSources, 'RUN_CHECKPOINT_CHANGED', '候选计数与原结果不一致。')
+  invariant(candidates === checkpoint.candidatesReceived, 'RUN_CHECKPOINT_CHANGED', '候选计数与原结果不一致。')
   return { current, stored, plan, file, checkpoint, checkpointFileImage }
 }
 export async function prepareResearchBatchAction(io: FileStore, runId: string, action: 'resume' | 'retry' | 'close', ownerAlive: (owner: RunState['owner']) => boolean, retrySessionId?: string) {
@@ -164,7 +159,7 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
       { path: checkpointFile(state.runId), before: undefined, after: cpText }, { path: runFile(state.runId), before: undefined, after: text }, { path: ACTIVE_RUN, before: active, after: text }])
     stateHash = digest(text); checkpointHash = digest(cpText)
   })
-  const budgetMs = plan.snapshot.budget.maxDurationMinutes * 60000, budgetSignal = AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, budgetMs - priorDuration))])
+  const budgetSignal = signal
   const result = () => ({ run: state, checkpoint, searches: plan.searches, paused: state.status === 'paused', limitations: ['候选仅是出版元数据；纳入来源与全文证据确认仍需用户操作。'] })
   try {
     // An interrupted request is charged and archived. Only this explicitly
@@ -181,13 +176,10 @@ export async function executeResearchBatch(io: FileStore, plan: ResearchBatchPla
     while (checkpoint.queries.some(row => row.state === 'pending')) {
       budgetSignal.throwIfAborted()
       if (control.pauseRequested()) { state.status = 'paused'; await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); return result() }
-      invariant(priorDuration + Date.now() - executionStarted < budgetMs && checkpoint.queriesUsed < plan.snapshot.budget.maxSearchQueries,
-        'RESEARCH_BUDGET_EXHAUSTED', '本次查询或时间预算耗尽，已取得结果保留。')
       const query = checkpoint.queries.find(row => row.state === 'pending')!, spec = plan.searches.find(row => row.queryId === query.queryId)!.search
       while (query.retryNotBefore && Date.now() < query.retryNotBefore) {
         budgetSignal.throwIfAborted()
         if (control.pauseRequested()) { state.status = 'paused'; await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); return result() }
-        invariant(query.retryNotBefore - Date.now() < budgetMs - priorDuration - (Date.now() - executionStarted), 'RESEARCH_BUDGET_EXHAUSTED', '提供方重试窗口超过剩余运行预算。')
         await waitRetrySlice(Math.min(200, query.retryNotBefore - Date.now()), budgetSignal)
       }
       const boundary = await snapshot(io)

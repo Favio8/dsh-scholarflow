@@ -134,7 +134,7 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
       invariant(action.action === 'resume' && action.runId === state.runId && action.frozen.contentHash === plan.contentHash, 'INVALID_APPROVAL', '恢复不属于此冻结审查。')
       state = { ...original.run, owner, status: 'running', ...(control.executionSessionId && { executionSessionId: control.executionSessionId }) }; delete state.errorCode
       checkpoint = progress.checkpoint
-      priorDuration = (state.activeDurationMs ?? 0) + (checkpoint.pendingCall ? Math.min(plan.snapshot.budget.maxDurationMinutes * 60000, Math.max(0, Date.now() - Date.parse(state.updatedAt))) : 0)
+      priorDuration = (state.activeDurationMs ?? 0) + (checkpoint.pendingCall ? Math.max(0, Date.now() - Date.parse(state.updatedAt)) : 0)
       checkpoint.pendingCall = false; started = Date.now()
       const progressText = json(checkpointSchema.parse(checkpoint)); state.checkpointHash = digest(progressText); state.updatedAt = new Date().toISOString(); state.activeDurationMs = priorDuration
       const stateText = json(runStateSchema.parse(state))
@@ -154,20 +154,17 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
       { path: `.scholarflow/runs/${state.runId}/skills.json`, before: undefined, after: json({ schemaVersion: 1, projectId: state.projectId, resourceLockHash: plan.snapshot.resourceLockHash, resources: plan.context.academicSkills }) }])
     expectedStateHash = digest(stateText); expectedCheckpointHash = digest(progressText)
   })
-  const remainingMs = Math.max(1, plan.snapshot.budget.maxDurationMinutes * 60000 - priorDuration), bounded = AbortSignal.any([signal, AbortSignal.timeout(Math.min(remainingMs, 30 * 60000))])
+  const bounded = signal
   const pause = async () => { bounded.throwIfAborted(); state.status = 'paused'; await save(); await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0); return { run: state, paused: true } }
   try {
     if (checkpoint.output) {
       const existing = await existingModelReview(io, plan, checkpoint.output)
       if (existing) { state.reviewId = existing.report.id; state.status = existing.report.issues.length || existing.report.checks.some(check => check.status !== 'pass') ? 'completed-with-issues' : 'succeeded'; checkpoint.published = { reviewId: existing.report.id, reportHash: existing.reportHash }; await save(); return { run: state, ...existing, recoveredArtifact: true } }
     }
-    invariant(priorDuration < plan.snapshot.budget.maxDurationMinutes * 60000, 'BUDGET_EXHAUSTED', '原审查时间预算耗尽，保留检查点。')
     while (!checkpoint.output && checkpoint.formatAttempts < 2) {
       bounded.throwIfAborted(); if (control.pauseRequested()) return await pause()
-      invariant(state.usedModelCalls < plan.snapshot.budget.maxModelCalls, 'BUDGET_EXHAUSTED', '审查模型调用预算耗尽。')
       while (checkpoint.retryNotBefore && Date.now() < checkpoint.retryNotBefore) {
         bounded.throwIfAborted(); if (control.pauseRequested()) return await pause()
-        invariant(checkpoint.retryNotBefore - Date.now() < remainingMs - (Date.now() - started), 'BUDGET_EXHAUSTED', '提供方重试窗口超过剩余审查预算。')
         await waitRetrySlice(Math.min(200, checkpoint.retryNotBefore - Date.now()), bounded)
       }
       delete checkpoint.retryNotBefore; await checkInputs(); state.usedModelCalls++; checkpoint.pendingCall = true; await save()
@@ -184,7 +181,9 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
         // Domain errors contain our fixed contract explanations, never the raw
         // provider response. Do not forward SyntaxError excerpts or Zod values.
         const cause = error instanceof ScholarError && error.code.startsWith('MODEL_REVIEW_')
-          ? `具体违反合同：${error.code}：${error.message}。` : '输出未通过 JSON 字段、数组形状、枚举或长度合同。'
+          ? `具体违反合同：${error.code}：${error.message}。` : error instanceof z.ZodError
+            ? `字段合同错误：${error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ').slice(0, 700)}。`
+            : '输出不是合法 JSON；仅返回 JSON 对象。'
         checkpoint.repair = `${cause}返回严格 JSON。checks 恰好包含以下不同检查名的数组，status 必须按实际依据填写 pass/fail/unknown，不能是以检查名为键的对象：${JSON.stringify((plan.context.semanticScope ? semanticReviewChecks : semanticReviewChecks.slice(0, 2)).map(id => ({ id, status: 'unknown', detail: '实际检查依据或无法判定的原因，至少10字符。' })))}。findings、rechecks、limitations 必须是数组；问题和复查使用给定身份、实际源码块及其唯一连续原样 quote，关联 ID 只取本次范围。${plan.context.semanticScope ? '每项 finding 必须有对应 assessmentId，该检查不能 pass。只要有非 style finding（包括 structure、requirement、integrity），argument_assessment 也不能 pass；有 style finding 时 style_assessment 不能 pass。重新依依据填写 fail 或 unknown，不得删除真实问题来维持 pass。' : ''}detail/explanation/reason 至少10字符。不能重复位置、制造引用或同时宣称有问题且通过。没有问题／复查时返回空数组，无法判断明确 unknown。`
       }
       await save()

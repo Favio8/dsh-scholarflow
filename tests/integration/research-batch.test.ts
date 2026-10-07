@@ -26,7 +26,8 @@ async function setup(count = 3) {
 test('SF-009/027: multi-query preview writes nothing, reserves bounded scopes, and preserves successful metadata when another query fails', async () => {
   const { io, current, plan, request } = await setup(), writes = io.writes
   await prepareResearchBatch(io, request); assert.equal(io.writes, writes)
-  await assert.rejects(prepareResearchBatch(io, { ...request, searches: Array.from({ length: 5 }, () => ({ ...searches[0], limit: 20 })) }), { code: 'RESEARCH_BUDGET_EXHAUSTED' })
+  const expanded = await prepareResearchBatch(io, { ...request, searches: Array.from({ length: 5 }, () => ({ ...searches[0], limit: 20 })) })
+  assert.equal(expanded.searches.reduce((sum, row) => sum + row.search.limit, 0), 100, 'legacy candidate quota does not block a valid search plan')
   let calls = 0
   const result = await executeResearchBatch(io, plan, { ...provider, async search(input) {
     calls++; const data = await readResearchBatch(io, plan.snapshot.runId)

@@ -19,6 +19,11 @@ export function WritingRequirements({ project, api, context, refresh, onFormat }
       <label>提交格式<select value={spec.format} onChange={e => update({ format: e.target.value as CreationSpec['format'] })}>{Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
     <label>写作要求<textarea rows={8} value={spec.requirements} onChange={e => update({ requirements: e.target.value })} /></label>
     <label>目标篇幅<input type="number" min={200} max={60000} value={spec.targetLength} onChange={e => update({ targetLength: Number(e.target.value) })} /></label>
+    {spec.cover?.enabled && <fieldset><legend>封面</legend>
+      <label>封面标题<input value={spec.cover.title} onChange={event => update({ cover: { ...spec.cover!, title: event.target.value } })} /></label>
+      {spec.cover.fields.map((field, index) => <label key={index}>{field.label}<input value={field.value} onChange={event => update({ cover: {
+        ...spec.cover!, fields: spec.cover!.fields.map((row, at) => at === index ? { ...row, value: event.target.value } : row) } })} /></label>)}
+    </fieldset>}
     <button className="sf-primary" disabled={busy || !spec.title.trim() || !spec.requirements.trim()} onClick={async () => { setBusy(true); setMessage('')
       try { await api('writingTask.preferences', { context: context(), spec }); onFormat(spec.format); await refresh(); setMessage('已保存写作要求。') }
       catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }

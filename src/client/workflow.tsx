@@ -35,7 +35,7 @@ export function GuidedWorkflow({ project, context, api, run, busy, refresh, navi
     {workflow && <>
       <p role="status">{workflow.input.goal.researchQuestion} · {workflow.checkpoint.status} · 检查点 {workflow.checkpoint.revision}</p>
       <AutomaticWorkflow key={`${workflow.input.workflowId}:${project.binding.sessionId}`} project={project} workflow={workflow} context={context} api={api} refresh={refresh} inspectWorkflow={inspect} run={run} busy={busy} />
-      {value.budget?.used && <p role="status" aria-label="引导累计预算">模型调用 {value.budget.used.modelCalls}/{value.budget.limits.maxModelCalls} · 查询 {value.budget.used.searchQueries}/{value.budget.limits.maxSearchQueries} · 候选及未知响应预留 {value.budget.used.candidates}/{value.budget.limits.maxCandidateSources} · 模型审查轮次 {value.budget.used.reviewRounds}/{value.budget.maxReviewRounds} · 执行 {Math.ceil(value.budget.used.durationMs / 1000)} 秒/{value.budget.limits.maxDurationMinutes} 分钟</p>}
+      {value.budget?.used && <p role="status" aria-label="引导累计统计">模型调用 {value.budget.used.modelCalls} · 查询 {value.budget.used.searchQueries} · 候选及未知响应预留 {value.budget.used.candidates} · 模型审查轮次 {value.budget.used.reviewRounds} · 执行 {Math.ceil(value.budget.used.durationMs / 1000)} 秒</p>}
       {value.budget?.pendingCalls.map((call: any) => <p key={call.callId}>未结算请求：{call.runId} · {labels[call.stage]} · {call.callId}
         <button disabled={busy || reason.trim().length < 10} onClick={() => action('close-unknown-call', undefined, call.callId)}>预览结束无应答请求 {call.callId}</button></p>)}
       {workflow.configChanged && <p role="alert">项目配置已改变，当前任务不能沿用原计划恢复或完成。原记录保留；取消后可明确建立新目标。</p>}
@@ -60,7 +60,7 @@ export function GuidedWorkflow({ project, context, api, run, busy, refresh, navi
     </>}
     {preview && <section role="dialog" aria-label="引导任务确认"><h4>{preview.goal ? '确认引导目标' : '确认阶段决定'}</h4>
       {preview.goal && <p>{preview.goal.researchQuestion} · 最低当前文本来源 {preview.goal.minimumSources} · 定位证据 {preview.goal.minimumLocatedEvidence} · {preview.goal.noFormalRequirementsReason}</p>}
-      {preview.budget && <p>整份引导目标累计预算：模型调用 {preview.budget.maxModelCalls} · 查询 {preview.budget.maxSearchQueries} · 候选 {preview.budget.maxCandidateSources} · 执行 {preview.budget.maxDurationMinutes} 分钟 · 模型审查 {preview.maxReviewRounds} 轮。格式修复、临时重试及无应答请求计入原额度；阶段预览和读取结果不计费。</p>}
+      <p>模型调用、审查轮次与执行时间仅用于统计。阶段请求范围将在调用前展示，可随时停止。</p>
       {preview.action && <p>{preview.action} · {labels[preview.stage] ?? '当前任务'} · {preview.reason}</p>}
       {preview.gate && <p>{preview.gate.outcome} · {preview.gate.reasons.join(' ')}</p>}
       <p>确认保存检查点与决定记录；不接受候选、不修改正文、不关闭审查问题。带缺口的交付保持实际质量标识。</p>

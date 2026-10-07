@@ -133,8 +133,11 @@ try {
     return value
   }
   /** Runs a remote and fails loudly with the plugin's own message. */
-  const withTimeout = (promise, label, ms = 10 * 60 * 1000) => Promise.race([promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} did not answer within ${Math.round(ms / 1000)}s`)), ms))])
+  const withTimeout = async (promise, label, ms = 10 * 60 * 1000) => {
+    let timer
+    try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + ' did not answer within ' + Math.round(ms / 1000) + 's')), ms) })]) }
+    finally { clearTimeout(timer) }
+  }
   const must = async (name, request, ms) => {
     record('call', { name })
     const result = await withTimeout(remote(name, request), name, ms)
@@ -181,6 +184,16 @@ try {
   }
   record('read-result', { state: read?.state, phase: read?.phase, done: read?.done, total: read?.total,
     members: (read?.members ?? []).map(member => ({ name: member.name, state: member.state, chars: member.chars, note: member.note })) })
+  // Recover only failed members, using the same action as the UI. Partial assignment
+  // reads cannot count as a complete acceptance of this three-image assignment.
+  for (const member of (read?.members ?? []).filter(member => member.state === 'failed')) {
+    const retried = await must('creation.retryMember', { context: contextBody, spec, readId, member: member.name })
+    read = retried.read
+    record('member-retry', { name: member.name, state: read.members.find(row => row.name === member.name)?.state })
+  }
+  if (!read || read.members.length !== 3 || read.members.some(member => member.state !== 'ready')) {
+    record('blocked', { reason: 'all three assignment images must be read for this acceptance' }); await finish(1)
+  }
   if (!read?.members?.some(member => member.state === 'ready')) { record('blocked', { reason: 'no member was read' }); await finish(1) }
 
   // ── 4. structure what was read into a requirement candidate ──────────────────────────────
@@ -193,7 +206,8 @@ try {
 
   // ── 5. adopt: the teacher's page and length requirement, then the PDF as a material ──────
   const adopted = (await must('candidates.adopt', { context: contextBody, candidateId: brief.candidateId, spec, all: true })).spec
-  const withMaterials = { ...adopted, materials: [PAPER], targetLength: adopted.brief?.length?.value ?? adopted.targetLength }
+  const withMaterials = { ...adopted, materials: [PAPER], targetLength: adopted.brief?.length?.value ?? adopted.targetLength,
+    cover: { ...adopted.cover, enabled: true, title: '科技论文阅读分析报告', fields: [{ label: '姓名', value: '张三' }, { label: '学号', value: '23009200123' }] } }
   record('adopted', { targetLength: withMaterials.targetLength, typography: withMaterials.typography, cover: withMaterials.cover,
     overrides: withMaterials.overrides, coverage: withMaterials.brief?.coverage?.length })
   const adoptedCheck = creationSpec.safeParse(withMaterials)

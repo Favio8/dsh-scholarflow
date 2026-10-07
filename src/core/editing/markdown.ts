@@ -150,6 +150,23 @@ export function validateRange(projection: Projection, from: number, to: number, 
   return { block, renderedText, citationKeys: [...new Set(overlapping.flatMap(leaf => leaf.citationKeys ?? []))] }
 }
 
+/** Local co-writing may span adjacent prose paragraphs. Each paragraph retains the
+ * same mapping and citation checks; this does not widen the native single-block card. */
+export function validateProseRange(projection: Projection, from: number, to: number) {
+  const blocks = projection.blocks.filter(block => block.start < to && block.end > from)
+  if (blocks.length === 1) {
+    const range = validateRange(projection, from, to, from === blocks[0].start && to === blocks[0].end ? 'paragraph' : 'inline')
+    return { blockIds: [range.block.id], renderedText: range.renderedText, citationKeys: range.citationKeys }
+  }
+  const nodes = (projection.tree.children ?? []).filter(node => start(node) < to && end(node) > from)
+  invariant(blocks.length && nodes.every(node => node.type === 'paragraph') && blocks.every(block => block.editable && block.node.type === 'paragraph'),
+    'SELECTION_UNSUPPORTED', '跨段改写请只选择普通正文，不包含标题、表格、公式或代码。')
+  const ranges = blocks.map(block => validateRange(projection, Math.max(from, block.start), Math.min(to, block.end),
+    from <= block.start && to >= block.end ? 'paragraph' : 'inline'))
+  return { blockIds: blocks.map(block => block.id), renderedText: ranges.map(range => range.renderedText).join('\n\n'),
+    citationKeys: [...new Set(ranges.flatMap(range => range.citationKeys))] }
+}
+
 export function validateSelection(source: string, selection: SelectionPayload) {
   const { startUtf16: from, endUtf16: to } = selection.sourceRange
   const range = validateRange(projectMarkdown(source), from, to, selection.scope)

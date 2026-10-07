@@ -16,7 +16,7 @@ const requestSchema = z.object({ callId: id, runId: id, stage, kind: z.enum(['mo
 export type WorkflowCall = z.input<typeof requestSchema>
 function statistics(checkpoint: WorkflowCheckpoint, now = Date.now()) {
   const budget = checkpoint.budget!
-  invariant(new Set(budget.calls.map(row => row.callId)).size === budget.calls.length && Object.keys(budget.childDurationMs).length <= 52 &&
+  invariant(new Set(budget.calls.map(row => row.callId)).size === budget.calls.length &&
     budget.calls.every(row => row.receivedCandidates <= row.reservedCandidates && budget.childDurationMs[row.runId] !== undefined &&
       Number.isFinite(Date.parse(row.startedAt)) && row.startDurationMs <= budget.childDurationMs[row.runId] &&
       (row.state === 'pending' ? !row.completedAt : !!row.completedAt && Number.isFinite(Date.parse(row.completedAt)))),
@@ -38,7 +38,6 @@ async function binding(io: FileStore, expected?: string) {
   invariant(expected === pointer.workflowId, 'WORKFLOW_BINDING_CHANGED', '当前引导任务改变；请重新预览阶段发送范围与累计预算。')
   invariant(!stored.configChanged, 'WORKFLOW_INPUT_CHANGED', '引导目标的配置改变，未调用提供方。')
   invariant(stored.checkpoint.status === 'waiting-input', 'WORKFLOW_PAUSED', '引导任务已暂停；先明确恢复再执行阶段。')
-  invariant(stored.input.budget && stored.input.maxReviewRounds && stored.checkpoint.budget, 'WORKFLOW_BUDGET_MISSING', '旧引导记录没有冻结累计预算；保留历史并重新建立目标，不能猜测恢复额度。')
   return stored
 }
 export async function workflowBudgetInfo(io: FileStore) {
@@ -68,23 +67,17 @@ export async function reserveWorkflowCall(io: FileStore, expected: string | unde
       'AUTOMATIC_CHILD_INVALID', '调度授权不属于这个阶段或调用。')
     await ensureNoAutomaticExecuting(io, stored.input.projectId, request.automaticChild)
     invariant(request.owner, 'WORKFLOW_OWNER_REQUIRED', '累计请求须绑定可检查的实际执行进程；未发起请求。')
-    const checkpoint = structuredClone(stored.checkpoint), budget = checkpoint.budget!, limits = stored.input.budget!
+    const checkpoint = structuredClone(stored.checkpoint), budget = checkpoint.budget ??= { calls: [], childDurationMs: {} }
     invariant(!budget.calls.some(row => row.callId === request.callId), 'WORKFLOW_CALL_ALREADY_CHARGED', '这个调用已经计入累计预算；未知响应不能重新发送同一次请求。')
     invariant(!budget.calls.some(row => row.state === 'pending'), 'WORKFLOW_CALL_PENDING', '前一请求仍未结束或响应未知；先等待或明确处理进程中断记录，不并行请求。')
     budget.childDurationMs[request.runId] = Math.max(budget.childDurationMs[request.runId] ?? 0, request.activeDurationMs)
-    const used = statistics(checkpoint), durationRemaining = limits.maxDurationMinutes * 60000 - used.durationMs
-    invariant(durationRemaining > 0 && (request.kind === 'model' ? used.modelCalls < limits.maxModelCalls : used.searchQueries < limits.maxSearchQueries) &&
-      used.candidates + request.candidateLimit <= limits.maxCandidateSources, 'WORKFLOW_BUDGET_EXHAUSTED', '引导任务累计调用、查询、候选或时间预算已耗尽；已有产物保留，未发起新请求。')
-    if (request.kind === 'model' && request.stage === 'review') invariant(
-      budget.calls.some(row => row.kind === 'model' && row.stage === 'review' && row.runId === request.runId) || used.reviewRounds < stored.input.maxReviewRounds!,
-      'WORKFLOW_REVIEW_LIMIT', '引导任务模型审查轮次已达上限；保留当前问题，补材料或带问题结束。')
-    invariant(budget.calls.length < 52, 'WORKFLOW_BUDGET_EXHAUSTED', '累计调用记录达到限额；未重置额度。')
+    statistics(checkpoint) // Counts and duration remain inspectable, never stopping thresholds.
     const startedAt = new Date().toISOString()
     budget.calls.push({ callId: request.callId, runId: request.runId, stage: request.stage, kind: request.kind, state: 'pending',
       startedAt, reservedCandidates: request.candidateLimit, receivedCandidates: 0, startDurationMs: budget.childDurationMs[request.runId], owner: request.owner })
     checkpoint.revision++; checkpoint.updatedAt = startedAt
     await commit(io, workflowCheckpointMutations(stored, checkpoint))
-    return { workflowId: stored.input.workflowId, callId: request.callId, durationRemainingMs: Math.max(1, Math.floor(durationRemaining)) }
+    return { workflowId: stored.input.workflowId, callId: request.callId }
   })
 }
 export async function settleWorkflowCall(io: FileStore, reservation: Awaited<ReturnType<typeof reserveWorkflowCall>>, state: 'succeeded' | 'failed', candidates: number) {
@@ -120,9 +113,8 @@ export async function workflowCall<T>(io: FileStore, workflowId: string | undefi
   execute: (signal: AbortSignal) => Promise<T>, candidateCount: (result: T) => number = () => 0): Promise<T> {
   signal.throwIfAborted()
   const reservation = await reserveWorkflowCall(io, workflowId, request)
-  const bounded = reservation ? AbortSignal.any([signal, AbortSignal.timeout(Math.min(30 * 60000, reservation.durationRemainingMs))]) : signal
   let result: T, candidates: number
-  try { result = await execute(bounded); bounded.throwIfAborted(); candidates = candidateCount(result)
+  try { result = await execute(signal); signal.throwIfAborted(); candidates = candidateCount(result)
     invariant(Number.isInteger(candidates) && candidates >= 0 && candidates <= (request.candidateLimit ?? 0), 'WORKFLOW_BUDGET_INVALID', '返回候选数量无法校验，未自动纳入来源。') }
   catch (error) { await settleWorkflowCall(io, reservation, 'failed', 0); throw error }
   await settleWorkflowCall(io, reservation, 'succeeded', candidates)

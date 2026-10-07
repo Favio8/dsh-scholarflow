@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
-import type { WritingTask } from '../shared/writing-task.ts'
+import { writingReadPaths, type WritingTask } from '../shared/writing-task.ts'
 import { groupIssues, mapLegacyNotes } from '../core/pipeline/task-issues.ts'
 
 const STAGES: Record<string, string> = { materials: '读取工作区资料', research: '检索公开文献', evidence: '整理证据与引用', outline: '规划章节内容', drafting: '撰写正文', review: '检查全文', completed: '初稿已生成' }
@@ -9,7 +9,7 @@ const STAGES: Record<string, string> = { materials: '读取工作区资料', res
  * in the middle column's bottom overlay, so this component never grows a large card that
  * pushes the text down; it reports real counts and keeps technical text one level deeper.
  */
-export function WritingProgress({ api, context, refresh, onTask, taskRevision }: any) {
+export function WritingProgress({ api, context, refresh, onTask, taskRevision, onManage }: any) {
   const [task, setTask] = useState<WritingTask>(), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [elapsed, setElapsed] = useState(0)
   const latest = useRef({ context, refresh, onTask }); latest.current = { context, refresh, onTask }
@@ -35,6 +35,17 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision }:
     try { const result = await api('writingTask.action', { context: context(), taskId: task.id, action: name }); setTask(result.task); await refresh() }
     catch (error) { setError((error as Error).message) } finally { setBusy(false) }
   }
+  const handleIssue = async (issue: WritingTask['issues'][number], op: string) => {
+    if (op === 'view-review') { onManage('Review'); return }
+    if (['paste-text', 'reconnect-source'].includes(op)) { onManage('Overview'); return }
+    if (op === 'answer-materials') { onManage('Research'); return }
+    if (['resolve-conflict', 'answer-keep-gap'].includes(op)) { onManage('Draft'); return }
+    setBusy(true); setError('')
+    try {
+      await api('writingTask.issueAction', { context: context(), taskId: task.id, issueId: issue.id, op })
+      const result = await api('writingTask.inspect', { context: context() }); setTask(result.task); await refresh()
+    } catch (error) { setError((error as Error).message) } finally { setBusy(false) }
+  }
   // A task stored before this field existed still has to render, so absence is an empty list.
   const issues = task.issues?.length ? task.issues : mapLegacyNotes(task.notes ?? [], task.updatedAt)
   const { needsAction, inProgress, handled } = groupIssues(issues)
@@ -55,7 +66,7 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision }:
         {task.status !== 'completed' && <button disabled={busy} onClick={() => action('cancel')}>停止</button>}
         {!!issues.length && <details><summary>详情（{needsAction.length} 项待处理）</summary>
           <div className="sf-issue-popover">
-            <IssueGroup title="需要处理" rows={needsAction} tone="needs" />
+            <IssueGroup title="需要处理" rows={needsAction} tone="needs" onAction={handleIssue} disabled={busy || task.status === 'running'} />
             <IssueGroup title="继续中" rows={inProgress} tone="working" />
             <IssueGroup title="已处理" rows={handled} tone="done" collapsed />
           </div></details>}
@@ -67,14 +78,16 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision }:
   </section>
 }
 
-function IssueGroup({ title, rows, tone, collapsed }: { title: string; rows: WritingTask['issues']; tone: string; collapsed?: boolean }) {
+function IssueGroup({ title, rows, tone, collapsed, onAction, disabled }: { title: string; rows: WritingTask['issues']; tone: string; collapsed?: boolean;
+  onAction?: (issue: WritingTask['issues'][number], op: string) => void; disabled?: boolean }) {
   if (!rows.length) return null
   return <details className="sf-issue-group" data-tone={tone} open={!collapsed}>
     <summary>{title}（{rows.length}）</summary>
     {rows.map(issue => <article key={issue.id} className="sf-issue-row">
       <p className="sf-issue-what">{issue.what}{issue.occurrences > 1 ? `（出现 ${issue.occurrences} 次，已合并）` : ''}</p>
       {!!issue.impact && <p className="sf-issue-impact">{issue.impact}</p>}
-      {!!issue.actions.length && <div className="sf-issue-actions">{issue.actions.map(entry => <span key={entry.op}>{entry.label}</span>)}</div>}
+      {!!issue.actions.length && onAction && <div className="sf-issue-actions">{issue.actions.map(entry => <button key={entry.op} disabled={disabled}
+        onClick={() => onAction(issue, entry.op)}>{entry.op === 'paste-text' ? '补充要求文字' : entry.op === 'reconnect-source' ? '管理要求来源' : entry.label}</button>)}</div>}
       {!!issue.detail && <details><summary>技术详情</summary><pre>{issue.detail}</pre></details>}
     </article>)}
   </details>
@@ -82,7 +95,11 @@ function IssueGroup({ title, rows, tone, collapsed }: { title: string; rows: Wri
 
 /** Real counts with the right denominator; a folder is never counted as a file. */
 function countsOf(task: WritingTask) {
-  if (task.stage === 'materials') return `已读取 ${Math.min(task.materialIndex, task.spec.materials.length)} / ${task.spec.materials.length} 份参考材料`
+  if (task.stage === 'materials') {
+    const paths = writingReadPaths(task.spec)
+    const requirements = paths.filter(path => !task.spec.materials.includes(path)).length
+    return `已处理 ${task.materialIndex} / ${paths.length} 个文件（要求 ${requirements}，参考材料 ${task.spec.materials.length}）`
+  }
   if (task.stage === 'evidence') return `已检查 ${task.evidenceMaterialIndex} 份资料 · 当前第 ${task.evidenceBlockIndex} 个内容单元`
   if (task.stage === 'research') return `已登记 ${task.onlineSources.length} 个来源（不等于已取得全文）`
   if (['drafting', 'review', 'completed'].includes(task.stage)) return `已写入 ${task.sectionIndex} / ${task.spec.sections.length} 节`
@@ -113,7 +130,7 @@ export const PROGRESS_CSS = `.sf-writing-progress{flex:none;border-bottom:1px so
 .sf-issue-what{margin:0 0 4px;font-size:12.5px;line-height:1.6}
 .sf-issue-impact{margin:0;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary,#727780)}
 .sf-issue-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.sf-issue-actions span{font-size:11.5px;padding:2px 7px;border:1px solid #8884;border-radius:6px;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-issue-actions button{font-size:11.5px;padding:2px 7px!important;border:1px solid #8884!important;border-radius:6px;color:var(--dsw-alias-label-secondary,#727780)}
 .sf-issue-row pre{margin:6px 0 0;padding:7px;background:#88808;border-radius:6px;font-size:11px;overflow:auto;white-space:pre-wrap}
 .sf-cowrite-inline{border:1px solid #4475e730;border-radius:10px;margin:12px;padding:12px;background:var(--dsw-alias-bg-base,#fff);font-size:13px;max-height:350px;overflow:auto}
 .sf-cowrite-inline header{display:flex;align-items:center;gap:10px}.sf-cowrite-inline header strong{flex:1}

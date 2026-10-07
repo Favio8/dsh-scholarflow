@@ -123,7 +123,7 @@ export async function prepareAutomatic(io: FileStore, workflowId: string, sessio
   const stored = await eligible(io, workflowId), previous = await inspectAutomatic(io, workflowId), pointer = await io.read(`${base(workflowId)}/current.json`)
   invariant(!previous.automatic || terminal(previous.automatic.state), 'AUTOMATIC_IN_PROGRESS', '先恢复或明确结束当前自动推进；不覆盖检查点。')
   const limits = stored.checkpoint.automaticBudget
-  invariant(!limits || limits.maxSteps === policy.maxSteps && limits.maxNoProgress === policy.maxNoProgress, 'AUTOMATIC_LIMIT_CHANGED', '本目标已冻结步骤与无进展上限，新的推进不重置额度。')
+  invariant(!limits || limits.maxNoProgress === policy.maxNoProgress, 'AUTOMATIC_LIMIT_CHANGED', '本目标已冻结步骤与无进展上限，新的推进不重置额度。')
   const observed = await reviewInput(io)
   invariant(observed.current.configHash === stored.current.configHash && observed.current.ledgerHash === stored.current.ledgerHash, 'WORKFLOW_INPUT_CHANGED', '预览期间输入变化，请重新读取。')
   if (reviewPlan) {
@@ -219,12 +219,11 @@ export async function startAutomatic(io: FileStore, plan: AutomaticPlan, owner: 
         plan.reviewPlan.inputBytes === plan.input.modelReview!.inputBytes && json(plan.reviewPlan.snapshot.modelDescriptor) === json(plan.input.modelReview!.modelDescriptor) &&
         json(plan.reviewPlan.snapshot.skillDigests) === json(plan.input.modelReview!.skillDigests), 'AUTOMATIC_CHILD_INVALID', '确认时审查计划已变化。')
     }
+    checkpoint.budget ??= { calls: [], childDurationMs: {} }
     checkpoint.automaticBudget ??= { maxSteps: plan.input.policy.maxSteps, usedSteps: 0, maxNoProgress: plan.input.policy.maxNoProgress, noProgress: 0, progressHash: progress(stored) }
     if (checkpoint.automaticBudget.progressHash !== progress(stored)) {
       checkpoint.automaticBudget.noProgress = 0; checkpoint.automaticBudget.progressHash = progress(stored)
     }
-    invariant(checkpoint.automaticBudget.usedSteps < checkpoint.automaticBudget.maxSteps && Object.keys(checkpoint.budget!.childDurationMs).length < 52,
-      'WORKFLOW_BUDGET_EXHAUSTED', '原步骤或时间记录额度已耗尽，未建立新调度。')
     checkpoint.budget!.childDurationMs[plan.input.automaticId] = 0
     checkpoint.revision++; checkpoint.updatedAt = new Date().toISOString()
     const state = automaticStateSchema.parse({ schemaVersion: 1, automaticId: plan.input.automaticId, workflowId: plan.input.workflowId,
@@ -257,10 +256,7 @@ export async function driveAutomatic(io: FileStore, workflowId: string, automati
   workers: AutomaticWorkers = {}) {
   const first = await readAutomatic(io, workflowId, automaticId)
   invariant(first.state.status === 'queued' && !first.state.steps.some(row => row.state === 'pending'), 'AUTOMATIC_RESUME_REQUIRED', '已开始的调度需要明确恢复或结束，不能重放旧步骤。')
-  const externalSignal = signal, originalBudget = await workflowBudgetInfo(io)
-  const remainingMs = first.root.input.budget!.maxDurationMinutes * 60000 - (originalBudget?.used?.durationMs ?? 0)
-  signal = AbortSignal.any([externalSignal, AbortSignal.timeout(Math.max(1, Math.min(30 * 60000, remainingMs)))])
-  const timedOut = () => signal.aborted && !externalSignal.aborted
+  const timedOut = () => false
   await stateChange(io, workflowId, automaticId, state => {
     invariant(state.status === 'queued' && !state.steps.some(row => row.state === 'pending'), 'AUTOMATIC_IN_PROGRESS', '调度已被另一个执行器接管，未再次开始。')
     state.status = 'running'
@@ -287,9 +283,6 @@ export async function driveAutomatic(io: FileStore, workflowId: string, automati
       if (stored.checkpoint.status === 'cancelled') return await stop('cancelled', 'WORKFLOW_TERMINAL', '引导目标已取消，未继续调度。')
       const observed = await reviewInput(io)
       invariant(!stored.configChanged && observed.dependencyHash === auto.input.dependencyHash, 'WORKFLOW_INPUT_CHANGED', '资料、要求、大纲、记忆、文风或实际稿件已变化；旧授权停止。')
-      const budget = await workflowBudgetInfo(io)
-      if (budget?.used && budget.used.durationMs >= budget.limits!.maxDurationMinutes * 60000 || limits.usedSteps >= limits.maxSteps)
-        return await stop('completed-with-issues', 'WORKFLOW_BUDGET_EXHAUSTED', '原任务步骤或执行时间预算已耗尽；没有重置额度。')
       if (limits.noProgress >= limits.maxNoProgress) return await stop('completed-with-issues', 'AUTOMATIC_NO_PROGRESS', '没有新增有效事实或问题变化，已达到原无进展上限；保留卡点。')
       const needsModelReview = auto.input.modelReview && !auto.state.steps.some(row => row.operation === 'model-review' && row.state === 'settled')
       const needsWork = auto.input.work && !auto.state.steps.some(row => ['model-generation', 'research-batch'].includes(row.operation) && row.state === 'settled')
@@ -323,7 +316,7 @@ export async function driveAutomatic(io: FileStore, workflowId: string, automati
       await io.lock(async () => {
         const fresh = await readAutomatic(io, workflowId, automaticId), root = await readWorkflow(io, workflowId), checkpoint = structuredClone(root.checkpoint)
         invariant(fresh.state.status === 'running' && !fresh.state.steps.some(row => row.state === 'pending') && digest(root.checkpointFile.text) === digest(stored.checkpointFile.text) &&
-          checkpoint.automaticBudget!.usedSteps < checkpoint.automaticBudget!.maxSteps && !checkpoint.budget!.calls.some(row => row.state === 'pending'),
+          !checkpoint.budget!.calls.some(row => row.state === 'pending'),
           'AUTOMATIC_STATE_CHANGED', '步骤或累计预算在登记前变化，未执行。')
         await ensureNoStageExecuting(io, root.current.ledger.projectId)
         const state = structuredClone(fresh.state)

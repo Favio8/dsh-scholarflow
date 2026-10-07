@@ -187,7 +187,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
         const model = await selectedModel(this.ctx, input.context.sessionId, signal)
         reviewPlan = await prepareModelReview(io, { context: input.context, assessmentScope: 'cross-section' },
           { providerId: model.selected.provider, modelId: model.selected.model, ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }), maxOutputTokens: model.maxOutputTokens }, binding => readPrivateSkill(binding, io))
-        invariant(reviewPlan.inputBytes + (reviewPlan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow,
+        invariant(Math.ceil(reviewPlan.inputBytes / 3) + (reviewPlan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow,
           'CONTEXT_WINDOW_EXCEEDED', '完整审查范围超过宿主模型上下文，没有隐式裁剪。')
       }
       let work: AutomaticWork | undefined
@@ -207,7 +207,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
           const generation = input.revision ? { instruction: input.revision.instruction, reviewIssueId: input.revision.issueId, selection: issueFixSelection(current, input.revision.issueId) } : input.generation!
           work = { kind: 'generation', plan: await prepareGeneration(io, { context: input.context, ...generation }, descriptor, binding => readPrivateSkill(binding, io)) }
         }
-        invariant(work.plan.inputBytes + (work.plan.snapshot.modelDescriptor.maxOutputTokens ?? 16384) + 2000 <= model.contextWindow,
+        invariant(Math.ceil(work.plan.inputBytes / 3) + (work.plan.snapshot.modelDescriptor.maxOutputTokens ?? 16384) + 2000 <= model.contextWindow,
           'CONTEXT_WINDOW_EXCEEDED', '所列生成范围超过当前模型上下文限额，没有截掉关键证据。')
       }
       const plan = await prepareAutomatic(io, input.workflowId, input.context.sessionId, input.policy, reviewPlan, work)
@@ -268,7 +268,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
         skillReader: binding => readPrivateSkill(binding, io),
         generation: async (plan, grant, childSignal, executionSessionId) => {
           const model = await checkModel(executionSessionId, childSignal)
-          invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 16384) + 2000 <= model.contextWindow,
+          invariant(Math.ceil(plan.inputBytes / 3) + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 16384) + 2000 <= model.contextWindow,
             'CONTEXT_WINDOW_EXCEEDED', '宿主模型实际上下文限额改变，没有发送旧范围。')
           return executeGeneration(io, plan, owner, childSignal, async call => {
             const currentModel = await checkModel(executionSessionId, call.signal)
@@ -282,7 +282,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
         },
         modelReview: async (plan, grant, childSignal, executionSessionId) => {
           const model = await checkModel(executionSessionId, childSignal)
-          invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow,
+          invariant(Math.ceil(plan.inputBytes / 3) + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow,
             'CONTEXT_WINDOW_EXCEEDED', '宿主模型实际上下文限额改变，未发送旧范围。')
           return executeModelReview(io, plan, owner, childSignal, async call => {
             const currentModel = await checkModel(executionSessionId, call.signal)
@@ -1161,7 +1161,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
         const model = await selectedModel(this.ctx, input.context.sessionId, signal), frozen = (await readDraftSequence(io, input.sequenceId)).input.model
         invariant(model.selected.provider === frozen.providerId && model.selected.model === frozen.modelId &&
           model.selected.reasoningEffort === frozen.reasoningEffort, 'MODEL_SELECTION_CHANGED', '宿主模型选择与初稿顺序不同，请取消旧顺序后重新预览发送范围。')
-        invariant(plan.generation.context.structuralGap === true || plan.generation.inputBytes + 16384 + 2000 <= model.contextWindow,
+        invariant(plan.generation.context.structuralGap === true || Math.ceil(plan.generation.inputBytes / 3) + 16384 + 2000 <= model.contextWindow,
           'CONTEXT_WINDOW_EXCEEDED', '当前实际正文与证据超出模型上下文预算，没有删掉关键输入继续。')
         invariant(this.generationPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有章节预览。')
         this.generationPlans.set(plan.generation.id, { plan: plan.generation, sequence: plan, selected: model.selected, peerId, expires: Date.now() + 600000 })
@@ -1235,6 +1235,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async candidatesDiscard(request: unknown) { return applicationResult(async () => this.writingController.discardCandidate(request)) }
   @Remote('task.issues')
   async taskIssues(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.taskIssues(request, signal) }) }
+  @Remote('writingTask.issueAction')
+  async writingTaskIssueAction(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.issueAction(request, signal) }) }
   @Remote('typography.update')
   async typographyUpdate(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.preferencesTypography(request, signal)) }
   @Remote('writingTask.inspect')
@@ -1275,7 +1277,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const { io } = await resolveStore(this.ctx, input.context, signal)
       const model = await selectedModel(this.ctx, input.context.sessionId, signal)
       const plan = await prepareGeneration(io, input, { providerId: model.selected.provider, modelId: model.selected.model, maxOutputTokens: model.maxOutputTokens }, binding => readPrivateSkill(binding, io))
-      invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '选定范围超过模型上下文预算；请缩小章节和证据范围，未截掉关键证据继续生成。')
+      invariant(Math.ceil(plan.inputBytes / 3) + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '选定范围超过模型上下文预算；请缩小章节和证据范围，未截掉关键证据继续生成。')
       for (const [key, row] of this.generationPlans) if (row.expires < Date.now()) this.generationPlans.delete(key)
       invariant(this.generationPlans.size < 100, 'TOO_MANY_PENDING_PLANS', '请先处理已有生成计划。')
       this.generationPlans.set(plan.id, { plan, selected: model.selected, peerId, expires: Date.now() + 600000 })
@@ -1405,7 +1407,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
           invariant(generation.snapshot.modelDescriptor.providerId === selection.provider && generation.snapshot.modelDescriptor.modelId === selection.model,
             'MODEL_SELECTION_CHANGED', '恢复需要原提供方与模型；请选择原模型，或结束旧运行后为新模型预览新任务。')
         }
-        invariant(generation.inputBytes + (generation.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '恢复输入超过当前模型上下文限额。')
+        invariant(Math.ceil(generation.inputBytes / 3) + (generation.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '恢复输入超过当前模型上下文限额。')
       }
       this.runActionPlans.set(plan.id, { plan, generation, selected, context: input.context, peerId, expires: Date.now() + 600000 })
       const stored = await readRun(io, input.runId, plan.projectId)
@@ -1627,7 +1629,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const { io } = await resolveStore(this.ctx, input.context, signal), model = await selectedModel(this.ctx, input.context.sessionId, signal)
       const plan = await prepareModelReview(io, input, { providerId: model.selected.provider, modelId: model.selected.model,
         ...(model.selected.reasoningEffort && { reasoningEffort: model.selected.reasoningEffort }), maxOutputTokens: model.maxOutputTokens }, binding => readPrivateSkill(binding, io))
-      invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '完整审查范围超过模型上下文预算，请缩小稿件；未隐式删掉关键证据。')
+      invariant(Math.ceil(plan.inputBytes / 3) + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '完整审查范围超过模型上下文预算，请缩小稿件；未隐式删掉关键证据。')
       this.modelReviewPlans.set(plan.id, { plan, peerId, selected: model.selected, expires: Date.now() + 600000 })
       return this.reviewPreview(plan)
     })
@@ -1640,7 +1642,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
       blocks: plan.context.blocks.length, budget: plan.snapshot.budget, skillDigests: plan.snapshot.skillDigests,
       assessments: plan.context.semanticScope ? ['论证', '文风', '跨节术语', '贡献项', '摘要／结论与实际正文'] : ['论证', '文风（旧冻结范围，跨节检查未执行）'],
       risks: ['向所列宿主模型发送当前全部已保存主稿、项目要求、相关论点、有效已选定位证据、已确认记忆、文风与本审查阶段固定 Skill 说明；本地模式不代表模型离线处理。',
-        '只生成同版审查与问题，不修改正文或升级来源身份；未知项和未关闭问题保持可见。暂停／恢复保留调用预算，已有产物不重放。',
+        '只生成同版审查与问题，不修改正文或升级来源身份；未知项和未关闭问题保持可见。暂停／恢复保留调用统计，已有产物不重放。',
         '宿主会话保存模型请求与结果以供追溯，项目诊断不另存完整 Prompt；阶段最多一次格式修复和两次临时错误重试。'] }
   }
 
@@ -1683,7 +1685,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
           selection.reasoningEffort === plan.snapshot.modelDescriptor.reasoningEffort, 'MODEL_SELECTION_CHANGED', '恢复须使用原审查的提供方、模型和推理设置；请恢复宿主选择或明确新建重试。')
         else plan = linkModelReviewRetry(await prepareModelReview(io, { context: input.context }, { providerId: selection.provider, modelId: selection.model,
           ...(selection.reasoningEffort && { reasoningEffort: selection.reasoningEffort }) }, binding => readPrivateSkill(binding, io)), action)
-        invariant(plan.inputBytes + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '恢复的完整审查输入超过当前模型上下文预算。')
+        invariant(Math.ceil(plan.inputBytes / 3) + (plan.snapshot.modelDescriptor.maxOutputTokens ?? 4096) + 2000 <= model.contextWindow, 'CONTEXT_WINDOW_EXCEEDED', '恢复的完整审查输入超过当前模型上下文预算。')
       }
       this.modelReviewActions.set(action.id, { action, plan, context: input.context, peerId, selected, expires: Date.now() + 600000 })
       return { ...this.reviewPreview(plan), planId: action.id, planHash: action.contentHash, action: input.action, originalRunId: action.runId,

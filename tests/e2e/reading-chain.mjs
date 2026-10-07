@@ -29,7 +29,7 @@ await writeFile(join(root, '作业要求', '要求说明.md'), 'TEST_ONLY 要求
 await writeFile(join(root, '作业要求', '扫描件.bin'), new Uint8Array([0, 255, 13, 10, 7, 42]))
 await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'scholarflow-reading', private: true,
   dependencies: { 'dsh-scholarflow': `link:${resolve('.').replaceAll('\\', '/')}` },
-  dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-scholarflow'] } } }))
+  dsh: JSON.parse(await (await import('node:fs/promises')).readFile(join(process.env.USERPROFILE, '.dsh/profiles/desktop/package.json'), 'utf8')).dsh }))
 await writeFile(join(profile, 'cordis.yml'), '[]\n')
 if (liveModel) await copyFile(join(process.env.USERPROFILE ?? '', '.dsh/.credentials.yaml'), join(testHome, '.credentials.yaml'))
 try { await symlink(resolve('.'), join(profile, 'node_modules/dsh-scholarflow'), 'junction') } catch (error) { if (error.code !== 'EEXIST') throw error }
@@ -82,49 +82,61 @@ try {
       body: JSON.stringify({ type: 'client-request', rpcId: crypto.randomUUID(), method, payload: { args } }) })
     return JSON.parse(await response.text())?.result?.value
   }, { method, args })
-  await rpc('workspace/create', { request: { path: root } })
-  await page.reload()
-  await page.waitForTimeout(3000)
-
-  // The same entry a person uses: open a conversation, point it at the workspace, then the chip.
-  await page.locator('[class*="_sessionRow"]', { hasText: '新会话' }).first().click().catch(() => undefined)
-  await page.waitForTimeout(1800)
-  await page.evaluate(async name => {
-    const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
-    const button = document.querySelector('button[aria-label="选择工作区"]')
-    if (!button) return false
-    button.click()
-    const deadline = Date.now() + 6000
-    while (Date.now() < deadline) {
-      await new Promise(done => setTimeout(done, 120))
-      const option = [...document.querySelectorAll('*')]
-        .filter(el => visible(el) && el.children.length === 0 && (el.innerText ?? '').includes(name)).at(-1)
-      if (!option) continue
-      let target = option
-      for (let up = 0; up < 4 && target.parentElement; up += 1) {
-        if (target.tagName === 'BUTTON' || target.getAttribute('role') === 'menuitem' || (target.className ?? '').toString().includes('_item_')) break
-        target = target.parentElement
-      }
-      target.click(); return true
-    }
-    return false
-  }, root.split(String.fromCharCode(92)).pop())
-  await page.waitForTimeout(2000)
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (await page.locator('[aria-label="创建论文向导"]').count()) break
-    await page.locator('button[title="选择新任务使用的 Agent 预设"]').click().catch(() => undefined)
-    await page.waitForTimeout(900)
-    await page.evaluate(() => {
-      const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
-      const option = [...document.querySelectorAll('button,[role=menuitem],[role=option],[class*="_item_"]')]
-        .filter(visible).find(el => (el.className ?? '').toString().includes('_item_') && (el.innerText ?? '').includes('ScholarFlow'))
-      option?.click()
-    })
-    await page.waitForTimeout(3000)
+  const workspaceId = (await rpc('workspace/create', { request: { path: root } })).workspace.workspaceId
+  await page.reload(); await page.waitForTimeout(800)
+  for (const [matcher, label] of [[/^预览版说明/, '继续'], [/^添加一个 API Key/, '稍后配置']]) {
+    const dialog = page.getByRole('dialog').first()
+    if (await dialog.count() && matcher.test(await dialog.innerText())) await dialog.getByRole('button', { name: label, exact: true }).click()
+    await page.waitForTimeout(700)
   }
-  const wizard = page.locator('[aria-label="创建论文向导"]')
-  record('读取链路向导已打开', await wizard.count() === 1, '容器=' + await wizard.count())
-  if (!(await wizard.count())) throw new Error('wizard did not render')
+  await page.locator(`[data-row-key="workspace:${workspaceId}"]`).hover()
+  const [created] = await Promise.all([
+    page.waitForResponse(response => response.request().method() === 'POST' && response.request().postDataJSON()?.method === 'session/create'),
+    page.locator('button[aria-label*="要求来源 TEST_ONLY"][aria-label*="中新建会话"]').click()
+  ])
+  const sessionId = (await created.json()).result.value.sessionId
+  await page.locator(`[data-row-key="session:${sessionId}"][aria-selected="true"]`).waitFor()
+  await page.locator('button[title="选择新任务使用的 Agent 预设"]').click()
+  await page.locator('[class*="_item_"]').filter({ hasText: /^ScholarFlow/ }).click()
+  const wizard = page.locator('.sf-wizard'); await wizard.waitFor()
+  record('读取链路向导已打开', await wizard.count() === 1, 'native session')
+  if (process.argv.includes('--outline-only')) {
+    // TEST_ONLY delayed transport: real host/client and real clicks; no claim of
+    // model quality. Verify feedback, stale candidates and HTTP cancellation.
+    await wizard.locator('#sf-field-title').fill('TEST_ONLY outline feedback')
+    await wizard.locator('#sf-field-requirements').fill('TEST_ONLY 分析指定论文结构')
+    await page.getByRole('button', { name: '下一步 →', exact: true }).click()
+    await page.getByRole('button', { name: '下一步 →', exact: true }).click()
+    const titles = page.locator('.sf-section-title')
+    const before = await titles.evaluateAll(nodes => nodes.map(node => node.value))
+    let calls = 0, cancelled = false
+    page.on('requestfailed', request => { if (request.url().endsWith('/outline.suggest')) cancelled = true })
+    await page.route('**/api/scholarflow.v1/outline.suggest', async route => {
+      calls++; const request = route.request().postDataJSON()
+      await page.waitForTimeout(2200)
+      await route.fulfill({ json: { type: 'server-response', rpcId: request.rpcId, result: { ok: true, value: { ok: true, data: {
+        candidate: { candidateId: 'cand_TEST_ONLY', sections: [{ id: 'section_TEST_ONLY', title: 'TEST_ONLY 候选', purpose: 'TEST_ONLY', targetLength: 1500 }], changes: [], coverage: [], gaps: [] }
+      } } } } }).catch(() => {})
+    })
+    const at = Date.now(); await page.getByRole('button', { name: 'AI 完善结构', exact: true }).click()
+    await page.locator('.sf-long-op').waitFor()
+    record('AT-45 第三步一秒内显示真实等待阶段', Date.now() - at <= 1000, 'delay=' + (Date.now() - at))
+    await page.waitForTimeout(1200)
+    record('AT-45 等待期间耗时继续增加', /已用 1 秒/.test(await page.locator('.sf-long-op').innerText()), await page.locator('.sf-long-op').innerText())
+    await page.locator('.sf-outline-candidate').waitFor()
+    record('AT-50 候选不覆盖原结构', JSON.stringify(before) === JSON.stringify(await titles.evaluateAll(nodes => nodes.map(node => node.value))), 'original outline unchanged')
+    const first = titles.first(), original = await first.inputValue()
+    await first.fill(original + ' TEST_ONLY changed')
+    record('AT-50 修改输入后旧大纲不能采用', await page.getByRole('button', { name: '采用此大纲', exact: true }).isDisabled(), 'stale adoption disabled')
+    await first.fill(original)
+    await page.getByRole('button', { name: 'AI 完善结构', exact: true }).click()
+    await page.getByRole('button', { name: '停止生成大纲', exact: true }).click()
+    await page.waitForTimeout(2500)
+    record('AT-45 停止大纲中止请求并保留原结构', cancelled && await page.locator('.sf-long-op').count() === 0 && calls === 2 &&
+      JSON.stringify(before) === JSON.stringify(await titles.evaluateAll(nodes => nodes.map(node => node.value))), JSON.stringify({ cancelled, calls }))
+    record('大纲交互无客户端错误', clientErrors.length === 0, clientErrors.join(' | ') || 'none')
+    await finish(rows.some(row => !row.ok) ? 1 : 0)
+  }
 
   const press = async label => page.evaluate(text => {
     const button = [...document.querySelectorAll('.sf-wizard-footer button, .sf-assignment-extract')]
@@ -167,7 +179,7 @@ try {
     const settled = await page.evaluate(() => {
       const running = Boolean(document.querySelector('.sf-long-op'))
       const members = [...document.querySelectorAll('.sf-member-reads li')]
-      return !running || members.some(row => row.getAttribute('data-state') === 'failed')
+      return !running && members.length >= 2 && members.every(row => ['ready', 'failed'].includes(row.getAttribute('data-state')))
     })
     if (settled) break
     await page.waitForTimeout(1000)
@@ -190,7 +202,7 @@ try {
   const stopped = await page.evaluate(() => ({ running: Boolean(document.querySelector('.sf-long-op')),
     requirements: document.querySelector('#sf-field-requirements')?.value ?? '' }))
   record('AT-45 停止结束运行状态', stopped.running === false, 'running=' + stopped.running)
-  record('AT-45 停止后迟到响应不写入字段', stopped.requirements === beforeStop || stopped.requirements.length === beforeStop.length,
+  record('AT-45 停止后迟到响应不写入字段', stopped.requirements === beforeStop,
     '长度 ' + beforeStop.length + '→' + stopped.requirements.length)
 
   // AT-49: structuring produces a candidate that is adopted on purpose, not applied silently.
@@ -217,6 +229,13 @@ try {
     error: (document.querySelector('.sf-wizard-error')?.innerText ?? '').slice(0, 140) }))
   record('AT-49 整理要求产出候选而非直接改写', candidate.brief > 0, JSON.stringify(candidate))
   record('AT-49 候选标出每项来源', candidate.origins > 0, '来源标记=' + candidate.origins)
+  const requirementsField = page.locator('#sf-field-requirements')
+  const candidateInput = await requirementsField.inputValue()
+  await requirementsField.fill(candidateInput + '\nTEST_ONLY 输入发生变化')
+  const adoptButton = page.locator('.sf-brief-actions button').filter({ hasText: '全部采用' })
+  record('AT-49 输入变化后旧候选禁止采用', await adoptButton.isDisabled(), 'stale candidate cannot overwrite changed input')
+  await requirementsField.fill(candidateInput)
+  record('AT-49 恢复相同输入后候选可采用', await adoptButton.isEnabled(), 'basis matches again; no additional paid request')
   const adopted = await page.evaluate(() => {
     const button = [...document.querySelectorAll('.sf-brief-actions button')].find(el => (el.innerText ?? '').includes('全部采用'))
     if (!button) return false
@@ -227,7 +246,7 @@ try {
     requirements: document.querySelector('#sf-field-requirements')?.value ?? '' }))
   record('AT-49 采用后候选收起且原输入保留', adopted && after.brief === 0 && after.requirements.includes('TEST_ONLY 原始要求文字'),
     '采用=' + adopted + ' 候选=' + after.brief + ' 原输入保留=' + after.requirements.includes('TEST_ONLY 原始要求文字'))
-  record('AT-49 采用写入的是带标签的整理记录', /已采用的要求整理/.test(after.requirements) || !adopted,
+  record('AT-49 采用写入的是带标签的整理记录', adopted && /已采用的要求整理/.test(after.requirements),
     '含整理记录=' + /已采用的要求整理/.test(after.requirements))
   record('读取链路期间无客户端错误', clientErrors.length === 0, clientErrors.slice(0, 3).join(' | ') || 'none')
   await finish(rows.some(row => !row.ok) ? 1 : 0)

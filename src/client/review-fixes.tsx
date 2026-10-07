@@ -19,7 +19,7 @@ export function ReviewFixes({ project, context, api, refresh, run, busy }: Props
     {plan && <section role="dialog" aria-label="问题修复确认"><h4>确认问题和完整段落范围</h4>
       <p>{plan.reviewIssueId} · {plan.model.providerId} / {plan.model.modelId} · 源码 [{plan.scope.startUtf16}, {plan.scope.endUtf16}) · 输入约 {plan.inputBytes} bytes</p>
       <p>本次输出上限 {plan.model.maxOutputTokens ?? 4096} token，包含提供方计入的推理输出；结果截断不自动重试。{plan.workflowId && `调用计入引导目标 ${plan.workflowId} 的原累计额度。`}</p>
-      <pre>{plan.sourceText}</pre><p>调用上限 {plan.budget.maxModelCalls} · {plan.budget.maxDurationMinutes} 分钟</p>
+      <pre>{plan.sourceText}</pre><p>生成建议后由你确认采用；可随时停止</p>
       {plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy} onClick={() => run(async () => { const confirmed = plan, captured = context(); setPlan(undefined); setActive({ context: captured, runId: confirmed.runId }); setMessage('正在生成待审阅修复，不修改主稿。')
         try { const result = await api('runs.start', { context: captured, planId: confirmed.planId, planHash: confirmed.planHash }); if (result.proposal) setProposal(result); setMessage(result.paused ? '修复生成已暂停；在正文运行历史预览恢复。' : '修复候选已保存，请逐项核对差异。'); await refresh() }

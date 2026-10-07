@@ -15,6 +15,7 @@ import { prepareSearch, executeSearch, prepareLookup, executeLookup } from '../.
 import { prepareResearchBatch, executeResearchBatch } from '../../src/core/research/batch.ts'
 import { registerSource } from '../../src/core/evidence/evidence.ts'
 import { recover } from '../../src/core/store/transactions.ts'
+import { semanticReviewChecks } from '../../src/shared/review.ts'
 import type { ResearchProvider } from '../../src/shared/online-research.ts'
 import { registerMaterial } from '../../src/core/materials/materials.ts'
 import { workflowAssociation } from '../../src/core/pipeline/workflow-budget.ts'
@@ -44,7 +45,7 @@ async function writing(io: MemoryStore) {
 const candidate = { candidateId: 'candidate_TEST_ONLY', provider: 'crossref' as const, recordId: '10.1000/test-only', sourceUrl: 'https://api.crossref.org/works/10.1000/test-only',
   retrievedAt: new Date().toISOString(), title: 'TEST_ONLY fake metadata', authors: [], identifiers: { doi: '10.1000/test-only', url: 'https://doi.org/10.1000/test-only' },
   textAccess: 'metadata' as const, kind: 'paper' as const, warnings: ['TEST_ONLY never claim real publication'] }
-test('real writing and model-review executors share charged calls; format repair spends the original budget without modifying the manuscript', async () => {
+test('writing and review retain telemetry beyond legacy call limits without modifying the manuscript', async () => {
   const { io, workflowId } = await setup({ maxModelCalls: 2 }), plan = await writing(io)
   assert.equal(plan.snapshot.workflowId, workflowId)
   let calls = 0
@@ -56,11 +57,11 @@ test('real writing and model-review executors share charged calls; format repair
   }, () => true)
   assert.equal(result.run.usedModelCalls, 2); assert.equal(calls, 2)
   const review = await prepareModelReview(io, { context: await context(io) }, { providerId: 'TEST_ONLY-provider', modelId: 'TEST_ONLY-model' })
-  await assert.rejects(executeModelReview(io, review, owner, signal(), async () => { calls++; return '' }, () => true, { pauseRequested: () => false }), { code: 'WORKFLOW_BUDGET_EXHAUSTED' })
-  assert.equal(calls, 2); assert.equal((await workflowBudgetInfo(io))!.used!.modelCalls, 2)
+  await executeModelReview(io, review, owner, signal(), async () => { calls++; return JSON.stringify({ checks: semanticReviewChecks.map(id => ({ id, status: 'unknown', detail: 'TEST_ONLY unverified' })), findings: [], rechecks: [], limitations: ['TEST_ONLY'] }) }, () => true, { pauseRequested: () => false })
+  assert.equal(calls, 3); assert.equal((await workflowBudgetInfo(io))!.used!.modelCalls, 3)
   assert.equal((await snapshot(io)).document.text, plain); assert.equal((await io.read('raw.txt'))!.text, 'TEST_ONLY unchanged raw')
 })
-test('single search, multi-query batch and DOI verification share query and candidate budgets; a blocked lookup preserves identity', async () => {
+test('search, batch and DOI lookup continue beyond legacy aggregate query limits with durable telemetry', async () => {
   const { io } = await setup({ maxSearchQueries: 3, maxCandidateSources: 4 })
   let queries = 0, lookups = 0
   const provider: ResearchProvider = { id: 'crossref', capabilities: { search: true, lookupIdentifier: true, fullText: false },
@@ -72,20 +73,20 @@ test('single search, multi-query batch and DOI verification share query and cand
   const source = await registerSource(io, { title: candidate.title, kind: 'paper', authors: [], identifiers: candidate.identifiers }, (await snapshot(io)).ledger.revision)
   const before = (await snapshot(io)).ledger.sources[source.source.id]
   const lookup = await executeLookup(io, await prepareLookup(io, source.source.id), provider, signal(), owner)
-  assert.equal(lookup.errorCode, 'WORKFLOW_BUDGET_EXHAUSTED'); assert.equal(lookups, 0)
-  assert.deepEqual((await snapshot(io)).ledger.sources[source.source.id], before)
+  assert.equal(lookup.errorCode, undefined); assert.equal(lookups, 1)
+  assert.equal((await snapshot(io)).ledger.sources[source.source.id].title, before.title)
   const used = (await workflowBudgetInfo(io))!.used!
-  assert.equal(used.searchQueries, 3); assert.equal(used.candidates, 3); assert.equal(used.modelCalls, 0)
+  assert.equal(used.searchQueries, 4); assert.equal(used.candidates, 3); assert.equal(used.modelCalls, 0)
 })
-test('review retries in the same run do not create new rounds; the next review round is bounded independently of writing', async () => {
+test('review retries and additional review rounds are counted without a legacy stopping threshold', async () => {
   const { io, workflowId } = await setup({ maxModelCalls: 4 }, 1)
   let calls = 0
   for (const number of [1, 2]) await workflowCall(io, workflowId, { callId: `call_TEST_ONLY_review_${number}`, runId: 'run_TEST_ONLY_review',
     stage: 'review', kind: 'model', owner }, signal(), async () => ++calls)
-  await assert.rejects(workflowCall(io, workflowId, { callId: 'call_TEST_ONLY_review_3', runId: 'run_TEST_ONLY_next_review', stage: 'review', kind: 'model', owner },
-    signal(), async () => ++calls), { code: 'WORKFLOW_REVIEW_LIMIT' })
+  await workflowCall(io, workflowId, { callId: 'call_TEST_ONLY_review_3', runId: 'run_TEST_ONLY_next_review', stage: 'review', kind: 'model', owner },
+    signal(), async () => ++calls)
   await workflowCall(io, workflowId, { callId: 'call_TEST_ONLY_writing', runId: 'run_TEST_ONLY_writing', stage: 'revision', kind: 'model', owner }, signal(), async () => ++calls)
-  assert.equal(calls, 3); assert.equal((await workflowBudgetInfo(io))!.used!.reviewRounds, 1)
+  assert.equal(calls, 4); assert.equal((await workflowBudgetInfo(io))!.used!.reviewRounds, 2)
 })
 test('unknown response survives cold restart; live ownership blocks closure and dead ownership preserves charged request and unknown candidate cap', async () => {
   const { io, workflowId } = await setup({ maxSearchQueries: 2, maxCandidateSources: 4 })
@@ -104,19 +105,32 @@ test('unknown response survives cold restart; live ownership blocks closure and 
   assert.equal(budget!.pendingCalls.length, 0); assert.equal(budget!.used!.searchQueries, 1); assert.equal(budget!.used!.candidates, 2)
   assert.equal((await readWorkflow(cold, workflowId)).checkpoint.budget!.calls[0].state, 'interrupted')
   let calls = 0
-  await assert.rejects(workflowCall(cold, workflowId, { ...request, callId: 'call_TEST_ONLY_new', candidateLimit: 3 }, signal(), async () => ++calls), { code: 'WORKFLOW_BUDGET_EXHAUSTED' })
-  assert.equal(calls, 0)
+  await workflowCall(cold, workflowId, { ...request, callId: 'call_TEST_ONLY_new', candidateLimit: 3 }, signal(), async () => ++calls)
+  assert.equal(calls, 1); assert.equal((await workflowBudgetInfo(cold))!.used!.searchQueries, 2)
 })
-test('total child duration is not charged twice and exhausted aggregate time stops dispatch across stages', async () => {
+test('total child duration is not charged twice and legacy aggregate time does not stop dispatch', async () => {
   const { io, workflowId } = await setup({ maxDurationMinutes: 1 })
   await workflowCall(io, workflowId, { callId: 'call_TEST_ONLY_duration', runId: 'run_TEST_ONLY_duration', stage: 'drafting', kind: 'model', owner }, signal(), async () => 'TEST_ONLY')
   await syncWorkflowDuration(io, workflowId, 'run_TEST_ONLY_duration', 60000)
   await syncWorkflowDuration(io, workflowId, 'run_TEST_ONLY_duration', 60000)
   assert.equal((await workflowBudgetInfo(io))!.used!.durationMs, 60000)
   let called = false
-  await assert.rejects(workflowCall(io, workflowId, { callId: 'call_TEST_ONLY_after_time', runId: 'run_TEST_ONLY_review', stage: 'review', kind: 'model', owner },
-    signal(), async () => { called = true }), { code: 'WORKFLOW_BUDGET_EXHAUSTED' })
-  assert.equal(called, false)
+  await workflowCall(io, workflowId, { callId: 'call_TEST_ONLY_after_time', runId: 'run_TEST_ONLY_review', stage: 'review', kind: 'model', owner },
+    signal(), async () => { called = true })
+  assert.equal(called, true); assert.ok((await workflowBudgetInfo(io))!.used!.durationMs >= 60000)
+})
+
+test('durable telemetry passes forty calls, fifty-two records and thirty minutes without blocking paid dispatch', async () => {
+  const { io, workflowId } = await setup({ maxModelCalls: 1, maxDurationMinutes: 1 }, 1)
+  let calls = 0
+  for (let index = 0; index < 55; index++) await workflowCall(io, workflowId, { callId: `call_TEST_ONLY_${index}`, runId: `run_TEST_ONLY_${index}`,
+    stage: 'review', kind: 'model', owner }, signal(), async () => ++calls)
+  await syncWorkflowDuration(io, workflowId, 'run_TEST_ONLY_0', 31 * 60000)
+  await workflowCall(io, workflowId, { callId: 'call_TEST_ONLY_56', runId: 'run_TEST_ONLY_56', stage: 'drafting', kind: 'model', owner }, signal(), async () => ++calls)
+  const telemetry = await workflowBudgetInfo(io)
+  assert.equal(calls, 56); assert.equal(telemetry!.used!.modelCalls, 56)
+  assert.equal(telemetry!.used!.reviewRounds, 55); assert.ok(telemetry!.used!.durationMs >= 31 * 60000)
+  assert.equal((await readWorkflow(io, workflowId)).checkpoint.budget!.calls.length, 56)
 })
 test('old unbound query plans cannot bypass a newly confirmed guided task and pause does not refresh its budget', async () => {
   const { io, workflowId } = await setup()
@@ -158,4 +172,21 @@ test('explicit material selection preserves the original overall quota; budget a
   config.workflow.budget.maxModelCalls = 1; io.externalEdit(path, stringify(config))
   await assert.rejects(workflowAssociation(io), { code: 'WORKFLOW_INPUT_CHANGED' })
   assert.equal((await workflowBudgetInfo(io))!.used!.modelCalls, 1); assert.equal((await workflowBudgetInfo(io))!.limits!.maxModelCalls, 2)
+})
+
+
+test('a request lasting past thirty minutes keeps the caller lifetime instead of a plugin deadline', async t => {
+  const { io, workflowId } = await setup({ maxDurationMinutes: 1 })
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const started = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>()
+  const controller = new AbortController()
+  let providerSignal: AbortSignal | undefined
+  const execution = workflowCall(io, workflowId, { callId: 'call_TEST_ONLY_long_request', runId: 'run_TEST_ONLY_long_request',
+    stage: 'review', kind: 'model', owner }, controller.signal, async signal => {
+    providerSignal = signal; started.resolve(); await finish.promise; signal.throwIfAborted(); return 'TEST_ONLY'
+  })
+  await started.promise
+  t.mock.timers.tick(31 * 60000)
+  assert.equal(providerSignal!.aborted, false)
+  finish.resolve(); assert.equal(await execution, 'TEST_ONLY')
 })

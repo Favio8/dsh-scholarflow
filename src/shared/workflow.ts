@@ -19,12 +19,12 @@ export const workflowStampSchema = z.object({ stage, fingerprint: hash, outcome:
 export const workflowCheckpointSchema = z.object({ schemaVersion: z.literal(1), workflowId: id, projectId: id, planHash: hash,
   revision: z.number().int().min(0), status: z.enum(['waiting-input', 'paused', 'cancelled', 'succeeded', 'completed-with-issues']),
   stamps: z.array(workflowStampSchema).max(7), updatedAt: z.string(),
-  automaticBudget: z.object({ maxSteps: z.number().int().min(7).max(64), usedSteps: z.number().int().min(0).max(64),
-    maxNoProgress: z.number().int().min(1).max(3), noProgress: z.number().int().min(0).max(64), progressHash: hash }).strict().optional(),
+  automaticBudget: z.object({ maxSteps: z.number().int().min(7).max(64), usedSteps: z.number().int().min(0),
+    maxNoProgress: z.number().int().min(1).max(3), noProgress: z.number().int().min(0), progressHash: hash }).strict().optional(),
   budget: z.object({ calls: z.array(z.object({ callId: id, runId: id, stage, kind: z.enum(['model', 'search', 'lookup']),
     state: z.enum(['pending', 'succeeded', 'failed', 'interrupted']), startedAt: z.string(), completedAt: z.string().optional(),
     owner: z.object({ pid: z.number().int().min(1), bootInstance: z.string().min(1).max(200) }).strict().optional(),
     reservedCandidates: z.number().int().min(0).max(80), receivedCandidates: z.number().int().min(0).max(80),
-    startDurationMs: z.number().int().nonnegative() }).strict()).max(52), childDurationMs: z.record(id, z.number().int().nonnegative()) }).strict().optional(),
+    startDurationMs: z.number().int().nonnegative() }).strict()), childDurationMs: z.record(id, z.number().int().nonnegative()) }).strict().optional(),
 }).strict()
 export type WorkflowCheckpoint = z.infer<typeof workflowCheckpointSchema>

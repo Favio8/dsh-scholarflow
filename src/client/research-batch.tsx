@@ -22,7 +22,7 @@ export function ResearchBatch({ search, context, api, run, busy, onSearch, refre
       <button disabled={busy} aria-label={`移除计划查询 ${index + 1}`} onClick={() => { setQueries(queries.filter((_, i) => i !== index)); setPlan(undefined) }}>移除此查询</button></li>)}</ol>
     <button disabled={busy || !queries.length} onClick={() => run(async () => setPlan(await api('research.batchPrepare', { context: context(), searches: queries })))}>预览多查询检索</button>
     {plan && <section role="dialog" aria-label="多查询检索确认"><h5>{plan.action === 'start' ? '确认检索计划' : plan.action === 'resume' ? '确认恢复检索' : plan.action === 'retry' ? '确认新运行重试' : '确认结束检索'}</h5>
-      <p>{plan.destination} · 本次最多 {plan.budget.maxSearchQueries} 次请求、{plan.budget.maxCandidateSources} 个候选、{plan.budget.maxDurationMinutes} 分钟；重试请求也计入预算。</p>
+      <p>{plan.destination} · 本次最多 {plan.budget.maxSearchQueries} 次请求、{plan.budget.maxCandidateSources} 个候选；调用次数与耗时仅用于统计，可随时停止。</p>
       {plan.previousRunId && <p>原运行 {plan.previousRunId} · 已使用 {plan.usedQueries} 次请求，已保存 {plan.candidatesReceived} 个候选。</p>}
       <ol>{plan.searches.map((item: any) => <li key={item.queryId}>{item.search.query} · 上限 {item.search.limit} · {item.search.yearFrom ?? '不限'}–{item.search.yearTo ?? '不限'}<p>用途：{item.search.purpose}</p></li>)}</ol>
       {plan.queryStates?.map((query: any) => <p key={query.queryId}>{query.queryId} · {labels[query.state]} · {query.attempts.length} 次尝试</p>)}

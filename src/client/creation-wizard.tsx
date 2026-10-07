@@ -1,3 +1,4 @@
+import { useTextPrompt } from './text-prompt.tsx'
 import React, { useEffect, useRef, useState } from 'react'
 import { useConfirmationFocus } from './confirmation-focus.ts'
 import { creationSpec, presetSections, type CreationSpec } from '../shared/writing-task.ts'
@@ -22,7 +23,7 @@ const splitPath = (path: string) => {
  * teacher-versus-preset conflict is shown rather than resolved, and the raw input is untouched
  * until the user adopts.
  */
-function BriefCandidate({ candidate, busy, onAdopt, onDiscard }: any) {
+function BriefCandidate({ candidate, stale, busy, onAdopt, onDiscard }: any) {
   const brief = candidate.brief
   const row = (label: string, value?: string, path?: string) => value
     ? <div className="sf-brief-row" key={label}><dt>{label}</dt><dd>{value}{path && brief.origins?.[path] &&
@@ -48,10 +49,11 @@ function BriefCandidate({ candidate, busy, onAdopt, onDiscard }: any) {
       {conflict.preferred === 'candidate' && <span>建议采用候选，因为它是作业要求的原文。</span>}
     </div>)}
     <div className="sf-brief-actions">
-      <button type="button" className="sf-primary" disabled={busy} onClick={() => onAdopt({ all: true })}>全部采用</button>
+      {stale && <p role="status">输入已改变，候选已过期；请基于当前要求重新整理。</p>}
+      <button type="button" className="sf-primary" disabled={busy || stale} onClick={() => onAdopt({ all: true })}>全部采用</button>
       {candidate.conflicts?.some((conflict: any) => conflict.topic === '篇幅') && <>
-        <button type="button" disabled={busy} onClick={() => onAdopt({ all: true, resolveLength: 'teacher' })}>采用老师要求并同步篇幅</button>
-        <button type="button" disabled={busy} onClick={() => onAdopt({ all: true, resolveLength: 'current' })}>保留当前篇幅（记录本次覆盖）</button>
+        <button type="button" disabled={busy || stale} onClick={() => onAdopt({ all: true, resolveLength: 'teacher' })}>采用老师要求并同步篇幅</button>
+        <button type="button" disabled={busy || stale} onClick={() => onAdopt({ all: true, resolveLength: 'current' })}>保留当前篇幅（记录本次覆盖）</button>
       </>}
       <button type="button" disabled={busy} onClick={onDiscard}>放弃候选</button>
       <span className="sf-field-hint">原输入保留；采用后会追加一段带标签的整理记录，不会覆盖你写的文字。</span>
@@ -60,7 +62,7 @@ function BriefCandidate({ candidate, busy, onAdopt, onDiscard }: any) {
 }
 
 /** The outline candidate: what changed, which requirement each section carries, and the gaps. */
-function OutlineCandidate({ candidate, busy, onAdopt, onDiscard }: any) {
+function OutlineCandidate({ candidate, stale, busy, onAdopt, onDiscard }: any) {
   return <section className="sf-outline-candidate" aria-label="大纲候选">
     <h5>大纲候选 · 与当前结构对照</h5>
     {!!candidate.changes?.length && <p className="sf-field-hint">变化：{summarizeChanges(candidate.changes)}</p>}
@@ -70,7 +72,8 @@ function OutlineCandidate({ candidate, busy, onAdopt, onDiscard }: any) {
       {candidate.coverage.map((row: any) => <p key={row.itemId} className={row.covered ? undefined : 'sf-gap'}>{row.covered ? '✔' : '✖'} {row.text}{!row.covered && ' · 还没有对应章节'}</p>)}</details>}
     {candidate.gaps?.map((gap: string) => <p className="sf-gap" key={gap}>缺口：{gap}</p>)}
     <div className="sf-brief-actions">
-      <button type="button" className="sf-primary" disabled={busy} onClick={onAdopt}>采用此大纲</button>
+      {stale && <p role="status">要求或结构已改变，请重新生成大纲候选。</p>}
+      <button type="button" className="sf-primary" disabled={busy || stale} onClick={onAdopt}>采用此大纲</button>
       <button type="button" disabled={busy} onClick={onDiscard}>放弃候选</button>
       <span className="sf-field-hint">放弃只删除候选，当前结构逐字节不变。</span>
     </div>
@@ -162,6 +165,7 @@ export function restoreCreationDraft(spec: CreationSpec): CreationSpec {
 }
 
 export function CreationWizard({ scope, api, context, onCreated, workspaceTitle, defaults }: any) {
+  const textPrompt = useTextPrompt()
   const key = `scholarflow:creation:${scope}`
   const initial: CreationSpec = { title: '', type: defaults?.defaultProjectType ?? 'course-paper', language: defaults?.language === 'en' ? 'en' : 'zh-CN',
     format: 'docx', requirements: '', requirementSources: [], materials: [], online: false, targetLength: 4000,
@@ -201,7 +205,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       if (selectAll) update({ materials: result.files.filter((file: any) => file.supported).map((file: any) => file.relativePath) })
     } catch (failure) { setError((failure as Error).message) } finally { setScanning(false) }
   }
-  useEffect(() => { void loadFiles(!saved) }, [key])
+  useEffect(() => { void loadFiles(false) }, [key])
   // A restored draft may name external handles the host no longer holds (a new session, a
   // lapsed grant). Ask which are still live and mark the rest for reconnection, so the
   // wizard never implies a source will be read when it will not be (SPEC v1.1 §7.2).
@@ -229,7 +233,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     }).catch(() => undefined)
     return () => { live = false }
   }, [key])
-  const act = async (fn: () => Promise<void>) => { setBusy(true); setError(''); try { await fn() } catch (error) { setError((error as Error).message) } finally { setBusy(false) } }
+  const act = async (fn: () => Promise<void>) => { setBusy(true); setError(''); try { await fn() } catch (error) { if ((error as Error).name !== 'AbortError') setError((error as Error).message) } finally { setBusy(false) } }
   // Requirement sources stand on their own: they are never merged into the materials
   // list, and extraction reads them under their own authorisation (SPEC v1.1 §7).
   const readySpec = () => ({ ...spec, title: spec.title.trim() || spec.requirements.trim().split('\n')[0].slice(0, 60) })
@@ -241,8 +245,11 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const readRef = useRef<{ readId?: string; timer?: number; startedAt?: number; opId: string }>({ opId: '' })
   const [read, setRead] = useState<any>()
   const [brief, setBrief] = useState<any>()
+  const readController = useRef<AbortController | undefined>(undefined)
+  useEffect(() => () => readController.current?.abort(), [])
   const [elapsed, setElapsed] = useState(0)
   const stopReading = () => {
+    readController.current?.abort()
     const { readId, timer } = readRef.current
     window.clearInterval(timer); setElapsed(0)
     if (readId) void api('creation.stopRead', { readId }).then(setRead).catch(() => undefined)
@@ -252,10 +259,12 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const [operator, setOperator] = useState<'idle' | 'reading' | 'structuring' | 'stopped' | 'done'>('idle')
   const organize = () => act(async () => {
     const current = readySpec()
+    const controller = new AbortController(); readController.current = controller
     const opId = `op_${Date.now()}`
     readRef.current = { opId, startedAt: Date.now() }
     setElapsed(0); setBrief(undefined); setOperator('reading'); setError('')
-    const { readId } = await api('creation.readRequirements', { context: context(), spec: creationSpec.parse(current) })
+    const { readId } = await api('creation.readRequirements', { context: context(), spec: creationSpec.parse(current) }, controller.signal)
+    if (controller.signal.aborted || readRef.current.opId !== opId) { void api('creation.stopRead', { readId }); return }
     readRef.current.readId = readId
     const startedAt = readRef.current.startedAt!
     readRef.current.timer = window.setInterval(async () => {
@@ -265,7 +274,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       try {
         const status = await api('creation.readStatus', { readId })
         // A late answer from a stopped or superseded action never reaches a field (PRD §4.1).
-        if (live.opId !== opId) return
+        if (readRef.current.opId !== opId) return
         setRead(status)
       } catch { /* a finished job reports its final state on the next poll */ }
     }, 400)
@@ -282,11 +291,13 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       return
     }
     setOperator('structuring')
+    const structureTimer = window.setInterval(() => setElapsed(Date.now() - startedAt), 400)
     try {
-      const result = await api('creation.structure', { context: context(), spec: creationSpec.parse(current), readId, presetLength: spec.targetLength })
+      const result = await api('creation.structure', { context: context(), spec: creationSpec.parse(current), readId, presetLength: spec.targetLength }, controller.signal)
       if (readRef.current.opId !== opId) return
-      setBrief(result.candidate); setOperator('done')
-    } catch (error) { setOperator('done'); throw error }
+      setBrief({ ...result.candidate, inputSpecJson: JSON.stringify(current) }); setOperator('done')
+    } catch (error) { if (controller.signal.aborted) return; setOperator('done'); throw error }
+    finally { window.clearInterval(structureTimer) }
   })
   const waitForRead = async (readId: string, opId: string, timeoutMs = 15 * 60 * 1000) => {
     const deadline = Date.now() + timeoutMs
@@ -320,10 +331,22 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     setRead(result.read)
   })
   // The old single-shot suggest stays available for the chapter-only path in step 3.
+  const outlineController = useRef<AbortController | undefined>(undefined)
+  const [outlineRunning, setOutlineRunning] = useState(false), [outlineElapsed, setOutlineElapsed] = useState(0)
+  useEffect(() => () => outlineController.current?.abort(), [])
+  const stopOutline = () => {
+    outlineController.current?.abort(); setOutlineRunning(false)
+    setIssues(['已停止生成大纲；原结构保持，重新生成需再次点击。'])
+  }
   const suggestStructure = () => act(async () => {
     const current = creationSpec.parse(readySpec())
-    const result = await api('outline.suggest', { context: context(), spec: current })
-    setOutline(result.candidate)
+    const controller = new AbortController(); outlineController.current = controller
+    const startedAt = Date.now(); setOutlineRunning(true); setOutlineElapsed(0)
+    const timer = window.setInterval(() => setOutlineElapsed(Date.now() - startedAt), 400)
+    try {
+      const result = await api('outline.suggest', { context: context(), spec: current }, controller.signal)
+      if (!controller.signal.aborted) setOutline({ ...result.candidate, inputSpecJson: JSON.stringify(readySpec()) })
+    } finally { window.clearInterval(timer); if (outlineController.current === controller) setOutlineRunning(false) }
   })
   const [outline, setOutline] = useState<any>()
   const adoptOutline = () => act(async () => {
@@ -397,8 +420,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     setRecognition(previous => ({ ...previous, [resourceId]: { state: 'confirmed' as const, text: candidate.text } }))
   }
   /** Pasting the text of a file that could not be read is a user action, not a parser guess. */
-  const pasteMemberText = (member: string) => {
-    const text = window.prompt(`把 ${member} 里真实存在的要求文字粘贴到这里（确认后进入写作要求）：`)
+  const pasteMemberText = async (member: string) => {
+    const text = await textPrompt.ask(`粘贴 ${member} 的真实要求文字`, '', true)
     if (!text?.trim()) return
     update({ requirements: [spec.requirements.trim(), text.trim()].filter(Boolean).join(String.fromCharCode(10)).slice(0, 12000) })
     setRead((current: any) => current ? { ...current, members: current.members.map((row: any) => row.name === member
@@ -490,12 +513,12 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     source.kind === 'folder' ? source.members.map(member => member.name) : source.path ? [source.path] : [])])]
   const capabilityGaps = [
     '引用样式只支持顺序编号，作者—年份尚未实现',
-    '排版要求（字体、行距、页数、封面）暂未支持',
-    ...(spec.requirementSources.some(source => requirementKind(source.path ?? '') === 'image' && recognition[source.resourceId]?.state !== 'confirmed')
+    ...(spec.requirementSources.some(source => requirementKind(source.path ?? '') === 'image' && recognition[source.resourceId]?.state !== 'confirmed'
+      && !(read?.members ?? []).some((member: any) => member.name === source.path && member.state === 'ready'))
       ? ['图片文字需先识别并确认，或手动补充'] : []),
     ...(spec.requirementSources.some(source => source.origin === 'external' && source.state !== 'connected') ? ['外部来源需要重新连接后才能再次读取'] : []),
   ]
-  return <div className="sf-wizard-scroll"><section ref={root} className="sf-wizard" aria-label="创建论文向导">
+  return <>{textPrompt.dialog}<div className="sf-wizard-scroll"><section ref={root} className="sf-wizard" aria-label="创建论文向导">
     <header><span className="sf-wizard-eyebrow">{workspaceTitle}</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p>
       <button className="sf-wizard-clear" disabled={busy} onClick={clearDraft}>清除草稿</button></header>
     <p className="sf-wizard-step-compact" aria-current="step">第 {step + 1} 步 / 共 3 步 · {["写作要求", "资料范围", "行文结构"][step]}</p>
@@ -534,7 +557,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
             <span className="sf-long-op-hint">{operator === 'reading' ? '等待模型响应期间不显示推算的剩余时间。' : '只使用本次真正读到的文字。'}</span>
           </div>}
           <p className="sf-field-hint">要求来源规定这篇论文该怎么写；第二步的论文参考材料提供写作所需的资料。两者独立选择，互不要求对方包含自己。文件保持原样，只在整理或写作时读取。</p>
-          {brief && <BriefCandidate candidate={brief} busy={busy} onAdopt={adoptBrief} onDiscard={discardBrief} />}
+          {brief && <BriefCandidate candidate={brief} stale={brief.inputSpecJson !== JSON.stringify(readySpec())} busy={busy} onAdopt={adoptBrief} onDiscard={discardBrief} />}
           {spec.requirementSources.length
             ? <ul className="sf-source-list">{requirementRows}</ul>
             : <p className="sf-field-hint">还没有添加要求来源。也可以直接填写写作要求后继续。</p>}
@@ -570,10 +593,12 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           <div className="sf-structure-actions">
             <button disabled={busy || !spec.preset} onClick={() => setPresetOpen(true)}>更换预设</button>
             <button disabled={busy || allocationPlan.minimumShortfall} onClick={reallocate}>重新分配</button>
-            <button disabled={busy} onClick={suggestStructure}>AI 完善结构</button>
+            {outlineRunning ? <button onClick={stopOutline}>停止生成大纲</button> : <button disabled={busy} onClick={suggestStructure}>AI 完善结构</button>}
           </div>
         </div>
-        {outline && <OutlineCandidate candidate={outline} busy={busy} onAdopt={adoptOutline}
+        {outlineRunning && <div className="sf-long-op" role="status" aria-live="polite"><span className="sf-long-op-dot" aria-hidden="true" />
+          <strong>生成大纲候选</strong><span>已用 {formatElapsed(outlineElapsed)}</span><span>原结构保持，完成后由你确认采用。</span></div>}
+        {outline && <OutlineCandidate candidate={outline} stale={outline.inputSpecJson !== JSON.stringify(readySpec())} busy={busy} onAdopt={adoptOutline}
           onDiscard={() => act(async () => { await api('candidates.discard', { context: context(), candidateId: outline.candidateId }); setOutline(undefined) })} />}
         <p className="sf-field-hint">当前预设：{spec.preset ? `${spec.preset.id}（${spec.preset.source === 'builtin' ? '内置' : '我的'}${spec.preset.modified ? ' · 已修改' : ''}）` : '尚未选择'}
           ，计划合计 {allocationPlan.total} / {spec.targetLength}。手工章节保持原值，其余按建议比例分配；比例只是起点，任何一项都可以改。</p>
@@ -593,7 +618,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           <button onClick={() => editSections([...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500, allocationMode: 'auto' }])}>+ 添加章节</button>
           <button disabled={busy || !history.length} onClick={undoStructure}>撤销结构编辑</button>
           <button disabled={busy || !spec.sections.every(section => section.title.trim())} onClick={() => act(async () => {
-            const name = window.prompt('预设名称', spec.title.trim() || '我的结构'); if (!name?.trim()) return
+            const name = await textPrompt.ask('预设名称', spec.title.trim() || '我的结构'); if (!name?.trim()) return
             await api('presets.save', { ...structureForPreset(), title: name.trim() }) })}>保存为我的预设</button>
           {spec.preset?.source === 'user' && <button disabled={busy} onClick={() => act(async () => {
             if (!window.confirm('用当前结构更新这个预设？已有论文不受影响。')) return
@@ -601,6 +626,12 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         </div>
         {/* A short summary next to the create button, expandable for the full scope. The large
             pre-creation confirmation block is gone: nothing here is asked twice. */}
+        {spec.cover?.enabled && <fieldset className="sf-cover-fields"><legend>封面</legend>
+          <label>封面标题<input value={spec.cover.title} onChange={event => update({ cover: { ...spec.cover!, title: event.target.value } })} /></label>
+          {spec.cover.fields.map((field, index) => <label key={index}>{field.label}<input value={field.value} onChange={event => update({ cover: {
+            ...spec.cover!, fields: spec.cover!.fields.map((row, at) => at === index ? { ...row, value: event.target.value } : row) } })} /></label>)}
+          <small>仅用于封面，不作为正文生成资料。</small>
+        </fieldset>}
         <section className="sf-create-summary" aria-label="创建摘要">
           <div className="sf-create-line">
             <strong>{FORMAT_LABELS[spec.format]} · {spec.language === 'en' ? `约 ${spec.targetLength} 词` : `约 ${spec.targetLength} 字`}
@@ -653,7 +684,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     </footer>
     <PresetPicker open={presetOpen} language={spec.language} paperType={spec.type} applied={spec.preset} structure={structureForPreset}
       api={api} run={act} busy={busy} onClose={() => setPresetOpen(false)} onUse={applyPreset} />
-  </section></div>
+  </section></div></>
 }
 
 export const WIZARD_CSS = `/* Text colours are tokens because they must clear WCAG AA in both colour schemes

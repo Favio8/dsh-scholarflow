@@ -28,7 +28,7 @@ export function useCowrite({ text, baseHash, api, context, merge, refresh }: any
     <small>{row.instruction}</small>{(row.protectedFactChanges?.length || row.citationChanges?.added.length || row.citationChanges?.removed.length) ? <details><summary>事实与引用变化</summary>{row.protectedFactChanges?.map((item: string) => <p key={item}>{item}</p>)}{!!row.citationChanges?.added.length && <p>新增引用：{row.citationChanges.added.join('、')}</p>}{!!row.citationChanges?.removed.length && <p>移除引用：{row.citationChanges.removed.join('、')}</p>}</details> : null}{row.baseBufferHash !== hash && <p>正文已变化，这条建议需重新生成。</p>}
     {row.before && <pre className="sf-cowrite-before"><del>{row.before}</del></pre>}<pre className="sf-cowrite-after">{row.after}</pre>
   </section>
-  const annotations = (start: number, end: number) => suggestions.filter(row => row.start >= start && row.start < end).map(card)
+  const annotations = (start: number, end: number, excludeId?: string) => suggestions.filter(row => row.id !== excludeId && row.start >= start && row.start < end).map(card)
   const generatedView = generated && <section className="sf-cowrite-inline"><header><strong>本节生成建议 · 人工内容已保留</strong>
     <button disabled={busy || generated.proposal.edits.some((edit: any) => text.slice(edit.startUtf16, edit.endUtf16) !== edit.expectedText)} onClick={() => act(async () => {
       const result = await api('cowrite.adoptGenerated', { context: context(), proposalId: generated.proposal.id, text })

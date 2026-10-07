@@ -20,7 +20,7 @@ export async function currentWritingText(io: FileStore, sessionId: string) {
 export async function proposeCowrite(io: FileStore, sessionId: string, input: {
   text: string; baseDocumentHash: string; start: number; end: number; replacementText: string; instruction: string
   action?: 'rewrite' | 'polish' | 'shorten' | 'expand' | 'custom'; blockId?: string; baseBufferHash?: string
-}) {
+}, signal?: AbortSignal) {
   const current = await snapshot(io), before = input.text.slice(input.start, input.end)
   invariant(input.baseDocumentHash === current.document.contentHash && input.start <= input.end && input.end <= input.text.length &&
     unicodeBoundary(input.text, input.start) && unicodeBoundary(input.text, input.end), 'STALE_DOCUMENT_VERSION', '编辑基础或范围已改变。')
@@ -33,6 +33,9 @@ export async function proposeCowrite(io: FileStore, sessionId: string, input: {
     action: input.action ?? 'custom', ...(input.blockId && { blockId: input.blockId }),
     protectedFactChanges: protectedChanges(before, input.replacementText), citationChanges: { added: citationKeys(input.replacementText).filter(key => !citationKeys(before).includes(key)), removed: citationKeys(before).filter(key => !citationKeys(input.replacementText).includes(key)) },
     state: 'pending', createdAt: now, updatedAt: now })
-  await io.lock(async () => io.write(`.scholarflow/writing/suggestions/${suggestion.id}.json`, json(suggestion), undefined))
+  await io.lock(async () => {
+    signal?.throwIfAborted()
+    await io.write(`.scholarflow/writing/suggestions/${suggestion.id}.json`, json(suggestion), undefined)
+  })
   return suggestion
 }

@@ -1,3 +1,4 @@
+import { useTextPrompt } from './text-prompt.tsx'
 import React, { useEffect, useState } from 'react'
 import { localized } from '../shared/presets.ts'
 
@@ -6,6 +7,7 @@ import { localized } from '../shared/presets.ts'
 // wizard-specific: no current structure, no applying to a paper.
 
 export function StructurePresets({ api, run, busy, language }: any) {
+  const textPrompt = useTextPrompt()
   const [library, setLibrary] = useState<any>({ all: [], issues: [] })
   const [message, setMessage] = useState('')
   const load = () => api('presets.list', {}).then((value: any) => { setLibrary(value); return value })
@@ -16,7 +18,7 @@ export function StructurePresets({ api, run, busy, language }: any) {
   })
   const mine = (library.all ?? []).filter((preset: any) => preset.source === 'user')
   const builtin = (library.all ?? []).filter((preset: any) => preset.source === 'builtin')
-  return <section className="sf-settings-presets" aria-label="结构预设">
+  return <>{textPrompt.dialog}<section className="sf-settings-presets" aria-label="结构预设">
     <h3>结构预设</h3>
     <p>内置预设随插件发布，只读；可复制为我的预设后再修改。这里与创建引导的预设弹窗共用同一份数据。</p>
     <p className="sf-muted">我的预设 {mine.length} 个 · 内置 {builtin.length} 个</p>
@@ -25,7 +27,7 @@ export function StructurePresets({ api, run, busy, language }: any) {
     <ul className="sf-settings-preset-list">
       {mine.map((preset: any) => <li key={preset.id}>
         <span>{localized(preset.title, language ?? 'zh-CN')}<small>{preset.paperType} · v{preset.version} · {preset.sectionCount} 章</small></span>
-        <button disabled={busy} onClick={() => { const next = window.prompt('新的预设名称', localized(preset.title, language ?? 'zh-CN'))
+        <button disabled={busy} onClick={async () => { const next = await textPrompt.ask('新的预设名称', localized(preset.title, language ?? 'zh-CN'))
           if (next?.trim()) void manage(() => api('presets.rename', { id: preset.id, title: next.trim() }), '预设已改名。') }}>改名</button>
         <button disabled={busy} onClick={() => { if (window.confirm(`删除预设「${localized(preset.title, language ?? 'zh-CN')}」？已有论文不受影响。`))
           void manage(() => api('presets.remove', { id: preset.id }), '预设已删除，已有论文不受影响。') }}>删除</button>
@@ -39,5 +41,5 @@ export function StructurePresets({ api, run, busy, language }: any) {
       </li>)}</ul>
     </details>
     <p role="status">{message}</p>
-  </section>
+  </section></>
 }

@@ -38,11 +38,11 @@ export function ModelReview({ project, context, api, refresh, run, busy, onRevie
     {preview && <section role="dialog" aria-label="模型审查确认"><h4>{actionPlan ? actionPlan.action === 'resume' ? '确认恢复原审查' : '确认关联新审查' : '确认模型审查范围'}</h4>
       <p>{preview.model.providerId} / {preview.model.modelId}{preview.model.reasoningEffort ? ` · ${preview.model.reasoningEffort}` : ''} · 段落 {preview.blocks} · 输入约 {preview.inputBytes} bytes</p>
       <p>本次冻结检查：{preview.assessments?.join('、')}</p>
-      <p>正文版本：{preview.documentHash} · 证据 {preview.evidenceIds.length} · 实际引用来源 {preview.sourceIds.length} · 调用上限 {preview.budget.maxModelCalls} · {preview.budget.maxDurationMinutes} 分钟</p>
-      {preview.workflowId && <p>计入引导任务 {preview.workflowId} 的原累计预算与模型审查轮次；未知响应不推定未计费。</p>}
+      <p>正文版本：{preview.documentHash} · 证据 {preview.evidenceIds.length} · 实际引用来源 {preview.sourceIds.length} · 调用次数与耗时仅用于统计</p>
+      {preview.workflowId && <p>记录到引导任务 {preview.workflowId} 的调用统计与审查历史；未知响应不推定未计费。</p>}
       <p>每次调用输出上限：{preview.model.maxOutputTokens ?? 4096} tokens，包含提供方计费的推理输出；达到上限会停止并保留失败记录。</p>
       {preview.skillDigests.map((skill: any) => <p key={skill.qualifiedId}>固定审查 Skill：{skill.qualifiedId} · {skill.digest}</p>)}
-      {actionPlan && <p>原运行 {actionPlan.originalRunId} · 已计费调用 {actionPlan.recoveredCalls}；{actionPlan.existingReportId ? '已保存报告只恢复终态，不再次调用模型或发布报告。' : '恢复保留原预算；关联新运行使用预览中的新预算。'}</p>}
+      {actionPlan && <p>原运行 {actionPlan.originalRunId} · 已计费调用 {actionPlan.recoveredCalls}；{actionPlan.existingReportId ? '已保存报告只恢复终态，不再次调用模型或发布报告。' : '恢复保留原统计；关联新运行使用已确认的发送范围。'}</p>}
       {preview.retryNotBefore && <p>提供方等待窗口：{new Date(preview.retryNotBefore).toLocaleString()}</p>}
       {preview.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       {preview.documentHash !== project.document.contentHash && !preview.existingReportId && <p role="alert">正文已改变，请取消旧预览并重新规划。</p>}

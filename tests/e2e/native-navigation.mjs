@@ -60,6 +60,7 @@ const rpc = (method, args = {}) => page.evaluate(async ({ method, args }) => {
   return result.json()
 }, { method, args })
 const dismiss = async () => {
+  await page.waitForTimeout(800)
   for (let attempt = 0; attempt < 4; attempt++) {
     const dialog = page.getByRole('dialog').first()
     if (!await dialog.count()) break
@@ -67,7 +68,7 @@ const dismiss = async () => {
     if (body.startsWith('预览版说明')) await dialog.getByRole('button', { name: '继续', exact: true }).click()
     else if (body.startsWith('添加一个 API Key')) await dialog.getByRole('button', { name: '稍后配置', exact: true }).click()
     else break
-    await page.waitForTimeout(400)
+    await page.waitForTimeout(700)
   }
 }
 const createFrom = async button => {
@@ -116,6 +117,7 @@ try {
   console.log('PASS reopening the same blank session restores the wizard and its draft')
   await page.reload()
   await page.locator('.sf-wizard').waitFor({ timeout: 30000 })
+  await dismiss()
   assert.equal(await page.locator('#sf-field-title').inputValue(), 'TEST_ONLY retained wizard draft')
   console.log('PASS reloading an existing ScholarFlow session restores the wizard')
   // Fresh isolated profiles masked the production crash: the user's existing
@@ -132,6 +134,7 @@ try {
   }, sessionId)
   await page.reload()
   await page.locator('.sf-wizard').waitFor({ timeout: 30000 })
+  await dismiss()
   assert.match(await page.locator('.sf-wizard-step-compact').textContent(), /第 3 步/)
   const migrated = await page.evaluate(sessionId => JSON.parse(localStorage.getItem(Object.keys(localStorage)
     .find(key => key.startsWith('scholarflow:creation:') && key.endsWith(`:${sessionId}`)))), sessionId)

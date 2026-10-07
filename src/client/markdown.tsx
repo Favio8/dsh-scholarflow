@@ -1,9 +1,10 @@
 import React from 'react'
 import katex from 'katex'
-import { type AstNode, type Projection, mapLeafPoint, validateRange } from '../core/editing/markdown.ts'
+import { type AstNode, type Projection, mapLeafPoint, validateRange, validateProseRange } from '../core/editing/markdown.ts'
 import type { SelectionPayload } from '../shared/editing.ts'
 
-export function MarkdownView({ projection, annotations }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode }) {
+export function MarkdownView({ projection, annotations, afterBlock }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode;
+  afterBlock?: (start: number, end: number) => React.ReactNode }) {
   const leaves = new Map(projection.leaves.map(leaf => [leaf.id, leaf]))
   const render = (node: AstNode, key: string): React.ReactNode => {
     const children = node.children?.map((child, index) => render(child, `${key}_${index}`))
@@ -11,7 +12,8 @@ export function MarkdownView({ projection, annotations }: { projection: Projecti
     if (node.type === 'root') return <React.Fragment key={key}>{node.children?.map((child, index) => <React.Fragment key={index}>
       {annotations?.(child.position?.start.offset ?? 0, node.children?.[index + 1]?.position?.start.offset ?? projection.source.length + 1)}
       {render(child, `${key}_${index}`)}</React.Fragment>)}</React.Fragment>
-    if (node.type === 'paragraph') return <p key={key} data-sf-block={node.blockId} tabIndex={-1} style={{ whiteSpace: 'pre-wrap' }}>{children}</p>
+    if (node.type === 'paragraph') return <React.Fragment key={key}><p data-sf-block={node.blockId} tabIndex={-1} style={{ whiteSpace: 'pre-wrap' }}>{children}</p>
+      {afterBlock?.(node.position!.start.offset!, node.position!.end.offset!)}</React.Fragment>
     if (node.type === 'heading') return React.createElement(`h${node.depth ?? 2}`, { key, 'data-sf-heading-offset': node.position?.start.offset, tabIndex: -1 }, children)
     if (node.type === 'strong') return <strong key={key}>{children}</strong>
     if (node.type === 'emphasis') return <em key={key}>{children}</em>
@@ -53,16 +55,16 @@ function point(root: HTMLElement, node: Node, offset: number, edge: 'start' | 'e
   if (!element || !root.contains(element) || element.childNodes.length !== 1 || element.firstChild !== node) throw new Error('选区涉及不可安全映射的节点，请明确选择普通段落。')
   return { leafId: element.dataset.sfLeaf!, offset }
 }
-export function captureSelection(root: HTMLElement, projection: Projection, documentSnapshot: any, projectId: string): SelectionPayload {
+export function captureSelection(root: HTMLElement, projection: Projection, documentSnapshot: any, projectId: string, local = false): SelectionPayload {
   const selection = window.getSelection()
   if (!selection?.rangeCount || selection.isCollapsed) throw new Error('请先在渲染正文中选择一段连续文字。')
   const range = selection.getRangeAt(0)
   if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) throw new Error('选区须位于当前渲染正文中。')
   const a = point(root, range.startContainer, range.startOffset, 'start'), b = point(root, range.endContainer, range.endOffset, 'end')
   const from = mapLeafPoint(projection, a.leafId, a.offset, 'start'), to = mapLeafPoint(projection, b.leafId, b.offset, 'end')
-  const validated = validateRange(projection, from, to)
+  const validated = local ? validateProseRange(projection, from, to) : (() => { const range = validateRange(projection, from, to); return { ...range, blockIds: [range.block.id] } })()
   if (validated.renderedText !== selection.toString()) throw new Error('渲染选区与源码映射不一致，请明确选择普通段落或使用源码选择。')
-  return { projectId, documentId: 'paper', documentHash: documentSnapshot.contentHash, revisionId: documentSnapshot.revisionId, blockIds: [validated.block.id],
+  return { projectId, documentId: 'paper', documentHash: documentSnapshot.contentHash, revisionId: documentSnapshot.revisionId, blockIds: validated.blockIds,
     sourceRange: { startUtf16: from, endUtf16: to }, sourceText: projection.source.slice(from, to), renderedText: validated.renderedText,
     prefixContext: projection.source.slice(Math.max(0, from - 200), from), suffixContext: projection.source.slice(to, to + 200),
     citationKeys: validated.citationKeys, claimIds: [], scope: 'inline', capturedAt: new Date().toISOString() }

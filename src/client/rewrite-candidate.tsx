@@ -7,7 +7,7 @@ import { SCENE } from './motion/tokens.ts'
  * visible at all times, and never applies itself: accepting is a click, and the click is what
  * writes, not the end of an animation.
  */
-export type RewriteCandidate = { id: string; action: string; instruction: string
+export type RewriteCandidate = { id: string; action: string; instruction: string; origin?: 'source' | 'preview'
   start: number; end: number; before: string; after: string
   protectedFactChanges?: string[]; citationChanges?: { added: string[]; removed: string[] }
   state: 'generating' | 'ready' | 'accepted' | 'discarded' | 'stopped' | 'failed'

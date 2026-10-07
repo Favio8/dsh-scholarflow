@@ -129,7 +129,8 @@ export function adoptBrief(spec: CreationSpec, brief: RequirementBrief, options:
   const lines: string[] = [spec.requirements, options.summary].filter(text => text?.trim())
   next.requirements = lines.join('\n').slice(0, 12000)
   if (adopt.has('length') && brief.length.value !== undefined && !brief.length.approximate) next.targetLength = brief.length.value
-  if (adopt.has('format') && brief.format.cover === true) next.cover = { ...(spec.cover ?? { enabled: false, title: '', fields: [], date: '' }), enabled: true, title: spec.title }
+  if (adopt.has('format') && brief.format.cover === true) next.cover = { ...(spec.cover ?? { enabled: false, title: '', fields: [], date: '' }), enabled: true, title: spec.title,
+    fields: spec.cover?.fields.length ? spec.cover.fields : [{ label: '姓名', value: '' }, { label: '学号', value: '' }] }
   if (adopt.has('typography') && brief.typography && spec.typography === undefined) next.typography = brief.typography
   if (options.overrides?.length) next.overrides = [...spec.overrides, ...options.overrides].slice(-40)
   return next

@@ -188,7 +188,7 @@ export async function applyWorkflowAction(io: FileStore, plan: WorkflowActionPla
       const call = checkpoint.budget!.calls.find(row => row.callId === plan.callId)!
       call.state = 'interrupted'; call.completedAt = updatedAt
       checkpoint.budget!.childDurationMs[call.runId] = Math.max(checkpoint.budget!.childDurationMs[call.runId], call.startDurationMs +
-        Math.min(stored.input.budget!.maxDurationMinutes * 60000, Math.max(0, Date.parse(updatedAt) - Date.parse(call.startedAt))))
+        Math.max(0, Date.parse(updatedAt) - Date.parse(call.startedAt)))
     } else if (['complete-stage', 'skip-stage', 'stop-revision'].includes(plan.action)) {
       const gate = plan.gate!
       checkpoint.stamps = checkpoint.stamps.filter(row => row.stage !== gate.stage)

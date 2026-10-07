@@ -74,7 +74,7 @@ export function useOverlaySpace(container: React.RefObject<HTMLElement | null>, 
 export const OVERLAY_CSS = `
 /* Carry the draft viewport through this wrapper; a block with auto height grows with the
    manuscript and leaves the inner editor/preview with no overflow of their own. */
-.sf-middle-column{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden}
+.sf-middle-column{position:relative;isolation:isolate;display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden}
 /* Motion's transform establishes a containing block. Give it the full viewport, and allow
    pointer input through the empty part of that layer to the editor underneath. */
 .sf-overlay-presence{position:absolute;inset:0;z-index:30;pointer-events:none}

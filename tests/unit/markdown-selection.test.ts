@@ -1,6 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { projectMarkdown, mapLeafPoint, validateRange, validateSelection, citationKeys, unicodeBoundary, wordStats } from '../../src/core/editing/markdown.ts'
+import { projectMarkdown, mapLeafPoint, validateRange, validateSelection, validateProseRange, citationKeys, unicodeBoundary, wordStats } from '../../src/core/editing/markdown.ts'
+
+test('local co-writing supports adjacent prose while preserving atomic citation and special-block boundaries', () => {
+  const source = '首段事实 [@sf_TEST_ONLY]。\n\n第二段分析。\n\n```txt\nTEST_ONLY code\n```\n\n末段。', projection = projectMarkdown(source)
+  const end = source.indexOf('\n\n```')
+  const local = validateProseRange(projection, 0, end)
+  assert.equal(local.blockIds.length, 2); assert.deepEqual(local.citationKeys, ['sf_TEST_ONLY'])
+  assert.match(local.renderedText, /第二段分析/)
+  assert.throws(() => validateRange(projection, 0, end), /单个普通段落/)
+  assert.throws(() => validateProseRange(projection, source.indexOf('sf_TEST_ONLY') + 2, end), /引用/)
+  assert.throws(() => validateProseRange(projection, 0, source.length), /表格、公式或代码/)
+})
 
 test('BOM remains in raw manuscript coordinates for CRLF headings and the second repeated Unicode paragraph', () => {
   const paragraph = 'TEST_ONLY 重复段落 😀。', source = `\uFEFF# TEST_ONLY\r\n\r\n${paragraph}\r\n\r\n${paragraph}\r\n`
