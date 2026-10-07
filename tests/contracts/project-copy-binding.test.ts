@@ -11,6 +11,24 @@ import { parse, stringify } from 'yaml'
 
 // TEST_ONLY Host registry/reader seam. No real session, policy or duplicate
 // workspace registration is claimed; installed-host-smoke covers the real SDK.
+type InspectResult = Awaited<ReturnType<typeof inspectProject>>
+// `inspectProject` answers with one of several diagnostic shapes. Each assertion below is about
+// exactly one of them, so narrow to it instead of reading a field that only exists on some members.
+function readonlyDiagnostic(result: InspectResult) {
+  const readonly = result.readonly
+  assert.ok(readonly && 'reason' in readonly, 'TEST_ONLY expected a readonly diagnostic')
+  return readonly
+}
+function identityConflict(result: InspectResult) {
+  const conflict = 'identityConflict' in result ? result.identityConflict : undefined
+  assert.ok(conflict, 'TEST_ONLY expected a duplicate-identity diagnostic')
+  return conflict
+}
+function recoveryDiagnostic(result: InspectResult) {
+  const recovery = 'recovery' in result ? result.recovery : undefined
+  assert.ok(recovery, 'TEST_ONLY expected a recovery diagnostic')
+  return recovery
+}
 async function fixture() {
   const a = new MemoryStore({ 'raw-private.txt': 'TEST_ONLY do not inspect raw material' })
   await initialize(a, await prepareInit(a, { title: 'TEST_ONLY copied project', type: 'course-paper' }))
@@ -42,13 +60,13 @@ async function fixture() {
 test('duplicate project identities expose bounded local originals without enabling writes or reading the other manuscript', async () => {
   const { a, b, reads, host, context, signal } = await fixture(), beforeA = [...a.files], beforeB = [...b.files]
   const result = await inspectProject(host, { context }, signal)
-  assert.equal(result.initialized, false); assert.equal(result.readonly?.reason.code, 'PROJECT_ID_CONFLICT')
+  assert.equal(result.initialized, false); assert.equal(readonlyDiagnostic(result).reason.code, 'PROJECT_ID_CONFLICT')
   assert.equal(result.binding.workspaceId, context.workspaceId)
-  assert.deepEqual(result.identityConflict?.copies.map(row => row.workspaceId), ['workspace_TEST_ONLY_0'])
-  assert.ok(result.readonly?.originals.some(row => row.relativePath === 'manuscript/paper.md'))
+  assert.deepEqual(identityConflict(result).copies.map(row => row.workspaceId), ['workspace_TEST_ONLY_0'])
+  assert.ok(readonlyDiagnostic(result).originals.some(row => row.relativePath === 'manuscript/paper.md'))
   assert.ok(reads.every(row => row.root === 1 || row.path === CONFIG_PATH))
   assert.ok(!reads.some(row => row.path === 'raw-private.txt'))
-  assert.ok(!JSON.stringify(result.identityConflict).includes('TEST_ONLY_copy_A'))
+  assert.ok(!JSON.stringify(identityConflict(result)).includes('TEST_ONLY_copy_A'))
   await assert.rejects(resolveStore(host, context, signal), { code: 'PROJECT_ID_CONFLICT' })
   const { io } = await resolveStore(host, context, signal, undefined, true)
   await assert.rejects(io.lock(async () => assert.fail('TEST_ONLY must not create a lock')), { code: 'PROJECT_READONLY' })
@@ -62,7 +80,8 @@ test('multiple registrations of one canonical root remain one project; removing 
   registry.push({ id: 'workspace_TEST_ONLY_alias', path: registry[1].path, sessionIds: ['session_TEST_ONLY_alias'] })
   registry.splice(0, 1)
   const result = await inspectProject(host, { context }, signal)
-  assert.equal(result.initialized, true); assert.equal(result.readonly, undefined); assert.equal(result.identityConflict, undefined)
+  assert.equal(result.initialized, true); assert.equal(result.readonly, undefined)
+  assert.equal('identityConflict' in result ? result.identityConflict : undefined, undefined)
   assert.equal((await b.read(CONFIG_PATH))!.text, originalConfig)
   await assert.rejects(inspectProject(host, { context: { ...context, projectId: 'prj_TEST_ONLY_other' } }, signal), { code: 'PROJECT_ID_CONFLICT' })
 })
@@ -72,7 +91,7 @@ test('a safely readable newer-schema copy identity still conflicts without adopt
   future.schemaVersion = 99; future.futureOnly = { TEST_ONLY: 'unknown policy must not be applied' }
   a.externalEdit(CONFIG_PATH, stringify(future)); const beforeA = [...a.files], beforeB = [...b.files]
   const result = await inspectProject(host, { context }, signal)
-  assert.equal(result.readonly?.reason.code, 'PROJECT_ID_CONFLICT'); assert.equal(result.identityConflict?.copies.length, 1)
+  assert.equal(readonlyDiagnostic(result).reason.code, 'PROJECT_ID_CONFLICT'); assert.equal(identityConflict(result).copies.length, 1)
   await assert.rejects(resolveStore(host, context, signal), { code: 'PROJECT_ID_CONFLICT' })
   assert.deepEqual([...a.files], beforeA); assert.deepEqual([...b.files], beforeB)
 })
@@ -108,11 +127,12 @@ test('a confirmed copy journal can be inspected read-only while duplicate identi
   b.write = async (...args) => { const result = await write(...args); if (args[0].startsWith('.scholarflow/transactions/')) throw new Error('TEST_ONLY interruption before config'); return result }
   await assert.rejects(applyProjectCopy(b, plan), /TEST_ONLY interruption/); b.write = write
   const result = await inspectProject(host, { context }, signal)
-  assert.equal(result.readonly?.reason.code, 'PROJECT_ID_CONFLICT'); assert.equal(result.recovery?.copyIdentity, true)
-  assert.ok(result.recovery?.transactions[0].files.some(row => row.relativePath === CONFIG_PATH))
+  assert.equal(readonlyDiagnostic(result).reason.code, 'PROJECT_ID_CONFLICT'); assert.equal(recoveryDiagnostic(result).copyIdentity, true)
+  assert.ok(recoveryDiagnostic(result).transactions[0].files.some(row => row.relativePath === CONFIG_PATH))
   const path = [...b.files.keys()].find(path => path.startsWith('.scholarflow/transactions/') && JSON.parse(b.files.get(path)!.text).state === 'prepared')!
   const journal = JSON.parse((await b.read(path))!.text); journal.changes.push({ path: '.scholarflow/TEST_ONLY-extra.json', before: null,
     after: { text: '{}', hash: digest('{}') } }); b.externalEdit(path, JSON.stringify(journal))
   const before = [...b.files], invalid = await inspectProject(host, { context }, signal)
-  assert.equal(invalid.recovery, undefined); assert.equal(invalid.readonly?.reason.code, 'PROJECT_ID_CONFLICT'); assert.deepEqual([...b.files], before)
+  assert.equal('recovery' in invalid ? invalid.recovery : undefined, undefined)
+  assert.equal(readonlyDiagnostic(invalid).reason.code, 'PROJECT_ID_CONFLICT'); assert.deepEqual([...b.files], before)
 })

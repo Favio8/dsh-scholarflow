@@ -43,7 +43,9 @@ async function setup() {
   const response = (sectionId: string) => json({ sectionId, replacementText: `TEST_ONLY 教学说明不代表实验结果。[@${source.source.citeKey}]`, limitations: ['仅限教学材料'], paragraphClaims: [{ paragraphIndex: 0, claimIds: [claim.claim.id] }] })
   return { io, workflowId: root.workflowId, response }
 }
-const drive = (io: MemoryStore, workflowId: string, automaticId: string, workers: Parameters<typeof driveAutomatic>[6]) =>
+// `workers` is the sixth parameter (index 5); the earlier index made every worker callback implicit
+// `any`, which is why the shape of each worker was never checked.
+const drive = (io: MemoryStore, workflowId: string, automaticId: string, workers: Parameters<typeof driveAutomatic>[5]) =>
   driveAutomatic(io, workflowId, automaticId, signal(), { pauseRequested: () => false }, workers)
 
 test('fixed automatic generation uses only its registered child, saves a verifiable candidate and stops before acceptance', async () => {

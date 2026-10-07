@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { contentOf, deliveredText } from '../fixtures/delivery-artifacts.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { saveManual } from '../../src/core/editing/proposals.ts'
 import { prepareDelivery, createDelivery, readDelivery } from '../../src/core/export/delivery.ts'
@@ -52,8 +53,8 @@ test('public Markdown links, reference definitions and local anchors preserve ex
   const io = await setup(text), plan = await prepareDelivery(io), current = await snapshot(io)
   const delivered = await createDelivery(io, plan, 'working-draft', current.ledger.revision)
   const artifacts = await readDelivery(io, delivered.manifest.id)
-  assert.equal(artifacts.files.find(row => row.relativePath === 'paper.md')!.text, text)
+  assert.equal(deliveredText(artifacts.files, 'paper.md'), text)
   assert.deepEqual(artifacts.files.map(row => row.relativePath), ['paper.md', 'references.bib', 'quality-report.md'])
   assert.equal((await snapshot(io)).document.text, text)
-  for (const artifact of artifacts.files) assert.doesNotMatch(artifact.text, /private material must never enter/u)
+  for (const artifact of artifacts.files) assert.doesNotMatch(contentOf(artifact), /private material must never enter/u)
 })

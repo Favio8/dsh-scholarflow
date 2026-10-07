@@ -3,6 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { proposalOf, proposalHashOf } from '../fixtures/generation-result.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { saveManual, applyProposal } from '../../src/core/editing/proposals.ts'
 import { prepareGeneration, executeGeneration, validateModelReplacement } from '../../src/core/pipeline/generation.ts'
@@ -40,7 +41,7 @@ test('finite stage performs one structured-format repair, persists a proposal, a
   assert.equal(result.run.status, 'completed-with-issues')
   assert.equal(result.run.usedModelCalls, 2)
   assert.equal((await snapshot(io)).document.text, original)
-  assert.equal((await snapshot(io)).ledger.proposalStates[result.proposal.id].state, 'pending')
+  assert.equal((await snapshot(io)).ledger.proposalStates[proposalOf(result).id].state, 'pending')
   assert.ok((await io.read(`.scholarflow/runs/${plan.snapshot.runId}/input.json`))!.text.includes('TEST_ONLY-provider'))
 })
 
@@ -150,7 +151,7 @@ test('validated output checkpoint is reused without a second paid call after pau
   const preview = await prepareRunAction(io, plan.snapshot.runId, 'resume', () => true)
   const resumed = await executeGeneration(io, preview.frozen!, owner, new AbortController().signal, async () => { throw new Error('must reuse validated candidate') },
     () => true, { resume: preview, pauseRequested: () => false })
-  assert.equal(resumed.proposal!.edits[0].replacementText, 'TEST_ONLY 已保存的有效候选。')
+  assert.equal(proposalOf(resumed).edits[0].replacementText, 'TEST_ONLY 已保存的有效候选。')
   assert.equal(resumed.run.usedModelCalls, 1)
 })
 
@@ -176,9 +177,9 @@ test('recovery of an already accepted proposal cannot repeat model calls or acce
   const { io, plan } = await setup()
   const result = await executeGeneration(io, plan, owner, new AbortController().signal,
     async () => JSON.stringify({ replacementText: 'TEST_ONLY 已接受的用户稿。', limitations: [] }), () => true)
-  assert.ok(result.proposal)
+  assert.ok(proposalOf(result))
   const current = await snapshot(io)
-  await applyProposal(io, result.proposal.id, current.ledger.revision, result.proposalHash!)
+  await applyProposal(io, proposalOf(result).id, current.ledger.revision, proposalHashOf(result))
   // TEST_ONLY fault image: proposal published, terminal state not yet saved.
   const stored = await readRun(io, plan.snapshot.runId, plan.snapshot.projectId)
   const interrupted = json({ ...stored.run, status: 'running', proposalId: undefined })
@@ -187,7 +188,7 @@ test('recovery of an already accepted proposal cannot repeat model calls or acce
   assert.equal(preview.existingProposalState, 'accepted')
   const recovered = await executeGeneration(io, preview.frozen!, { pid: 23456, bootInstance: 'TEST_ONLY_restart' }, new AbortController().signal,
     async () => { throw new Error('accepted proposal must never regenerate') }, () => false, { resume: preview, pauseRequested: () => false })
-  assert.equal(recovered.run.proposalId, result.proposal.id); assert.equal(recovered.run.status, 'completed-with-issues')
+  assert.equal(recovered.run.proposalId, proposalOf(result).id); assert.equal(recovered.run.status, 'completed-with-issues')
   const after = await snapshot(io)
   assert.equal(after.ledgerHash, before.ledgerHash); assert.equal(after.document.text, before.document.text)
   await assert.rejects(prepareRunAction(io, plan.snapshot.runId, 'resume', () => false), { code: 'RUN_TERMINAL' })

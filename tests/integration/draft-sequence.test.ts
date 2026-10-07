@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { proposalOf, proposalHashOf } from '../fixtures/generation-result.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { prepareDraftSequence, startDraftSequence, prepareDraftSequenceAction, applyDraftSequenceAction,
   inspectDraftSequence, readDraftSequence } from '../../src/core/pipeline/draft-sequence.ts'
@@ -152,10 +153,10 @@ test('old sequences without an output-token field use the known generation defau
 })
 test('rejecting a chapter never advances or automatically retries it, and cancellation preserves both the proposal and body', async () => {
   const { io } = await setup(), sequenceId = await begin(io), result = await execute(io, await dispatch(io, sequenceId)), before = (await snapshot(io)).document.text
-  await rejectProposal(io, result.proposal!.id, (await snapshot(io)).ledger.revision)
+  await rejectProposal(io, proposalOf(result).id, (await snapshot(io)).ledger.revision)
   await assert.rejects(action(io, sequenceId, 'next'), { code: 'DRAFT_SEQUENCE_AWAITING_ACCEPTANCE' })
   await applyDraftSequenceAction(io, await action(io, sequenceId, 'cancel', 'TEST_ONLY 用户拒绝该节，明确取消顺序保留所有产物。'))
-  assert.equal((await snapshot(io)).document.text, before); assert.equal((await snapshot(io)).ledger.proposalStates[result.proposal!.id].state, 'rejected')
+  assert.equal((await snapshot(io)).document.text, before); assert.equal((await snapshot(io)).ledger.proposalStates[proposalOf(result).id].state, 'rejected')
 })
 test('a later section exceeds legacy model quotas while preserving earlier accepted body', async () => {
   const { io, citeKey, claimIds } = await setup({ evidence: true, modelCalls: 1 }), sequenceId = await begin(io)
@@ -167,7 +168,7 @@ test('a later section exceeds legacy model quotas while preserving earlier accep
   await accept(io, result)
   const body = (await snapshot(io)).document.text, second = await dispatch(io, sequenceId)
   const next = await execute(io, second, async () => { calls++; return JSON.stringify({ replacementText: `TEST_ONLY 总结 [@${citeKey}]。`, sectionId: second.input.sectionId, paragraphClaims: [{ paragraphIndex: 0, claimIds }], limitations: [] }) })
-  assert.ok(next.proposal); assert.equal(calls, 2); assert.equal((await snapshot(io)).document.text, body)
+  assert.ok(proposalOf(next)); assert.equal(calls, 2); assert.equal((await snapshot(io)).document.text, body)
   assert.equal((await workflowBudgetInfo(io))!.used!.modelCalls, 2)
 })
 test('concurrent sequence starts and stale confirmations cannot replace the current sequence or overwrite human edits', async () => {
@@ -183,7 +184,7 @@ test('concurrent sequence starts and stale confirmations cannot replace the curr
 })
 test('an operator-edited descendant can count only after its immutable lineage and accepted manifest are proven', async () => {
   const { io } = await setup(), sequenceId = await begin(io), result = await execute(io, await dispatch(io, sequenceId))
-  const edit = await prepareProposalRevision(io, { context: await context(io), proposalId: result.proposal!.id, proposalHash: result.proposalHash,
+  const edit = await prepareProposalRevision(io, { context: await context(io), proposalId: proposalOf(result).id, proposalHash: proposalHashOf(result),
     replacementText: '[待补：TEST_ONLY 用户编辑的明确缺口，尚无真实结果。]', paragraphClaims: [{ paragraphIndex: 0, claimIds: [] }], reason: 'TEST_ONLY 用户改写待补说明。' })
   const revised = await publishProposalRevision(io, edit, 'session_TEST_ONLY'); await accept(io, revised)
   const next = await action(io, sequenceId, 'next')

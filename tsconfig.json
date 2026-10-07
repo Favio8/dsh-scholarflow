@@ -11,5 +11,9 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  // The four remaining `.js` tests (client-boot, creation-draft, native-navigation,
+  // new-session-entry) stay out: they drive the built bundle through a node:vm stub that
+  // needs heavy annotation, and enabling allowJs/checkJs also drags the ignored
+  // .dsh-tmp/*.mjs artifacts into the check. Converting them is a separate task.
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"]
 }

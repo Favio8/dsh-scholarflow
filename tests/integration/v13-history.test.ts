@@ -82,8 +82,9 @@ test('model, stored JSON and request validation are separate boundaries and neve
 })
 test('damaged persisted records keep their own boundary instead of being reported as request errors', async () => {
   const { io } = await setup(), current = await snapshot(io), sessionId = 'session_TEST_ONLY'
-  // Each row is a real stored record read through the same boundary the Remote uses.
-  const cases = [
+  // Each row is a real stored record read through the same boundary the Remote uses. The element
+  // type is explicit because the readers return different record shapes.
+  const cases: Array<{ label: string; path: string; code: string; read: () => Promise<unknown> }> = [
     { label: 'run state', path: runFile('run_TEST_ONLY_damaged'), code: 'RUN_STATE_INVALID',
       read: () => readRun(io, 'run_TEST_ONLY_damaged', current.ledger.projectId) },
     { label: 'workflow pointer', path: '.scholarflow/workflows/current.json', code: 'WORKFLOW_INVALID', read: () => currentWorkflow(io) },

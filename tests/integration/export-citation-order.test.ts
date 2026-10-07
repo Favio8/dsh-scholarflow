@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import JSZip from 'jszip'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { contentOf, deliveredText } from '../fixtures/delivery-artifacts.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { saveManual } from '../../src/core/editing/proposals.ts'
 import { prepareDelivery, createDelivery, readDelivery } from '../../src/core/export/delivery.ts'
@@ -26,7 +27,7 @@ test('V5: Markdown, LaTeX and Word deliver the same numbered citation order', as
     const plan = await prepareDelivery(io, format)
     const made = await createDelivery(io, plan, 'working-draft', (await snapshot(io)).ledger.revision)
     const read = await readDelivery(io, made.manifest.id)
-    deliveries[format] = Object.fromEntries(read.files.map(file => [file.relativePath, file.text ?? file.base64]))
+    deliveries[format] = Object.fromEntries(read.files.map(file => [file.relativePath, contentOf(file)]))
   }
 
   const keyA = alpha.source.citeKey, keyB = beta.source.citeKey

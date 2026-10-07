@@ -6,6 +6,8 @@ import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
 import { projectType } from '../../src/shared/schema.ts'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { proposalOf, proposalHashOf } from '../fixtures/generation-result.ts'
+import { deliveredText } from '../fixtures/delivery-artifacts.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { registerMaterial } from '../../src/core/materials/materials.ts'
 import { parseRegisteredMaterial } from '../../src/core/materials/parse.ts'
@@ -66,7 +68,7 @@ for (const task of tasks) test(`${task.type}: example requirements → located e
     summarySectionIds: ['sec_TEST_ONLY_summary'] }, model))
   let modelRequests = 0, acceptedBody = ''
   for (const sectionId of ['sec_TEST_ONLY_body', 'sec_TEST_ONLY_summary']) {
-    const preview = await prepareDraftSequenceAction(io, { context: await context(), sequenceId: sequence.sequenceId, action: 'next' })
+    const preview = await prepareDraftSequenceAction(io, { context: await context(), sequenceId: sequence.sequenceId, action: 'next', reason: '' })
     assert.equal(preview.generation!.input.sectionId, sectionId)
     await applyDraftSequenceAction(io, preview)
     const before = (await snapshot(io)).document.text
@@ -81,11 +83,11 @@ for (const task of tasks) test(`${task.type}: example requirements → located e
         limitations: [task.limitation, 'TEST_ONLY 固定适配器输出，不是在线模型判断。'] })
     }, () => true)
     assert.equal((await snapshot(io)).document.text, before, 'a candidate alone cannot modify the paper')
-    await applyProposal(io, result.proposal!.id, (await snapshot(io)).ledger.revision, result.proposalHash!)
+    await applyProposal(io, proposalOf(result).id, (await snapshot(io)).ledger.revision, proposalHashOf(result))
     acceptedBody = (await snapshot(io)).document.text; assert.ok(acceptedBody.includes(human))
     if (sectionId === 'sec_TEST_ONLY_body') io = new MemoryStore(Object.fromEntries([...io.files].map(([path, file]) => [path, file.text])))
   }
-  await applyDraftSequenceAction(io, await prepareDraftSequenceAction(io, { context: await context(), sequenceId: sequence.sequenceId, action: 'next' }))
+  await applyDraftSequenceAction(io, await prepareDraftSequenceAction(io, { context: await context(), sequenceId: sequence.sequenceId, action: 'next', reason: '' }))
   const auto = await startAutomatic(io, await prepareAutomatic(io, workflow.workflowId, 'session_TEST_ONLY_example', automaticPolicySchema.parse({ workingDraftDelivery: true,
     stopRevisionReason: 'TEST_ONLY 缺口、未知与未核验身份全部保留，只交付工作草稿，不冒称完整学术成果。' })), owner)
   assert.equal((await driveAutomatic(io, workflow.workflowId, auto.automaticId, signal(), { pauseRequested: () => false })).status, 'completed-with-issues')
@@ -97,9 +99,9 @@ for (const task of tasks) test(`${task.type}: example requirements → located e
   assert.ok(review.report!.checks.some(row => row.status === 'unknown'))
   const delivery = Object.values((await snapshot(io)).ledger.deliveries)[0], exported = await readDelivery(io, delivery.id)
   assert.equal(delivery.reviewState, 'draft-incomplete'); assert.equal(exported.files.length, 3)
-  const paper = exported.files.find(row => row.relativePath === 'paper.md')!.text
+  const paper = deliveredText(exported.files, 'paper.md')
   assert.equal(paper, acceptedBody); assert.equal(delivery.documentHash, digest(paper))
-  assert.match(exported.files.find(row => row.relativePath === 'references.bib')!.text, new RegExp(source.source.citeKey))
+  assert.match(deliveredText(exported.files, 'references.bib'), new RegExp(source.source.citeKey))
   assert.doesNotMatch(json(exported), /TEST_ONLY_UNSELECTED_EXAMPLE_SENTINEL/u)
   const preflight = await prepareDelivery(io)
   await assert.rejects(createDelivery(io, preflight, 'reviewed-draft', preflight.ledgerRevision), { code: 'REVIEW_NOT_READY' })

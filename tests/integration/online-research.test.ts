@@ -83,8 +83,9 @@ test('DOI requests checkpoint their budget before provider IO and release the pr
     assert.equal(await io.lock(async () => true), true)
     return candidate
   } }, new AbortController().signal)
-  assert.ok('source' in result)
-  assert.equal(result.source.identity.status, 'matched')
+  const resolved = 'source' in result ? result.source : undefined
+  assert.ok(resolved, 'TEST_ONLY expected a matched source')
+  assert.equal(resolved.identity.status, 'matched')
   const checkpoint = JSON.parse((await io.read(`.scholarflow/research/${plan.id}.json`))!.text)
   assert.equal(checkpoint.state, 'completed')
   assert.equal(checkpoint.identity.status, 'matched')

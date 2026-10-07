@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { deliveredText, textOf } from '../fixtures/delivery-artifacts.ts'
 import { initialize, prepareInit, snapshot, mutateLedger } from '../../src/core/project/project.ts'
 import { saveManual } from '../../src/core/editing/proposals.ts'
 import { runReview, inspectReview, decideIssue } from '../../src/core/review/review.ts'
@@ -41,7 +42,7 @@ test('AT-21: absent own research results stays B0 even when dismissed, with reas
   await assert.rejects(createDelivery(io, plan, 'reviewed-draft', review.revision + 1), { code: 'REVIEW_NOT_READY' })
   const exported = await createDelivery(io, plan, 'working-draft', review.revision + 1)
   assert.equal(exported.manifest.reviewState, 'draft-incomplete')
-  const read = await readDelivery(io, exported.manifest.id), report = read.files.find(file => file.relativePath === 'quality-report.md')!.text
+  const read = await readDelivery(io, exported.manifest.id), report = deliveredText(read.files, 'quality-report.md')
   assert.ok(report.includes(issue.id)); assert.ok(report.includes('B0 · dismissed')); assert.ok(report.includes('等待实验'))
   assert.ok(report.includes('unknown · model-assisted'))
 })
@@ -53,12 +54,12 @@ test('AT-22: all immutable exported files match one revision without changing th
   const review = await runReview(io, source.revision + 1), plan = await prepareDelivery(io)
   const result = await createDelivery(io, plan, 'working-draft', review.revision)
   const delivery = await readDelivery(io, result.manifest.id)
-  assert.equal(delivery.files.find(file => file.relativePath === 'paper.md')!.text, text)
+  assert.equal(deliveredText(delivery.files, 'paper.md'), text)
   assert.equal(result.manifest.documentHash, digest(text)); assert.equal(result.manifest.revisionId, plan.revisionId)
   assert.equal(result.manifest.ledgerRevision, plan.ledgerRevision)
-  for (const file of delivery.files) { assert.equal(file.hash, digest(file.text)); assert.equal(file.sizeBytes, Buffer.byteLength(file.text)) }
-  assert.ok(delivery.files.find(file => file.relativePath === 'references.bib')!.text.includes(source.source.citeKey))
-  assert.ok(delivery.files.find(file => file.relativePath === 'quality-report.md')!.text.includes(plan.revisionId))
+  for (const file of delivery.files) { const content = textOf(file); assert.equal(file.hash, digest(content)); assert.equal(file.sizeBytes, Buffer.byteLength(content)) }
+  assert.ok(deliveredText(delivery.files, 'references.bib').includes(source.source.citeKey))
+  assert.ok(deliveredText(delivery.files, 'quality-report.md').includes(plan.revisionId))
   assert.equal((await snapshot(io)).document.text, text)
   assert.equal((await inspectReview(io)).stale, false, 'delivery persistence must not expire the review')
   const secondPlan = await prepareDelivery(io), second = await createDelivery(io, secondPlan, 'working-draft', result.revision)

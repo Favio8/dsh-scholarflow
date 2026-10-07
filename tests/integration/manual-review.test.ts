@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { contentOf, deliveredText } from '../fixtures/delivery-artifacts.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { saveManual } from '../../src/core/editing/proposals.ts'
 import { confirmOutline } from '../../src/core/evidence/evidence.ts'
@@ -64,7 +65,7 @@ test('AT-20/21/22: same-version completed checks permit an honest reviewed draft
   assert.equal(plan.reviewedAllowed, true); assert.equal(plan.reviewState, 'draft-reviewed')
   const exported = await createDelivery(io, plan, 'reviewed-draft', assessed.revision)
   assert.equal(exported.manifest.reviewState, 'draft-reviewed')
-  assert.match((await readDelivery(io, exported.manifest.id)).files.find(row => row.relativePath === 'quality-report.md')!.text, /pass · manual/u)
+  assert.match(deliveredText((await readDelivery(io, exported.manifest.id)).files, 'quality-report.md'), /pass · manual/u)
   const negative = await submitManualReview(io, await prepareManualReview(io, await request(io, assessed.report.id, 'style_assessment', 'fail')), 'session_TEST_ONLY')
   const issue = negative.ledger.reviewIssues[`issue_${digest('style_assessment').slice(7, 31)}`]
   assert.equal(issue.state, 'open'); assert.equal(issue.checkMethod, 'manual')

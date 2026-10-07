@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { contentOf, deliveredText } from '../fixtures/delivery-artifacts.ts'
 import { prepareInit, initialize, snapshot } from '../../src/core/project/project.ts'
 import { inspectManuscriptSource, prepareManuscriptAdoption, applyManuscriptAdoption } from '../../src/core/editing/manuscript-adoption.ts'
 import { saveManual, buildProposal, undoRevision } from '../../src/core/editing/proposals.ts'
@@ -54,8 +55,8 @@ test('explicit keyed citation mappings use existing Sources and never fabricate 
   assert.equal(deliveryPlan.reviewedAllowed, false)
   const delivery = await createDelivery(io, deliveryPlan, 'working-draft', reviewed.revision)
   const files = (await readDelivery(io, delivery.manifest.id)).files
-  assert.ok(files.find(row => row.relativePath === 'references.bib')!.text.includes(source.source.citeKey))
-  assert.ok(files.find(row => row.relativePath === 'quality-report.md')!.text.includes('未映射引用／数字标记'))
+  assert.ok(deliveredText(files, 'references.bib').includes(source.source.citeKey))
+  assert.ok(deliveredText(files, 'quality-report.md').includes('未映射引用／数字标记'))
 })
 test('legacy markers survive import and local AI edits must preserve their multiplicity while prototype-like keys remain ordinary data', async () => {
   const original = '# TEST_ONLY\n\nTEST_ONLY [@constructor] [@__proto__] [@smith] [1] [1].\n', io = await fixture(original), prepared = await plan(io)

@@ -7,11 +7,14 @@ const selected = { provider: 'TEST_ONLY-provider', model: 'TEST_ONLY-model' }
 const image = { bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]), mediaType: 'image/png', name: '截图.png' }
 
 /** A Host stand-in whose attachment service mirrors the real admission contract. */
-function host(overrides = {}) {
-  const calls = { admitted: [], streamed: [], logged: [], flushes: 0 }
+type PromptPart = { type?: string; mediaType?: string; data?: string; attachment?: { id: string } }
+type StreamedRequest = { messages: Array<{ content: PromptPart[] }> }
+type Calls = { admitted: PromptPart[][]; streamed: StreamedRequest[]; logged: unknown[]; flushes: number }
+function host(overrides: Record<string, unknown> = {}) {
+  const calls: Calls = { admitted: [], streamed: [], logged: [], flushes: 0 }
   const ctx = {
     attachments: {
-      async admitPromptContent(content) {
+      async admitPromptContent(content: PromptPart[]) {
         calls.admitted.push(content)
         // The real service replaces each upload with a durable reference; text passes through.
         return content.map(part => part.type === 'image' ? { type: 'image', attachment: { id: 'att_TEST_ONLY' } } : part)
@@ -19,7 +22,7 @@ function host(overrides = {}) {
     },
     sessions: { async flush() { calls.flushes += 1; return true } },
     llm: {
-      async *stream(request) {
+      async *stream(request: StreamedRequest) {
         calls.streamed.push(request)
         yield { type: 'text-delta', text: '{"text":"要求：四页，第一页封面"}' }
         yield { type: 'finish', reason: { kind: 'stop' } }
@@ -27,7 +30,7 @@ function host(overrides = {}) {
     },
     ...overrides,
   }
-  const session = { id: 'session_TEST_ONLY', append(_type, message) { calls.logged.push(message) } }
+  const session = { id: 'session_TEST_ONLY', append(_type: string, message: unknown) { calls.logged.push(message) } }
   return { ctx, session, calls }
 }
 
@@ -41,11 +44,14 @@ test('V4: an image is admitted through the host attachment service, never assemb
   assert.equal(calls.admitted.length, 1)
   assert.equal(calls.admitted[0][1].type, 'image')
   assert.equal(calls.admitted[0][1].mediaType, 'image/png')
-  assert.equal(Buffer.from(calls.admitted[0][1].data, 'base64').toString('latin1'), Buffer.from(image.bytes).toString('latin1'))
+  const admittedData = calls.admitted[0][1].data
+  assert.ok(admittedData, 'TEST_ONLY expected the admitted image part to carry base64 data')
+  assert.equal(Buffer.from(admittedData, 'base64').toString('latin1'), Buffer.from(image.bytes).toString('latin1'))
   // The request the provider receives carries the admitted block, not the raw bytes.
   const sent = calls.streamed[0].messages.at(-1)
-  assert.equal(sent.content.some((part: any) => part.type === 'image' && part.attachment.id === 'att_TEST_ONLY'), true)
-  assert.equal(sent.content.some((part: any) => 'data' in part), false)
+  assert.ok(sent, 'TEST_ONLY expected a streamed request')
+  assert.equal(sent.content.some(part => part.type === 'image' && part.attachment?.id === 'att_TEST_ONLY'), true)
+  assert.equal(sent.content.some(part => 'data' in part), false)
 })
 
 test('V4: the stage log redacts the image instead of duplicating its bytes', async () => {

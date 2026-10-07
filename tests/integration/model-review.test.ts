@@ -13,7 +13,21 @@ import { digest, json } from '../../src/core/store/files.ts'
 import { inspectReview } from '../../src/core/review/review.ts'
 import { ScholarError } from '../../src/shared/errors.ts'
 import { semanticReviewChecks } from '../../src/shared/review.ts'
+import type { ModelCall } from '../../src/core/pipeline/generation.ts'
 const owner = { pid: 12345, bootInstance: 'TEST_ONLY-review' }
+type ReviewResult = Awaited<ReturnType<typeof executeModelReview>>
+// A model review answers with one of several terminal shapes; read the member the assertion is
+// about instead of a field that only some shapes carry.
+function reportOf(result: ReviewResult) {
+  const report = 'report' in result ? result.report : undefined
+  assert.ok(report, 'TEST_ONLY expected a published review report')
+  return report
+}
+function recoveredArtifactOf(result: ReviewResult) {
+  const artifact = 'recoveredArtifact' in result ? result.recoveredArtifact : undefined
+  assert.ok(artifact, 'TEST_ONLY expected a recovered artifact')
+  return artifact
+}
 const quote = 'TEST_ONLY 声称没有依据的普遍结论。'
 async function setup(type = 'course-paper') {
   const io = new MemoryStore({ 'raw.txt': 'TEST_ONLY original source' })
@@ -37,7 +51,7 @@ function output(plan: ModelReviewPlan, findings = true) {
     findings: findings ? [{ category: 'logic', severity: 'B1', ...(plan.context.semanticScope && { assessmentId: 'argument_assessment' }), title: 'TEST_ONLY 缺少依据', explanation: 'TEST_ONLY 当前断言未提供普遍适用的证据，应保留适用范围。', suggestedFix: 'TEST_ONLY 补充真实依据或收窄结论。',
       blockId: plan.context.blocks.at(-1)!.id, quote, claimIds: [], evidenceIds: [], requirementIds: [] }] : [], rechecks: [], limitations: ['TEST_ONLY 模拟审查不是提供方结果。'] }
 }
-const execute = (io: MemoryStore, plan: ModelReviewPlan, call: any, pauseRequested = () => false) => executeModelReview(io, plan, owner, new AbortController().signal, call, () => true, { pauseRequested })
+const execute = (io: MemoryStore, plan: ModelReviewPlan, call: (request: ModelCall) => Promise<string>, pauseRequested = () => false) => executeModelReview(io, plan, owner, new AbortController().signal, call, () => true, { pauseRequested })
 
 test('SF-013/023: full saved chapters and confirmed terminology are frozen for distinct cross-section checks; a false summary stays positioned and never edits the body', async () => {
   const { io } = await setup('research-paper')
@@ -57,13 +71,13 @@ test('SF-013/023: full saved chapters and confirmed terminology are frozen for d
     explanation: 'TEST_ONLY 方法明确表示实验未执行，结论却宣称取得改善；这是固定测试响应，不是在线模型判断。', suggestedFix: 'TEST_ONLY 生成待补结果的修订建议，保留方法与人工稿。',
     blockId: plan.context.blocks.at(-1)!.id, quote: summaryQuote, claimIds: [], evidenceIds: [], requirementIds: [] } as any)
   const reviewed = await execute(io, plan, async request => {
-    assert.equal(request.context.manuscript, body); assert.equal(request.context.outline.sections.length, 3)
-    assert.match(request.context.approvedMemory.terminology, /尚未执行实验/u)
+    assert.equal(request.context.manuscript, body); assert.equal((request.context.outline as { sections: unknown[] }).sections.length, 3)
+    assert.match((request.context.approvedMemory as { terminology: string }).terminology, /尚未执行实验/u)
     assert.match(request.system, /摘要.*实际已保存正文/u); assert.match(request.system, /贡献项数量/u)
     return json(result)
   })
-  assert.equal(reviewed.report!.checks.filter(check => (semanticReviewChecks as readonly string[]).includes(check.id) && check.method === 'model-assisted').length, 5)
-  const issue = reviewed.report!.issues.find(row => row.location && row.category === 'integrity')!
+  assert.equal(reportOf(reviewed).checks.filter(check => (semanticReviewChecks as readonly string[]).includes(check.id) && check.method === 'model-assisted').length, 5)
+  const issue = reportOf(reviewed).issues.find(row => row.location && row.category === 'integrity')!
   assert.equal(issue.location!.sourceRange.startUtf16, body.lastIndexOf(summaryQuote)); assert.equal(issue.severity, 'B0'); assert.equal(issue.state, 'open')
   assert.equal((await snapshot(io)).document.text, body)
 })
@@ -107,7 +121,7 @@ test('old two-check frozen scope resumes its exact output without invented consi
   const resumed = await executeModelReview(io, action.frozen, owner, new AbortController().signal, async () => { calls++; throw new Error('TEST_ONLY no replay') }, () => true,
     { pauseRequested: () => false, resume: action })
   assert.equal(calls, 1); assert.equal(resumed.run.usedModelCalls, 1)
-  assert.equal(resumed.report!.checks.find(check => check.id === 'summary_body_consistency')!.status, 'unknown')
+  assert.equal(reportOf(resumed).checks.find(check => check.id === 'summary_body_consistency')!.status, 'unknown')
 })
 
 test('SF-023: model review checkpoints inputs before I/O, locates the second identical paragraph, and keeps raw source and manuscript bytes unchanged', async () => {
@@ -123,12 +137,12 @@ test('SF-023: model review checkpoints inputs before I/O, locates the second ide
     return json(output(plan))
   })
   assert.equal(result.run.usedModelCalls, 1); assert.equal(result.run.status, 'completed-with-issues')
-  const issue = result.report!.issues.find(row => row.location)!
+  const issue = reportOf(result).issues.find(row => row.location)!
   assert.equal(issue.location!.sourceRange.startUtf16, original.lastIndexOf(quote)); assert.equal(issue.location!.quote, quote)
   assert.equal((await snapshot(io)).document.text, original); assert.equal((await io.read('raw.txt'))!.text, 'TEST_ONLY original source')
   assert.equal((await inspectReview(io)).stale, false)
   const progress = await readModelReviewCheckpoint(io, result.run)
-  assert.equal(progress.checkpoint.published!.reviewId, result.report!.id)
+  assert.equal(progress.checkpoint.published!.reviewId, reportOf(result).id)
 })
 
 test('model review rejects invented positions, identities, duplicate findings, and contradictory pass assertions', async () => {
@@ -147,8 +161,8 @@ test('model review gets one format repair, never creates fake completion, and ca
   const { io, plan } = await setup('research-paper'); let calls = 0
   const result = await execute(io, plan, async (call: any) => { calls++; if (calls === 1) return 'TEST_ONLY invalid JSON'; assert.ok(call.repair); return json(output(plan, false)) })
   assert.equal(calls, 2); assert.equal(result.run.usedModelCalls, 2)
-  assert.equal(result.report!.checks.find(row => row.id === 'own_research_results')!.status, 'fail')
-  assert.ok(result.report!.issues.some(issue => issue.severity === 'B0' && issue.category === 'integrity'))
+  assert.equal(reportOf(result).checks.find(row => row.id === 'own_research_results')!.status, 'fail')
+  assert.ok(reportOf(result).issues.some(issue => issue.severity === 'B0' && issue.category === 'integrity'))
   const other = await setup(); let badCalls = 0
   await assert.rejects(execute(other.io, other.plan, async () => { badCalls++; return '{}' }), { code: 'MODEL_REVIEW_INVALID' })
   assert.equal(badCalls, 2); assert.equal((await readRun(other.io, other.plan.snapshot.runId, other.plan.snapshot.projectId)).run.status, 'failed')
@@ -172,8 +186,8 @@ test('the only repair explains a real structure-finding versus argument-pass con
     return json(candidate)
   })
   assert.equal(calls, 2); assert.equal(result.run.usedModelCalls, 2)
-  assert.equal(result.report!.checks.find(row => row.id === 'argument_assessment')!.status, 'fail')
-  assert.ok(result.report!.issues.some(row => row.category === 'structure' && row.location?.quote === quote))
+  assert.equal(reportOf(result).checks.find(row => row.id === 'argument_assessment')!.status, 'fail')
+  assert.ok(reportOf(result).issues.some(row => row.category === 'structure' && row.location?.quote === quote))
   assert.equal((await snapshot(io)).document.text, original)
   assert.ok((await readModelReviewCheckpoint(io, result.run)).checkpoint.repair!.length <= 2000)
 })
@@ -187,7 +201,7 @@ test('a validated review output survives pause and resume without another paid c
   const resumed = await executeModelReview(io, action.frozen, { pid: 12345, bootInstance: 'TEST_ONLY-resumed' }, new AbortController().signal,
     async () => { throw new Error('TEST_ONLY must reuse saved output') }, () => true, { pauseRequested: () => false, resume: action, executionSessionId: 'session_TEST_ONLY_new' })
   assert.equal(resumed.run.usedModelCalls, 1); assert.equal(resumed.run.executionSessionId, 'session_TEST_ONLY_new')
-  assert.equal(resumed.run.sessionId, plan.snapshot.sessionId); assert.equal(resumed.report!.modelRunId, first.run.runId)
+  assert.equal(resumed.run.sessionId, plan.snapshot.sessionId); assert.equal(reportOf(resumed).modelRunId, first.run.runId)
 })
 
 test('format-repair pause only resumes its remaining attempt and an abandoned owner call remains charged', async () => {
@@ -218,7 +232,7 @@ test('published review recovery settles only its terminal record after later use
   const afterEdit = await snapshot(io), action = await prepareModelReviewAction(io, state.runId, 'resume', () => false)
   const recovered = await executeModelReview(io, action.frozen, owner, new AbortController().signal, async () => { throw new Error('TEST_ONLY cannot call again') }, () => false,
     { pauseRequested: () => false, resume: action })
-  assert.equal(recovered.recoveredArtifact, true); assert.equal(recovered.report!.id, result.report!.id)
+  assert.equal(recoveredArtifactOf(recovered), true); assert.equal(reportOf(recovered).id, reportOf(result).id)
   assert.equal((await snapshot(io)).document.text, afterEdit.document.text); assert.equal((await snapshot(io)).ledger.revision, afterEdit.ledger.revision)
   assert.equal((await inspectReview(io)).stale, true)
 })
@@ -247,7 +261,7 @@ test('temporary failures are charged and bounded, while authentication errors ha
 })
 
 test('old positioned model issues stay open when omitted and close only after an explicit current-version recheck', async () => {
-  const { io, plan } = await setup(), initial = await execute(io, plan, async () => json(output(plan))), old = initial.report!.issues.find(issue => issue.location)!
+  const { io, plan } = await setup(), initial = await execute(io, plan, async () => json(output(plan))), old = reportOf(initial).issues.find(issue => issue.location)!
   const next = await prepare(io), omitted = await publishModelReview(io, next, validateModelReview(next, output(next, false)))
   assert.ok(omitted.report.issues.some(issue => issue.id === old.id))
   const final = await prepare(io), result = output(final, false)
@@ -255,7 +269,7 @@ test('old positioned model issues stay open when omitted and close only after an
   const rechecked = await publishModelReview(io, final, validateModelReview(final, result))
   assert.equal((await snapshot(io)).ledger.reviewIssues[old.id].state, 'resolved')
   assert.equal(rechecked.report.issues.some(issue => issue.id === old.id), false)
-  assert.equal(JSON.parse((await io.read(`.scholarflow/reviews/${initial.report!.id}/report.json`))!.text).issues.find((issue: any) => issue.id === old.id).state, 'open')
+  assert.equal(JSON.parse((await io.read(`.scholarflow/reviews/${reportOf(initial).id}/report.json`))!.text).issues.find((issue: any) => issue.id === old.id).state, 'open')
 })
 
 test('review cancellation preserves a charged call and prevents a late response from publishing', async () => {
@@ -279,7 +293,7 @@ test('parallel review startup cannot steal the active project run or dispatch a 
   await assert.rejects(execute(io, other, async () => { extraCalls++; return json(output(other)) }), { code: 'RUN_IN_PROGRESS' })
   assert.equal(extraCalls, 0); assert.equal(await io.read(runFile(other.snapshot.runId)), undefined)
   release(); const result = await first
-  assert.equal(result.run.usedModelCalls, 1); assert.equal(result.report!.modelRunId, plan.snapshot.runId)
+  assert.equal(result.run.usedModelCalls, 1); assert.equal(reportOf(result).modelRunId, plan.snapshot.runId)
 })
 
 test('a paused rate-limit window and charged retry survive confirmation without an immediate request', async () => {

@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { proposalOf, proposalHashOf } from '../fixtures/generation-result.ts'
 import { initialize, prepareInit, snapshot, mutateLedger } from '../../src/core/project/project.ts'
 import { confirmOutline } from '../../src/core/evidence/evidence.ts'
 import { saveManual, buildProposal, storeProposal, rejectProposal, applyProposal } from '../../src/core/editing/proposals.ts'
@@ -62,16 +63,16 @@ test('SF-024: issue fix uses the second exact paragraph, checkpoints its cause a
     assert.equal((call.context.manuscript as any).sourceText, quote)
     return json({ replacementText: replacement, limitations: ['TEST_ONLY 未完成学术事实核验。'] })
   }, () => true)
-  assert.equal(result.proposal!.reviewIssue!.issueId, issue.id)
+  assert.equal(proposalOf(result).reviewIssue!.issueId, issue.id)
   assert.equal((await snapshot(io)).ledger.reviewIssues[issue.id].state, 'proposed-fix')
   assert.equal((await snapshot(io)).document.text, original)
-  const accepted = await acceptAndRecheck(io, result.proposal!.id, (await snapshot(io)).ledger.revision, result.proposalHash!)
+  const accepted = await acceptAndRecheck(io, proposalOf(result).id, (await snapshot(io)).ledger.revision, proposalHashOf(result))
   assert.equal('recheck' in accepted && accepted.recheck.status, 'completed')
   const after = await snapshot(io)
   assert.equal(after.document.text, original.slice(0, original.lastIndexOf(quote)) + replacement + '\n')
   assert.equal(after.ledger.reviewIssues[issue.id].state, 'proposed-fix'); assert.equal(after.ledger.reviewIssues[issue.id].stale, true)
   assert.equal((await io.read('raw.txt'))!.text, 'TEST_ONLY original bytes\r\n')
-  const revision = after.ledger.revision, again = await acceptAndRecheck(io, result.proposal!.id, revision, result.proposalHash!)
+  const revision = after.ledger.revision, again = await acceptAndRecheck(io, proposalOf(result).id, revision, proposalHashOf(result))
   assert.equal(again.alreadyApplied, true); assert.equal((await snapshot(io)).ledger.revision, revision)
   const next = await prepareModelReview(io, { context: context(await snapshot(io)), assessmentScope: 'argument-style' }, { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' })
   await publishModelReview(io, next, { checks: [{ id: 'argument_assessment', status: 'pass', detail: 'TEST_ONLY 已针对新稿的范围逐项复核。' }, { id: 'style_assessment', status: 'pass', detail: 'TEST_ONLY 已核对当前新稿的表达形式。' }], findings: [],

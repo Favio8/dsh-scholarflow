@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { deliveredText } from '../fixtures/delivery-artifacts.ts'
 import { initialize, prepareInit, snapshot } from '../../src/core/project/project.ts'
 import { confirmOutline } from '../../src/core/evidence/evidence.ts'
 import { saveManual } from '../../src/core/editing/proposals.ts'
@@ -15,6 +16,7 @@ import { prepareGeneration, executeGeneration } from '../../src/core/pipeline/ge
 import { prepareModelReview } from '../../src/core/review/model.ts'
 import { executeModelReview } from '../../src/core/review/model-run.ts'
 import { projectMarkdown, validateRange } from '../../src/core/editing/markdown.ts'
+import type { SelectionPayload } from '../../src/shared/editing.ts'
 import { reserveWorkflowCall } from '../../src/core/pipeline/workflow-budget.ts'
 import { recover } from '../../src/core/store/transactions.ts'
 import { semanticReviewChecks } from '../../src/shared/review.ts'
@@ -175,7 +177,7 @@ test('SF-027: local automatic progression records seven real gates and a same-ve
   assert.equal((await snapshot(io)).document.text, body); assert.equal((await io.read('unselected.txt'))!.text, 'TEST_ONLY raw unchanged')
   const ledger = (await snapshot(io)).ledger, manifest = Object.values(ledger.deliveries)[0], files = (await readDelivery(io, manifest.id)).files
   assert.equal(manifest.reviewState, 'draft-incomplete'); assert.ok(Object.values(ledger.reviewIssues).some(row => row.severity === 'B0' && row.state === 'open'))
-  assert.match(files.find(row => row.relativePath === 'quality-report.md')!.text, /B0 · open/u)
+  assert.match(deliveredText(files, 'quality-report.md'), /B0 · open/u)
   assert.equal(root.checkpoint.budget!.calls.length, 0); assert.equal(root.checkpoint.budget!.childDurationMs[automaticId]! >= 0, true)
 })
 
@@ -295,7 +297,7 @@ test('cancellation after durable step registration stops before execution and re
 test('AT-24: queued local scheduling blocks independent writer, model review and query reservation before any paid dispatch or stage publication', async () => {
   const { io, workflowId } = await setup(), current = await snapshot(io), projection = projectMarkdown(current.document.text), block = projection.blocks[0], range = validateRange(projection, block.start, block.end, 'paragraph')
   const context = { requestId: 'request_TEST_ONLY', projectId: current.ledger.projectId, workspaceId: 'workspace_TEST_ONLY', sessionId, expectedLedgerRevision: current.ledger.revision }
-  const model = { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' }, selection = { projectId: current.ledger.projectId, documentId: 'paper', documentHash: current.document.contentHash,
+  const model = { providerId: 'TEST_ONLY', modelId: 'TEST_ONLY' }, selection: SelectionPayload = { projectId: current.ledger.projectId, documentId: 'paper', documentHash: current.document.contentHash,
     revisionId: current.document.revisionId, blockIds: [block.id], sourceRange: { startUtf16: block.start, endUtf16: block.end }, sourceText: current.document.text.slice(block.start, block.end),
     renderedText: range.renderedText, prefixContext: '', suffixContext: '', citationKeys: range.citationKeys, claimIds: [], scope: 'paragraph', capturedAt: new Date().toISOString() }
   const generation = await prepareGeneration(io, { context, instruction: 'TEST_ONLY 保留缺失实验标记，仅生成待审阅改写。', selection }, model)

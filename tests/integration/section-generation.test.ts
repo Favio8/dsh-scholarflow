@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MemoryStore } from '../fixtures/memory-store.ts'
+import { proposalOf, proposalHashOf, revisionOf } from '../fixtures/generation-result.ts'
 import { initialize, prepareInit, snapshot, mutateLedger } from '../../src/core/project/project.ts'
 import { registerMaterial } from '../../src/core/materials/materials.ts'
 import { parseRegisteredMaterial } from '../../src/core/materials/parse.ts'
@@ -56,9 +57,9 @@ test('SF-013: section candidates preserve headings, adjacent chapters and nested
   assert.ok((plan.context.manuscript as any).actualSavedManuscriptForConsistency.includes('子节原文。'))
   const result = await executeGeneration(io, plan, owner, new AbortController().signal, async () => JSON.stringify(output), () => true)
   assert.equal((await snapshot(io)).document.text, before.document.text)
-  assert.equal(result.proposal.scope, 'section')
-  const edit = result.proposal.edits[0]
-  const accepted = await applyProposal(io, result.proposal.id, result.revision, result.proposalHash), after = await snapshot(io)
+  assert.equal(proposalOf(result).scope, 'section')
+  const edit = proposalOf(result).edits[0]
+  const accepted = await applyProposal(io, proposalOf(result).id, revisionOf(result), proposalHashOf(result)), after = await snapshot(io)
   assert.equal(after.document.text, before.document.text.slice(0, edit.startUtf16) + edit.replacementText + before.document.text.slice(edit.endUtf16))
   assert.ok(after.document.text.includes('### 已有人工作品\r\n\r\n子节原文。'))
   assert.ok(after.document.text.includes('[待补：真实结果与原始记录，当前尚未完成]'))
@@ -78,10 +79,10 @@ test('missing sections insert in outline order without replacing any existing hu
   const before = await snapshot(io), plan = await prepareGeneration(io, input, model)
   assert.equal(plan.sectionTarget?.mode, 'insert')
   const result = await executeGeneration(io, plan, owner, new AbortController().signal, async () => JSON.stringify(output), () => true)
-  const edit = result.proposal.edits[0]
+  const edit = proposalOf(result).edits[0]
   assert.equal(edit.startUtf16, before.document.text.indexOf('## 人工后节'))
   assert.equal(edit.expectedText, '')
-  await applyProposal(io, result.proposal.id, result.revision, result.proposalHash)
+  await applyProposal(io, proposalOf(result).id, revisionOf(result), proposalHashOf(result))
   const after = await snapshot(io)
   assert.equal(after.document.text.slice(0, edit.startUtf16), before.document.text.slice(0, edit.startUtf16))
   assert.equal(after.document.text.slice(edit.startUtf16 + edit.replacementText.length), before.document.text.slice(edit.startUtf16))
