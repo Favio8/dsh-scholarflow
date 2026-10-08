@@ -16,6 +16,7 @@ import { applyGutterRows } from './gutter-rows.ts'
 import { OverlayHost, useOverlaySpace } from './middle-overlay.tsx'
 import { RewriteCandidateView, protectedChanges, type RewriteCandidate } from './rewrite-candidate.tsx'
 import { SourceCandidate } from './source-candidate.tsx'
+import { SourceRangeMark, type MarkRange } from './range-mark.tsx'
 import { trackRange, type TextRange } from './rewrite-range.ts'
 import { pendingQuestion } from '../shared/writing-task.ts'
 import { usePaneZoom, ZoomControls } from './pane-zoom.tsx'
@@ -419,8 +420,13 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     onAccept={() => run(acceptRewrite)} onDiscard={() => run(discardRewrite)} onUndo={undoSnapshot ? () => run(undoRewrite) : undefined}
     onRegenerate={() => submitRewrite({ start: candidate.start, end: candidate.end })} />
   const sourceCandidate = candidate && (view === 'edit' || view === 'split' && candidate.origin !== 'preview')
-  const previewCandidate = candidate && (view === 'preview' || view === 'split' && candidate.origin === 'preview')
   const candidateBlock = livePreview.projection?.blocks.filter(block => block.node.type === 'paragraph' && block.start < (candidate?.end ?? 0)).at(-1)
+  // The textarea's value holds LF while the manuscript may hold CRLF, so the pane's offsets are the
+  // normalised ones; the preview works in the projection's source offsets (SF-087).
+  const textareaOffset = (offset: number) => text.slice(0, offset).replace(/\r\n|\r/g, '\n').length
+  const sourceMark: MarkRange | undefined = candidate && { state: candidate.state,
+    start: textareaOffset(candidate.start), end: textareaOffset(candidate.end) }
+  const previewMark = candidate && { start: candidate.start, end: candidate.end, flowing: candidate.state === 'generating' }
   return <section className="sf-draft" aria-label="正文编辑">
     {/* The menu appears next to the selection and calls no model; the chosen function becomes
         an instruction in the bottom overlay (PRD §5.2). */}
@@ -446,7 +452,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       <div className="sf-editor-grid" data-view={view}>
         <div className="sf-source-pane" hidden={view === 'preview'} style={{ '--sf-editor-font': `${13 * editorZoom.zoom}px`, '--sf-editor-line': `${24 * editorZoom.zoom}px` } as React.CSSProperties}><div className="sf-pane-caption"><span>Markdown</span><ZoomControls label="编辑" {...editorZoom} />
           <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>{saving ? '保存中…' : '保存'}</button></div>
-          <div className="sf-source-editor" ref={sourceEditor} data-candidate={!!sourceCandidate}><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
+          <div className="sf-source-editor" ref={sourceEditor} data-candidate={!!sourceCandidate}><SourceRangeMark area={sourceArea} host={sourceEditor} range={sourceMark} text={text} zoom={editorZoom.zoom} /><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
             <textarea ref={sourceArea} className="sf-source-input" aria-label="Markdown 手工编辑" spellCheck={false} disabled={busy || saving} value={text}
               onScroll={e => { const area = e.currentTarget; if (area.selectionStart !== area.selectionEnd) setSelectionAnchor(sourceSelectionRect(area)); if (gutter.current) gutter.current.style.transform = `translateY(${-area.scrollTop}px)` }}
               onMouseDown={() => { selecting.current = true; setSelectionAnchor(undefined) }}
@@ -480,8 +486,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         <div className="sf-preview-pane" hidden={view === 'edit'}><div className="sf-pane-caption"><span>预览</span><ZoomControls label="预览" {...previewZoom} /></div>
           <div className="sf-paper-scroll" ref={previewScroll}><div className="sf-paper-page" style={{ zoom: previewZoom.zoom }} data-format={format} ref={root} onMouseUp={capture} onKeyUp={capture}>
             {livePreview.projection ? <MarkdownView projection={livePreview.projection}
-              afterBlock={(start) => previewCandidate && candidateBlock?.start === start ? candidateView : null}
-              annotations={(start, end) => <>{cowrite.annotations(start, end, candidate?.id)}{!dirty && (Object.values(project.ledger.reviewIssues) as any[]).filter(issue => !issue.stale && issue.state !== 'resolved' && issue.documentHash === project.document.contentHash && issue.location?.sourceRange.startUtf16 >= start && issue.location.sourceRange.startUtf16 < end).map(issue => <button className="sf-review-marker" key={issue.id} title={issue.explanation} onClick={onReview}>{issue.severity} · {issue.title}</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
+              afterBlock={(start) => candidate && view !== 'edit' && candidateBlock?.start === start ? candidateView : null}
+              markRange={previewMark} annotations={(start, end) => <>{cowrite.annotations(start, end, candidate?.id)}{!dirty && (Object.values(project.ledger.reviewIssues) as any[]).filter(issue => !issue.stale && issue.state !== 'resolved' && issue.documentHash === project.document.contentHash && issue.location?.sourceRange.startUtf16 >= start && issue.location.sourceRange.startUtf16 < end).map(issue => <button className="sf-review-marker" key={issue.id} title={issue.explanation} onClick={onReview}>{issue.severity} · {issue.title}</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
             {!!livePreview.projection?.citationOrder.length && <section className="sf-paper-references"><h3>参考文献</h3><ol>{livePreview.projection.citationOrder.map(key => {
               const source = (Object.values(project.ledger.sources) as any[]).find(row => row.citeKey === key)
               return <li key={key}>{source ? [source.authors.map((author: any) => author.literal ?? [author.given, author.family].filter(Boolean).join(' ')).join(', '), source.title, source.year, source.venue].filter(Boolean).join('. ') : `待登记引用：${key}`}</li>
@@ -489,7 +495,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
           </div></div>
         </div>
       </div>
-      {sourceCandidate && <SourceCandidate area={sourceArea} end={text.slice(0, candidate.end).replace(/\r\n/g, '\n').length} identity={candidate.id}>{candidateView}</SourceCandidate>}
+      {sourceCandidate && <SourceCandidate area={sourceArea} end={textareaOffset(candidate.end)} identity={candidate.id}>{candidateView}</SourceCandidate>}
       <footer className="sf-draft-status"><span role="status" title={message || bufferMessage}>{saving ? '保存中…' : dirty ? '未保存 · 编辑已在本页保留' : project.document.externalChange ? '外部正文已改变' : <><span className="sf-saved-dot">●</span>已保存</>}{message && ` · ${message}`}</span>
         <span>{statistics ? `${statistics?.chineseCharacters ?? 0} 汉字 · ${statistics?.westernWords ?? 0} 词` : '字数暂不可用'}{currentHeading && ` · ${textOf(currentHeading)}`}</span></footer>
     </div>

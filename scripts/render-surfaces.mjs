@@ -103,13 +103,26 @@ const escapeHtml = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').r
 const LONG_PARAGRAPH = '多模态情感识别从语音、文本与视频等异质来源推断情绪状态，已被用于患者情绪状态分析、客户服务中的实时情绪检测以及自闭症儿童的社交技能训练。'.repeat(18)
 const DRAFT_LINES = ['# 科技论文写作', '', '## 引言', '', LONG_PARAGRAPH, '', '## 主题论证', '', '短段落。', '', '## 结论', '', '结束。']
 const DRAFT_LONG_LINE = 4
+const DRAFT_TEXT = DRAFT_LINES.join('\n')
+// The marked range for the SF-087 capture: the long paragraph, which wraps over many rows.
+const MARK_START = DRAFT_TEXT.indexOf(LONG_PARAGRAPH)
+const MARK_END = MARK_START + LONG_PARAGRAPH.length
 
 /** Mirrors the source pane's JSX: a line-number column and the pane itself, at the pane's own width. */
+const draftSource = (gutterId, extra = '') => `<div class="sf-source-editor">${extra}<div class="sf-line-gutter" aria-hidden="true"><div id="${gutterId}">${DRAFT_LINES.map((_, index) => `<div>${index + 1}</div>`).join('')}</div></div>
+<textarea class="sf-source-input" aria-label="Markdown 手工编辑">${escapeHtml(DRAFT_TEXT)}</textarea>`
+
 const draftBody = () => `<div class="sf-app sf-paper-project" style="height:420px;display:flex;flex-direction:column">
 <div class="sf-editor-grid" data-view="split">
 <div class="sf-source-pane" style="--sf-editor-font:13px;--sf-editor-line:24px">
-<div class="sf-source-editor"><div class="sf-line-gutter" aria-hidden="true"><div id="sf-wrap-gutter">${DRAFT_LINES.map((_, index) => `<div>${index + 1}</div>`).join('')}</div></div>
-<textarea class="sf-source-input" aria-label="Markdown 手工编辑">${escapeHtml(DRAFT_LINES.join('\n'))}</textarea>
+${draftSource('sf-wrap-gutter')}
+</div></div></div></div>`
+
+/** The same pane with the marking layer the component renders, so the bands can be measured. */
+const draftMarkBody = () => `<div class="sf-app sf-paper-project" style="height:420px;display:flex;flex-direction:column">
+<div class="sf-editor-grid" data-view="split">
+<div class="sf-source-pane" style="--sf-editor-font:13px;--sf-editor-line:24px">
+${draftSource('sf-mark-gutter', '<div class="sf-source-marks" aria-hidden="true"><div id="sf-mark-bands"></div></div>')}
 </div></div></div></div>`
 
 const presetRow = (title, summary, chosen, current, manage) => `<div style="display:flex;align-items:center">
@@ -158,7 +171,8 @@ const surfaces = {
   step3: { title: '第 3 步 · 行文结构与创建前确认', body: step3, width: '830px' },
   preset: { title: '结构预设弹窗（宽屏双栏）', body: modal('wide'), width: '100%' },
   presetDetail: { title: '结构预设弹窗（窄屏详情栏）', body: modal('detail'), width: '100%' },
-  draftWrap: { title: '正文源码区 · 长行软换行', body: draftBody(), width: '100%' }
+  draftWrap: { title: '正文源码区 · 长行软换行', body: draftBody(), width: '100%' },
+  draftMark: { title: '正文源码区 · 改写范围标注', body: draftMarkBody(), width: '100%' }
 }
 
 export function pageHtml(wizard, picker, paper) {
@@ -185,8 +199,8 @@ ${stages}
 
 /** Wide captures both columns; narrow captures the single column the component switches to. */
 const passes = [
-  { viewport: { width: 1100, height: 900 }, suffix: '', ids: ['step1', 'step2', 'step3', 'preset', 'draftWrap'] },
-  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: ['step1', 'step2', 'step3', 'presetDetail', 'draftWrap'] }
+  { viewport: { width: 1100, height: 900 }, suffix: '', ids: ['step1', 'step2', 'step3', 'preset', 'draftWrap', 'draftMark'] },
+  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: ['step1', 'step2', 'step3', 'presetDetail', 'draftWrap', 'draftMark'] }
 ]
 
 const indexPath = (id) => Object.keys(surfaces).indexOf(id) + 1
@@ -214,27 +228,33 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
   const wizard = extractCss('src/client/creation-wizard.tsx', 'WIZARD_CSS')
   const picker = extractCss('src/client/preset-picker.tsx', 'PRESET_CSS')
   const paper = extractCss('src/client/paper-workspace.tsx', 'PAPER_CSS')
-  // The wrap surface runs the shipped module, so it cannot pass against a stale copy of the rule.
+  const marks = extractCss('src/client/range-mark.tsx', 'RANGE_MARK_CSS')
+  // The wrap and mark surfaces run the shipped modules, so they cannot pass against a stale copy of
+  // a rule. Both are bundled for the page rather than re-implemented here.
   const gutterModule = await build({ entryPoints: [join(root, 'src/client/gutter-rows.ts')], bundle: true, write: false,
     platform: 'browser', format: 'iife', globalName: 'ScholarFlowGutter' })
+  const measureModule = await build({ entryPoints: [join(root, 'src/client/source-measure.ts')], bundle: true, write: false,
+    platform: 'browser', format: 'iife', globalName: 'ScholarFlowMeasure' })
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
-  writeFileSync(join(outDir, 'wizard.html'), pageHtml(wizard, picker, paper))
+  writeFileSync(join(outDir, 'wizard.html'), pageHtml(wizard, picker, paper + marks))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
-  const results = [], wrap = []
+  const results = [], wrap = [], mark = []
   try {
     for (const pass of passes) {
       const page = await (await browser.newContext({ viewport: pass.viewport })).newPage()
       await page.goto(pathToFileURL(join(outDir, 'wizard.html')).href)
       await page.addScriptTag({ content: gutterModule.outputFiles[0].text })
+      await page.addScriptTag({ content: measureModule.outputFiles[0].text })
       await page.waitForTimeout(500)
       for (const id of pass.ids) {
         const name = `surface-${id}${pass.suffix}.png`
         const file = join(outDir, name)
-        // The wrap surface is measured before it is captured, so the capture shows the state the
-        // check just accepted instead of an unmeasured line-number column.
+        // The wrap and mark surfaces are measured before they are captured, so the capture shows the
+        // state the check just accepted instead of an unmeasured column or an unpainted pane.
         if (id === 'draftWrap') { const report = await checkDraftWrap(page, `#s${indexPath(id)}>.frame`); wrap.push({ name, report, problems: auditWrap(name, report) }) }
+        if (id === 'draftMark') { const report = await checkDraftMark(page, `#s${indexPath(id)}>.frame`); mark.push({ name, report, problems: auditMark(name, report, wrap.at(-1)?.report.longRows) }) }
         const shot = await page.locator(`#s${indexPath(id)}>.frame`).screenshot()
         writeFileSync(file, shot)
         results.push({ name, ...(await measure(page, shot.toString('base64'))) })
@@ -242,11 +262,60 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
       await page.close()
     }
   } finally { await browser.close() }
-  return { outDir, results, wrap, problems: [...audit(results), ...wrap.flatMap(row => row.problems)] }
+  return { outDir, results, wrap, mark, problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems)] }
 }
 
 function chromePath() {
   return process.env.SCHOLARFLOW_CHROME ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+}
+
+/**
+ * AT-87 (1) in a real browser page: the shipped range measurement is applied to a marked range and
+ * the bands are painted the way the component paints them, then measured. A mark that silently
+ * collapsed to one band would still screenshot fine, so these numbers are the point.
+ */
+async function checkDraftMark(page, selector) {
+  return page.evaluate(({ selector, start, end }) => {
+    const root = document.querySelector(selector)
+    const area = root.querySelector('textarea.sf-source-input')
+    const layer = root.querySelector('.sf-source-marks'), bands = root.querySelector('#sf-mark-bands')
+    const style = getComputedStyle(area), row = parseFloat(style.lineHeight)
+    const rects = window.ScholarFlowMeasure.lineBoxes(window.ScholarFlowMeasure.sourceRangeRects(area, start, end), row)
+    bands.replaceChildren()
+    bands.dataset.state = 'generating'
+    for (const rect of rects) {
+      const band = document.createElement('div')
+      band.className = 'sf-range-band'
+      Object.assign(band.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` })
+      bands.append(band)
+    }
+    const box = area.getBoundingClientRect(), layerBox = layer.getBoundingClientRect()
+    const shift = { x: box.left - layerBox.left, y: box.top - layerBox.top - area.scrollTop }
+    bands.style.transform = `translate(${shift.x}px, ${shift.y}px)`
+    const contentWidth = area.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    const painted = [...bands.children].map(band => band.getBoundingClientRect())
+    // The same band with the candidate ready must stop: the settled state is part of the contract.
+    const flow = getComputedStyle(bands.children[0]).animationName
+    bands.dataset.state = 'ready'
+    const settled = getComputedStyle(bands.children[0]).animationName
+    const lefts = painted.map(rect => rect.left - (box.left + parseFloat(style.paddingLeft)))
+    return { row, count: rects.length, contentWidth, heights: painted.map(rect => rect.height),
+      minLeft: Math.min(...lefts), maxRight: Math.max(...painted.map((rect, index) => lefts[index] + rect.width)),
+      gaps: painted.slice(1).map((rect, index) => rect.top - painted[index].bottom), flow, settled }
+  }, { selector, start: MARK_START, end: MARK_END })
+}
+
+export function auditMark(name, report, expectedRows) {
+  const problems = []
+  if (report.count <= 1) problems.push(`${name}: the marked range produced ${report.count} band(s)`)
+  if (expectedRows !== undefined && Math.abs(report.count - expectedRows) > 1) problems.push(`${name}: ${report.count} bands for a range the pane wraps over ${expectedRows.toFixed(0)} rows`)
+  if (report.gaps.some(gap => Math.abs(gap) > 1)) problems.push(`${name}: the bands are not on consecutive lines (largest gap ${Math.max(...report.gaps.map(Math.abs)).toFixed(2)}px)`)
+  const short = report.heights.find(height => Math.abs(height - report.row) > 1)
+  if (short !== undefined) problems.push(`${name}: a band is ${short.toFixed(1)}px tall instead of one line (${report.row}px)`)
+  if (report.minLeft < -1 || report.maxRight > report.contentWidth + 1) problems.push(`${name}: a band leaves the pane's content box (${report.minLeft.toFixed(1)} to ${report.maxRight.toFixed(1)} of ${report.contentWidth.toFixed(1)}px)`)
+  if (!report.flow.includes('sf-range-flow')) problems.push(`${name}: the band is not flowing while the candidate is generating (${report.flow})`)
+  if (report.settled !== 'none') problems.push(`${name}: the band keeps flowing after the candidate is ready (${report.settled})`)
+  return problems
 }
 
 /** A capture that renders nothing is the failure this check exists for. */
@@ -297,13 +366,15 @@ export function auditWrap(name, report) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { outDir, results, wrap, problems } = await renderSurfaces()
+  const { outDir, results, wrap, mark, problems } = await renderSurfaces()
   for (const shot of results) {
     console.log(`${shot.name.padEnd(30)} ${String(shot.width).padStart(4)}x${String(shot.height).padStart(4)}  ink ${(shot.ink * 100).toFixed(2)}%`)
   }
   // The measured numbers are printed, not just asserted: a wrapping check that reports "the long
-  // paragraph occupies one row" is the difference between a real gate and a vacuous one.
+  // paragraph occupies one row" is the difference between a real gate and a vacuous one, and the
+  // mark count has to match the rows the same range actually wraps over.
   for (const row of wrap) console.log(`${row.name}: 横向溢出 ${row.report.overflow}px · 长段落 ${row.report.longRows.toFixed(1)} 行 · 行号列 ${row.report.gutterTotal.toFixed(0)}px / 编辑区内容 ${row.report.content.toFixed(0)}px`)
+  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行高 ${row.report.row}px · 流动 ${row.report.flow} → 就绪 ${row.report.settled} · 横向范围 ${row.report.minLeft.toFixed(0)}～${row.report.maxRight.toFixed(0)} / ${row.report.contentWidth.toFixed(0)}px`)
   if (problems.length) {
     console.error(`\n${problems.length} check(s) failed:`)
     for (const problem of problems) console.error(`  ${problem}`)

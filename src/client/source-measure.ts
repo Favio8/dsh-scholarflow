@@ -36,3 +36,31 @@ export function mirrorOf(area: HTMLTextAreaElement) {
     width: `${area.clientWidth ? area.clientWidth - padLeft - padRight : fallback}px` })
   return mirror
 }
+
+/**
+ * Snap inline rectangles to the line boxes they sit in. The browser reports the glyph box, which is
+ * shorter than the line box, so a wrapped range would paint as one stripe per row with gaps between
+ * them; the inline box is centred in its line box, so half the difference is the half-leading above
+ * it. Callers that paint behind text want line boxes (SF-087).
+ */
+export function lineBoxes(rects: readonly DOMRect[], lineHeight: number): DOMRect[] {
+  if (!lineHeight) return [...rects]
+  return rects.map(rect => new DOMRect(rect.left, rect.top - (lineHeight - rect.height) / 2, rect.width, lineHeight))
+}
+
+/**
+ * The target range's rectangles in the pane's own **content coordinates** — one per visual line,
+ * without the scroll offset, so a caller can paint behind the text and follow scrolling with a
+ * transform instead of re-measuring. A wrapped range therefore marks every row it covers (SF-087).
+ */
+export function sourceRangeRects(area: HTMLTextAreaElement, start: number, end: number): DOMRect[] {
+  const mirror = mirrorOf(area), span = document.createElement('span')
+  const bounds = area.getBoundingClientRect()
+  mirror.append(document.createTextNode(area.value.slice(0, start)))
+  span.textContent = area.value.slice(start, end) || '\u200b'
+  mirror.append(span); document.body.append(mirror)
+  try {
+    return [...span.getClientRects()].map(rect => new DOMRect(rect.left - bounds.left + area.scrollLeft,
+      rect.top - bounds.top + area.scrollTop, rect.width, rect.height))
+  } finally { mirror.remove() }
+}

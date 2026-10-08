@@ -1,14 +1,38 @@
 import React from 'react'
 import katex from 'katex'
-import { type AstNode, type Projection, mapLeafPoint, validateRange, validateProseRange } from '../core/editing/markdown.ts'
+import { type AstNode, type Projection, type Leaf, type TextUnit, mapLeafPoint, validateRange, validateProseRange } from '../core/editing/markdown.ts'
 import type { SelectionPayload } from '../shared/editing.ts'
 
-export function MarkdownView({ projection, annotations, afterBlock }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode;
-  afterBlock?: (start: number, end: number) => React.ReactNode }) {
+/**
+ * The rendered slice of a leaf that a source range covers, or nothing when it cannot be placed
+ * exactly. `units` tile both spaces continuously, so the slice runs from the first unit ending after
+ * the range start to the last unit starting before its end. Boundaries are taken at whole units: a
+ * decoded escape or entity is not the same length in the two spaces, so interpolating inside one
+ * would land on the wrong character (SF-087).
+ */
+export function markedSlice(leaf: Leaf, range: { start: number; end: number }) {
+  if (!leaf.mappable || !leaf.units.length) return undefined
+  const from = Math.max(range.start, leaf.start), to = Math.min(range.end, leaf.end)
+  if (from >= to) return undefined
+  const first = leaf.units.find(unit => unit.sourceEnd > from)
+  let last: TextUnit | undefined
+  for (const unit of leaf.units) if (unit.sourceStart < to) last = unit
+  if (!first || !last || last.renderedEnd <= first.renderedStart) return undefined
+  return { start: first.renderedStart, end: last.renderedEnd }
+}
+
+export function MarkdownView({ projection, annotations, afterBlock, markRange }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode;
+  afterBlock?: (start: number, end: number) => React.ReactNode; markRange?: { start: number; end: number; flowing: boolean } }) {
   const leaves = new Map(projection.leaves.map(leaf => [leaf.id, leaf]))
   const render = (node: AstNode, key: string): React.ReactNode => {
     const children = node.children?.map((child, index) => render(child, `${key}_${index}`))
-    if (node.type === 'text') return <React.Fragment key={key}>{node.leafIds?.map(id => { const leaf = leaves.get(id)!; return <span key={id} data-sf-leaf={id} title={leaf.citationKeys ? leaf.citationKeys.map(key => `[@${key}]`).join('; ') : undefined}>{leaf.text}</span> })}</React.Fragment>
+    if (node.type === 'text') return <React.Fragment key={key}>{node.leafIds?.map(id => {
+      const leaf = leaves.get(id)!, slice = markRange && markedSlice(leaf, markRange)
+      const title = leaf.citationKeys ? leaf.citationKeys.map(key => `[@${key}]`).join('; ') : undefined
+      if (!slice) return <span key={id} data-sf-leaf={id} title={title}>{leaf.text}</span>
+      return <span key={id} data-sf-leaf={id} title={title}>{leaf.text.slice(0, slice.start)}<span className="sf-mark-inline"
+        data-sf-marked="true" data-flow={markRange!.flowing ? 'on' : 'off'}>{leaf.text.slice(slice.start, slice.end)}</span>{leaf.text.slice(slice.end)}</span>
+    })}</React.Fragment>
     if (node.type === 'root') return <React.Fragment key={key}>{node.children?.map((child, index) => <React.Fragment key={index}>
       {annotations?.(child.position?.start.offset ?? 0, node.children?.[index + 1]?.position?.start.offset ?? projection.source.length + 1)}
       {render(child, `${key}_${index}`)}</React.Fragment>)}</React.Fragment>

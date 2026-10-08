@@ -5,6 +5,7 @@ import { MOTION_CSS } from './motion/tokens.ts'
 import { OVERLAY_CSS } from './middle-overlay.tsx'
 import { REWRITE_CSS } from './rewrite-candidate.tsx'
 import { SOURCE_CANDIDATE_CSS } from './source-candidate.tsx'
+import { RANGE_MARK_CSS } from './range-mark.tsx'
 import { SELECTION_MENU_CSS } from './selection-menu.tsx'
 import { OutlineEditor } from './research.tsx'
 import { CreationWizard, WIZARD_CSS } from './creation-wizard.tsx'
@@ -158,7 +159,7 @@ export function apply(ctx: Host) {
       window.addEventListener('blur', blur); window.addEventListener('focus', sync)
       return () => { document.removeEventListener('visibilitychange', sync); window.removeEventListener('blur', blur); window.removeEventListener('focus', sync) }
     }, [])
-    return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS}</style>
+    return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS + RANGE_MARK_CSS}</style>
       <SelectionReferenceDetails sessionId={props.sessionId} />
       <main className="sf-body">{props.renderSlot('scholarflow.project', {
         renderNativeTools: (extra: React.ReactNode) => <NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} extra={extra} />,
