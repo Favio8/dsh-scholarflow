@@ -11,7 +11,8 @@ import type { DraftController, PaperView } from './paper-workspace.tsx'
 import type { ExportFormat } from '../shared/presentation.ts'
 import { SelectionDetails, type SelectionContext } from './selection-card.tsx'
 import { useCowrite } from './cowrite.tsx'
-import { REWRITE_ACTIONS, SelectionMenu, renderedSelectionRect, sourceSelectionRect, sourceRangeRect, type RewriteAction } from './selection-menu.tsx'
+import { REWRITE_ACTIONS, SelectionMenu, renderedSelectionRect, sourceSelectionRect, revealSourceOffset, textareaZoomAnchor, type RewriteAction } from './selection-menu.tsx'
+import { applyGutterRows } from './gutter-rows.ts'
 import { OverlayHost, useOverlaySpace } from './middle-overlay.tsx'
 import { RewriteCandidateView, protectedChanges, type RewriteCandidate } from './rewrite-candidate.tsx'
 import { SourceCandidate } from './source-candidate.tsx'
@@ -63,9 +64,13 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   }, error => { persistenceBlocked.current = true; setBufferMessage(`暂存未完成，保留本页面和浏览器备份：${(error as Error).message}`) })
   const root = useRef<HTMLDivElement>(null), gutter = useRef<HTMLDivElement>(null)
   const sourceArea = useRef<HTMLTextAreaElement>(null)
+  const sourceEditor = useRef<HTMLDivElement>(null)
   const previewScroll = useRef<HTMLDivElement>(null)
   const zoomKey = `scholarflow:zoom:${projectId}`
-  const editorZoom = usePaneZoom(`${zoomKey}:editor`, sourceArea), previewZoom = usePaneZoom(`${zoomKey}:preview`, previewScroll)
+  // The source pane wraps now, so its scroll position no longer scales with the zoom ratio: it keeps
+  // the offset under the anchor instead (SF-086). The preview keeps the proportional default.
+  const sourceAnchor = useMemo(() => textareaZoomAnchor(sourceArea), [])
+  const editorZoom = usePaneZoom(`${zoomKey}:editor`, sourceArea, sourceAnchor), previewZoom = usePaneZoom(`${zoomKey}:preview`, previewScroll)
   const middleColumn = useRef<HTMLDivElement>(null)
   useOverlaySpace(middleColumn)
   // The rewrite flow (SPEC v1.2 §12): a chosen function fills the overlay's instruction, the
@@ -100,6 +105,30 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     if (selectionAnchor) setSelectionAnchor(selectionOrigin.current === 'source' ? sourceSelectionRect(sourceArea.current!)
       : window.getSelection()?.rangeCount ? renderedSelectionRect(window.getSelection()!.getRangeAt(0)) : undefined)
   }, [editorZoom.zoom, previewZoom.zoom])
+  /**
+   * Line numbers follow visual rows: a wrapped paragraph keeps its number on its first row and the
+   * rows it wraps into stay blank. Heights come from the pane's own layout, batched into one frame
+   * so typing does not pay a forced layout per keystroke (SF-086). Hidden panes are skipped and the
+   * gutter is left exactly as it was.
+   */
+  useLayoutEffect(() => {
+    const area = sourceArea.current, node = gutter.current
+    if (!area || !node || view === 'preview') return
+    const frame = requestAnimationFrame(() => applyGutterRows(node, area, text))
+    return () => cancelAnimationFrame(frame)
+  }, [text, editorZoom.zoom, view])
+  useLayoutEffect(() => {
+    const container = sourceEditor.current
+    if (!container || typeof ResizeObserver === 'undefined') return
+    // The pane's width decides where it wraps, and it changes when the host panel, the window or the
+    // pane split is resized — none of which changes the text.
+    const observer = new ResizeObserver(() => {
+      const area = sourceArea.current, node = gutter.current
+      if (area && node) applyGutterRows(node, area, area.value)
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
   const [answer, setAnswer] = useState('')
   /**
    * The question a task needs answered belongs in the same place as the local instruction, so
@@ -407,7 +436,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       <details className="sf-chapter-nav"><summary>目录</summary><div>{headings.map(node => <button key={node.position!.start.offset} onClick={e => {
         const offset = node.position!.start.offset!; setCursor(offset); e.currentTarget.closest('details')?.removeAttribute('open')
         if (view === 'preview') root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${offset}"]`)?.scrollIntoView({ block: 'start' })
-        else { const area = sourceArea.current!; area.focus(); area.setSelectionRange(offset, offset); area.scrollTop = text.slice(0, offset).split(String.fromCharCode(10)).length * 24 * editorZoom.zoom - 40 }
+        else { const area = sourceArea.current!; area.focus(); area.setSelectionRange(offset, offset); revealSourceOffset(area, offset, 40) }
       }}>{textOf(node)}</button>)}</div></details>
     </div>
     {cowrite.message && <p className="sf-editor-notice" role="status">{cowrite.message}</p>}
@@ -417,8 +446,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       <div className="sf-editor-grid" data-view={view}>
         <div className="sf-source-pane" hidden={view === 'preview'} style={{ '--sf-editor-font': `${13 * editorZoom.zoom}px`, '--sf-editor-line': `${24 * editorZoom.zoom}px` } as React.CSSProperties}><div className="sf-pane-caption"><span>Markdown</span><ZoomControls label="编辑" {...editorZoom} />
           <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>{saving ? '保存中…' : '保存'}</button></div>
-          <div className="sf-source-editor" data-candidate={!!sourceCandidate}><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
-            <textarea ref={sourceArea} className="sf-source-input" aria-label="Markdown 手工编辑" wrap="off" spellCheck={false} disabled={busy || saving} value={text}
+          <div className="sf-source-editor" ref={sourceEditor} data-candidate={!!sourceCandidate}><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
+            <textarea ref={sourceArea} className="sf-source-input" aria-label="Markdown 手工编辑" spellCheck={false} disabled={busy || saving} value={text}
               onScroll={e => { const area = e.currentTarget; if (area.selectionStart !== area.selectionEnd) setSelectionAnchor(sourceSelectionRect(area)); if (gutter.current) gutter.current.style.transform = `translateY(${-area.scrollTop}px)` }}
               onMouseDown={() => { selecting.current = true; setSelectionAnchor(undefined) }}
               onMouseUp={e => { selecting.current = false; selectSource(e.currentTarget) }}

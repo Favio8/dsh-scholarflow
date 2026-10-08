@@ -1,5 +1,6 @@
-// Render the creation wizard's surfaces to static pages and screenshot them, so the visual
-// review in dsh-scholarflow-ai/docs/entry-wizard-presets/05 can be re-run instead of trusted.
+// Render implemented surfaces to static pages and screenshot them, so the visual reviews can be
+// re-run instead of trusted: the creation wizard and preset picker (docs/entry-wizard-presets/05),
+// and the source pane's soft wrapping (SF-086).
 //
 // The CSS is read out of the client components and the markup mirrors their JSX, so a capture
 // shows the implemented look rather than a hand-drawn mockup. No host and no model call is
@@ -7,11 +8,13 @@
 //
 // Each capture is measured before it is accepted. A collapsed stage, a blank image or a
 // single-colour image fails the run, because a screenshot that silently renders nothing is
-// exactly the failure this script exists to catch.
+// exactly the failure this script exists to catch. The wrap surface is measured against the real
+// implementation — its module is bundled for the page rather than re-implemented here.
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium } from '@playwright/test'
+import { build } from 'esbuild'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -94,6 +97,21 @@ ${row(4, '结论', '回到最初的问题，说明证据支持到什么程度', 
 </dl></section></div>
 <footer class="sf-wizard-footer"><button>← 上一步</button><span></span><button class="sf-primary">创建论文并开始撰写</button></footer></section>`
 
+const escapeHtml = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+// One paragraph far longer than any pane can fit on a row, so "did it wrap at all" is unambiguous.
+const LONG_PARAGRAPH = '多模态情感识别从语音、文本与视频等异质来源推断情绪状态，已被用于患者情绪状态分析、客户服务中的实时情绪检测以及自闭症儿童的社交技能训练。'.repeat(18)
+const DRAFT_LINES = ['# 科技论文写作', '', '## 引言', '', LONG_PARAGRAPH, '', '## 主题论证', '', '短段落。', '', '## 结论', '', '结束。']
+const DRAFT_LONG_LINE = 4
+
+/** Mirrors the source pane's JSX: a line-number column and the pane itself, at the pane's own width. */
+const draftBody = () => `<div class="sf-app sf-paper-project" style="height:420px;display:flex;flex-direction:column">
+<div class="sf-editor-grid" data-view="split">
+<div class="sf-source-pane" style="--sf-editor-font:13px;--sf-editor-line:24px">
+<div class="sf-source-editor"><div class="sf-line-gutter" aria-hidden="true"><div id="sf-wrap-gutter">${DRAFT_LINES.map((_, index) => `<div>${index + 1}</div>`).join('')}</div></div>
+<textarea class="sf-source-input" aria-label="Markdown 手工编辑">${escapeHtml(DRAFT_LINES.join('\n'))}</textarea>
+</div></div></div></div>`
+
 const presetRow = (title, summary, chosen, current, manage) => `<div style="display:flex;align-items:center">
 <button class="sf-preset-row"${chosen ? ' aria-pressed="true"' : ''}><span><strong>${title}</strong><small>${summary}</small></span>${current ? '<em>当前</em>' : ''}</button>
 ${manage ? '<div class="sf-preset-manage"><button>改名</button><button>删除</button></div>' : ''}</div>`
@@ -139,10 +157,11 @@ const surfaces = {
   step2: { title: '第 2 步 · 资料范围', body: step2, width: '830px' },
   step3: { title: '第 3 步 · 行文结构与创建前确认', body: step3, width: '830px' },
   preset: { title: '结构预设弹窗（宽屏双栏）', body: modal('wide'), width: '100%' },
-  presetDetail: { title: '结构预设弹窗（窄屏详情栏）', body: modal('detail'), width: '100%' }
+  presetDetail: { title: '结构预设弹窗（窄屏详情栏）', body: modal('detail'), width: '100%' },
+  draftWrap: { title: '正文源码区 · 长行软换行', body: draftBody(), width: '100%' }
 }
 
-export function pageHtml(wizard, picker) {
+export function pageHtml(wizard, picker, paper) {
   const stages = Object.entries(surfaces)
     .map(([id, surface], index) => stage(`s${index + 1}`, surface.title, surface.body, surface.width))
     .join('\n')
@@ -155,6 +174,7 @@ body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;colo
 @media(max-width:900px){.frame{width:auto!important}}
 ${wizard}
 ${picker}
+${paper}
 /* Same specificity as the plugin rule, so this must come after it. The real dialog is a fixed
    overlay, which would sit out of flow and collapse its stage in a static page. */
 .sf-preset-backdrop{position:static;padding:0;background:transparent}
@@ -165,8 +185,8 @@ ${stages}
 
 /** Wide captures both columns; narrow captures the single column the component switches to. */
 const passes = [
-  { viewport: { width: 1100, height: 900 }, suffix: '', ids: ['step1', 'step2', 'step3', 'preset'] },
-  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: ['step1', 'step2', 'step3', 'presetDetail'] }
+  { viewport: { width: 1100, height: 900 }, suffix: '', ids: ['step1', 'step2', 'step3', 'preset', 'draftWrap'] },
+  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: ['step1', 'step2', 'step3', 'presetDetail', 'draftWrap'] }
 ]
 
 const indexPath = (id) => Object.keys(surfaces).indexOf(id) + 1
@@ -193,20 +213,28 @@ async function measure(page, base64) {
 export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) {
   const wizard = extractCss('src/client/creation-wizard.tsx', 'WIZARD_CSS')
   const picker = extractCss('src/client/preset-picker.tsx', 'PRESET_CSS')
+  const paper = extractCss('src/client/paper-workspace.tsx', 'PAPER_CSS')
+  // The wrap surface runs the shipped module, so it cannot pass against a stale copy of the rule.
+  const gutterModule = await build({ entryPoints: [join(root, 'src/client/gutter-rows.ts')], bundle: true, write: false,
+    platform: 'browser', format: 'iife', globalName: 'ScholarFlowGutter' })
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
-  writeFileSync(join(outDir, 'wizard.html'), pageHtml(wizard, picker))
+  writeFileSync(join(outDir, 'wizard.html'), pageHtml(wizard, picker, paper))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
-  const results = []
+  const results = [], wrap = []
   try {
     for (const pass of passes) {
       const page = await (await browser.newContext({ viewport: pass.viewport })).newPage()
       await page.goto(pathToFileURL(join(outDir, 'wizard.html')).href)
+      await page.addScriptTag({ content: gutterModule.outputFiles[0].text })
       await page.waitForTimeout(500)
       for (const id of pass.ids) {
-        const name = `wizard-${id}${pass.suffix}.png`
+        const name = `surface-${id}${pass.suffix}.png`
         const file = join(outDir, name)
+        // The wrap surface is measured before it is captured, so the capture shows the state the
+        // check just accepted instead of an unmeasured line-number column.
+        if (id === 'draftWrap') { const report = await checkDraftWrap(page, `#s${indexPath(id)}>.frame`); wrap.push({ name, report, problems: auditWrap(name, report) }) }
         const shot = await page.locator(`#s${indexPath(id)}>.frame`).screenshot()
         writeFileSync(file, shot)
         results.push({ name, ...(await measure(page, shot.toString('base64'))) })
@@ -214,7 +242,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
       await page.close()
     }
   } finally { await browser.close() }
-  return { outDir, results }
+  return { outDir, results, wrap, problems: [...audit(results), ...wrap.flatMap(row => row.problems)] }
 }
 
 function chromePath() {
@@ -232,17 +260,55 @@ export function audit(results) {
   return problems
 }
 
+/**
+ * AT-86 in a real browser page. The pane's own wrapping module is applied here rather than a copy of
+ * it, and the line-number column is then measured against the pane: a column that drifted from the
+ * wrapping would still screenshot fine, so these numbers are what the check is for.
+ */
+async function checkDraftWrap(page, selector) {
+  return page.evaluate(({ selector, longLine }) => {
+    const root = document.querySelector(selector)
+    const area = root.querySelector('textarea.sf-source-input')
+    const gutter = root.querySelector('#sf-wrap-gutter')
+    window.ScholarFlowGutter.applyGutterRows(gutter, area, area.value)
+    const style = getComputedStyle(area), row = parseFloat(style.lineHeight)
+    const boxes = [...gutter.children].map(cell => cell.getBoundingClientRect())
+    const heights = boxes.map(box => box.height)
+    return { row, overflow: area.scrollWidth - area.clientWidth, heights,
+      gaps: boxes.slice(1).map((box, index) => Math.abs(box.top - boxes[index].bottom)),
+      gutterTotal: heights.reduce((sum, height) => sum + height, 0),
+      content: area.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+      longRows: heights[longLine] / row }
+  }, { selector, longLine: DRAFT_LONG_LINE })
+}
+
+export function auditWrap(name, report) {
+  const problems = []
+  if (report.overflow > 1) problems.push(`${name}: the pane still overflows horizontally by ${report.overflow}px`)
+  if (report.longRows < 1.5) problems.push(`${name}: the long paragraph did not wrap (${report.longRows.toFixed(2)} rows)`)
+  report.heights.forEach((height, index) => {
+    const rows = height / report.row
+    if (Math.abs(height - Math.round(rows) * report.row) > 1) problems.push(`${name}: line ${index + 1} is ${rows.toFixed(2)} rows tall, not a whole number`)
+  })
+  const gap = report.gaps.length ? Math.max(...report.gaps) : 0
+  if (gap > 1) problems.push(`${name}: line numbers are not contiguous (largest gap ${gap.toFixed(2)}px)`)
+  if (Math.abs(report.gutterTotal - report.content) > 1.5) problems.push(`${name}: the column is ${report.gutterTotal.toFixed(1)}px tall but the pane's content is ${report.content.toFixed(1)}px`)
+  return problems
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { outDir, results } = await renderSurfaces()
+  const { outDir, results, wrap, problems } = await renderSurfaces()
   for (const shot of results) {
-    console.log(`${shot.name.padEnd(28)} ${String(shot.width).padStart(4)}x${String(shot.height).padStart(4)}  ink ${(shot.ink * 100).toFixed(2)}%`)
+    console.log(`${shot.name.padEnd(30)} ${String(shot.width).padStart(4)}x${String(shot.height).padStart(4)}  ink ${(shot.ink * 100).toFixed(2)}%`)
   }
-  const problems = audit(results)
+  // The measured numbers are printed, not just asserted: a wrapping check that reports "the long
+  // paragraph occupies one row" is the difference between a real gate and a vacuous one.
+  for (const row of wrap) console.log(`${row.name}: 横向溢出 ${row.report.overflow}px · 长段落 ${row.report.longRows.toFixed(1)} 行 · 行号列 ${row.report.gutterTotal.toFixed(0)}px / 编辑区内容 ${row.report.content.toFixed(0)}px`)
   if (problems.length) {
-    console.error(`\n${problems.length} capture(s) failed the render check:`)
+    console.error(`\n${problems.length} check(s) failed:`)
     for (const problem of problems) console.error(`  ${problem}`)
     process.exit(1)
   }
   console.log(`\n${results.length} 张截图写入 ${outDir}（同实现的 CSS 与结构，未接宿主）`)
-  console.log('行为验收由 pnpm acceptance:ui 驱动真实客户端完成；这里只覆盖渲染本身。')
+  console.log('行为验收由 pnpm acceptance:ui 驱动真实客户端完成；这里只覆盖渲染本身与源码区换行的量化断言。')
 }

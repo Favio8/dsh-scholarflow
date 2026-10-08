@@ -1,6 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { SCENE } from './motion/tokens.ts'
+import { mirrorOf } from './source-measure.ts'
+import type { ZoomAnchor } from './pane-zoom.tsx'
 
 /**
  * The rewrite entry (PRD §5.2 / SPEC v1.2 §12.1). The fixed toolbar that used to sit above the
@@ -28,13 +30,8 @@ export function sourceSelectionRect(area: HTMLTextAreaElement): DOMRect {
 }
 
 export function sourceRangeRect(area: HTMLTextAreaElement, start: number, end: number): DOMRect {
-  const mirror = document.createElement('div'), span = document.createElement('span')
+  const mirror = mirrorOf(area), span = document.createElement('span')
   const style = window.getComputedStyle(area), bounds = area.getBoundingClientRect()
-  for (const property of ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'tab-size', 'padding', 'border', 'box-sizing']) {
-    mirror.style.setProperty(property, style.getPropertyValue(property))
-  }
-  Object.assign(mirror.style, { position: 'fixed', visibility: 'hidden', pointerEvents: 'none', whiteSpace: 'pre',
-    left: `${bounds.left - area.scrollLeft}px`, top: `${bounds.top - area.scrollTop}px`, width: `${bounds.width}px` })
   mirror.append(document.createTextNode(area.value.slice(0, start)))
   span.textContent = area.value.slice(start, end) || '\u200b'
   mirror.append(span); document.body.append(mirror)
@@ -43,6 +40,47 @@ export function sourceRangeRect(area: HTMLTextAreaElement, start: number, end: n
     const left = Math.max(bounds.left + 8, Math.min(rect.left, bounds.right - 16))
     return new DOMRect(left, rect.top, Math.max(0, Math.min(rect.right, bounds.right) - left), Math.min(rect.height, parseFloat(style.lineHeight)))
   } finally { mirror.remove() }
+}
+
+/**
+ * Bring a source offset into view with a top margin. Measured rather than estimated from a line
+ * index: a wrapped paragraph does not occupy one row per logical line, so "line index × line
+ * height" lands somewhere else entirely once the pane wraps (SF-086).
+ */
+export function revealSourceOffset(area: HTMLTextAreaElement, offset: number, margin: number): void {
+  const delta = sourceRangeRect(area, offset, offset).top - area.getBoundingClientRect().top - margin
+  if (Math.abs(delta) > 1) area.scrollTop += delta
+}
+
+/**
+ * Keep the text under the zoom anchor where it is. Scaling `scrollTop` by the zoom ratio is exact
+ * for the preview, whose CSS `zoom` scales the scroll extent linearly, but not for the source pane:
+ * a larger font wraps a paragraph into more rows than the ratio accounts for. So the offset at the
+ * anchor is found before the change and measured again after it, and that offset is returned to the
+ * same place on screen. This runs on zoom only, which the wheel handler already batches by frame.
+ */
+export function textareaZoomAnchor(area: React.RefObject<HTMLTextAreaElement | null>): ZoomAnchor {
+  return {
+    capture(point) {
+      const node = area.current
+      if (!node) return undefined
+      // `sourceRangeRect` is monotonic in the offset, so the offset at the anchor is a search.
+      const target = node.getBoundingClientRect().top + point.y
+      let low = 0, high = node.value.length
+      while (low < high) {
+        const middle = (low + high + 1) >> 1
+        if (sourceRangeRect(node, middle, middle).top <= target) low = middle
+        else high = middle - 1
+      }
+      return { offset: low, top: sourceRangeRect(node, low, low).top }
+    },
+    restore(token) {
+      const node = area.current, held = token as { offset: number; top: number } | undefined
+      if (!node || !held) return
+      const delta = sourceRangeRect(node, held.offset, held.offset).top - held.top
+      if (Math.abs(delta) > 1) node.scrollTop += delta
+    },
+  }
 }
 
 /**

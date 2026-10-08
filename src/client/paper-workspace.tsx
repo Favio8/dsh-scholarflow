@@ -78,7 +78,7 @@ export const PAPER_CSS = `
 .sf-line-gutter{width:48px;flex-shrink:0;box-sizing:border-box;overflow:hidden;padding:20px 10px 20px 0;text-align:right;user-select:none;color:#a4a9b3;background:#88803}
 .sf-line-gutter>div{will-change:transform}
 .sf-line-gutter,.sf-app textarea.sf-source-input{font:var(--sf-editor-font,13px)/var(--sf-editor-line,24px) Consolas,'SFMono-Regular',monospace!important;tab-size:2}
-.sf-app textarea.sf-source-input{flex:1;width:0;min-width:0;height:100%;resize:none!important;border:0!important;border-radius:0;padding:20px 18px;white-space:pre;overflow:auto;outline:none!important;background:transparent}
+.sf-app textarea.sf-source-input{flex:1;width:0;min-width:0;height:100%;resize:none!important;border:0!important;border-radius:0;padding:20px 18px;white-space:pre-wrap;overflow-wrap:break-word;overflow-x:hidden;overflow-y:auto;outline:none!important;background:transparent}
 .sf-preview-pane{background:var(--dsw-alias-bg-layer-2,#f4f5f7)}
 .sf-paper-scroll{flex:1;min-height:0;overflow:auto;padding:24px 20px 40px}
 .sf-paper-page{box-sizing:border-box;width:100%;max-width:794px;min-height:900px;margin:auto;padding:42px 38px;background:#fff;color:#252a34;box-shadow:0 1px 8px #19243a0c;border:1px solid #e8e9ec}
