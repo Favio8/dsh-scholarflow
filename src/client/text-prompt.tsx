@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { THEME_CSS } from './theme/tokens.ts'
 
 /** Electron has no window.prompt. Use the same editable dialog in both clients. */
 export function useTextPrompt() {
@@ -23,7 +24,7 @@ export function useTextPrompt() {
   }
   const dialog = request && createPortal(<dialog ref={element} className="sf-text-prompt-modal" aria-label={request.title}
     onCancel={event => { event.preventDefault(); finish() }}>
-    <style>{`.sf-text-prompt-modal{border:0;padding:0;border-radius:12px;font:inherit}.sf-text-prompt-modal::backdrop{background:#0004}.sf-text-prompt{width:min(520px,calc(100vw - 32px));padding:22px;box-sizing:border-box;border-radius:12px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#222);box-shadow:0 8px 32px #0003}.sf-text-prompt input,.sf-text-prompt textarea{box-sizing:border-box;width:100%;margin:12px 0;padding:10px;font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:6px}.sf-text-prompt footer{display:flex;gap:10px;justify-content:flex-end}.sf-text-prompt button{padding:8px 16px;font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:6px}`}</style>
+    <style>{THEME_CSS + `.sf-text-prompt-modal{border:0;padding:0;border-radius:var(--sf-radius-xl);font:inherit}.sf-text-prompt-modal::backdrop{background:var(--sf-scrim)}.sf-text-prompt{width:min(520px,calc(100vw - 32px));padding:var(--sf-space-5);box-sizing:border-box;border-radius:var(--sf-radius-xl);background:var(--dsw-alias-bg-base,var(--sf-surface));color:var(--dsw-alias-label-primary,var(--sf-text));box-shadow:var(--sf-shadow-3)}.sf-text-prompt input,.sf-text-prompt textarea{box-sizing:border-box;width:100%;margin:var(--sf-space-3) 0;padding:var(--sf-space-2);font:inherit;color:inherit;background:transparent;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md)}.sf-text-prompt footer{display:flex;gap:var(--sf-space-2);justify-content:flex-end}.sf-text-prompt button{padding:var(--sf-space-2) var(--sf-space-4);font:inherit;color:inherit;background:transparent;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md)}`}</style>
     <form className="sf-text-prompt"
       onSubmit={event => { event.preventDefault(); finish(request.value) }}
       onKeyDown={event => {

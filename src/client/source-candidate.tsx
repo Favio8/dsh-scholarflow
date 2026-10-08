@@ -19,7 +19,7 @@ export function SourceCandidate({ area, end, identity, children }: {
 }
 
 export const SOURCE_CANDIDATE_CSS = `
-.sf-source-candidate{flex:none;min-height:0;max-height:42%;margin:6px 12px;overflow:auto;overscroll-behavior:contain;background:var(--dsw-alias-bg-layer-1,#fff);border-radius:10px}
+.sf-source-candidate{flex:none;min-height:0;max-height:42%;margin:var(--sf-space-2) var(--sf-space-3);overflow:auto;overscroll-behavior:contain;background:var(--dsw-alias-bg-layer-1,var(--sf-surface));border-radius:var(--sf-radius-xl)}
 .sf-source-candidate .sf-rewrite{margin:0;max-height:320px;display:flex;flex-direction:column}
 .sf-source-candidate .sf-rewrite-reading{flex:1;min-height:0}
 .sf-source-candidate .sf-rewrite>header,.sf-source-candidate .sf-rewrite-actions,.sf-source-candidate .sf-rewrite-technical{flex:none}

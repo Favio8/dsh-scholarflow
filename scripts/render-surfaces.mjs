@@ -187,11 +187,12 @@ const surfaces = {
   draftPreview: { title: '正文预览 · 改写范围标注', body: draftPreviewBody(), width: '520px' }
 }
 
-export function pageHtml(wizard, picker, paper) {
+export function pageHtml(theme, wizard, picker, paper) {
   const stages = Object.entries(surfaces)
     .map(([id, surface], index) => stage(`s${index + 1}`, surface.title, surface.body, surface.width))
     .join('\n')
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ScholarFlow 界面静态渲染</title><style>
+${theme}
 :root{--dsw-alias-bg-layer-1:#fafbfc;--dsw-alias-bg-base:#fff;--dsw-alias-label-secondary:#727780;--dsw-alias-interactive-bg-hover:#f0f1f3}
 body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:#1f2329;background:#e9ecef}
 .stage{padding:18px 20px 28px}
@@ -237,6 +238,7 @@ async function measure(page, base64) {
 }
 
 export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) {
+  const theme = extractCss('src/client/theme/tokens.ts', 'THEME_CSS')
   const wizard = extractCss('src/client/creation-wizard.tsx', 'WIZARD_CSS')
   const picker = extractCss('src/client/preset-picker.tsx', 'PRESET_CSS')
   const paper = extractCss('src/client/paper-workspace.tsx', 'PAPER_CSS')
@@ -251,7 +253,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
     platform: 'browser', format: 'iife', globalName: 'ScholarFlowRange' })
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
-  writeFileSync(join(outDir, 'wizard.html'), pageHtml(wizard, picker, paper + marks))
+  writeFileSync(join(outDir, 'wizard.html'), pageHtml(theme, wizard, picker, paper + marks))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
   const results = [], wrap = [], mark = [], preview = []

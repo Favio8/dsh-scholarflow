@@ -90,12 +90,11 @@ export const RANGE_MARK_CSS = `
    it must stay. The two themes bound it from opposite sides: on a light page dark text needs the band
    to stay light, on a dark page light text needs it to stay dark. So each theme gets the most colour
    it can carry — measured, not guessed: the light theme's band still leaves the text 7:1 and the dark
-   theme's worst stop computes to 5:1. */
-:root{--sf-mark-band-opacity:.78}
-@media(prefers-color-scheme:dark){:root{--sf-mark-band-opacity:.45}}
+   theme's worst stop computes to 5:1. The per-theme opacity lives in src/client/theme/tokens.ts and
+   keys off body[data-ds-dark-theme], so a dark workbench under a light system gets the dark value. */
 .sf-source-marks{position:absolute;inset:0;pointer-events:none;z-index:0;overflow:hidden}
 .sf-source-marks>div{position:absolute;inset:0;will-change:transform}
-.sf-range-band{position:absolute;border-radius:3px;opacity:var(--sf-mark-band-opacity);
+.sf-range-band{position:absolute;border-radius:var(--sf-mark-band-radius);opacity:var(--sf-mark-band-opacity);
   background-image:linear-gradient(90deg,#ff4d6d,#ffc300,#12b981,#2f7bff,#a25bf7,#ff4d6d);background-size:100% 100%;
   animation:sf-range-flow var(--sf-sweep,2.8s) var(--sf-ease-in-out,cubic-bezier(.4,0,.2,1)) infinite}
 /* One period of the gradient per loop, so the flow has no visible seam. */
@@ -114,5 +113,5 @@ export const RANGE_MARK_CSS = `
    platform default, because then there is no mark to see instead. The tint is deliberately faint —
    it sits above the band, so every point of it dilutes the hues the mark exists to show. */
 .sf-source-editor[data-marked] textarea.sf-source-input::selection,
-.sf-mark-inline::selection{background:rgba(63,104,216,.1);color:inherit}
+.sf-mark-inline::selection{background:var(--sf-selection-tint);color:inherit}
 `

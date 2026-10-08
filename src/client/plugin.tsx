@@ -2,6 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useSyncExternalSto
 import { PaperVersions } from './paper-versions.tsx'
 import { PaperMaterials, MATERIALS_CSS } from './paper-materials.tsx'
 import { MOTION_CSS } from './motion/tokens.ts'
+import { THEME_CSS } from './theme/tokens.ts'
 import { OVERLAY_CSS } from './middle-overlay.tsx'
 import { REWRITE_CSS } from './rewrite-candidate.tsx'
 import { SOURCE_CANDIDATE_CSS } from './source-candidate.tsx'
@@ -32,7 +33,7 @@ import { ApplicationError } from './application-error.tsx'
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export', 'Settings', 'Changes', 'History'] as const
 const TAB_LABELS = ['写作要求', '资料与引用', '大纲', '正文', '审查', '导出', '项目设置', '修改建议', '版本记录']
-const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:16px;border-bottom:1px solid #8884}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:20px;overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid #8884;display:flex;flex-direction:column;overflow:hidden}.sf-body button:not(.sf-native-tools *),.sf-body select:not(.sf-native-tools *),.sf-header button,.sf-settings button,.sf-settings select{font:inherit;color:inherit;padding:7px 12px;border-radius:6px;background:transparent;border:1px solid #8886}.sf-error{color:#d45151;white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:12px 0}.sf-settings{padding:20px;max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid #8884;flex-shrink:0}}`
+const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:var(--sf-space-4);border-bottom:1px solid var(--sf-border-strong)}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:var(--sf-space-5);overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid var(--sf-border-strong);display:flex;flex-direction:column;overflow:hidden}.sf-body button:not(.sf-native-tools *),.sf-body select:not(.sf-native-tools *),.sf-header button,.sf-settings button,.sf-settings select{font:inherit;color:inherit;padding:var(--sf-space-2) var(--sf-space-3);border-radius:var(--sf-radius-md);background:transparent;border:1px solid var(--sf-border-strong)}.sf-error{color:var(--sf-danger);white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:var(--sf-space-3) 0}.sf-settings{padding:var(--sf-space-5);max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid var(--sf-border-strong);flex-shrink:0}}`
 export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'layout', 'sidebarRight', 'sidebarRightTabs', 'inputTriggers', 'conversation']
 // A validation refusal carries the fields that failed; without them the message is a dead
 // end for whoever has to fix it, so they are part of the text.
@@ -40,15 +41,15 @@ function describeError(error: { code?: string; message?: string; details?: { fie
   const fields = error?.details?.fields ?? []
   return [error?.code, error?.message, fields.length ? `字段：${fields.join('、')}` : ''].filter(Boolean).join(' · ')
 }
-const LAYOUT_CSS = `.sf-agent-resize{width:8px;flex-shrink:0;cursor:col-resize;touch-action:none;background:#8881}.sf-agent-resize:focus-visible{outline:2px solid currentColor;outline-offset:-2px}.sf-app[data-sf-narrow=true] .sf-agent{height:100%;min-height:0;flex:1}.sf-header{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.sf-header button{margin-left:auto}`
-const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:6px;padding:8px;resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid #8884;padding:12px 0;margin:12px 0}.sf-tabs button[aria-selected=true]{background:#8882;border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:2px solid currentColor;outline-offset:2px}`
+const LAYOUT_CSS = `.sf-agent-resize{width:var(--sf-space-2);flex-shrink:0;cursor:col-resize;touch-action:none;background:var(--sf-border-soft)}.sf-agent-resize:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:calc(-1 * var(--sf-focus-width))}.sf-app[data-sf-narrow=true] .sf-agent{height:100%;min-height:0;flex:1}.sf-header{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sf-space-3)}.sf-header button{margin-left:auto}`
+const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);padding:var(--sf-space-2);resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:var(--sf-space-2);border-bottom:1px solid var(--sf-border-strong);padding:var(--sf-space-3) 0;margin:var(--sf-space-3) 0}.sf-tabs button[aria-selected=true]{background:var(--sf-fill-strong);border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:var(--sf-focus-width)}`
 // The settings surface reached from the top entry: the same component as the global
 // settings section, so the two can never drift into two configurations.
-const SETTINGS_CSS = `.sf-caption-settings{position:absolute;top:calc(100% + 4px);left:var(--sf-caption-left,150px);width:min(600px,94vw);max-height:min(72vh,640px);overflow:auto;background:var(--dsw-alias-bg-base,#fff);border:1px solid #8883;border-radius:12px;box-shadow:0 18px 44px #00000024;z-index:1200}
-.sf-caption-settings>header{position:sticky;top:0;display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #8882;background:var(--dsw-alias-bg-base,#fff)}
-.sf-caption-settings>header strong{font-size:14px;font-weight:600}
-.sf-caption-settings>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:18px;line-height:1;cursor:pointer;padding:0 4px}
-.sf-caption-settings .sf-settings{max-width:none;padding:16px}`
+const SETTINGS_CSS = `.sf-caption-settings{position:absolute;top:calc(100% + var(--sf-space-1));left:var(--sf-caption-left,150px);width:min(600px,94vw);max-height:min(72vh,640px);overflow:auto;background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-3);z-index:1200}
+.sf-caption-settings>header{position:sticky;top:0;display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-3) var(--sf-space-4);border-bottom:1px solid var(--sf-border);background:var(--dsw-alias-bg-base,var(--sf-surface))}
+.sf-caption-settings>header strong{font-size:var(--sf-font-lg);font-weight:600}
+.sf-caption-settings>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:var(--sf-font-xl);line-height:1;cursor:pointer;padding:0 var(--sf-space-1)}
+.sf-caption-settings .sf-settings{max-width:none;padding:var(--sf-space-4)}`
 
 export function apply(ctx: Host) {
   const call = async (method: string, args: unknown = {}, signal?: AbortSignal) => {
@@ -69,7 +70,7 @@ export function apply(ctx: Host) {
   function WorkspaceSurface(props: Host) { return props.renderFactorySlot('scholarflow.workspace', {}) }
   // The settings surface for platforms whose top entry is a sidebar row rather than a
   // caption button; it renders the same Settings component as the global section.
-  function SettingsSurface() { return <div className="sf-app"><style>{CSS + EXTRA_CSS + SETTINGS_CSS + SURFACE_BOUNDARY_CSS}</style><SurfaceBoundary label="设置面"><Settings /></SurfaceBoundary></div> }
+  function SettingsSurface() { return <div className="sf-app"><style>{THEME_CSS + CSS + EXTRA_CSS + SETTINGS_CSS + SURFACE_BOUNDARY_CSS}</style><SurfaceBoundary label="设置面"><Settings /></SurfaceBoundary></div> }
   function ChatViews(props: Host) { return props.renderSlot('conversation.session', { view: 'chat' }) }
   function DockChat(props: Host) {
     const scope = useSyncExternalStore(navigation.source.subscribe, navigation.source.getSnapshot, navigation.source.getSnapshot)
@@ -78,7 +79,7 @@ export function apply(ctx: Host) {
     const { tab } = props.useTabInfo()
     const owner = tabs.find((item: Host) => item.sessionId === props.sessionId && item.kind === CHAT_KIND)
     const live = scope.active && scope.sessionId === props.sessionId && owner?.tabId === tab.id
-    return <><style>{CHAT_CSS + NATIVE_DOCK_CSS}</style>{live
+    return <><style>{THEME_CSS + CHAT_CSS + NATIVE_DOCK_CSS}</style>{live
       ? <aside className="sf-agent sf-dock-chat" aria-label="DSH 当前会话"><Agent {...props} onClose={() => ctx.sidebarRight.toggleExpanded()} /></aside>
       : <section className="sf-chat-resume"><WorkbenchIcon kind="chat" /><p>AI Chat · ScholarFlow 工作台</p>
         <button onClick={() => navigation.open(props.sessionId)}>{scope.active ? '转到当前 AI Chat' : '打开 ScholarFlow 工作台'}</button></section>}</>
@@ -87,7 +88,7 @@ export function apply(ctx: Host) {
     const scope = useSyncExternalStore(navigation.source.subscribe, navigation.source.getSnapshot, navigation.source.getSnapshot)
     const { tab } = props.useTabInfo()
     if (!scope.active || scope.sessionId !== props.sessionId) return null
-    return <><style>{NATIVE_DOCK_CSS}</style><button className="sf-chat-guide" data-sidebar-right-guide-entry={CHAT_KIND}
+    return <><style>{THEME_CSS + NATIVE_DOCK_CSS}</style><button className="sf-chat-guide" data-sidebar-right-guide-entry={CHAT_KIND}
       onClick={() => tab.actions.openTab(CHAT_KIND, { replaceTab: true })}><WorkbenchIcon kind="chat" /><span>{props.title}{props.description && <small>{props.description}</small>}</span></button></>
   }
   function Agent(props: Host) {
@@ -140,7 +141,7 @@ export function apply(ctx: Host) {
       window.addEventListener('resize', position)
       return () => { size.disconnect(); offset.disconnect(); window.removeEventListener('resize', position) }
     }, [])
-    return <><style>{CAPTION_CSS + SETTINGS_CSS}</style><div ref={entry} className="sf-caption-entry">
+    return <><style>{THEME_CSS + CAPTION_CSS + SETTINGS_CSS}</style><div ref={entry} className="sf-caption-entry">
       <button aria-label="ScholarFlow 设置" aria-expanded={open} title="打开 ScholarFlow 设置" onClick={() => setOpen(value => !value)}><WorkbenchIcon />ScholarFlow</button>
       {open && <section className="sf-caption-settings" role="dialog" aria-label="ScholarFlow 设置">
         <header><strong>ScholarFlow 设置</strong><button aria-label="关闭设置" onClick={() => setOpen(false)}>×</button></header>
@@ -159,7 +160,7 @@ export function apply(ctx: Host) {
       window.addEventListener('blur', blur); window.addEventListener('focus', sync)
       return () => { document.removeEventListener('visibilitychange', sync); window.removeEventListener('blur', blur); window.removeEventListener('focus', sync) }
     }, [])
-    return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS + RANGE_MARK_CSS}</style>
+    return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{THEME_CSS + CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS + RANGE_MARK_CSS}</style>
       <SelectionReferenceDetails sessionId={props.sessionId} />
       <main className="sf-body">{props.renderSlot('scholarflow.project', {
         renderNativeTools: (extra: React.ReactNode) => <NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} extra={extra} />,
@@ -313,7 +314,7 @@ export function apply(ctx: Host) {
         setRow(result.value); setMessage('已保存，仅影响新项目默认值。')
       } catch (e) { setMessage((e as Error).message) }
     }
-    return <section ref={confirmationRoot} className="sf-app sf-settings" style={{ overflow: 'auto' }}><style>{CSS + EXTRA_CSS}</style><h2>ScholarFlow 设置</h2>
+    return <section ref={confirmationRoot} className="sf-app sf-settings" style={{ overflow: 'auto' }}><style>{THEME_CSS + CSS + EXTRA_CSS}</style><h2>ScholarFlow 设置</h2>
       {row ? <><label>新项目默认类型 <select aria-label="新项目默认类型" value={row.value.defaultProjectType} onChange={e => save('defaultProjectType', e.target.value)}>
         <option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></label>
         <label>新项目默认语言 <select aria-label="新项目默认语言" value={row.value.language} onChange={e => save('language', e.target.value)}><option value="zh">中文</option><option value="en">英文</option></select></label>
