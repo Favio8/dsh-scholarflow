@@ -76,6 +76,29 @@ moves `background-position`.
 Accepting a rewrite now moves the selection onto the accepted text, so the mark follows what is
 actually there and the same range can be polished again immediately.
 
+## The platform selection used to hide the mark
+
+The platform paints an opaque block over a selection, so selecting the range covered exactly what the
+mark had just shown — the band behind the source pane's text and the gradient on the preview's glyphs.
+The user reported it as the default blue covering the gradient.
+
+Over a marked range the selection is now a light tint (`rgba(63,104,216,.18)`) and the text keeps its
+own colour, so the mark shows through. The change is scoped:
+
+- the source pane switches only **while bands are actually painted** (the component sets the flag with
+  them), so a failed measurement leaves the platform selection, and the user never loses selection
+  feedback;
+- the preview treats **only the marked span**, because a selection elsewhere has no mark to show
+  instead and should keep the default;
+- neither makes the selection fully transparent, for the same reason.
+
+Checked in the browser rather than argued: the gate now selects the text for real and compares the
+average colour of a sampled strip over a band against one over a selected row without a band. Before
+the fix the two differed by 13.6 (indistinguishable, i.e. the selection was covering the band); after
+it they differ by 79.6 at 1060 px and 311.5 at 420 px. The preview gets the same treatment with a DOM
+selection: the marked text keeps its gradient and differs from its unmarked neighbour by 86.2, where
+the unmarked neighbour still shows the platform selection.
+
 ## Candidate placement
 
 The preview now shows the candidate after its paragraph whenever the preview is visible, instead of

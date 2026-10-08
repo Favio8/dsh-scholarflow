@@ -35,6 +35,7 @@ export function SourceRangeMark({ area, host, range, text, zoom }: {
     if (!node) return
     node.replaceChildren()
     delete node.dataset.state
+    if (host.current) delete host.current.dataset.marked
     if (!range || !input || !visible(range.state) || input.clientWidth <= 0 || range.end <= range.start) return
     try {
       // Band geometry is in the pane's content coordinates, so scrolling only moves the layer.
@@ -46,8 +47,11 @@ export function SourceRangeMark({ area, host, range, text, zoom }: {
         node.append(band)
       }
       node.dataset.state = range.state
+      // The platform selection colour is opaque and would hide the bands, so while a range is marked
+      // the pane switches to a tint the mark shows through (see RANGE_MARK_CSS).
+      if (host.current) host.current.dataset.marked = ''
       place(input, node)
-    } catch { node.replaceChildren(); delete node.dataset.state }
+    } catch { node.replaceChildren(); delete node.dataset.state; if (host.current) delete host.current.dataset.marked }
   }
   // The observer and the scroll listener outlive a render, so they must reach the current closure
   // rather than the one they were created with.
@@ -82,7 +86,7 @@ export function SourceRangeMark({ area, host, range, text, zoom }: {
  * so reduced motion and the hidden-window pause are handled once (motion/tokens.ts).
  */
 export const RANGE_MARK_CSS = `
-:root{--sf-mark-band-opacity:.3}
+:root{--sf-mark-band-opacity:.42}
 .sf-source-marks{position:absolute;inset:0;pointer-events:none;z-index:0;overflow:hidden}
 .sf-source-marks>div{position:absolute;inset:0;will-change:transform}
 .sf-range-band{position:absolute;border-radius:3px;opacity:var(--sf-mark-band-opacity);
@@ -96,4 +100,11 @@ export const RANGE_MARK_CSS = `
   -webkit-box-decoration-break:clone;box-decoration-break:clone;
   animation:sf-range-flow var(--sf-sweep,2.8s) var(--sf-ease-in-out,cubic-bezier(.4,0,.2,1)) infinite}
 .sf-mark-inline[data-flow=off]{animation:none;background-position:50% 0}
+/* The platform paints an opaque block over a selection, which hides the band behind the text in the
+   source pane and the colour on the glyphs in the preview. So over the mark the selection becomes a
+   light tint those show through, and the text keeps its own colour instead of the platform's contrast
+   colour. In the preview only the marked text is treated this way: a selection elsewhere keeps the
+   platform default, because then there is no mark to see instead. */
+.sf-source-editor[data-marked] textarea.sf-source-input::selection,
+.sf-mark-inline::selection{background:rgba(63,104,216,.18);color:inherit}
 `

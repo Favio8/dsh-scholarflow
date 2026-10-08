@@ -104,9 +104,13 @@ const LONG_PARAGRAPH = '多模态情感识别从语音、文本与视频等异�
 const DRAFT_LINES = ['# 科技论文写作', '', '## 引言', '', LONG_PARAGRAPH, '', '## 主题论证', '', '短段落。', '', '## 结论', '', '结束。']
 const DRAFT_LONG_LINE = 4
 const DRAFT_TEXT = DRAFT_LINES.join('\n')
-// The marked range for the SF-087 capture: the long paragraph, which wraps over many rows.
+// The marked range for the SF-087 capture: the start of the long paragraph, which wraps over several
+// rows. The selection is deliberately longer than the mark so a selected row *without* a band can be
+// sampled next to a selected row *with* one — if the platform selection hid the mark, the two would
+// look the same, which is the defect this check exists for.
 const MARK_START = DRAFT_TEXT.indexOf(LONG_PARAGRAPH)
-const MARK_END = MARK_START + LONG_PARAGRAPH.length
+const MARK_END = MARK_START + 60, FULL_END = MARK_START + LONG_PARAGRAPH.length
+const SELECT_END = MARK_START + 300
 
 /** Mirrors the source pane's JSX: a line-number column and the pane itself, at the pane's own width. */
 const draftSource = (gutterId, extra = '') => `<div class="sf-source-editor">${extra}<div class="sf-line-gutter" aria-hidden="true"><div id="${gutterId}">${DRAFT_LINES.map((_, index) => `<div>${index + 1}</div>`).join('')}</div></div>
@@ -123,6 +127,13 @@ const draftMarkBody = () => `<div class="sf-app sf-paper-project" style="height:
 <div class="sf-editor-grid" data-view="split">
 <div class="sf-source-pane" style="--sf-editor-font:13px;--sf-editor-line:24px">
 ${draftSource('sf-mark-gutter', '<div class="sf-source-marks" aria-hidden="true"><div id="sf-mark-bands"></div></div>')}
+</div></div></div></div>`
+
+/** The preview's half of the mark: the range is coloured on the glyphs themselves. */
+const draftPreviewBody = () => `<div class="sf-app sf-paper-project" style="height:340px;display:flex;flex-direction:column">
+<div class="sf-preview-pane" style="display:flex;flex-direction:column;min-height:0;flex:1">
+<div class="sf-paper-scroll" style="flex:1;min-height:0;overflow:auto"><div class="sf-paper-page">
+<p data-sf-block="p_TEST_ONLY" style="white-space:pre-wrap"><span data-sf-leaf="leaf_TEST_ONLY_plain">同样长度的未标注文字</span><span class="sf-mark-inline" data-sf-marked="true" data-flow="off">同样长度的被标注文字</span></p>
 </div></div></div></div>`
 
 const presetRow = (title, summary, chosen, current, manage) => `<div style="display:flex;align-items:center">
@@ -172,7 +183,8 @@ const surfaces = {
   preset: { title: '结构预设弹窗（宽屏双栏）', body: modal('wide'), width: '100%' },
   presetDetail: { title: '结构预设弹窗（窄屏详情栏）', body: modal('detail'), width: '100%' },
   draftWrap: { title: '正文源码区 · 长行软换行', body: draftBody(), width: '100%' },
-  draftMark: { title: '正文源码区 · 改写范围标注', body: draftMarkBody(), width: '100%' }
+  draftMark: { title: '正文源码区 · 改写范围标注', body: draftMarkBody(), width: '100%' },
+  draftPreview: { title: '正文预览 · 改写范围标注', body: draftPreviewBody(), width: '520px' }
 }
 
 export function pageHtml(wizard, picker, paper) {
@@ -199,8 +211,8 @@ ${stages}
 
 /** Wide captures both columns; narrow captures the single column the component switches to. */
 const passes = [
-  { viewport: { width: 1100, height: 900 }, suffix: '', ids: ['step1', 'step2', 'step3', 'preset', 'draftWrap', 'draftMark'] },
-  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: ['step1', 'step2', 'step3', 'presetDetail', 'draftWrap', 'draftMark'] }
+  { viewport: { width: 1100, height: 900 }, suffix: '', ids: ['step1', 'step2', 'step3', 'preset', 'draftWrap', 'draftMark', 'draftPreview'] },
+  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: ['step1', 'step2', 'step3', 'presetDetail', 'draftWrap', 'draftMark', 'draftPreview'] }
 ]
 
 const indexPath = (id) => Object.keys(surfaces).indexOf(id) + 1
@@ -240,7 +252,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
   writeFileSync(join(outDir, 'wizard.html'), pageHtml(wizard, picker, paper + marks))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
-  const results = [], wrap = [], mark = []
+  const results = [], wrap = [], mark = [], preview = []
   try {
     for (const pass of passes) {
       const page = await (await browser.newContext({ viewport: pass.viewport })).newPage()
@@ -254,15 +266,28 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
         // The wrap and mark surfaces are measured before they are captured, so the capture shows the
         // state the check just accepted instead of an unmeasured column or an unpainted pane.
         if (id === 'draftWrap') { const report = await checkDraftWrap(page, `#s${indexPath(id)}>.frame`); wrap.push({ name, report, problems: auditWrap(name, report) }) }
-        if (id === 'draftMark') { const report = await checkDraftMark(page, `#s${indexPath(id)}>.frame`); mark.push({ name, report, problems: auditMark(name, report, wrap.at(-1)?.report.longRows) }) }
+        const markReport = id === 'draftMark' ? await checkDraftMark(page, `#s${indexPath(id)}>.frame`) : undefined
+        const previewReport = id === 'draftPreview' ? await checkDraftPreview(page, `#s${indexPath(id)}>.frame`) : undefined
         const shot = await page.locator(`#s${indexPath(id)}>.frame`).screenshot()
         writeFileSync(file, shot)
         results.push({ name, ...(await measure(page, shot.toString('base64'))) })
+        if (markReport) {
+          // Read the two sampled strips back out of the capture: this is what decides whether the
+          // platform selection colour is hiding the mark.
+          const [band, plain] = await sampleColors(page, shot.toString('base64'), markReport.sample)
+          markReport.contrast = Math.hypot(band.r - plain.r, band.g - plain.g, band.b - plain.b)
+          mark.push({ name, report: markReport, problems: auditMark(name, markReport, wrap.at(-1)?.report.longRows) })
+        }
+        if (previewReport) {
+          const [marked, plain] = await sampleColors(page, shot.toString('base64'), previewReport.sample)
+          previewReport.contrast = Math.hypot(marked.r - plain.r, marked.g - plain.g, marked.b - plain.b)
+          preview.push({ name, report: previewReport, problems: auditPreview(name, previewReport) })
+        }
       }
       await page.close()
     }
   } finally { await browser.close() }
-  return { outDir, results, wrap, mark, problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems)] }
+  return { outDir, results, wrap, mark, preview, problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems), ...preview.flatMap(row => row.problems)] }
 }
 
 function chromePath() {
@@ -275,24 +300,31 @@ function chromePath() {
  * collapsed to one band would still screenshot fine, so these numbers are the point.
  */
 async function checkDraftMark(page, selector) {
-  return page.evaluate(({ selector, start, end }) => {
+  return page.evaluate(({ selector, start, end, markEnd, selectionEnd }) => {
     const root = document.querySelector(selector)
     const area = root.querySelector('textarea.sf-source-input')
     const layer = root.querySelector('.sf-source-marks'), bands = root.querySelector('#sf-mark-bands')
     const style = getComputedStyle(area), row = parseFloat(style.lineHeight)
-    const rects = window.ScholarFlowMeasure.lineBoxes(window.ScholarFlowMeasure.sourceRangeRects(area, start, end), row)
-    bands.replaceChildren()
-    bands.dataset.state = 'generating'
-    for (const rect of rects) {
-      const band = document.createElement('div')
-      band.className = 'sf-range-band'
-      Object.assign(band.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` })
-      bands.append(band)
-    }
     const box = area.getBoundingClientRect(), layerBox = layer.getBoundingClientRect()
-    const shift = { x: box.left - layerBox.left, y: box.top - layerBox.top - area.scrollTop }
-    bands.style.transform = `translate(${shift.x}px, ${shift.y}px)`
     const contentWidth = area.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    const paint = (from, to) => {
+      const rects = window.ScholarFlowMeasure.lineBoxes(window.ScholarFlowMeasure.sourceRangeRects(area, from, to), row)
+      bands.replaceChildren()
+      for (const rect of rects) {
+        const band = document.createElement('div')
+        band.className = 'sf-range-band'
+        Object.assign(band.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` })
+        bands.append(band)
+      }
+      bands.style.transform = `translate(${box.left - layerBox.left}px, ${box.top - layerBox.top - area.scrollTop}px)`
+      // The component marks the pane while bands are up, which is what switches the selection to a
+      // tint. Reproducing the defect means reproducing that too.
+      const pane = area.closest('.sf-source-editor')
+      if (pane) pane.dataset.marked = ''
+      return rects
+    }
+    bands.dataset.state = 'generating'
+    const whole = paint(start, end)
     const painted = [...bands.children].map(band => band.getBoundingClientRect())
     // The same band with the candidate ready must stop, and a plain selection must never flow: the
     // settled states are part of the contract, not a side effect.
@@ -301,15 +333,77 @@ async function checkDraftMark(page, selector) {
     const settled = getComputedStyle(bands.children[0]).animationName
     bands.dataset.state = 'selected'
     const held = getComputedStyle(bands.children[0]).animationName
+    // Now reproduce the defect: select the text for real. The selection runs past the marked range,
+    // so the last rows it covers carry a band and a row further down carries only the selection.
+    const marked = paint(start, markEnd)
+    area.focus(); area.setSelectionRange(start, selectionEnd); area.scrollTop = 0
+    bands.style.transform = `translate(${box.left - layerBox.left}px, ${box.top - layerBox.top}px)`
+    const first = bands.children[0].getBoundingClientRect()
+    // The reference row is two rows below the last band, in the pane's content coordinates: it is
+    // inside the selection but carries no band, and measuring from the bands keeps it in view at any
+    // column width instead of relying on a character offset that only fits one of them.
+    const last = marked[marked.length - 1]
+    const plainTop = box.top + last.top + row * 2, frame = root.getBoundingClientRect()
+    const strip = (left, top, width) => ({ x: left - frame.left + 2, y: top - frame.top + 1, width: Math.max(4, width - 4), height: 5 })
     const lefts = painted.map(rect => rect.left - (box.left + parseFloat(style.paddingLeft)))
-    return { row, count: rects.length, contentWidth, heights: painted.map(rect => rect.height),
+    return { row, count: whole.length, marked: marked.length, contentWidth, heights: painted.map(rect => rect.height),
       minLeft: Math.min(...lefts), maxRight: Math.max(...painted.map((rect, index) => lefts[index] + rect.width)),
-      gaps: painted.slice(1).map((rect, index) => rect.top - painted[index].bottom), flow, settled, held }
-  }, { selector, start: MARK_START, end: MARK_END })
+      gaps: painted.slice(1).map((rect, index) => rect.top - painted[index].bottom), flow, settled, held,
+      inView: box.top <= plainTop && plainTop + row <= box.bottom, view: { probe: plainTop, top: box.top, bottom: box.bottom, last: last.top },
+      sample: [strip(first.left, first.top, first.width), strip(box.left + parseFloat(style.paddingLeft), plainTop, contentWidth)] }
+  }, { selector, start: MARK_START, end: FULL_END, markEnd: MARK_END, selectionEnd: SELECT_END })
 }
 
-export function auditMark(name, report, expectedRows) {
+/** Average colour of each sampled strip, read back out of the capture. */
+async function sampleColors(page, base64, rects) {  return page.evaluate(async ({ src, rects }) => {
+    const image = new Image(); image.src = 'data:image/png;base64,' + src
+    await image.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = image.width; canvas.height = image.height
+    const context = canvas.getContext('2d')
+    context.drawImage(image, 0, 0)
+    return rects.map(({ x, y, width, height }) => {
+      const data = context.getImageData(Math.max(0, Math.round(x)), Math.max(0, Math.round(y)),
+        Math.max(1, Math.round(width)), Math.max(1, Math.round(height))).data
+      let r = 0, g = 0, b = 0, n = 0
+      for (let i = 0; i < data.length; i += 4) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++ }
+      return { r: r / n, g: g / n, b: b / n }
+    })
+  }, { src: base64, rects })
+}
+
+/**
+ * The preview's half of the same defect: there the range is coloured on the glyphs, and selecting it
+ * made the platform paint over that colour. A DOM selection is set over the marked span and its
+ * unmarked neighbour, both of which are then sampled from the capture — if the selection covered the
+ * mark, the two would read alike.
+ */
+async function checkDraftPreview(page, selector) {
+  return page.evaluate(selector => {
+    const root = document.querySelector(selector)
+    const marked = root.querySelector('.sf-mark-inline'), plain = root.querySelector('[data-sf-leaf]')
+    const range = document.createRange()
+    range.setStartBefore(plain); range.setEndAfter(marked)
+    const selection = window.getSelection()
+    selection.removeAllRanges(); selection.addRange(range)
+    const frame = root.getBoundingClientRect()
+    const strip = element => { const box = element.getBoundingClientRect()
+      return { x: box.left - frame.left + 1, y: box.top - frame.top + 1, width: Math.max(4, box.width - 2), height: Math.max(4, box.height - 2) } }
+    const style = getComputedStyle(marked)
+    return { selected: selection.toString().length, gradient: style.backgroundImage.includes('linear-gradient'),
+      colour: style.color, sample: [strip(marked), strip(plain)] }
+  }, selector)
+}
+
+export function auditPreview(name, report) {
   const problems = []
+  if (!report.selected) problems.push(`${name}: no text was selected, so nothing was compared`)
+  if (!report.gradient) problems.push(`${name}: the marked text lost its gradient`)
+  if (report.contrast !== undefined && report.contrast < 20) problems.push(`${name}: the selection hides the marked colour (marked and unmarked text differ by ${report.contrast.toFixed(1)})`)
+  return problems
+}
+
+export function auditMark(name, report, expectedRows) {  const problems = []
   if (report.count <= 1) problems.push(`${name}: the marked range produced ${report.count} band(s)`)
   if (expectedRows !== undefined && Math.abs(report.count - expectedRows) > 1) problems.push(`${name}: ${report.count} bands for a range the pane wraps over ${expectedRows.toFixed(0)} rows`)
   if (report.gaps.some(gap => Math.abs(gap) > 1)) problems.push(`${name}: the bands are not on consecutive lines (largest gap ${Math.max(...report.gaps.map(Math.abs)).toFixed(2)}px)`)
@@ -319,6 +413,10 @@ export function auditMark(name, report, expectedRows) {
   if (!report.flow.includes('sf-range-flow')) problems.push(`${name}: the band is not flowing while the candidate is generating (${report.flow})`)
   if (report.settled !== 'none') problems.push(`${name}: the band keeps flowing after the candidate is ready (${report.settled})`)
   if (report.held !== 'none') problems.push(`${name}: a plain selection flows instead of holding still (${report.held})`)
+  if (!report.inView) problems.push(`${name}: the unmarked row used as the colour reference is outside the pane (probe ${report.view.probe.toFixed(1)} vs pane ${report.view.top.toFixed(1)}–${report.view.bottom.toFixed(1)}, last band ${report.view.last.toFixed(1)})`)
+  // If the platform selection colour covered the mark, a selected row with a band and a selected row
+  // without one would look the same.
+  if (report.contrast !== undefined && report.contrast < 20) problems.push(`${name}: the selection hides the mark (marked and unmarked selected rows differ by ${report.contrast.toFixed(1)})`)
   return problems
 }
 
@@ -370,7 +468,7 @@ export function auditWrap(name, report) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { outDir, results, wrap, mark, problems } = await renderSurfaces()
+  const { outDir, results, wrap, mark, preview, problems } = await renderSurfaces()
   for (const shot of results) {
     console.log(`${shot.name.padEnd(30)} ${String(shot.width).padStart(4)}x${String(shot.height).padStart(4)}  ink ${(shot.ink * 100).toFixed(2)}%`)
   }
@@ -378,7 +476,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // paragraph occupies one row" is the difference between a real gate and a vacuous one, and the
   // mark count has to match the rows the same range actually wraps over.
   for (const row of wrap) console.log(`${row.name}: 横向溢出 ${row.report.overflow}px · 长段落 ${row.report.longRows.toFixed(1)} 行 · 行号列 ${row.report.gutterTotal.toFixed(0)}px / 编辑区内容 ${row.report.content.toFixed(0)}px`)
-  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行高 ${row.report.row}px · 流动 ${row.report.flow} → 就绪 ${row.report.settled} · 横向范围 ${row.report.minLeft.toFixed(0)}～${row.report.maxRight.toFixed(0)} / ${row.report.contentWidth.toFixed(0)}px`)
+  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行高 ${row.report.row}px · 流动 ${row.report.flow} → 就绪 ${row.report.settled} · 选中时与未标注行色差 ${(row.report.contrast ?? 0).toFixed(1)} · 横向范围 ${row.report.minLeft.toFixed(0)}～${row.report.maxRight.toFixed(0)} / ${row.report.contentWidth.toFixed(0)}px`)
+  for (const row of preview) console.log(`${row.name}: 选中 ${row.report.selected} 字 · 渐变 ${row.report.gradient ? '在' : '丢失'} · 选中时被标注与未标注文字色差 ${(row.report.contrast ?? 0).toFixed(1)}`)
   if (problems.length) {
     console.error(`\n${problems.length} check(s) failed:`)
     for (const problem of problems) console.error(`  ${problem}`)
