@@ -294,14 +294,17 @@ async function checkDraftMark(page, selector) {
     bands.style.transform = `translate(${shift.x}px, ${shift.y}px)`
     const contentWidth = area.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
     const painted = [...bands.children].map(band => band.getBoundingClientRect())
-    // The same band with the candidate ready must stop: the settled state is part of the contract.
+    // The same band with the candidate ready must stop, and a plain selection must never flow: the
+    // settled states are part of the contract, not a side effect.
     const flow = getComputedStyle(bands.children[0]).animationName
     bands.dataset.state = 'ready'
     const settled = getComputedStyle(bands.children[0]).animationName
+    bands.dataset.state = 'selected'
+    const held = getComputedStyle(bands.children[0]).animationName
     const lefts = painted.map(rect => rect.left - (box.left + parseFloat(style.paddingLeft)))
     return { row, count: rects.length, contentWidth, heights: painted.map(rect => rect.height),
       minLeft: Math.min(...lefts), maxRight: Math.max(...painted.map((rect, index) => lefts[index] + rect.width)),
-      gaps: painted.slice(1).map((rect, index) => rect.top - painted[index].bottom), flow, settled }
+      gaps: painted.slice(1).map((rect, index) => rect.top - painted[index].bottom), flow, settled, held }
   }, { selector, start: MARK_START, end: MARK_END })
 }
 
@@ -315,6 +318,7 @@ export function auditMark(name, report, expectedRows) {
   if (report.minLeft < -1 || report.maxRight > report.contentWidth + 1) problems.push(`${name}: a band leaves the pane's content box (${report.minLeft.toFixed(1)} to ${report.maxRight.toFixed(1)} of ${report.contentWidth.toFixed(1)}px)`)
   if (!report.flow.includes('sf-range-flow')) problems.push(`${name}: the band is not flowing while the candidate is generating (${report.flow})`)
   if (report.settled !== 'none') problems.push(`${name}: the band keeps flowing after the candidate is ready (${report.settled})`)
+  if (report.held !== 'none') problems.push(`${name}: a plain selection flows instead of holding still (${report.held})`)
   return problems
 }
 

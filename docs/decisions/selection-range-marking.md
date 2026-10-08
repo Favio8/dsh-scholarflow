@@ -61,10 +61,20 @@ Two defects surfaced while building this, both caught by the checks rather than 
 
 ## State and motion
 
-`generating` flows; `ready`, `stopped` and `failed` keep the colour but stop moving; an accepted or
-discarded candidate leaves nothing behind. Duration and easing come from the token layer, so reduced
-motion already stops it, and the animations joined the hidden-window pause list. Continuous motion
-only moves `background-position`.
+The marked range is whatever a rewrite currently applies to: the open candidate, or — before one
+exists — the user's own selection, so the mark appears the moment something is selected instead of
+only once generation starts. `rewriteTarget` in `rewrite-range.ts` decides that and is a pure
+function, so `tests/unit/rewrite-range.test.ts` covers it: a decided candidate stops being the target
+and the selection underneath takes over, and with neither there is nothing to mark.
+
+`generating` flows; a plain selection and `ready`, `stopped` and `failed` hold their colour and stop
+moving. The rule is written as "every marked state except `generating` stops", so a state added later
+cannot silently start animating. Duration and easing come from the token layer, so reduced motion
+already stops it, and the animations joined the hidden-window pause list. Continuous motion only
+moves `background-position`.
+
+Accepting a rewrite now moves the selection onto the accepted text, so the mark follows what is
+actually there and the same range can be polished again immediately.
 
 ## Candidate placement
 

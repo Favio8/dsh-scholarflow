@@ -17,7 +17,7 @@ import { OverlayHost, useOverlaySpace } from './middle-overlay.tsx'
 import { RewriteCandidateView, protectedChanges, type RewriteCandidate } from './rewrite-candidate.tsx'
 import { SourceCandidate } from './source-candidate.tsx'
 import { SourceRangeMark, type MarkRange } from './range-mark.tsx'
-import { trackRange, type TextRange } from './rewrite-range.ts'
+import { trackRange, rewriteTarget, type TextRange } from './rewrite-range.ts'
 import { pendingQuestion } from '../shared/writing-task.ts'
 import { usePaneZoom, ZoomControls } from './pane-zoom.tsx'
 import { ApplicationError } from './application-error.tsx'
@@ -338,6 +338,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     setUndoSnapshot({ start: candidate.start, before: candidate.before, after: candidate.after })
     await api('cowrite.decide', { context: context(), suggestionId: candidate.id, state: 'accepted' }).catch(() => undefined)
     setCandidate({ ...candidate, end: candidate.start + candidate.after.length, state: 'accepted', note: '已采用，可撤销。' }); setRewrite(undefined)
+    // The range now covers the accepted text, so a follow-up rewrite targets what is actually there.
+    setEditRange({ start: candidate.start, end: candidate.start + candidate.after.length })
     await cowrite.reload()
   }
   const discardRewrite = async () => {
@@ -424,9 +426,11 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   // The textarea's value holds LF while the manuscript may hold CRLF, so the pane's offsets are the
   // normalised ones; the preview works in the projection's source offsets (SF-087).
   const textareaOffset = (offset: number) => text.slice(0, offset).replace(/\r\n|\r/g, '\n').length
-  const sourceMark: MarkRange | undefined = candidate && { state: candidate.state,
-    start: textareaOffset(candidate.start), end: textareaOffset(candidate.end) }
-  const previewMark = candidate && { start: candidate.start, end: candidate.end, flowing: candidate.state === 'generating' }
+  // A mark shows the range a rewrite applies to: the open candidate, or — before one exists — the
+  // selection itself, so the user sees what they picked rather than only what is being generated.
+  const marked = rewriteTarget(candidate, editRange)
+  const sourceMark: MarkRange | undefined = marked && { ...marked, start: textareaOffset(marked.start), end: textareaOffset(marked.end) }
+  const previewMark = marked && { start: marked.start, end: marked.end, flowing: marked.state === 'generating' }
   return <section className="sf-draft" aria-label="正文编辑">
     {/* The menu appears next to the selection and calls no model; the chosen function becomes
         an instruction in the bottom overlay (PRD §5.2). */}

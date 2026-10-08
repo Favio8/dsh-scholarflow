@@ -1,9 +1,9 @@
 import React, { useLayoutEffect, useRef } from 'react'
 import { lineBoxes, sourceRangeRects } from './source-measure.ts'
 
-/** Only a range that is still being reviewed is marked; an accepted or discarded one is gone. */
+/** A mark exists while its range still means something; a decided candidate leaves nothing behind. */
 export type MarkRange = { start: number; end: number; state: string }
-const visible = (state: string) => state === 'generating' || state === 'ready' || state === 'stopped' || state === 'failed'
+const visible = (state: string) => state !== 'accepted' && state !== 'discarded'
 
 /**
  * The highlight behind the selected text in the Markdown pane (SF-087).
@@ -89,8 +89,8 @@ export const RANGE_MARK_CSS = `
   background-image:linear-gradient(90deg,#f3626b,#eab308,#22c55e,#3b82f6,#a25bf7,#f3626b);background-size:300% 100%;
   animation:sf-range-flow var(--sf-sweep,2.8s) var(--sf-ease-in-out,cubic-bezier(.4,0,.2,1)) infinite}
 @keyframes sf-range-flow{from{background-position:0 0}to{background-position:300% 0}}
-.sf-source-marks>div[data-state=ready] .sf-range-band,.sf-source-marks>div[data-state=stopped] .sf-range-band,
-.sf-source-marks>div[data-state=failed] .sf-range-band{animation:none;background-position:50% 0}
+/* Only a running generation flows: a plain selection or a candidate waiting for review holds still. */
+.sf-source-marks>div[data-state]:not([data-state=generating]) .sf-range-band{animation:none;background-position:50% 0}
 .sf-mark-inline{background-image:linear-gradient(90deg,#f3626b,#eab308,#22c55e,#3b82f6,#a25bf7,#f3626b);background-size:300% 100%;
   -webkit-background-clip:text;background-clip:text;color:transparent;
   -webkit-box-decoration-break:clone;box-decoration-break:clone;
