@@ -99,6 +99,26 @@ it they differ by 79.6 at 1060 px and 311.5 at 420 px. The preview gets the same
 selection: the marked text keeps its gradient and differs from its unmarked neighbour by 86.2, where
 the unmarked neighbour still shows the platform selection.
 
+## The mark used to arrive on release
+
+The range came from `select`, which a textarea fires once, when the gesture ends. Measured in the real
+browser with a simulated drag: **zero** `select` events while the button is down, six to eight
+`selectionchange`. So the mark appeared one gesture late — the user saw the platform selection during
+the drag and the mark only after letting go.
+
+The pane now reads the range from `selectionchange` as well, and it only ever *sets* a non-empty
+range: a collapsed selection cannot be told apart from "the user moved focus to the instruction box",
+and clearing there would erase the mark of the text they are about to rewrite. Clearing stays with
+the gestures that mean it — clicking inside a pane, editing the text, accepting or discarding.
+
+The offset conversion the pane needs had been written out three times (the textarea holds LF while the
+manuscript may hold CRLF); it is now `sourceOffset` / `paneOffset` in `rewrite-range.ts`, and
+`tests/unit/rewrite-range.test.ts` pins them as a round-trip rather than as hand-computed literals.
+
+The gate drags for real and counts how often the range can be read before the button comes up — three
+to five times here. A platform that stops reporting mid-drag fails the check instead of quietly
+lagging a gesture behind.
+
 ## Candidate placement
 
 The preview now shows the candidate after its paragraph whenever the preview is visible, instead of

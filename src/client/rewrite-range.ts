@@ -1,6 +1,21 @@
 export type TextRange = { start: number; end: number }
 
 /**
+ * The pane holds LF while the manuscript may hold CRLF, so an offset in one is not an offset in the
+ * other. These two directions are the only place that conversion happens, because getting one of
+ * them wrong shifts a selection silently; `tests/unit/rewrite-range.test.ts` pins them as a pair.
+ */
+export function sourceOffset(value: string, index: number, lineEnding: string) {
+  const prefix = value.slice(0, index)
+  return lineEnding === 'crlf' ? prefix.replace(/\n/g, '\r\n').length : prefix.length
+}
+
+/** The inverse: a manuscript offset as an offset into the pane's own text. */
+export function paneOffset(value: string, index: number) {
+  return value.slice(0, index).replace(/\r\n|\r/g, '\n').length
+}
+
+/**
  * The range a rewrite currently applies to, and so the range the panes mark: the open candidate if
  * there is one, otherwise the user's own selection — a selection has to be visible before anything
  * is generated, or the user cannot tell what they picked (SF-087). A decided candidate stops being

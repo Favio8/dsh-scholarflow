@@ -247,6 +247,8 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
     platform: 'browser', format: 'iife', globalName: 'ScholarFlowGutter' })
   const measureModule = await build({ entryPoints: [join(root, 'src/client/source-measure.ts')], bundle: true, write: false,
     platform: 'browser', format: 'iife', globalName: 'ScholarFlowMeasure' })
+  const rangeModule = await build({ entryPoints: [join(root, 'src/client/rewrite-range.ts')], bundle: true, write: false,
+    platform: 'browser', format: 'iife', globalName: 'ScholarFlowRange' })
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
   writeFileSync(join(outDir, 'wizard.html'), pageHtml(wizard, picker, paper + marks))
@@ -259,6 +261,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
       await page.goto(pathToFileURL(join(outDir, 'wizard.html')).href)
       await page.addScriptTag({ content: gutterModule.outputFiles[0].text })
       await page.addScriptTag({ content: measureModule.outputFiles[0].text })
+      await page.addScriptTag({ content: rangeModule.outputFiles[0].text })
       await page.waitForTimeout(500)
       for (const id of pass.ids) {
         const name = `surface-${id}${pass.suffix}.png`
@@ -276,6 +279,8 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
           // platform selection colour is hiding the mark.
           const [band, plain] = await sampleColors(page, shot.toString('base64'), markReport.sample)
           markReport.contrast = Math.hypot(band.r - plain.r, band.g - plain.g, band.b - plain.b)
+          // After the capture, so the drag cannot disturb what was measured above.
+          markReport.live = await dragRangeProbe(page, `#s${indexPath(id)}>.frame`)
           mark.push({ name, report: markReport, problems: auditMark(name, markReport, wrap.at(-1)?.report.longRows) })
         }
         if (previewReport) {
@@ -373,6 +378,33 @@ async function sampleColors(page, base64, rects) {  return page.evaluate(async (
 }
 
 /**
+ * The mark follows the pointer while it is still down, which only works if the range can be read
+ * during the drag: `select` fires once, on release (measured: none during a drag). This drags for
+ * real and counts how often the range could be read before the button came up, so a platform that
+ * stops reporting mid-drag fails here instead of silently lagging a gesture behind.
+ */
+async function dragRangeProbe(page, selector) {
+  const box = await page.locator(`${selector} textarea.sf-source-input`).boundingBox()
+  await page.evaluate(selector => {
+    window.__sfLive = 0
+    const input = document.querySelector(`${selector} textarea.sf-source-input`)
+    document.addEventListener('selectionchange', () => {
+      const start = window.ScholarFlowRange.sourceOffset(input.value, input.selectionStart, 'lf')
+      const end = window.ScholarFlowRange.sourceOffset(input.value, input.selectionEnd, 'lf')
+      if (end > start) window.__sfLive++
+    })
+  }, selector)
+  await page.mouse.move(box.x + 12, box.y + 30)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 180, box.y + 60, { steps: 6 })
+  const during = await page.evaluate(() => window.__sfLive)
+  await page.mouse.move(box.x + 260, box.y + 96, { steps: 5 })
+  const grown = await page.evaluate(() => window.__sfLive)
+  await page.mouse.up()
+  return { during, grown }
+}
+
+/**
  * The preview's half of the same defect: there the range is coloured on the glyphs, and selecting it
  * made the platform paint over that colour. A DOM selection is set over the marked span and its
  * unmarked neighbour, both of which are then sampled from the capture — if the selection covered the
@@ -414,6 +446,8 @@ export function auditMark(name, report, expectedRows) {  const problems = []
   if (report.settled !== 'none') problems.push(`${name}: the band keeps flowing after the candidate is ready (${report.settled})`)
   if (report.held !== 'none') problems.push(`${name}: a plain selection flows instead of holding still (${report.held})`)
   if (!report.inView) problems.push(`${name}: the unmarked row used as the colour reference is outside the pane (probe ${report.view.probe.toFixed(1)} vs pane ${report.view.top.toFixed(1)}–${report.view.bottom.toFixed(1)}, last band ${report.view.last.toFixed(1)})`)
+  if (report.live && report.live.during < 2) problems.push(`${name}: the range cannot be read while the pointer is still down (${report.live.during} updates during the drag)`)
+  if (report.live && report.live.grown <= report.live.during) problems.push(`${name}: the live range stopped keeping up with the drag`)
   // If the platform selection colour covered the mark, a selected row with a band and a selected row
   // without one would look the same.
   if (report.contrast !== undefined && report.contrast < 20) problems.push(`${name}: the selection hides the mark (marked and unmarked selected rows differ by ${report.contrast.toFixed(1)})`)
@@ -476,7 +510,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // paragraph occupies one row" is the difference between a real gate and a vacuous one, and the
   // mark count has to match the rows the same range actually wraps over.
   for (const row of wrap) console.log(`${row.name}: 横向溢出 ${row.report.overflow}px · 长段落 ${row.report.longRows.toFixed(1)} 行 · 行号列 ${row.report.gutterTotal.toFixed(0)}px / 编辑区内容 ${row.report.content.toFixed(0)}px`)
-  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行高 ${row.report.row}px · 流动 ${row.report.flow} → 就绪 ${row.report.settled} · 选中时与未标注行色差 ${(row.report.contrast ?? 0).toFixed(1)} · 横向范围 ${row.report.minLeft.toFixed(0)}～${row.report.maxRight.toFixed(0)} / ${row.report.contentWidth.toFixed(0)}px`)
+  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行高 ${row.report.row}px · 流动 ${row.report.flow} → 就绪 ${row.report.settled} · 选中时与未标注行色差 ${(row.report.contrast ?? 0).toFixed(1)} · 拖选中可读 ${row.report.live?.during ?? 0}→${row.report.live?.grown ?? 0} 次 · 横向范围 ${row.report.minLeft.toFixed(0)}～${row.report.maxRight.toFixed(0)} / ${row.report.contentWidth.toFixed(0)}px`)
   for (const row of preview) console.log(`${row.name}: 选中 ${row.report.selected} 字 · 渐变 ${row.report.gradient ? '在' : '丢失'} · 选中时被标注与未标注文字色差 ${(row.report.contrast ?? 0).toFixed(1)}`)
   if (problems.length) {
     console.error(`\n${problems.length} check(s) failed:`)

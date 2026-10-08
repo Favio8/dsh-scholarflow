@@ -17,7 +17,7 @@ import { OverlayHost, useOverlaySpace } from './middle-overlay.tsx'
 import { RewriteCandidateView, protectedChanges, type RewriteCandidate } from './rewrite-candidate.tsx'
 import { SourceCandidate } from './source-candidate.tsx'
 import { SourceRangeMark, type MarkRange } from './range-mark.tsx'
-import { trackRange, rewriteTarget, type TextRange } from './rewrite-range.ts'
+import { trackRange, rewriteTarget, sourceOffset, paneOffset, type TextRange } from './rewrite-range.ts'
 import { pendingQuestion } from '../shared/writing-task.ts'
 import { usePaneZoom, ZoomControls } from './pane-zoom.tsx'
 import { ApplicationError } from './application-error.tsx'
@@ -388,10 +388,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   })
   const attachSelection = () => selectionAction('add')
   const selectSource = (area: HTMLTextAreaElement) => {
-    const offset = (index: number) => {
-      const prefix = area.value.slice(0, index)
-      return project.document.lineEnding === 'crlf' ? prefix.replace(/\n/g, '\r\n').length : prefix.length
-    }
+    const offset = (index: number) => sourceOffset(area.value, index, project.document.lineEnding)
     const from = offset(area.selectionStart), to = offset(area.selectionEnd)
     selectionOrigin.current = 'source'
     setCursor(from); setEditRange(from === to ? undefined : { start: from, end: to })
@@ -414,6 +411,39 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       if (!selecting.current) setSelectionAnchor(sourceSelectionRect(area))
     } catch (error) { setSelection(undefined); setSelectionAnchor(undefined); setMessage((error as Error).message) }
   }
+  /**
+   * The range the mark follows while the pointer is still down. `select` fires only when the gesture
+   * ends (measured: zero `select` events during a drag, six to eight `selectionchange`), so a mark
+   * built from `select` alone appears one gesture late. This keeps the range current and never
+   * clears it: a collapsed selection is what focusing the instruction box looks like, and dropping
+   * the range there would erase the mark the user is about to rewrite (SF-087).
+   */
+  const liveRange = () => {
+    const area = sourceArea.current
+    if (area && document.activeElement === area) {
+      const from = sourceOffset(area.value, area.selectionStart, project.document.lineEnding), to = sourceOffset(area.value, area.selectionEnd, project.document.lineEnding)
+      return { origin: 'source' as const, range: from === to ? undefined : { start: from, end: to } }
+    }
+    const container = root.current, selection = window.getSelection()
+    if (!container || !selection?.rangeCount || selection.isCollapsed) return { origin: 'preview' as const, range: undefined }
+    const range = selection.getRangeAt(0)
+    if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) return { origin: 'preview' as const, range: undefined }
+    try {
+      const payload = captureSelection(container, livePreview.projection!, project.document, projectId, true)
+      return { origin: 'preview' as const, range: { start: payload.sourceRange.startUtf16, end: payload.sourceRange.endUtf16 } }
+    } catch { return { origin: 'preview' as const, range: undefined } }
+  }
+  const liveLatest = useRef(liveRange); liveLatest.current = liveRange
+  useEffect(() => {
+    const sync = () => {
+      const { origin, range } = liveLatest.current()
+      if (!range) return
+      selectionOrigin.current = origin
+      setEditRange(previous => previous && previous.start === range.start && previous.end === range.end ? previous : range)
+    }
+    document.addEventListener('selectionchange', sync)
+    return () => document.removeEventListener('selectionchange', sync)
+  }, [])
   const headings = livePreview.projection?.tree.children?.filter(node => node.type === 'heading') ?? []
   const currentHeading = [...headings].reverse().find(node => (node.position?.start.offset ?? 0) <= cursor)
   const statistics = livePreview.statistics
@@ -425,7 +455,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const candidateBlock = livePreview.projection?.blocks.filter(block => block.node.type === 'paragraph' && block.start < (candidate?.end ?? 0)).at(-1)
   // The textarea's value holds LF while the manuscript may hold CRLF, so the pane's offsets are the
   // normalised ones; the preview works in the projection's source offsets (SF-087).
-  const textareaOffset = (offset: number) => text.slice(0, offset).replace(/\r\n|\r/g, '\n').length
+  const textareaOffset = (offset: number) => paneOffset(text, offset)
   // A mark shows the range a rewrite applies to: the open candidate, or — before one exists — the
   // selection itself, so the user sees what they picked rather than only what is being generated.
   const marked = rewriteTarget(candidate, editRange)
@@ -465,7 +495,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
               onBeforeInput={e => {
                 const kind = (e.nativeEvent as InputEvent).inputType ?? ''
                 const area = e.currentTarget
-                const offset = (value: number) => project.document.lineEnding === 'crlf' ? area.value.slice(0, value).replace(/\n/g, '\r\n').length : value
+                const offset = (value: number) => sourceOffset(area.value, value, project.document.lineEnding)
                 inputEdit.current = kind.startsWith('insert') || kind === 'deleteByCut' ? { start: offset(area.selectionStart), end: offset(area.selectionEnd) } : undefined
               }}
               onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (dirty && !busy && !saving && baseHash === project.document.contentHash) run(save) } }}
