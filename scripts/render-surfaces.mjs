@@ -277,7 +277,16 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
         if (markReport) {
           // Read the two sampled strips back out of the capture: this is what decides whether the
           // platform selection colour is hiding the mark.
-          const [band, plain] = await sampleColors(page, shot.toString('base64'), markReport.sample)
+          const samples = await sampleColors(page, shot.toString('base64'), markReport.sample)
+          const probes = samples.slice(0, -1), plain = samples.at(-1)
+          const band = probes.reduce((sum, row) => ({ r: sum.r + row.r / probes.length, g: sum.g + row.g / probes.length, b: sum.b + row.b / probes.length }), { r: 0, g: 0, b: 0 })
+          // The band sits behind the text, so its own lightness decides whether the text is readable;
+          // the lightest point of the spectrum is the one that matters.
+          const text = { r: markReport.colour[0], g: markReport.colour[1], b: markReport.colour[2] }
+          markReport.band = band
+          markReport.textContrast = Math.min(...probes.map(row => contrastRatio(row, text)))
+          markReport.spread = Math.max(...probes.flatMap((one, index) => probes.slice(index + 1)
+            .map(other => Math.hypot(one.r - other.r, one.g - other.g, one.b - other.b))), 0)
           markReport.contrast = Math.hypot(band.r - plain.r, band.g - plain.g, band.b - plain.b)
           // After the capture, so the drag cannot disturb what was measured above.
           markReport.live = await dragRangeProbe(page, `#s${indexPath(id)}>.frame`)
@@ -350,13 +359,26 @@ async function checkDraftMark(page, selector) {
     const last = marked[marked.length - 1]
     const plainTop = box.top + last.top + row * 2, frame = root.getBoundingClientRect()
     const strip = (left, top, width) => ({ x: left - frame.left + 2, y: top - frame.top + 1, width: Math.max(4, width - 4), height: 5 })
+    // Sampled across one band, because "is it a rainbow" is a question about the spread of colours
+    // within a row, not about its average: the average of any spectrum is a muted mid-tone.
+    const probeWidth = Math.max(6, first.width / 10)
+    const across = [0.04, 0.28, 0.5, 0.72, 0.96].map(share => strip(first.left + first.width * share - probeWidth / 2, first.top, probeWidth))
     const lefts = painted.map(rect => rect.left - (box.left + parseFloat(style.paddingLeft)))
-    return { row, count: whole.length, marked: marked.length, contentWidth, heights: painted.map(rect => rect.height),
+    const colour = style.color.match(/[\d.]+/g).slice(0, 3).map(Number)
+    return { row, count: whole.length, marked: marked.length, contentWidth, heights: painted.map(rect => rect.height), colour,
       minLeft: Math.min(...lefts), maxRight: Math.max(...painted.map((rect, index) => lefts[index] + rect.width)),
       gaps: painted.slice(1).map((rect, index) => rect.top - painted[index].bottom), flow, settled, held,
       inView: box.top <= plainTop && plainTop + row <= box.bottom, view: { probe: plainTop, top: box.top, bottom: box.bottom, last: last.top },
-      sample: [strip(first.left, first.top, first.width), strip(box.left + parseFloat(style.paddingLeft), plainTop, contentWidth)] }
+      sample: [...across, strip(box.left + parseFloat(style.paddingLeft), plainTop, contentWidth)] }
   }, { selector, start: MARK_START, end: FULL_END, markEnd: MARK_END, selectionEnd: SELECT_END })
+}
+
+/** WCAG relative luminance and contrast ratio, for the text sitting on a band. */
+function contrastRatio(one, other) {
+  const channel = value => { const part = value / 255; return part <= 0.03928 ? part / 12.92 : Math.pow((part + 0.055) / 1.055, 2.4) }
+  const luminance = ({ r, g, b }) => 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+  const [high, low] = [luminance(one), luminance(other)].sort((a, b) => b - a)
+  return (high + 0.05) / (low + 0.05)
 }
 
 /** Average colour of each sampled strip, read back out of the capture. */
@@ -444,6 +466,8 @@ export function auditMark(name, report, expectedRows) {  const problems = []
   if (report.minLeft < -1 || report.maxRight > report.contentWidth + 1) problems.push(`${name}: a band leaves the pane's content box (${report.minLeft.toFixed(1)} to ${report.maxRight.toFixed(1)} of ${report.contentWidth.toFixed(1)}px)`)
   if (!report.flow.includes('sf-range-flow')) problems.push(`${name}: the band is not flowing while the candidate is generating (${report.flow})`)
   if (report.settled !== 'none') problems.push(`${name}: the band keeps flowing after the candidate is ready (${report.settled})`)
+  if (report.spread !== undefined && report.spread < 140) problems.push(`${name}: the band reads as one colour rather than a rainbow (spread ${report.spread.toFixed(0)} across the row)`)
+  if (report.textContrast !== undefined && report.textContrast < 4.5) problems.push(`${name}: the text on the band is only ${report.textContrast.toFixed(1)}:1 (rgb(${report.band.r.toFixed(0)},${report.band.g.toFixed(0)},${report.band.b.toFixed(0)}))`)
   if (report.held !== 'none') problems.push(`${name}: a plain selection flows instead of holding still (${report.held})`)
   if (!report.inView) problems.push(`${name}: the unmarked row used as the colour reference is outside the pane (probe ${report.view.probe.toFixed(1)} vs pane ${report.view.top.toFixed(1)}–${report.view.bottom.toFixed(1)}, last band ${report.view.last.toFixed(1)})`)
   if (report.live && report.live.during < 2) problems.push(`${name}: the range cannot be read while the pointer is still down (${report.live.during} updates during the drag)`)
@@ -510,7 +534,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // paragraph occupies one row" is the difference between a real gate and a vacuous one, and the
   // mark count has to match the rows the same range actually wraps over.
   for (const row of wrap) console.log(`${row.name}: 横向溢出 ${row.report.overflow}px · 长段落 ${row.report.longRows.toFixed(1)} 行 · 行号列 ${row.report.gutterTotal.toFixed(0)}px / 编辑区内容 ${row.report.content.toFixed(0)}px`)
-  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行高 ${row.report.row}px · 流动 ${row.report.flow} → 就绪 ${row.report.settled} · 选中时与未标注行色差 ${(row.report.contrast ?? 0).toFixed(1)} · 拖选中可读 ${row.report.live?.during ?? 0}→${row.report.live?.grown ?? 0} 次 · 横向范围 ${row.report.minLeft.toFixed(0)}～${row.report.maxRight.toFixed(0)} / ${row.report.contentWidth.toFixed(0)}px`)
+  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行内色散 ${(row.report.spread ?? 0).toFixed(0)} · 文字对比度 ${(row.report.textContrast ?? 0).toFixed(1)}:1 · 与未标注行色差 ${(row.report.contrast ?? 0).toFixed(1)} · 拖选中可读 ${row.report.live?.during ?? 0}→${row.report.live?.grown ?? 0} 次`)
   for (const row of preview) console.log(`${row.name}: 选中 ${row.report.selected} 字 · 渐变 ${row.report.gradient ? '在' : '丢失'} · 选中时被标注与未标注文字色差 ${(row.report.contrast ?? 0).toFixed(1)}`)
   if (problems.length) {
     console.error(`\n${problems.length} check(s) failed:`)

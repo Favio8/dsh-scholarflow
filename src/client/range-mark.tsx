@@ -86,16 +86,23 @@ export function SourceRangeMark({ area, host, range, text, zoom }: {
  * so reduced motion and the hidden-window pause are handled once (motion/tokens.ts).
  */
 export const RANGE_MARK_CSS = `
-:root{--sf-mark-band-opacity:.42}
+/* A band sits behind text, so it is a wash rather than a fill and its chroma is bounded by how light
+   it must stay. The two themes bound it from opposite sides: on a light page dark text needs the band
+   to stay light, on a dark page light text needs it to stay dark. So each theme gets the most colour
+   it can carry — measured, not guessed: the light theme's band still leaves the text 7:1 and the dark
+   theme's worst stop computes to 5:1. */
+:root{--sf-mark-band-opacity:.78}
+@media(prefers-color-scheme:dark){:root{--sf-mark-band-opacity:.45}}
 .sf-source-marks{position:absolute;inset:0;pointer-events:none;z-index:0;overflow:hidden}
 .sf-source-marks>div{position:absolute;inset:0;will-change:transform}
 .sf-range-band{position:absolute;border-radius:3px;opacity:var(--sf-mark-band-opacity);
-  background-image:linear-gradient(90deg,#f3626b,#eab308,#22c55e,#3b82f6,#a25bf7,#f3626b);background-size:300% 100%;
+  background-image:linear-gradient(90deg,#ff4d6d,#ffc300,#12b981,#2f7bff,#a25bf7,#ff4d6d);background-size:100% 100%;
   animation:sf-range-flow var(--sf-sweep,2.8s) var(--sf-ease-in-out,cubic-bezier(.4,0,.2,1)) infinite}
-@keyframes sf-range-flow{from{background-position:0 0}to{background-position:300% 0}}
+/* One period of the gradient per loop, so the flow has no visible seam. */
+@keyframes sf-range-flow{from{background-position:0 0}to{background-position:100% 0}}
 /* Only a running generation flows: a plain selection or a candidate waiting for review holds still. */
 .sf-source-marks>div[data-state]:not([data-state=generating]) .sf-range-band{animation:none;background-position:50% 0}
-.sf-mark-inline{background-image:linear-gradient(90deg,#f3626b,#eab308,#22c55e,#3b82f6,#a25bf7,#f3626b);background-size:300% 100%;
+.sf-mark-inline{background-image:linear-gradient(90deg,#ff4d6d,#ffc300,#12b981,#2f7bff,#a25bf7,#ff4d6d);background-size:100% 100%;
   -webkit-background-clip:text;background-clip:text;color:transparent;
   -webkit-box-decoration-break:clone;box-decoration-break:clone;
   animation:sf-range-flow var(--sf-sweep,2.8s) var(--sf-ease-in-out,cubic-bezier(.4,0,.2,1)) infinite}
@@ -104,7 +111,8 @@ export const RANGE_MARK_CSS = `
    source pane and the colour on the glyphs in the preview. So over the mark the selection becomes a
    light tint those show through, and the text keeps its own colour instead of the platform's contrast
    colour. In the preview only the marked text is treated this way: a selection elsewhere keeps the
-   platform default, because then there is no mark to see instead. */
+   platform default, because then there is no mark to see instead. The tint is deliberately faint —
+   it sits above the band, so every point of it dilutes the hues the mark exists to show. */
 .sf-source-editor[data-marked] textarea.sf-source-input::selection,
-.sf-mark-inline::selection{background:rgba(63,104,216,.18);color:inherit}
+.sf-mark-inline::selection{background:rgba(63,104,216,.1);color:inherit}
 `

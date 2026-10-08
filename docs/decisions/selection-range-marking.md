@@ -119,6 +119,36 @@ The gate drags for real and counts how often the range can be read before the bu
 to five times here. A platform that stops reporting mid-drag fails the check instead of quietly
 lagging a gesture behind.
 
+## The band used to be a muted grey-blue
+
+The user reported the rainbow as "暗淡" — dim. Three washes were stacked on it, and only measurement
+showed which one mattered:
+
+| | band colour sampled across a row | spread within a row | text on the band |
+|---|---|---|---|
+| before | rgb(149,194,216), saturation 31% | **119** | 11.0:1 |
+| after | — | **173** | 6.8:1 / 5.2:1 |
+
+The first two attempts were aimed at the wrong causes. Raising the gradient's saturation barely moved
+the sampled colour, because that sample is the *average* of a row and the average of any spectrum is a
+muted mid-tone. Widening the visible spectrum by changing `background-size` moved it by three points.
+The number that actually captures "it looks like one colour" is the **spread** — the largest distance
+between colours sampled along one row — and that is what the gate now measures and asserts (floor 140
+of a possible 441).
+
+The spread is bounded by the band's opacity: a band sits *behind* text, so it is a wash and each
+percent of dilution shrinks every colour difference by the same percent. What allows a stronger wash
+is the readability headroom: the band starts at 11:1 against the text, far more than the 4.5:1 the
+text needs, so it could take much more colour. Both themes bound it, from opposite sides — on a light
+page dark text needs the band to stay light, on a dark page light text needs it to stay dark — so
+each theme now sets its own maximum (0.78 light, 0.45 dark, the latter computed at its lightest stop
+to 5.1:1). The selection tint is drawn *above* the band, so it saturates whatever it covers; it stays
+faint (0.1) for that reason.
+
+Two things were checked rather than assumed: the per-row band widths (434/434/434 px and 126/126/112 px)
+to rule out rows scaling the gradient differently, and the lightest stop's contrast in the dark theme
+by calculation, since the gate renders the light one.
+
 ## Candidate placement
 
 The preview now shows the candidate after its paragraph whenever the preview is visible, instead of
