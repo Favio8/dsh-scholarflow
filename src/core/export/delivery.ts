@@ -3,6 +3,7 @@ import { inspectReview, reviewInput } from '../review/review.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { bibliography } from './bibliography.ts'
 import { projectMarkdown } from '../editing/markdown.ts'
+import { scanDocument } from './scan.ts'
 import { validateArtifactPrivacy, validateExportUrl, validateManuscriptPublication } from './public-artifacts.ts'
 import { deliverySchema, type Ledger } from '../../shared/schema.ts'
 import { invariant } from '../../shared/errors.ts'
@@ -38,7 +39,10 @@ export async function prepareDelivery(io: FileStore, format: ExportFormat = 'mar
     reviewId: review.report?.id, reviewState, sourceIds, unresolvedIssueIds: issues.filter(issue => issue.state !== 'resolved').map(issue => issue.id),
     reviewedAllowed: reviewed, limitations: review.report?.limitations ?? ['当前稿件尚未执行审查；只能导出工作草稿。'],
     format, formats: [...(format === 'markdown' ? [] : [format]), 'markdown', 'bibtex', 'quality-report'],
-    formatNotes: format === 'docx' ? ['Word 公式保留 TeX 表达式。',
+    // The scan runs here so the delivery states what the layout did and did not do, rather
+    // than leaving the reader to find out in Word.
+    formatNotes: format === 'docx' ? [...scanDocument(projectMarkdown(current.document.text)).formatNotes,
+      '标题编号、三线表与题注按主稿实际结构生成；没有写题注的图表按原样导出，不自动补编号。',
       '导出成功不等于排版合格：封面与正文的实际页数要在 Word 或等效查看环境中核对后才能称为已验证。']
       : format === 'latex' ? ['LaTeX 为完整源码，中文使用 ctex；下载包含 references.bib。'] : [] }
   invariant(format !== 'docx' || io.createExportBytes && io.readExportBytes, 'BINARY_EXPORT_UNAVAILABLE', '当前宿主不能保存 Word 交付。')

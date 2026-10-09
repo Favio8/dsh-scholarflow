@@ -1,18 +1,25 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import JSZip from 'jszip'
-import { wordDocument, coverParagraphs } from '../../src/core/export/formats.ts'
+import { wordDocument } from '../../src/core/export/formats.ts'
+import { coverParagraphs } from '../../src/core/export/word.ts'
+import { typographyToDocx } from '../../src/core/export/typography.ts'
 import { DEFAULT_TYPOGRAPHY } from '../../src/core/export/typography.ts'
 import type { Ledger, ProjectConfig } from '../../src/shared/schema.ts'
 
 const config = { project: { id: 'p_TEST', title: 'TEST_ONLY 报告', type: 'course-paper', language: 'zh-CN' },
   paths: { manuscriptDir: 'manuscript', mainDocument: 'manuscript/paper.md', references: 'manuscript/references.bib' } } as unknown as ProjectConfig
 const ledger = { sources: {} } as unknown as Ledger
+const coverDocx = typographyToDocx(DEFAULT_TYPOGRAPHY)
+const coverFont = { ascii: coverDocx.fonts.ascii, hAnsi: coverDocx.fonts.hAnsi, eastAsia: coverDocx.fonts.eastAsia, cs: coverDocx.fonts.cs }
 const body = '# TEST_ONLY 标题\n\n正文中文与 English words 混排。\n\n## 第一节\n\n内容。\n'
 
 async function readDocumentXml(bytes: Uint8Array, extra = {}) {
   const zip = await JSZip.loadAsync(bytes)
-  return { xml: await zip.file('word/document.xml')!.async('string'), styles: await zip.file('word/styles.xml')!.async('string'), extra }
+  const footers = Object.keys(zip.files).filter(name => /^word\/footer\d*\.xml$/u.test(name)).sort()
+  const footerText = (await Promise.all(footers.map(name => zip.file(name)!.async('string')))).join('')
+  return { xml: await zip.file('word/document.xml')!.async('string'), styles: await zip.file('word/styles.xml')!.async('string'),
+    footers, footerText, extra }
 }
 
 test('both font slots are set, so Chinese and western runs stop falling back to the theme', async () => {
@@ -51,25 +58,32 @@ test('a requirement that asks for a different size and spacing is executed, not 
 
 test('the cover is requested only when the requirement asked for one', async () => {
   const without = await readDocumentXml(await wordDocument(body, config, ledger))
-  assert.equal(/w:br w:type="page"/u.test(without.xml), false, '没有要求封面时不应插入分页')
+  assert.equal(without.xml.match(/<w:sectPr/g)!.length, 1, '没有要求封面时只有一个节')
+  assert.match(without.xml, /<w:footerReference/u, '正文节必须有页脚')
+  assert.equal(without.footers.length, 1, '页脚必须写成一个部件')
+  assert.match(without.footerText, /PAGE/u, '页脚必须写页码域')
+
   const withCover = await readDocumentXml(await wordDocument(body, config, ledger,
     { cover: { enabled: true, title: 'TEST_ONLY 题目', fields: [{ label: '姓名', value: 'TEST_ONLY' }], date: '' } }))
-  assert.match(withCover.xml, /w:br w:type="page"/u, '封面后必须分页')
+  // The cover is its own section, so the body starts on a fresh page without a page-break run
+  // and can number its pages from 1 while the cover carries no number.
+  assert.equal(withCover.xml.match(/<w:sectPr/g)!.length, 2, '封面必须是独立的一节')
+  assert.match(withCover.xml, /<w:pgNumType w:start="1"/u, '正文节必须从 1 开始编页')
   const coverIndex = withCover.xml.indexOf('TEST_ONLY 题目')
   const bodyIndex = withCover.xml.indexOf('正文中文')
   assert.equal(coverIndex > 0 && coverIndex < bodyIndex, true, '封面必须排在正文之前')
 })
 
 test('a cover with no date omits the date line instead of inventing one', () => {
-  const paragraphs = coverParagraphs({ enabled: true, title: 'T', fields: [{ label: '姓名', value: 'N' }], date: '' }, DEFAULT_TYPOGRAPHY, 'zh-CN')
+  const paragraphs = coverParagraphs({ enabled: true, title: 'T', fields: [{ label: '姓名', value: 'N' }], date: '' }, coverDocx, coverFont, 'zh-CN')
   const text = JSON.stringify(paragraphs)
   assert.equal(/\d{4}\s*年/u.test(text), false, '参考报告或今天的日期都不应出现在封面')
-  const withDate = coverParagraphs({ enabled: true, title: 'T', fields: [], date: '2026 年 10 月' }, DEFAULT_TYPOGRAPHY, 'zh-CN')
+  const withDate = coverParagraphs({ enabled: true, title: 'T', fields: [], date: '2026 年 10 月' }, coverDocx, coverFont, 'zh-CN')
   assert.match(JSON.stringify(withDate), /2026 年 10 月/u, '用户写下的日期应当保留')
 })
 
 test('an empty cover field is dropped rather than exported as a blank label', () => {
-  const paragraphs = coverParagraphs({ enabled: true, title: 'T', fields: [{ label: '学号', value: '' }, { label: '姓名', value: 'N' }], date: '' }, DEFAULT_TYPOGRAPHY, 'zh-CN')
+  const paragraphs = coverParagraphs({ enabled: true, title: 'T', fields: [{ label: '学号', value: '' }, { label: '姓名', value: 'N' }], date: '' }, coverDocx, coverFont, 'zh-CN')
   const text = JSON.stringify(paragraphs)
   assert.equal(text.includes('学号'), false)
   assert.match(text, /姓名/u)
