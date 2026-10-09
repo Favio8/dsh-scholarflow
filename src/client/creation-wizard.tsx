@@ -169,7 +169,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const key = `scholarflow:creation:${scope}`
   const initial: CreationSpec = { title: '', type: defaults?.defaultProjectType ?? 'course-paper', language: defaults?.language === 'en' ? 'en' : 'zh-CN',
     format: 'docx', requirements: '', requirementSources: [], materials: [], online: false, targetLength: 4000,
-    countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
+    countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 }, supplementalParts: [],
     sections: presetSections(defaults?.defaultProjectType ?? 'course-paper', 4000), manuscriptDir: 'manuscript',
     overrides: [], typography: DEFAULT_TYPOGRAPHY,
     cover: { enabled: false, title: '', fields: [], date: '' } }
@@ -476,24 +476,40 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const attachments = files.filter((file: any) => !file.supported && requirementKind(file.relativePath) === 'image')
   const materialNeedle = materialQuery.trim().toLowerCase()
   const visibleFiles = materialNeedle ? files.filter((file: any) => file.relativePath.toLowerCase().includes(materialNeedle)) : files
+  // A subsection moves inside its own chapter: swapping it past the chapter boundary would
+  // leave it pointing at a parent that is no longer above it, so the move is refused.
+  const sameParent = (left: CreationSpec['sections'][number], right: CreationSpec['sections'][number]) =>
+    (left.parentId ?? null) === (right.parentId ?? null)
   const moveSection = (index: number, direction: number) => {
     const sections = [...spec.sections], target = index + direction
     if (target < 0 || target >= sections.length) return
+    if (!sameParent(sections[index]!, sections[target]!)) return
     ;[sections[index], sections[target]] = [sections[target], sections[index]]; editSections(sections)
   }
+  // Removing a chapter takes its subsections with it; otherwise they would point at a
+  // parent that no longer exists.
+  const withoutSection = (id: string) => spec.sections.filter(row => row.id !== id && row.parentId !== id)
+  const addSubsection = (parentId: string) => editSections([...spec.sections,
+    { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新子节', purpose: '', targetLength: 500,
+      allocationMode: 'auto', parentId, kind: 'body' }])
   // Applying is atomic: the type (when the preset belongs to another one) and the
   // structure change together, after the caller confirmed once (design 02 §7).
-  const applyPreset = (preset: any, switching: boolean) => {
-    update({ ...(switching ? { type: preset.paperType } : {}), sections: sectionsFromPreset(preset, spec.language, spec.targetLength),
+  const applyPreset = (preset: any, switching: boolean, kept?: string[]) => {
+    const supplementalParts = (preset.supplementalParts ?? []).filter((part: any) => !kept || kept.includes(part.kind))
+    update({ ...(switching ? { type: preset.paperType } : {}), supplementalParts,
+      sections: sectionsFromPreset(preset, spec.language, spec.targetLength, { supplementalKinds: kept }),
       preset: selectionFromPreset(preset) })
     setPresetOpen(false)
   }
   const sectionKey = (id: string) => ('k-' + id.toLowerCase().replace(/[^a-z0-9-]/g, '-')).slice(0, 64)
   // Saving stores the structure only: shares are derived on the host, so the paper's
-  // absolute lengths and title never enter the global library.
+  // absolute lengths and title never enter the global library. Parent keys carry the
+  // nesting across, so a saved paper keeps its subsections.
   const structureForPreset = () => ({ title: spec.title.trim() || '未命名结构', summary: '按当前论文结构保存', paperType: spec.type,
     sections: spec.sections.map(section => ({ key: sectionKey(section.id), title: section.title,
-      focus: section.purpose.trim() || '（尚未填写写作重点）', targetLength: section.targetLength })),
+      focus: section.purpose.trim() || '（尚未填写写作重点）', targetLength: section.targetLength,
+      ...(section.parentId ? { parentKey: sectionKey(section.parentId) } : {}) })),
+    supplementalParts: spec.supplementalParts,
     ...(spec.preset?.source === 'builtin' ? { derivedFrom: spec.preset.id } : {}) })
   const allocationPlan = allocate(spec.sections.map(section => ({ id: section.id, targetLength: section.targetLength,
     allocationMode: section.allocationMode ?? 'manual', ...(section.allocationWeight === undefined ? {} : { allocationWeight: section.allocationWeight }) })),
@@ -603,19 +619,25 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <p className="sf-field-hint">当前预设：{spec.preset ? `${spec.preset.id}（${spec.preset.source === 'builtin' ? '内置' : '我的'}${spec.preset.modified ? ' · 已修改' : ''}）` : '尚未选择'}
           ，计划合计 {allocationPlan.total} / {spec.targetLength}。手工章节保持原值，其余按建议比例分配；比例只是起点，任何一项都可以改。</p>
         {allocationPlan.notes.map(note => <p className="sf-field-hint" key={note} role="status">{note}</p>)}
-        <div className="sf-structure-list">{spec.sections.map((section, index) => <div className="sf-structure-section" key={section.id}>
-          <span className="sf-section-index">{index + 1}</span>
+        <div className="sf-structure-list">{spec.sections.map((section, index) => <div className="sf-structure-section" key={section.id}
+          style={section.parentId ? { marginLeft: 20, borderLeft: '2px solid var(--sf-accent, #3f68d8)', paddingLeft: 10 } : undefined}>
+          <span className="sf-section-index">{section.parentId ? '·' : index + 1}</span>
           <div className="sf-section-text">
             <input id={`sf-section-title-${index}`} className="sf-section-title" aria-label={`第${index + 1}章标题`} placeholder="章节标题" value={section.title} onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, title: e.target.value } : row))} />
             <input className="sf-section-purpose" aria-label={`第${index + 1}章写作内容`} placeholder="本节写什么（可选）" value={section.purpose} onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, purpose: e.target.value } : row))} />
           </div>
           <div className="sf-section-length"><input aria-label={`第${index + 1}章篇幅`} type="number" min={50} value={section.targetLength}
             onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, targetLength: Number(e.target.value), allocationMode: 'manual' } : row))} />
-            <span>{spec.language === 'en' ? '词' : '字'} · {section.allocationMode === 'auto' ? '自动' : '手工'}</span></div>
-          <div className="sf-section-actions"><button aria-label="上移章节" disabled={index === 0} onClick={() => moveSection(index, -1)}>↑</button><button aria-label="下移章节" disabled={index === spec.sections.length - 1} onClick={() => moveSection(index, 1)}>↓</button><button aria-label="删除章节" disabled={spec.sections.length === 1} onClick={() => editSections(spec.sections.filter(row => row.id !== section.id))}>×</button></div>
+            <span>{spec.language === 'en' ? '词' : '字'} · {section.allocationMode === 'auto' ? '自动' : '手工'}
+              {section.kind !== 'body' ? ` · ${section.kind === 'front' ? '前置' : '后置'}` : ''}</span></div>
+          <div className="sf-section-actions">
+            {!section.parentId && <button aria-label="添加子节" title="添加子节" onClick={() => addSubsection(section.id)}>＋</button>}
+            <button aria-label="上移章节" disabled={index === 0 || !sameParent(section, spec.sections[index - 1]!)} onClick={() => moveSection(index, -1)}>↑</button>
+            <button aria-label="下移章节" disabled={index === spec.sections.length - 1 || !sameParent(section, spec.sections[index + 1]!)} onClick={() => moveSection(index, 1)}>↓</button>
+            <button aria-label="删除章节" disabled={withoutSection(section.id).length === 0} onClick={() => editSections(withoutSection(section.id))}>×</button></div>
         </div>)}</div>
         <div className="sf-structure-actions" style={{ marginTop: 14 }}>
-          <button onClick={() => editSections([...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500, allocationMode: 'auto' }])}>+ 添加章节</button>
+          <button onClick={() => editSections([...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500, allocationMode: 'auto', kind: 'body' }])}>+ 添加章节</button>
           <button disabled={busy || !history.length} onClick={undoStructure}>撤销结构编辑</button>
           <button disabled={busy || !spec.sections.every(section => section.title.trim())} onClick={() => act(async () => {
             const name = await textPrompt.ask('预设名称', spec.title.trim() || '我的结构'); if (!name?.trim()) return

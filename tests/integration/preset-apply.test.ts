@@ -3,13 +3,18 @@ import assert from 'node:assert/strict'
 import { sectionsFromPreset, selectionFromPreset } from '../../src/core/presets/apply.ts'
 import type { Preset } from '../../src/shared/presets.ts'
 
+/** A chapter with the defaults filled in; `leadShare`/`subsections` are explicit on purpose. */
+const sec = (key: string, zh: string, en: string, focusZh: string, focusEn: string, share: number) =>
+  ({ key, title: { 'zh-CN': zh, en }, focus: { 'zh-CN': focusZh, en: focusEn }, share, shareSource: 'heuristic' as const,
+    leadShare: 0, subsections: [] })
+
 const preset = (overrides: Partial<Preset> = {}): Preset => ({
   schemaVersion: 1, id: 'course-argumentative', source: 'builtin', version: '1.0.0', updatedAt: '2026-10-06T00:00:00.000Z',
   paperType: 'course-paper', order: 1,
   title: { 'zh-CN': '论述/分析型', en: 'Argumentative' }, summary: { 'zh-CN': '说明', en: 'Summary' }, whenToUse: [],
   sections: [
-    { key: 'intro', title: { 'zh-CN': '引言', en: 'Introduction' }, focus: { 'zh-CN': '交代问题', en: 'Set up' }, share: 0.25, shareSource: 'heuristic' },
-    { key: 'body', title: { 'zh-CN': '主题论证', en: 'Argument' }, focus: { 'zh-CN': '展开论证', en: 'Argue' }, share: 0.75, shareSource: 'heuristic' }],
+    sec('intro', '引言', 'Introduction', '交代问题', 'Set up', 0.25),
+    sec('body', '主题论证', 'Argument', '展开论证', 'Argue', 0.75)],
   supplementalParts: [], references: [], tags: [], ...overrides,
 } as Preset)
 
@@ -30,15 +35,13 @@ test('the same preset in another language yields the other titles, not a transla
 
 test('shares that do not sum to one are normalised rather than trusted', () => {
   const skewed = preset({ sections: [
-    { key: 'a', title: '甲', focus: '一', share: 1, shareSource: 'heuristic' },
-    { key: 'b', title: '乙', focus: '二', share: 1, shareSource: 'heuristic' }] })
+    sec('a', '甲', 'A', '一', 'one', 1), sec('b', '乙', 'B', '二', 'two', 1)] })
   assert.deepEqual(sectionsFromPreset(skewed, 'zh-CN', 1000).map(section => section.targetLength), [500, 500])
 })
 
 test('a very small share still leaves a chapter above the minimum length', () => {
   const tiny = preset({ sections: [
-    { key: 'a', title: '甲', focus: '一', share: 0.999, shareSource: 'heuristic' },
-    { key: 'b', title: '乙', focus: '二', share: 0.001, shareSource: 'heuristic' }] })
+    sec('a', '甲', 'A', '一', 'one', 0.999), sec('b', '乙', 'B', '二', 'two', 0.001)] })
   const sections = sectionsFromPreset(tiny, 'zh-CN', 4000)
   assert.ok(sections[1]!.targetLength >= 50, '短章节不得低于合同下限')
 })

@@ -8,7 +8,8 @@ import { projectType } from './schema.ts'
 export const presetId = z.string().min(1).max(80).regex(/^[a-z][a-z0-9-]{0,79}$/)
 export const presetSectionKey = z.string().min(1).max(64).regex(/^[a-z][a-z0-9-]{0,63}$/)
 export const presetSource = z.enum(['builtin', 'user'])
-export const supplementalKind = z.enum(['abstract', 'keywords', 'references', 'appendix', 'publication-info'])
+export const supplementalKind = z.enum(['abstract', 'keywords', 'references', 'appendix', 'publication-info',
+  'abstract-en', 'acknowledgements', 'cover', 'toc'])
 
 /** Built-ins carry both languages; user entries may carry a single string. */
 export const localizedText = z.union([
@@ -17,6 +18,49 @@ export const localizedText = z.union([
 ])
 export type LocalizedText = z.infer<typeof localizedText>
 
+/**
+ * Where a supplemental part is produced. `manuscript` parts become real chapters the
+ * user drafts; `export` parts are produced by the exporter from the manuscript itself
+ * (references) or only declared here as an intention (cover, toc). Storing this as a
+ * lookup instead of a field keeps every stored preset byte-compatible.
+ */
+export const SUPPLEMENTAL_PRODUCTION = {
+  abstract: 'manuscript', keywords: 'manuscript', 'abstract-en': 'manuscript',
+  references: 'export', appendix: 'manuscript', 'publication-info': 'manuscript',
+  acknowledgements: 'manuscript', cover: 'export', toc: 'export',
+} as const satisfies Record<z.infer<typeof supplementalKind>, 'manuscript' | 'export'>
+
+/** Front matter comes before the body, back matter after it; export-only parts are placed too. */
+export const SUPPLEMENTAL_PLACEMENT = {
+  abstract: 'front', keywords: 'front', 'abstract-en': 'front', cover: 'front', toc: 'front',
+  references: 'back', acknowledgements: 'back', appendix: 'back', 'publication-info': 'back',
+} as const satisfies Record<z.infer<typeof supplementalKind>, 'front' | 'back'>
+
+/**
+ * The chapter title a manuscript part is drafted under. The preset's own `description`
+ * stays the explanation shown in the wizard; a heading must not be free prose.
+ */
+export const SUPPLEMENTAL_LABELS = {
+  abstract: { 'zh-CN': '摘要', en: 'Abstract' },
+  keywords: { 'zh-CN': '关键词', en: 'Keywords' },
+  'abstract-en': { 'zh-CN': 'Abstract', en: 'Abstract' },
+  references: { 'zh-CN': '参考文献', en: 'References' },
+  appendix: { 'zh-CN': '附录', en: 'Appendix' },
+  'publication-info': { 'zh-CN': '书目信息', en: 'Publication Info' },
+  acknowledgements: { 'zh-CN': '致谢', en: 'Acknowledgements' },
+  cover: { 'zh-CN': '封面', en: 'Cover' },
+  toc: { 'zh-CN': '目录', en: 'Contents' },
+} as const satisfies Record<z.infer<typeof supplementalKind>, LocalizedText>
+
+export const presetSubsection = z.object({
+  key: presetSectionKey,
+  title: localizedText,
+  focus: localizedText,
+  share: z.number().positive().finite(),
+  // Widening this to `sourced` requires a contract update (SPEC v1.1 §5.1).
+  shareSource: z.literal('heuristic').default('heuristic'),
+}).strict()
+
 export const presetSection = z.object({
   key: presetSectionKey,
   title: localizedText,
@@ -24,6 +68,12 @@ export const presetSection = z.object({
   share: z.number().positive().finite(),
   // Widening this to `sourced` requires a contract update (SPEC v1.1 §5.1).
   shareSource: z.literal('heuristic').default('heuristic'),
+  // How much of this chapter is a lead-in before the first subsection. Zero means the
+  // chapter is a pure container: it still occupies one outline row so its subsections
+  // have a parent to hang from, and the allocator floors it to the section minimum.
+  leadShare: z.number().min(0).max(1).default(0),
+  // Nested one level deep. Shares are normalised inside the chapter, never across it.
+  subsections: z.array(presetSubsection).max(8).default([]),
 }).strict()
 
 export const supplementalPart = z.object({
@@ -61,13 +111,14 @@ export const presetSummary = z.object({
   id: presetId, source: presetSource, paperType: projectType,
   order: z.number().int().nonnegative().nullable(), version: z.string(),
   title: localizedText, summary: localizedText, sectionCount: z.number().int().positive(),
+  subsectionCount: z.number().int().nonnegative().default(0),
   modified: z.boolean().optional(),
 }).strict()
 
 export const presetSelectionRequest = z.object({ id: presetId }).strict()
 /** What the wizard sends: the paper's own structure, with absolute chapter lengths. */
 export const presetStructureSection = z.object({ key: presetSectionKey, title: localizedText, focus: localizedText,
-  targetLength: z.number().int().min(50).max(30000) }).strict()
+  targetLength: z.number().int().min(50).max(30000), parentKey: presetSectionKey.optional() }).strict()
 export const presetSaveRequest = z.object({ title: localizedText, summary: localizedText, paperType: projectType,
   sections: z.array(presetStructureSection).min(1).max(40), supplementalParts: z.array(supplementalPart).max(12).default([]),
   tags: z.array(z.string().min(1).max(40)).max(20).default([]), derivedFrom: presetId.optional() }).strict()

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "course-argumentative",
-  "version": "1.0.0",
-  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "version": "2.0.0",
+  "updatedAt": "2026-10-09T00:00:00.000Z",
   "paperType": "course-paper",
   "order": 1,
   "title": {
@@ -35,11 +35,53 @@
         "en": "Introduction"
       },
       "focus": {
-        "zh-CN": "交代议题背景，给出可被辩护的中心观点，并说明为什么这个问题值得讨论。",
-        "en": "Set up the topic, state a defensible thesis, and explain why it matters."
+        "zh-CN": "交代议题背景与已有讨论的分歧，给出可被辩护的中心观点，并说明为什么这个问题值得讨论、本文按什么路线展开。",
+        "en": "Set up the topic and the disagreement around it, state a defensible thesis, and say why it matters and how the paper proceeds."
       },
       "share": 0.12,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "topic-background",
+          "title": {
+            "zh-CN": "议题背景与问题提出",
+            "en": "Topic and Question"
+          },
+          "focus": {
+            "zh-CN": "说明议题的来龙去脉，把讨论收敛到一个可以回答的问题；不堆砌与问题无关的常识。",
+            "en": "Explain where the topic comes from and narrow it to one answerable question; skip background that does not bear on it."
+          },
+          "share": 0.3,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "prior-discussion",
+          "title": {
+            "zh-CN": "已有讨论与分歧",
+            "en": "Existing Positions"
+          },
+          "focus": {
+            "zh-CN": "概述有代表性的几种立场及其理由，说明分歧卡在哪里；这里只呈现，不在本节下结论。",
+            "en": "Outline the representative positions and where they disagree; present them here and reserve judgement for later."
+          },
+          "share": 0.25,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "thesis-roadmap",
+          "title": {
+            "zh-CN": "中心观点与行文路线",
+            "en": "Thesis and Roadmap"
+          },
+          "focus": {
+            "zh-CN": "用一两句给出可被辩护的中心观点，并说明后续按什么顺序论证；观点要能被反驳，不能只是描述现象。",
+            "en": "State the defensible thesis in a sentence or two and the order the argument will follow; it must be falsifiable, not a description."
+          },
+          "share": 0.45,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "argument",
@@ -48,11 +90,66 @@
         "en": "Argument"
       },
       "focus": {
-        "zh-CN": "按分论点组织段落，每段先给主题句再给证据与解释，与中心观点形成一条线；需要时可拆成多章重新分配篇幅。",
-        "en": "One claim per paragraph: topic sentence, evidence, interpretation, each tied back to the thesis. Split into several chapters if needed."
+        "zh-CN": "本章是全文主体，按 2.1–2.4 组织，每节一个分论点：先给主题句，再给证据与解释，最后回扣中心观点。节序可改，改后重新分配篇幅。",
+        "en": "The body of the paper, organised as 2.1–2.4: one claim per section, each opening with its topic sentence, then evidence and interpretation tied back to the thesis. Reorder freely and reallocate."
       },
-      "share": 0.65,
-      "shareSource": "heuristic"
+      "share": 0.62,
+      "shareSource": "heuristic",
+      "leadShare": 0.1,
+      "subsections": [
+        {
+          "key": "premises",
+          "title": {
+            "zh-CN": "概念界定与论证前提",
+            "en": "Concepts and Premises"
+          },
+          "focus": {
+            "zh-CN": "界定关键概念，交代论证依赖的前提；概念有争议时说明采用哪种定义及理由。",
+            "en": "Define the key terms and state the premises the argument rests on; where a definition is contested, say which one you adopt and why."
+          },
+          "share": 0.14,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "main-evidence",
+          "title": {
+            "zh-CN": "主要论据与展开",
+            "en": "Main Evidence"
+          },
+          "focus": {
+            "zh-CN": "给出支撑中心观点的核心论据，逐条展开证据如何支持结论；这是篇幅最重的一节。",
+            "en": "Present the core evidence for the thesis and show, item by item, how it supports the conclusion. This carries the most weight."
+          },
+          "share": 0.32,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "further-material",
+          "title": {
+            "zh-CN": "进一步的材料与例证",
+            "en": "Further Material"
+          },
+          "focus": {
+            "zh-CN": "补充第二类证据或具体例证，覆盖主要论据没有处理的情形；例证要能检验观点，不只是装饰。",
+            "en": "Add a second kind of evidence or a concrete case covering what the main argument left out; examples must test the claim, not decorate it."
+          },
+          "share": 0.26,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "argument-limits",
+          "title": {
+            "zh-CN": "论证的边界与限制",
+            "en": "Limits of the Argument"
+          },
+          "focus": {
+            "zh-CN": "说明观点在什么范围内成立、什么地方不适用；主动划界比被反问更可信。",
+            "en": "State where the claim holds and where it does not; marking the boundary yourself reads as more credible than being asked."
+          },
+          "share": 0.18,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "counterargument",
@@ -64,8 +161,37 @@
         "zh-CN": "选择有代表性的反对意见，公平陈述后说明为何不推翻本文观点；不是宣布对方错误。",
         "en": "State a representative opposing view fairly, then explain why it does not overturn the thesis."
       },
-      "share": 0.13,
-      "shareSource": "heuristic"
+      "share": 0.14,
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "opposing-view",
+          "title": {
+            "zh-CN": "有代表性的反对意见",
+            "en": "The Opposing View"
+          },
+          "focus": {
+            "zh-CN": "选最强的而非最弱的反方，按其自身逻辑陈述，并给出它的依据；不设稻草人。",
+            "en": "Take the strongest opposing view, not the weakest, state it in its own terms with its grounds, and avoid a straw man."
+          },
+          "share": 0.45,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "reply",
+          "title": {
+            "zh-CN": "回应与必要修正",
+            "en": "Reply and Revision"
+          },
+          "focus": {
+            "zh-CN": "说明反方为何不推翻本文观点，或承认需要修正哪一部分；修正要具体，不能一句「有待研究」带过。",
+            "en": "Explain why the objection fails, or concede exactly which part of the thesis needs revising; a vague 'further study is needed' is not a revision."
+          },
+          "share": 0.55,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "conclusion",
@@ -77,22 +203,44 @@
         "zh-CN": "回到最初的问题，说明证据支持到什么程度；不引入未经论证的新结论。",
         "en": "Return to the original question and state how far the evidence carries it; introduce no new claims."
       },
-      "share": 0.1,
+      "share": 0.12,
       "shareSource": "heuristic"
     }
   ],
   "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要（问题、观点、主要依据与结论）",
+        "en": "Abstract: question, position, main grounds and conclusion"
+      },
+      "suggestedLength": 300
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词（3–5 个）",
+        "en": "Keywords (three to five)"
+      }
+    },
     {
       "kind": "references",
       "description": {
         "zh-CN": "参考文献",
         "en": "References"
       }
+    },
+    {
+      "kind": "acknowledgements",
+      "description": {
+        "zh-CN": "致谢（老师要求时才保留）",
+        "en": "Acknowledgements (keep only when the assignment asks for one)"
+      }
     }
   ],
   "methodNotes": {
-    "zh-CN": "论证型作业通常不要求方法与数据章节；若老师另有规定，以老师要求为准。",
-    "en": "Argumentative assignments usually have no methods or data chapters; the teacher's requirements take precedence."
+    "zh-CN": "论证型作业通常不要求方法与数据章节；若老师另有规定，以老师要求为准。摘要与关键词是常见起点，老师没要求时可在向导第三步取消勾选。",
+    "en": "Argumentative assignments usually have no methods or data chapters; the teacher's requirements take precedence. The abstract and keywords are a common starting point and can be unticked in step three of the wizard."
   },
   "references": [
     {

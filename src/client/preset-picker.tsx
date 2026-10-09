@@ -1,6 +1,6 @@
 import { useTextPrompt } from './text-prompt.tsx'
 import React, { useEffect, useState } from 'react'
-import { localized, type Preset } from '../shared/presets.ts'
+import { localized, SUPPLEMENTAL_LABELS, SUPPLEMENTAL_PLACEMENT, SUPPLEMENTAL_PRODUCTION, type Preset } from '../shared/presets.ts'
 import { sectionsFromPreset } from '../core/presets/apply.ts'
 
 /** Preset browsing, preview and management (design 02 §7). Applying is atomic: the type
@@ -43,6 +43,16 @@ export const PRESET_CSS = `
 .sf-preset-sections li{padding:7px 0;border-bottom:1px solid #8881}
 .sf-preset-sections strong{font-weight:500}
 .sf-preset-sections small{display:block;color:var(--sf-muted);font-size:12px;margin-top:2px}
+.sf-preset-subsections{margin:2px 0 0;padding:0 0 0 14px;list-style:none;border-left:2px solid #8882}
+.sf-preset-subsections li{padding:5px 0 5px 8px;border-bottom:0;color:var(--dsw-alias-label-secondary,#727780)}
+.sf-preset-subsections em{font-style:normal;font-size:11.5px;color:var(--sf-muted);margin-left:6px}
+.sf-preset-parts{margin:12px 0 0;padding:10px 12px;border:1px solid #8883;border-radius:8px;font-size:12.5px}
+.sf-preset-parts p{margin:0 0 6px;font-size:12.5px}
+.sf-preset-parts-row{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline}
+.sf-preset-parts-label{color:var(--sf-muted);font-size:11.5px}
+.sf-preset-part{display:inline-flex;align-items:baseline;gap:5px}
+.sf-preset-part small{color:var(--sf-muted);font-size:11px}
+.sf-preset-parts-note{margin:6px 0 0;color:var(--sf-muted);font-size:11.5px}
 .sf-preset-dialog>footer{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid #8882}
 .sf-preset-dialog>footer>span{flex:1}
 .sf-preset-dialog>footer button{height:36px;padding:0 14px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;cursor:pointer}
@@ -83,6 +93,11 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
   // (design 02 §7). The breakpoint follows the container, not the whole desktop.
   const [detail, setDetail] = useState(false), [narrow, setNarrow] = useState(false)
   const [draft, setDraft] = useState<{ title: string; sections: { key: string; title: string; focus: string; targetLength: number }[] }>()
+  // Which front and back matter this paper drafts. Everything the preset declares is
+  // pre-checked; the user narrows it here, once, before the structure is applied.
+  const [kept, setKept] = useState<string[]>([])
+  const draftedKinds = (preset: Preset) => preset.supplementalParts
+    .filter(part => SUPPLEMENTAL_PRODUCTION[part.kind] === 'manuscript').map(part => part.kind)
   useEffect(() => {
     const query = window.matchMedia('(max-width: 720px)')
     const sync = () => setNarrow(query.matches)
@@ -96,6 +111,10 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
     api('presets.list', {}).then((value: any) => live && setLibrary(value)).catch((failure: Error) => live && setError(failure.message))
     return () => { live = false }
   }, [open, paperType])
+  useEffect(() => {
+    const preset = library.all.find(row => row.id === chosen)
+    if (preset) setKept(draftedKinds(preset))
+  }, [chosen, library])
   if (!open) return null
   const needle = query.trim().toLowerCase()
   const rows = library.all.filter(preset => preset.paperType === tab)
@@ -110,8 +129,12 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
     if ((switching || applied?.modified) && !window.confirm(switching
       ? `将论文类型切换为「${localized(selected.title, language)}」所属类型，并替换当前结构。继续？`
       : '当前结构已被修改，使用该预设会替换它。继续？')) return
-    onUse(selected, switching)
+    onUse(selected, switching, kept)
   }
+  // An abstract without keywords, or the reverse, is almost never what an assignment asks
+  // for; saying so here is cheaper than finding out in the finished paper.
+  const halfPair = !!selected && (kept.includes('abstract') !== kept.includes('keywords'))
+    && draftedKinds(selected).includes('abstract') && draftedKinds(selected).includes('keywords')
   return <>{textPrompt.dialog}<div className="sf-preset-backdrop" onClick={event => { if (event.target === event.currentTarget) onClose() }}>
     <section className="sf-preset-dialog" role="dialog" aria-modal="true" aria-label="选择结构预设">
       <style>{PRESET_CSS}</style>
@@ -182,8 +205,29 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
               {selected.sections.map(section => <i key={section.key} style={{ width: `${section.share * 100}%` }} />)}</span></div>
             <ul className="sf-preset-sections">{selected.sections.map(section => <li key={section.key}>
               <strong>{localized(section.title, language)}</strong><em style={{ marginLeft: 8, fontSize: 12, color: 'var(--sf-muted)' }}>{Math.round(section.share * 100)}%</em>
-              <small>{localized(section.focus, language)}</small></li>)}</ul>
-            {selected.supplementalParts.length > 0 && <p>附属部分：{selected.supplementalParts.map(part => localized(part.description, language)).join('、')}（不计入正文目标）</p>}
+              <small>{localized(section.focus, language)}</small>
+              {section.subsections.length > 0 && <ul className="sf-preset-subsections">
+                {section.subsections.map(subsection => <li key={subsection.key}>
+                  <span>{localized(subsection.title, language)}</span><em>{Math.round(subsection.share * 100)}%</em>
+                  <small>{localized(subsection.focus, language)}</small></li>)}</ul>}
+            </li>)}</ul>
+            {selected.supplementalParts.length > 0 && <div className="sf-preset-parts">
+              <p>前置与后置部分（不占正文目标）</p>
+              {(['front', 'back'] as const).map(placement => {
+                const parts = selected.supplementalParts.filter(part => SUPPLEMENTAL_PLACEMENT[part.kind] === placement)
+                if (!parts.length) return null
+                return <div key={placement} className="sf-preset-parts-row">
+                  <span className="sf-preset-parts-label">{placement === 'front' ? '前置' : '后置'}</span>
+                  {parts.map(part => SUPPLEMENTAL_PRODUCTION[part.kind] === 'manuscript'
+                    ? <label key={part.kind} className="sf-preset-part">
+                      <input type="checkbox" checked={kept.includes(part.kind)}
+                        onChange={event => setKept(event.target.checked ? [...kept, part.kind] : kept.filter(kind => kind !== part.kind))} />
+                      <span>{localized(SUPPLEMENTAL_LABELS[part.kind], language)}</span></label>
+                    : <span key={part.kind} className="sf-preset-part">
+                      <span>{localized(SUPPLEMENTAL_LABELS[part.kind], language)}</span><small>导出时生成</small></span>)}
+                </div> })}
+              <p className="sf-preset-parts-note">勾掉的部分不会写入论文；参考文献按正文实际引用在导出时生成。</p>
+            </div>}
             {selected.methodNotes && <p>{localized(selected.methodNotes, language)}</p>}
             {selected.references.length > 0 && <p>结构依据：{selected.references.map(reference => reference.label).join('、')}</p>}
             <p>比例是建议起点，可按自己的需要修改。</p>
@@ -195,7 +239,8 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
         <button disabled={busy} onClick={() => void manage(() => api('presets.save', structure()))}>保存当前结构为我的预设</button>
         <button disabled={busy || !selected} onClick={() => selected && void manage(() => api('presets.copy', { id: selected.id }))}>复制为我的预设</button>
         <span />
-        <button className="sf-primary" disabled={busy || !selected} onClick={apply}>使用此预设</button>
+        {halfPair && <span style={{ fontSize: 12, color: 'var(--sf-warn-text)' }}>摘要与关键词通常一起出现，请同时勾选或同时取消。</span>}
+        <button className="sf-primary" disabled={busy || !selected || halfPair} onClick={apply}>使用此预设</button>
       </footer>
     </section>
   </div></>

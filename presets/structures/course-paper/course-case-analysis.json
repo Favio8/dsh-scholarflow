@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "course-case-analysis",
-  "version": "1.0.0",
-  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "version": "2.0.0",
+  "updatedAt": "2026-10-09T00:00:00.000Z",
   "paperType": "course-paper",
   "order": 3,
   "title": {
@@ -10,21 +10,21 @@
     "en": "Case Analysis"
   },
   "summary": {
-    "zh-CN": "给定情境，诊断问题、比较备选方案并给出可执行的建议，适合商科、管理与法学课程。",
-    "en": "Diagnoses a given situation, compares options and recommends action; suited to business, management and law courses."
+    "zh-CN": "从一个具体情境出发做诊断，比较备选方案并给出行动建议，适合商科、管理与法学类课程作业。",
+    "en": "Diagnoses a concrete situation, compares alternatives and recommends action; suited to business, management and law coursework."
   },
   "whenToUse": [
     {
-      "zh-CN": "老师提供一个组织或事件的情境材料",
-      "en": "The teacher provides an organisational or event-based situation"
+      "zh-CN": "作业给了一个案例或情境，要求分析并给建议",
+      "en": "The assignment supplies a case and asks for analysis and advice"
     },
     {
-      "zh-CN": "要求给出决策建议而不是研究结论",
-      "en": "A recommendation is required rather than a research finding"
+      "zh-CN": "评价标准看重问题识别与论证依据",
+      "en": "The rubric rewards problem identification and grounded reasoning"
     },
     {
-      "zh-CN": "需要用到课程中的分析框架",
-      "en": "Course frameworks are expected to be applied"
+      "zh-CN": "需要区分现象与原因、比较不同做法",
+      "en": "Symptoms must be separated from causes and options compared"
     }
   ],
   "sections": [
@@ -35,11 +35,40 @@
         "en": "Introduction"
       },
       "focus": {
-        "zh-CN": "说明分析目标、所用框架与行文路线；不预告最终建议，也不写研究意义。",
-        "en": "State the analytical objective, the framework used and the roadmap; do not preview the recommendation."
+        "zh-CN": "说明分析目标、案例边界与使用的课程概念，并交代全文的分析顺序。",
+        "en": "State the analytical goal, the boundary of the case and the course concepts applied, then the order of the analysis."
       },
       "share": 0.1,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "case-goal",
+          "title": {
+            "zh-CN": "案例与分析目标",
+            "en": "The Case and the Goal"
+          },
+          "focus": {
+            "zh-CN": "用几句话说清案例是什么、要回答什么问题；不整段复述案例材料。",
+            "en": "Say what the case is and which question it must answer in a few sentences; do not retell the case."
+          },
+          "share": 0.45,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "framework",
+          "title": {
+            "zh-CN": "分析框架与行文路线",
+            "en": "Framework and Roadmap"
+          },
+          "focus": {
+            "zh-CN": "说明采用哪个课程概念或分析框架、为什么适合这个案例，以及后文顺序。",
+            "en": "Name the course concept or analytical framework, why it fits this case, and the order the rest follows."
+          },
+          "share": 0.55,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "background",
@@ -48,11 +77,40 @@
         "en": "Background"
       },
       "focus": {
-        "zh-CN": "筛选与问题相关的情境事实，聚焦利益相关方的诉求、假设与矛盾。",
-        "en": "Select the situation facts that matter, focusing on stakeholders, their claims and tensions."
+        "zh-CN": "筛选与问题相关的情境事实，说明利益相关方与他们之间的紧张关系；只写后文用得上的事实。",
+        "en": "Select the facts that bear on the problem and identify the stakeholders and the tensions between them; keep only what the analysis uses."
       },
       "share": 0.18,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "situation",
+          "title": {
+            "zh-CN": "情境事实梳理",
+            "en": "The Situation"
+          },
+          "focus": {
+            "zh-CN": "按时间或结构梳理关键事实，标注数据出处；不复述与问题无关的细节。",
+            "en": "Lay out the key facts chronologically or structurally, marking where the numbers come from; omit detail the analysis never uses."
+          },
+          "share": 0.45,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "stakeholders",
+          "title": {
+            "zh-CN": "利益相关方与矛盾",
+            "en": "Stakeholders and Tensions"
+          },
+          "focus": {
+            "zh-CN": "列出相关方各自的目标与约束，指出他们之间的冲突在哪里；这决定后文的方案取舍。",
+            "en": "List each party's goals and constraints and locate the conflicts between them; this is what the later options trade off."
+          },
+          "share": 0.55,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "problem",
@@ -61,11 +119,40 @@
         "en": "Problem Identification"
       },
       "focus": {
-        "zh-CN": "区分现象与原因，按紧迫性和影响给问题分级，指出真正需要决策的那一个。",
-        "en": "Separate symptoms from causes, rank the issues by urgency and impact, and name the decision that matters."
+        "zh-CN": "区分现象与原因，找出关键决策点；问题要写到可以行动，不停在「管理不善」这类空判。",
+        "en": "Separate symptoms from causes and locate the decisive choice; state problems in terms that can be acted on, not 'poor management'."
       },
       "share": 0.2,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "symptom-cause",
+          "title": {
+            "zh-CN": "现象与原因的区分",
+            "en": "Symptoms versus Causes"
+          },
+          "focus": {
+            "zh-CN": "先摆出现象，再给出证据支持的原因判断；因果要有依据，不能凭印象。",
+            "en": "Present the symptoms first, then the causal judgement with the evidence behind it; do not infer causes from impressions."
+          },
+          "share": 0.45,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "key-decision",
+          "title": {
+            "zh-CN": "问题分级与关键决策点",
+            "en": "Ranking and the Key Decision"
+          },
+          "focus": {
+            "zh-CN": "按影响与紧迫性给问题排序，指出必须现在决定的那个点；排序标准要写明。",
+            "en": "Rank the problems by impact and urgency, name the one that must be decided now, and state the ranking criteria."
+          },
+          "share": 0.55,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "options",
@@ -74,11 +161,53 @@
         "en": "Options"
       },
       "focus": {
-        "zh-CN": "给出具体、现实的备选方案，比较各自的依据、代价与风险。",
-        "en": "Present concrete, realistic options and compare their basis, cost and risk."
+        "zh-CN": "给出两个以上可行方案及其依据，再比较代价与风险；方案要能落地，不能只是口号。",
+        "en": "Offer at least two workable options with their grounds, then compare cost and risk; options must be actionable, not slogans."
       },
       "share": 0.15,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "option-one",
+          "title": {
+            "zh-CN": "方案一及其依据",
+            "en": "Option One"
+          },
+          "focus": {
+            "zh-CN": "写清方案内容、依赖条件与支持它的课程概念或数据。",
+            "en": "State what the option involves, what it depends on, and the course concept or data that supports it."
+          },
+          "share": 0.35,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "option-two",
+          "title": {
+            "zh-CN": "方案二及其依据",
+            "en": "Option Two"
+          },
+          "focus": {
+            "zh-CN": "给出真正不同的第二条路，而不是第一个方案的微小变体。",
+            "en": "Give a genuinely different second path, not a small variation of the first."
+          },
+          "share": 0.35,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "comparison",
+          "title": {
+            "zh-CN": "方案比较：代价与风险",
+            "en": "Comparing Cost and Risk"
+          },
+          "focus": {
+            "zh-CN": "用同一套标准比较各方案的代价、风险与适用条件；比较标准前后一致。",
+            "en": "Compare the options on one consistent set of criteria covering cost, risk and the conditions each suits."
+          },
+          "share": 0.3,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "recommendation",
@@ -87,11 +216,53 @@
         "en": "Recommendation"
       },
       "focus": {
-        "zh-CN": "写明行动步骤、风险评估、成本收益、可衡量的判断标准与责任方，并回应可能的质疑。",
-        "en": "Specify steps, risks, cost and benefit, measurable criteria and owners, and answer the obvious objection."
+        "zh-CN": "给出推荐方案、实施步骤、风险应对与衡量标准；建议要能被执行和检验。",
+        "en": "Recommend one option with implementation steps, risk responses and measures; the advice must be executable and checkable."
       },
       "share": 0.3,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "steps",
+          "title": {
+            "zh-CN": "推荐方案与实施步骤",
+            "en": "The Recommendation and Its Steps"
+          },
+          "focus": {
+            "zh-CN": "明确推荐哪个方案，按顺序给出实施步骤、责任方与时间安排。",
+            "en": "Name the recommended option and give the steps in order, with owners and timing."
+          },
+          "share": 0.4,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "risks",
+          "title": {
+            "zh-CN": "风险评估与应对",
+            "en": "Risks and Responses"
+          },
+          "focus": {
+            "zh-CN": "指出方案的主要风险与触发条件，各给一条应对；不写「加强管理」这类空话。",
+            "en": "Name the main risks and their triggers with one response each; avoid empty phrases like 'strengthen management'."
+          },
+          "share": 0.3,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "measures",
+          "title": {
+            "zh-CN": "衡量标准与责任方",
+            "en": "Measures and Owners"
+          },
+          "focus": {
+            "zh-CN": "说明用什么指标判断建议是否奏效、由谁在什么时点检查。",
+            "en": "Say which indicators show whether the advice worked, who checks them and when."
+          },
+          "share": 0.3,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "conclusion",
@@ -100,14 +271,29 @@
         "en": "Conclusion"
       },
       "focus": {
-        "zh-CN": "简短回扣课程概念，不做发现总结与未来研究建议。",
-        "en": "Briefly tie back to course concepts; no findings summary or future-research agenda."
+        "zh-CN": "回扣课程概念，概括诊断与建议；不引入新材料或新方案。",
+        "en": "Return to the course concept and summarise the diagnosis and the recommendation; introduce no new material or option."
       },
       "share": 0.07,
       "shareSource": "heuristic"
     }
   ],
   "supplementalParts": [
+    {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要（案例、核心问题与建议）",
+        "en": "Abstract: the case, the core problem and the recommendation"
+      },
+      "suggestedLength": 200
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词（3–5 个）",
+        "en": "Keywords (three to five)"
+      }
+    },
     {
       "kind": "references",
       "description": {
@@ -117,13 +303,13 @@
     }
   ],
   "methodNotes": {
-    "zh-CN": "课程案例分析不是正式的案例研究：它服务于决策训练，不需要研究设计与数据三角验证。",
-    "en": "A course case analysis is not formal case-study research: it trains decision making and needs no research design."
+    "zh-CN": "课程案例分析的重点是问题、依据、备选与行动；不把课例分析冒称正式案例研究。章序为产品建议，老师另有规定时以老师要求为准。",
+    "en": "Course case analysis is about problem, grounds, options and action; do not present a coursework case as a formal case study. The chapter order is a product suggestion and the teacher's requirements take precedence."
   },
   "references": [
     {
-      "label": "USC Libraries · Writing a Case Analysis Paper",
-      "url": "https://libguides.usc.edu/writingguide/assignments/caseanalysis"
+      "label": "Baxter & Jack 2008 · Qualitative Case Study Methodology",
+      "url": "https://nsuworks.nova.edu/tqr/vol13/iss4/2/"
     }
   ]
 }

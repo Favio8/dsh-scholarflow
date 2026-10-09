@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "course-lab-report",
-  "version": "1.0.0",
-  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "version": "2.0.0",
+  "updatedAt": "2026-10-09T00:00:00.000Z",
   "paperType": "course-paper",
   "order": 2,
   "title": {
@@ -39,7 +39,36 @@
         "en": "State the purpose and relevant background, then the hypothesis and its basis, including how the variables relate."
       },
       "share": 0.14,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "purpose-background",
+          "title": {
+            "zh-CN": "实验目的与背景",
+            "en": "Purpose and Background"
+          },
+          "focus": {
+            "zh-CN": "说明这次实验要回答什么、与课程哪个问题相关；背景只保留理解实验所必需的部分。",
+            "en": "Say what the experiment answers and which course question it belongs to; keep only the background needed to follow it."
+          },
+          "share": 0.45,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "hypothesis",
+          "title": {
+            "zh-CN": "假设与变量关系",
+            "en": "Hypothesis and Variables"
+          },
+          "focus": {
+            "zh-CN": "给出可检验的假设，写清自变量、因变量与需要控制的变量；假设要能被打败。",
+            "en": "State a testable hypothesis with the independent, dependent and controlled variables; it must be capable of failing."
+          },
+          "share": 0.55,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "method",
@@ -52,7 +81,49 @@
         "en": "Describe materials, procedure, controls and analysis in chronological order so it can be reproduced; no results here."
       },
       "share": 0.2,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "materials",
+          "title": {
+            "zh-CN": "材料与设备",
+            "en": "Materials and Equipment"
+          },
+          "focus": {
+            "zh-CN": "列出材料、仪器型号与关键参数；参数要写到他人能据以复现，不写「若干」「适量」。",
+            "en": "List materials, instrument models and key parameters precisely enough to reproduce; avoid 'some' or 'an appropriate amount'."
+          },
+          "share": 0.3,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "procedure",
+          "title": {
+            "zh-CN": "实验步骤",
+            "en": "Procedure"
+          },
+          "focus": {
+            "zh-CN": "按实际顺序写步骤与对照设置，说明每组重复次数；与实验记录一致，不补做没做过的步骤。",
+            "en": "Write the steps and controls in the order performed, with the number of repeats per group; match the lab record and invent nothing."
+          },
+          "share": 0.4,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "analysis",
+          "title": {
+            "zh-CN": "数据处理与分析方法",
+            "en": "Data Processing and Analysis"
+          },
+          "focus": {
+            "zh-CN": "说明数据如何整理、用哪种统计或计算方法、显著性水平取多少；方法写在得到结果之前。",
+            "en": "Say how the data is processed, which statistical or computational method is used and at what significance level; decide this before seeing results."
+          },
+          "share": 0.3,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "results",
@@ -65,7 +136,49 @@
         "en": "Report observed and computed values factually; tables for precision, figures for trends, numbered with units. No interpretation."
       },
       "share": 0.25,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "overview",
+          "title": {
+            "zh-CN": "总体结果概述",
+            "en": "Overview"
+          },
+          "focus": {
+            "zh-CN": "用两三句概括结果的整体样子，再引出分项数据；不在此下结论。",
+            "en": "Summarise the overall pattern in two or three sentences before the detail; draw no conclusion here."
+          },
+          "share": 0.3,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "detailed-data",
+          "title": {
+            "zh-CN": "分项数据与图表",
+            "en": "Detailed Data and Figures"
+          },
+          "focus": {
+            "zh-CN": "逐项给出数值，表格呈现精确数据、图呈现趋势；图表按「表 3-1」「图 3-1」编号并配题注，单位写全。",
+            "en": "Give the values item by item, tables for precision and figures for trends; number them as Table 3-1 and Figure 3-1 with captions and full units."
+          },
+          "share": 0.45,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "anomalies",
+          "title": {
+            "zh-CN": "异常与误差说明",
+            "en": "Anomalies and Error"
+          },
+          "focus": {
+            "zh-CN": "报告偏离趋势的数据点与仪器误差范围，说明是保留还是剔除及理由；不静默删掉不利数据。",
+            "en": "Report points that depart from the trend and the instrument error range, and say whether they were kept or dropped and why; never silently discard inconvenient data."
+          },
+          "share": 0.25,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "discussion",
@@ -78,7 +191,62 @@
         "en": "State whether the data supports the hypothesis, analyse error sources concretely, compare with existing work and state limitations."
       },
       "share": 0.35,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "hypothesis-check",
+          "title": {
+            "zh-CN": "结果是否支持假设",
+            "en": "Does the Data Support the Hypothesis"
+          },
+          "focus": {
+            "zh-CN": "对照假设逐条判断支持、部分支持或不支持，并指出依据是哪个数据；不支持就说不支持。",
+            "en": "Judge each hypothesis as supported, partly supported or not, pointing at the data that decides it; say so when it is not supported."
+          },
+          "share": 0.3,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "error-analysis",
+          "title": {
+            "zh-CN": "误差来源分析",
+            "en": "Error Sources"
+          },
+          "focus": {
+            "zh-CN": "分析误差的具体来源与量级，说明哪一项最可能影响结论；不写空泛的「人为误差」。",
+            "en": "Analyse the concrete sources and magnitudes of error and which one most affects the conclusion; avoid the empty phrase 'human error'."
+          },
+          "share": 0.25,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "comparison",
+          "title": {
+            "zh-CN": "与既有研究的比较",
+            "en": "Comparison with Existing Work"
+          },
+          "focus": {
+            "zh-CN": "把结果与文献或他人实验对比，说明一致或不一致及可能原因；只比有出处的数据。",
+            "en": "Compare the result with published or peer data, explaining agreement or disagreement and its likely cause; compare only against sourced numbers."
+          },
+          "share": 0.25,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "limitations",
+          "title": {
+            "zh-CN": "本次实验的限制",
+            "en": "Limitations"
+          },
+          "focus": {
+            "zh-CN": "说明样本、条件或方法上的限制，以及结论因此能被推到多远；限制要具体到本次实验。",
+            "en": "State the limits in sample, conditions or method and how far the conclusion may be pushed; be specific to this experiment."
+          },
+          "share": 0.2,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "conclusion",
@@ -98,10 +266,17 @@
     {
       "kind": "abstract",
       "description": {
-        "zh-CN": "摘要",
-        "en": "Abstract"
+        "zh-CN": "摘要（目的、方法、主要结果与结论）",
+        "en": "Abstract: purpose, method, main result and conclusion"
       },
       "suggestedLength": 200
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词（3–5 个）",
+        "en": "Keywords (three to five)"
+      }
     },
     {
       "kind": "references",
@@ -119,8 +294,8 @@
     }
   ],
   "methodNotes": {
-    "zh-CN": "没有实际数据时，结果与讨论按待补处理，不编造数值或实验现象。",
-    "en": "Without real data, results and discussion stay marked as pending; never invent values or observations."
+    "zh-CN": "没有实际数据时，结果与讨论按待补处理，不编造数值或实验现象。摘要与关键词老师没要求时，可在向导第三步取消勾选。",
+    "en": "Without real data, results and discussion stay marked as pending; never invent values or observations. Untick the abstract and keywords in step three of the wizard if the assignment does not ask for them."
   },
   "references": [
     {

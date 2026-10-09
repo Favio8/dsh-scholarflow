@@ -1,13 +1,21 @@
 import { z } from 'zod'
 import { id, hash, requestContext, projectType, relativePath } from './schema.ts'
 import { exportFormat } from './presentation.ts'
-import { presetId, presetSource } from './presets.ts'
+import { presetId, presetSource, supplementalPart } from './presets.ts'
 
 export const writingSection = z.object({ id, title: z.string().trim().min(1).max(160), purpose: z.string().max(2000).default(''),
   targetLength: z.number().int().min(50).max(30000),
   // Only a manual value is locked; editing a title or reordering never changes this.
   allocationMode: z.enum(['auto', 'manual']).default('manual'),
-  allocationWeight: z.number().positive().finite().optional() }).strict()
+  // Zero is a container chapter: it holds a place for its subsections and the allocator
+  // floors it to the section minimum instead of giving it a share of the budget.
+  allocationWeight: z.number().nonnegative().finite().optional(),
+  // A subsection hangs off its chapter; absent means a top-level chapter.
+  parentId: id.optional(),
+  // Front and back matter are drafted after the body, because a summary can only
+  // summarise text that already exists. References never appear here: the exporter
+  // builds them from the citation order.
+  kind: z.enum(['body', 'front', 'back']).default('body') }).strict()
 
 /** One requirement source member; folders list what was confirmed, never the whole disk. */
 export const requirementSourceMember = z.object({ name: z.string().min(1).max(800),
@@ -115,7 +123,7 @@ export const requirementCandidate = z.object({ schemaVersion: z.literal(1), cand
   diff: z.array(candidateDiff).max(200).default([]), conflicts: z.array(candidateConflict).max(40).default([]),
   state: z.enum(['pending', 'adopted', 'discarded', 'stale']), createdAt: z.string(), updatedAt: z.string() }).strict()
 export const outlineCandidate = z.object({ schemaVersion: z.literal(1), candidateId: id, kind: z.literal('outline'),
-  projectId: id, sessionId: id, basedOn: candidateBasis, sections: z.array(writingSection).min(1).max(40),
+  projectId: id, sessionId: id, basedOn: candidateBasis, sections: z.array(writingSection).min(1).max(60),
   changes: z.array(outlineChange).max(80).default([]), coverage: z.array(outlineCoverage).max(60).default([]),
   gaps: z.array(z.string().max(1000)).max(40).default([]), conflicts: z.array(candidateConflict).max(40).default([]),
   state: z.enum(['pending', 'adopted', 'discarded', 'stale']), createdAt: z.string(), updatedAt: z.string() }).strict()
@@ -136,7 +144,10 @@ export const creationSpec = z.object({ title: z.string().trim().min(1).max(300),
   assignmentPath: relativePath.optional(),
   requirementSources: z.array(requirementSource).max(200).default([]),
   materials: z.array(relativePath).max(500), online: z.boolean().default(false), targetLength: z.number().int().min(200).max(60000),
-  countingPolicy, sections: z.array(writingSection).min(1).max(40), preset: presetSelection.optional(),
+  countingPolicy, sections: z.array(writingSection).min(1).max(60), preset: presetSelection.optional(),
+  // Which front and back matter this paper drafts. A snapshot, not a reference: deleting a
+  // preset must not change the paper (SPEC v1.1 §6).
+  supplementalParts: z.array(supplementalPart).max(12).default([]),
   // v1.2 additions: all optional so a stored draft keeps parsing (SPEC v1.2 §19).
   brief: requirementBrief.optional(), typography: typographySpec.optional(), cover: coverSpec.optional(),
   overrides: z.array(specOverride).max(40).default([]),
@@ -214,5 +225,5 @@ export const STRUCTURES: Record<CreationSpec['type'], string[]> = {
 export function presetSections(type: CreationSpec['type'], length: number) {
   const titles = STRUCTURES[type]
   return titles.map((title, index) => ({ id: `section_${index + 1}`, title, purpose: '',
-    targetLength: Math.max(50, Math.round(length / titles.length)), allocationMode: 'auto' as const }))
+    targetLength: Math.max(50, Math.round(length / titles.length)), allocationMode: 'auto' as const, kind: 'body' as const }))
 }

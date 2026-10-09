@@ -33,18 +33,27 @@
           "title": { "$ref": "#/$defs/localizedText" },
           "focus": { "$ref": "#/$defs/localizedText" },
           "share": { "type": "number", "exclusiveMinimum": 0, "description": "Body share. Stored normalised: the section shares sum to 1 within 1e-6." },
-          "shareSource": { "enum": ["heuristic"], "default": "heuristic", "description": "Widening this to 'sourced' requires a contract update (SPEC v1.1 §5.1)." }
+          "shareSource": { "enum": ["heuristic"], "default": "heuristic", "description": "Widening this to 'sourced' requires a contract update (SPEC v1.1 §5.1)." },
+          "leadShare": {
+            "type": "number", "minimum": 0, "maximum": 1, "default": 0,
+            "description": "Share of this chapter spent on a lead-in before the first subsection. With subsections present, leadShare plus the subsection shares must sum to 1 within 1e-6."
+          },
+          "subsections": {
+            "type": "array", "maxItems": 8, "default": [],
+            "description": "One level of nested sections. Their shares are normalised inside this chapter, never across the preset.",
+            "items": { "$ref": "#/$defs/presetSubsection" }
+          }
         }
       }
     },
     "supplementalParts": {
       "type": "array", "maxItems": 12,
-      "description": "Abstract, keywords, references, appendix and publication details. These never take a share of the body target.",
+      "description": "Abstract, keywords, references, appendix, publication details, acknowledgements and the declared cover/table of contents. These never take a share of the body target.",
       "items": {
         "type": "object", "additionalProperties": false,
         "required": ["kind", "description"],
         "properties": {
-          "kind": { "enum": ["abstract", "keywords", "references", "appendix", "publication-info"] },
+          "kind": { "enum": ["abstract", "keywords", "references", "appendix", "publication-info", "abstract-en", "acknowledgements", "cover", "toc"] },
           "description": { "$ref": "#/$defs/localizedText" },
           "suggestedLength": { "type": "integer", "minimum": 1, "maximum": 100000 }
         }
@@ -74,6 +83,17 @@
           "properties": { "zh-CN": { "type": "string", "minLength": 1, "maxLength": 2000 }, "en": { "type": "string", "minLength": 1, "maxLength": 2000 } }
         }
       ]
+    },
+    "presetSubsection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key", "title", "focus", "share"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "Stable and unique inside its chapter; also distinct from the chapter's own key." },
+        "title": { "$ref": "#/$defs/localizedText" },
+        "focus": { "$ref": "#/$defs/localizedText" },
+        "share": { "type": "number", "exclusiveMinimum": 0, "description": "Share inside the chapter. Stored normalised: leadShare plus the subsection shares sum to 1 within 1e-6." },
+        "shareSource": { "enum": ["heuristic"], "default": "heuristic" }
+      }
     }
   }
 }

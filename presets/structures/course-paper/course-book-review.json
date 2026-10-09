@@ -1,30 +1,30 @@
 {
   "schemaVersion": 1,
   "id": "course-book-review",
-  "version": "1.0.0",
-  "updatedAt": "2026-10-06T00:00:00.000Z",
+  "version": "2.0.0",
+  "updatedAt": "2026-10-09T00:00:00.000Z",
   "paperType": "course-paper",
   "order": 4,
   "title": {
     "zh-CN": "读书报告/书评型",
-    "en": "Book Report / Review"
+    "en": "Book Review / Reading Report"
   },
   "summary": {
-    "zh-CN": "先概述再评价，评价必须落到具体文本；适合通识课与经典阅读课。",
-    "en": "Summarises first, then evaluates against specific passages; suited to general-education and reading courses."
+    "zh-CN": "概述指定书目的内容并给出有依据的评价，适合要求提交阅读报告或书评的课程。",
+    "en": "Summarises an assigned book and judges it on stated grounds; suited to courses that ask for a reading report or review."
   },
   "whenToUse": [
     {
-      "zh-CN": "老师指定了书目并要求提交报告或书评",
-      "en": "A specific book is assigned and a report or review is required"
+      "zh-CN": "老师指定了书目，要求读后提交报告或书评",
+      "en": "The assignment names a book and asks for a report or review"
     },
     {
-      "zh-CN": "重点是理解与评价而不是论证一个新观点",
-      "en": "Understanding and evaluation matter more than a new argument"
+      "zh-CN": "既要说明书里讲什么，也要给出自己的判断",
+      "en": "Both what the book says and your own judgement are required"
     },
     {
-      "zh-CN": "读者假定没有读过原书",
-      "en": "The reader is assumed not to have read the book"
+      "zh-CN": "篇幅有限，概述不能挤掉评价",
+      "en": "Space is limited, so summary must not crowd out evaluation"
     }
   ],
   "sections": [
@@ -35,11 +35,40 @@
         "en": "Introduction"
       },
       "focus": {
-        "zh-CN": "给出书目信息、作者背景与本次评价的角度，让读者知道后面要评判什么。",
-        "en": "Give the book details, author background and the angle of evaluation."
+        "zh-CN": "给出作品、作者与版本信息，说明评价角度与标准，并交代全文顺序。",
+        "en": "Give the work, author and edition, state the angle and criteria of the evaluation, and the order of the paper."
       },
       "share": 0.1,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "book-info",
+          "title": {
+            "zh-CN": "书目与作者信息",
+            "en": "The Book and Its Author"
+          },
+          "focus": {
+            "zh-CN": "写清书名、作者、版本与出版信息，一句话说明作者立场或学术背景；信息要准确可查。",
+            "en": "Give title, author, edition and publication details accurately, plus one line on the author's standing or background."
+          },
+          "share": 0.35,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "criteria",
+          "title": {
+            "zh-CN": "评价角度与标准",
+            "en": "Angle and Criteria"
+          },
+          "focus": {
+            "zh-CN": "说明从哪个角度评价、用什么标准；标准先行，评价才有依据。",
+            "en": "State the angle of evaluation and the criteria; naming the criteria first is what makes the judgement accountable."
+          },
+          "share": 0.65,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "summary",
@@ -48,24 +77,121 @@
         "en": "Summary"
       },
       "focus": {
-        "zh-CN": "只提供理解评价所需的背景，不逐章复述，不透露结局。",
-        "en": "Give only the background needed to follow the evaluation; no chapter-by-chapter retelling."
+        "zh-CN": "提供理解评价所必需的背景：核心问题、主要论证线索与写作背景；概述为评价服务，不逐章复述。",
+        "en": "Give only what the evaluation needs: the core question, the main lines of argument and the context of writing. No chapter-by-chapter retelling."
       },
       "share": 0.35,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "core-question",
+          "title": {
+            "zh-CN": "核心问题与论点",
+            "en": "Core Question and Thesis"
+          },
+          "focus": {
+            "zh-CN": "说明全书要回答什么问题、主张什么；用作者自己的话说，再点明关键章节。",
+            "en": "Say what question the book answers and what it claims, in the author's own terms, and point to the chapters that carry it."
+          },
+          "share": 0.4,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "argument-line",
+          "title": {
+            "zh-CN": "主要论证线索",
+            "en": "Main Lines of Argument"
+          },
+          "focus": {
+            "zh-CN": "按论证结构而非章节顺序概述，指出每一环依赖什么；概述控制在评价所需的范围。",
+            "en": "Summarise by argument structure rather than chapter order, showing what each step relies on; keep it to what the evaluation needs."
+          },
+          "share": 0.35,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "context",
+          "title": {
+            "zh-CN": "写作背景与作者立场",
+            "en": "Context and Standpoint"
+          },
+          "focus": {
+            "zh-CN": "交代成书背景、对话对象与作者的立场偏向；这往往是评价的切入点。",
+            "en": "Give the context of writing, who the book answers and where the author stands; this is often where the evaluation starts."
+          },
+          "share": 0.25,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "evaluation",
       "title": {
         "zh-CN": "分析与评价",
-        "en": "Analysis and Evaluation"
+        "en": "Evaluation"
       },
       "focus": {
-        "zh-CN": "结合具体文本与理由，说明什么奏效、与同类作品相比如何、在主题或情理上是否有说服力。",
-        "en": "Argue from specific passages what works, how it compares with similar works, and whether it persuades."
+        "zh-CN": "结合具体文本与理由评价：论证是否有效、材料用得如何、与同类作品相比怎样、哪里有不足；每项判断都要落到原文。",
+        "en": "Judge against the text itself: whether the argument holds, how the material is used, how it compares with similar works and where it falls short. Anchor every judgement in the text."
       },
       "share": 0.45,
-      "shareSource": "heuristic"
+      "shareSource": "heuristic",
+      "leadShare": 0,
+      "subsections": [
+        {
+          "key": "validity",
+          "title": {
+            "zh-CN": "论证是否有效",
+            "en": "Does the Argument Hold"
+          },
+          "focus": {
+            "zh-CN": "检查关键推理是否成立、有无跳步或循环论证；指出具体位置，不泛泛而谈。",
+            "en": "Check whether the key inferences hold and whether there are leaps or circularity; point to the place, not the general impression."
+          },
+          "share": 0.3,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "evidence-use",
+          "title": {
+            "zh-CN": "材料与证据的使用",
+            "en": "Use of Evidence"
+          },
+          "focus": {
+            "zh-CN": "评价材料是否支撑结论、有无选择性引用或数据误用；举例说明。",
+            "en": "Assess whether the material supports the conclusions and whether there is selective quotation or misuse of data; give examples."
+          },
+          "share": 0.25,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "comparison",
+          "title": {
+            "zh-CN": "与同类作品的比较",
+            "en": "Comparison with Similar Works"
+          },
+          "focus": {
+            "zh-CN": "与观点相近或相反的作品对照，说明本书的贡献与位置；比较对象要确实可比。",
+            "en": "Set the book against works that agree or disagree, locating its contribution; compare only with genuinely comparable works."
+          },
+          "share": 0.25,
+          "shareSource": "heuristic"
+        },
+        {
+          "key": "weaknesses",
+          "title": {
+            "zh-CN": "不足与可争议之处",
+            "en": "Weaknesses and Disputable Points"
+          },
+          "focus": {
+            "zh-CN": "指出真正的不足或可以争论的地方，并说明理由；夸奖和批评都要有依据。",
+            "en": "Name the real weaknesses or the points open to dispute, with reasons; praise and criticism both need grounds."
+          },
+          "share": 0.2,
+          "shareSource": "heuristic"
+        }
+      ]
     },
     {
       "key": "conclusion",
@@ -74,8 +200,8 @@
         "en": "Conclusion"
       },
       "focus": {
-        "zh-CN": "给出总体判断与推荐对象；如需出版信息，按老师要求列在文末。",
-        "en": "State the overall judgement and who should read it; add publication details if required."
+        "zh-CN": "给出总体判断，说明这部作品对谁有什么阅读价值；不重复概述。",
+        "en": "Give the overall judgement and say what the work is worth reading for, and for whom; do not repeat the summary."
       },
       "share": 0.1,
       "shareSource": "heuristic"
@@ -83,16 +209,38 @@
   ],
   "supplementalParts": [
     {
+      "kind": "abstract",
+      "description": {
+        "zh-CN": "摘要（作品、核心论点与总体判断）",
+        "en": "Abstract: the work, its core claim and the overall judgement"
+      },
+      "suggestedLength": 200
+    },
+    {
+      "kind": "keywords",
+      "description": {
+        "zh-CN": "关键词（3–5 个）",
+        "en": "Keywords (three to five)"
+      }
+    },
+    {
+      "kind": "references",
+      "description": {
+        "zh-CN": "参考文献",
+        "en": "References"
+      }
+    },
+    {
       "kind": "publication-info",
       "description": {
-        "zh-CN": "出版信息",
-        "en": "Publication details"
+        "zh-CN": "书目信息（引用格式按老师要求）",
+        "en": "Publication details, formatted as the assignment requires"
       }
     }
   ],
   "methodNotes": {
-    "zh-CN": "概述与评价的比例按作业要求调整，常见各占一半；本预设把评价放在更重的一侧。",
-    "en": "The summary-to-evaluation ratio follows the assignment; this preset weights evaluation more heavily."
+    "zh-CN": "概述与评价要分开：概述提供理解评价所需的背景，评价给出有依据的判断。概述与评价的比例按作业要求调整；书目信息是元数据，不占正文篇幅。",
+    "en": "Keep summary and evaluation apart: the summary supplies what the evaluation needs, the evaluation gives a grounded judgement. Adjust the ratio to the assignment; publication details are metadata and take no body share."
   },
   "references": [
     {

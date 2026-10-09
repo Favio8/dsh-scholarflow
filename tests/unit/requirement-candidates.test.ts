@@ -6,12 +6,12 @@ import { classifyNote, groupIssues, mapLegacyNotes, mergeIssue, mergeIssues } fr
 import type { CreationSpec, RequirementBrief } from '../../src/shared/writing-task.ts'
 
 const at = '2026-10-06T00:00:00.000Z'
-const section = (title: string, purpose = '') => ({ id: `section_${title}`, title, purpose, targetLength: 200, allocationMode: 'auto' as const })
+const section = (title: string, purpose = '') => ({ id: `section_${title}`, title, purpose, targetLength: 200, allocationMode: 'auto' as const, kind: 'body' as const })
 
 function spec(overrides: Partial<CreationSpec> = {}): CreationSpec {
   return { title: '科技论文阅读报告', type: 'course-paper', language: 'zh-CN', format: 'docx',
     requirements: '写一篇阅读报告', requirementSources: [], materials: [], online: false, targetLength: 4000,
-    countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
+    countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 }, supplementalParts: [],
     sections: [section('引言', '')], overrides: [], manuscriptDir: 'manuscript', ...overrides }
 }
 

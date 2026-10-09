@@ -4,6 +4,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadPresetLibrary, duplicateOrders, defaultPreset, presetFromStructure, type RawPresetEntry } from '../../src/core/presets/library.ts'
+import { flattenPresetSections } from '../../src/core/presets/apply.ts'
 import { presetDocument, normalizeShares, sharesSumToOne, comparePresets, localized, type Preset } from '../../src/shared/presets.ts'
 
 const structuresRoot = fileURLToPath(new URL('../../presets/structures', import.meta.url))
@@ -63,6 +64,35 @@ test('the lowest order is the default preset for its paper type', async () => {
   assert.equal(defaultPreset(library, 'course-paper')!.id, 'course-argumentative')
   assert.equal(defaultPreset(library, 'research-paper')!.id, 'research-empirical-imrad')
   assert.equal(defaultPreset(library, 'literature-review')!.id, 'review-narrative')
+})
+
+test('every chapter with subsections closes its shares inside the chapter', async () => {
+  const library = loadPresetLibrary(await builtinEntries())
+  for (const preset of library.all) {
+    for (const section of preset.sections) {
+      if (!section.subsections.length) continue
+      const total = section.leadShare + section.subsections.reduce((sum, row) => sum + row.share, 0)
+      assert.ok(Math.abs(total - 1) <= 1e-6, `${preset.id}/${section.key} 的章首导语与子章节占比合计必须为 1，当前 ${total}`)
+      for (const subsection of section.subsections) {
+        assert.ok((subsection.title as { en?: string }).en, `${preset.id}/${section.key}/${subsection.key} 缺少英文子章节名`)
+        assert.ok((subsection.focus as { en?: string }).en, `${preset.id}/${section.key}/${subsection.key} 缺少英文写作重点`)
+        assert.equal(subsection.shareSource, 'heuristic')
+      }
+    }
+  }
+})
+
+test('no built-in flattens past the chapter limit, and course papers carry an abstract', async () => {
+  const library = loadPresetLibrary(await builtinEntries())
+  for (const preset of library.all) {
+    assert.ok(flattenPresetSections(preset).length <= 40, `${preset.id} 展平后不得超过 40 行`)
+  }
+  for (const preset of library.byType['course-paper']!) {
+    const kinds = preset.supplementalParts.map(part => part.kind)
+    assert.ok(kinds.includes('abstract'), `${preset.id} 需要摘要：课程论文通常要求摘要与关键词`)
+    assert.ok(kinds.includes('keywords'), `${preset.id} 需要关键词`)
+    assert.ok(kinds.includes('references'), `${preset.id} 需要参考文献`)
+  }
 })
 
 test('the preset document rejects unknown fields, unknown types and malformed ids', () => {
