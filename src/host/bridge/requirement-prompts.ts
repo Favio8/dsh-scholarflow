@@ -42,6 +42,8 @@ export const STRUCTURE_SYSTEM = [
 export const OUTLINE_SYSTEM = [
   '按已确认的要求给出章节结构候选，只返回 JSON 数组。',
   '数组元素：{"id":"section_1","title":"章节名","purpose":"本节要写什么，包含它承接哪一节","targetLength":300,"allocationMode":"auto"}。',
+  '子章节是可选的：加 "parentId":"上一章的 id" 即成为该章的子节，只用于要求本身分成几个并列方面时，不为凑结构而拆。',
+  '摘要、关键词、致谢、附录等前置后置部分也是可选的：加 "kind":"front" 或 "kind":"back"，且只在要求明确列出时才加。',
   '必须为 brief.coverage 中的每一项安排对应章节，并在 purpose 里写明覆盖的是哪一项。',
   'purpose 用要求的自然语言名称描述覆盖和承接，不写 brief.coverage、c1/c2 等内部追踪编号；技术映射编号不属于写作内容。',
   'rubric 若是贯穿各节的整体评价目标，在各节 purpose 中体现，不单独增加重复的总述章节。',

@@ -82,7 +82,11 @@ export const claimSchema = z.object({ id, text: z.string().min(1), kind: z.enum(
   status: z.enum(['draft', 'supported', 'partially-supported', 'unsupported', 'disputed', 'stale']), limitations: z.array(z.string()), reviewedBy: z.enum(['user', 'model', 'rule']).optional(),
 }).strict()
 export const outlineSchema = z.object({ version: z.number().int().min(0), title: z.string(), researchQuestion: z.string(), thesis: z.string(), confirmation: z.enum(['draft', 'confirmed']),
-  sections: z.array(z.object({ id, parentId: id.optional(), title: z.string().min(1), purpose: z.string(), claimIds: z.array(id), targetLength: z.object({ value: z.number().min(1), unit: z.enum(['words', 'zh-characters']) }).strict().optional(), missingEvidence: z.array(z.string()) }).strict()),
+  sections: z.array(z.object({ id, parentId: id.optional(), title: z.string().min(1), purpose: z.string(), claimIds: z.array(id), targetLength: z.object({ value: z.number().min(1), unit: z.enum(['words', 'zh-characters']) }).strict().optional(), missingEvidence: z.array(z.string()),
+    // Front and back matter are drafted after the body and never count toward the body
+    // target. Absent means body, which is what every stored outline written before this
+    // field existed says.
+    kind: z.enum(['body', 'front', 'back']).optional() }).strict()),
 }).strict()
 export const documentSchema = z.object({ id, relativePath, format: z.literal('markdown'), currentHash: hash, revisionId: id, encoding: z.literal('utf-8'), lineEnding: z.enum(['lf', 'crlf', 'mixed']), initialPlaceholder: z.boolean() }).strict()
 export const anchorSchema = z.object({ id, documentId: id, documentHash: hash, blockId: id, blockTextHash: hash, claimIds: z.array(id), status: z.enum(['current', 'needs-remap', 'stale']) }).strict()

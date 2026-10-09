@@ -18,6 +18,17 @@ import { classifyNote, mergeIssue } from './task-issues.ts'
 import type { ParsedMaterial } from '../../shared/materials.ts'
 import type { ReviewReport } from '../../shared/review.ts'
 
+/**
+ * Drafting order, which is not document order: the body comes first because a summary can
+ * only summarise text that already exists. The document itself keeps front matter at the
+ * top and back matter at the bottom; only the order the sections are written in changes.
+ */
+export function draftingOrder(sections: WritingTask['spec']['sections']): WritingTask['spec']['sections'] {
+  const body = sections.filter(section => (section.kind ?? 'body') === 'body')
+  const matter = sections.filter(section => (section.kind ?? 'body') !== 'body')
+  return matter.length ? [...body, ...matter] : sections
+}
+
 export interface WritingServices {
   parse(materialId: string): Promise<ParsedMaterial>
   search(query: string): Promise<string[]>
@@ -115,12 +126,19 @@ async function prepareWritingOutline(io: FileStore, task: WritingTask, model: Wr
   const claims = Object.values(current.ledger.claims).filter(claim => claim.evidenceLinks.every(link => evidence.some(row => row.id === link.evidenceId)))
   await confirmOutline(io, { version: current.ledger.outline.version, title: task.spec.title, researchQuestion: task.spec.requirements,
     thesis: `围绕 ${task.spec.title}，结合所选资料展开分析。`, confirmation: 'confirmed', sections: task.spec.sections.map(section => ({ id: section.id,
+      ...(section.parentId ? { parentId: section.parentId } : {}), kind: section.kind ?? 'body',
       title: section.title, purpose: section.purpose, claimIds: claims.filter(claim => claim.scope === section.id).map(claim => claim.id),
       targetLength: { value: section.targetLength, unit: task.spec.language === 'en' ? 'words' : 'zh-characters' }, missingEvidence: [] })) },
     current.ledger.revision, current.ledger.outline.version)
   current = await snapshot(io)
   if (current.document.initialPlaceholder && current.document.contentHash === task.expectedDocumentHash && !await dirtyWritingBuffers(io)) {
-    const skeleton = `# ${task.spec.title}\n\n` + task.spec.sections.map(section => `## ${section.title}\n\n`).join('')
+    // A subsection is one level deeper than its chapter, which is what sectionTarget()
+    // derives from the parent chain; a flat skeleton would fail that check on the first edit.
+    const depthOf = (id: string) => { let depth = 0, cursor = task.spec.sections.find(section => section.id === id)
+      while (cursor?.parentId) { depth++; cursor = task.spec.sections.find(section => section.id === cursor!.parentId) }
+      return depth }
+    const skeleton = `# ${task.spec.title}\n\n` + task.spec.sections
+      .map(section => `${'#'.repeat(2 + depthOf(section.id))} ${section.title}\n\n`).join('')
     await saveManual(io, skeleton, current.document.contentHash, current.ledger.revision)
     task.expectedDocumentHash = digest(skeleton)
   }
@@ -188,9 +206,14 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
       } else if (task.stage === 'outline') {
         if (!await prepareWritingOutline(io, task, model)) return
         task.stage = 'drafting'
+        // The order is a decision, not an implementation detail: it is recorded so a reader
+        // of the task can see why the abstract is written last.
+        if (task.spec.sections.some(section => (section.kind ?? 'body') !== 'body'))
+          await note('摘要、关键词、致谢等前置后置部分安排在正文之后生成：它们只能总结已经写完的内容。')
       } else if (task.stage === 'drafting') {
-        if (task.sectionIndex >= task.spec.sections.length) { task.stage = 'review'; await checkpoint(); continue }
-        const section = task.spec.sections[task.sectionIndex]
+        const order = draftingOrder(task.spec.sections)
+        if (task.sectionIndex >= order.length) { task.stage = 'review'; await checkpoint(); continue }
+        const section = order[task.sectionIndex]!
         if (task.childRunId && !task.pendingProposalId) task.pendingProposalId = await services.recoverChild(task)
         if (!task.pendingProposalId) {
           if (await dirtyWritingBuffers(io) || current.document.contentHash !== task.expectedDocumentHash) {
@@ -253,7 +276,9 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
           delete task.revisionPlan
           // Semantic corrections already have a full requirements assessment. Reuse it
           // when measured length stays valid; the actual semantic review still runs again.
-          const stats = wordStats((await snapshot(io)).document.text)
+          // The target is a body target: front and back matter are excluded, so a paper that
+          // met its plan is not sent back for a length repair because of its abstract.
+          const stats = wordStats((await snapshot(io)).document.text, { bodyOnly: true })
           const count = task.spec.language === 'en' ? stats.westernWords : stats.chineseCharacters
           if (count < task.spec.targetLength * .9 || count > task.spec.targetLength * 1.1) task.modelReviewComplete = false
         }
@@ -261,15 +286,16 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
           const live = await snapshot(io)
           const { cover, ...requirements } = task.spec
           const raw = await model('只返回 JSON {"issues":["具体问题与对应章节"],"sectionRevisions":[{"sectionId":"已给章节id","instruction":"基于已给原文证据的具体修正要求"}],"summary":"简短检查结论"}。逐项检查确认的大纲与老师要求；发现有证据可修正的漏项、篇幅偏差或错误，给出对应章节修正指令；无需修正返回空数组。篇幅使用给定 statistics.chineseCharacters（中文）或 westernWords（英文），不得另行估算；目标约数允许正负10%，不得在合格范围内以“需要凑足目标字数”为由扩写。仅修正真实漏项或错误，不将可选的更详细分析作为未达标要求。按报告任务分析原论文结构和承接关系，不要求学生补做实验。正文不写 brief.coverage、c1/c2 等内部追踪编号或 sectionId；这类残留须按所在章节提出修正。封面由导出器单独生成，不将正文没有封面信息列为缺项。未知项应说明，但不可编造核验结果。引用统一用已登记的 [@citeKey]；原论文的文献编号不可混作本报告引用。',
-            { requirements, manuscript: live.document.text, statistics: wordStats(live.document.text), evidence: Object.values(live.ledger.evidence),
+            { requirements, manuscript: live.document.text, statistics: wordStats(live.document.text, { bodyOnly: true }), evidence: Object.values(live.ledger.evidence),
               sources: Object.values(live.ledger.sources), answeredQuestions: task.questions.filter(row => row.kind !== 'budget') }, task.id + '.review.' + task.usedModelCalls)
           const assessment = parseModel(z.object({ issues: z.array(z.string().max(2000)).max(30), summary: z.string().max(2000),
             sectionRevisions: z.array(z.object({ sectionId: z.string(), instruction: z.string().max(4000) })).max(200).default([]) }), raw, 'writingTask.review')
           markHandled(task, { object: 'AI 全文检查', what: assessment.summary, impact: '本轮检查已执行；具体问题单独列出，执行完成不代表内容全部通过。' })
           reconcileReviewIssues(task, '要求检查', assessment.issues)
-          const statistics = wordStats(live.document.text), count = task.spec.language === 'en' ? statistics.westernWords : statistics.chineseCharacters
+          const statistics = wordStats(live.document.text, { bodyOnly: true }), count = task.spec.language === 'en' ? statistics.westernWords : statistics.chineseCharacters
           const lengthMismatch = count > task.spec.targetLength * 1.1 || count < task.spec.targetLength * .9
-          const lengths = lengthRepairTargets(task.spec.targetLength, count, task.spec.sections.map(section => {
+          const lengths = lengthRepairTargets(task.spec.targetLength, count, draftingOrder(task.spec.sections)
+            .filter(section => (section.kind ?? 'body') === 'body').map(section => {
             const range = sectionTarget(live.document.text, live.ledger.outline, section.id)
             const stats = wordStats(live.document.text.slice(range.startUtf16, range.endUtf16))
             return { id: section.id, count: task.spec.language === 'en' ? stats.westernWords : stats.chineseCharacters }

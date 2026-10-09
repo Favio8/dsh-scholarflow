@@ -109,3 +109,28 @@ test('AT-28: explained counting policy excludes citations, references, code and 
   assert.equal(result.westernWords, 2)
   assert.equal(result.countingPolicyId, 'sf-body-han-western-v1')
 })
+
+test('the body policy also excludes the abstract, keywords, acknowledgements and appendix', () => {
+  // A 2000-character plan is a body plan: a 300-character abstract is not 300 characters over.
+  const source = '# 标题\n\n## 摘要\n\n摘要三百字。\n\n## 关键词\n\n课程论文；结构\n\n## 引言\n\n正文一开始。\n\n## 致谢\n\n谢谢。\n\n## 附录\n\n附表。'
+  const whole = wordStats(source), body = wordStats(source, { bodyOnly: true })
+  assert.equal(whole.chineseCharacters, 33)
+  assert.equal(body.chineseCharacters, 9, '正文只算标题 2 + 引言 2 + 正文一开始 5')
+  assert.equal(whole.chineseCharacters - body.chineseCharacters, 24, '前置后置部分共 24 字，整篇统计仍包含它们')
+  assert.equal(body.westernWords, 0)
+  assert.match(body.detail, /摘要/)
+  assert.doesNotMatch(whole.detail, /摘要/)
+})
+
+test('a chapter the user happens to title 摘要-like prose still counts unless it is the whole heading', () => {
+  const source = '## 本文摘要了三种观点\n\n观点一二三。'
+  assert.equal(wordStats(source, { bodyOnly: true }).chineseCharacters, wordStats(source).chineseCharacters,
+    '只有整句等于受控标题名才算前置后置部分')
+})
+
+test('a subsection under an excluded heading stays excluded until a heading at its own depth ends it', () => {
+  const source = '## 附录\n\n### 原始数据\n\n数据一二三。\n\n## 结论\n\n收束。'
+  // 结论 2 + 收束 2; the appendix and its subsection (附录 2 + 原始数据 4 + 数据一二三 5) are out.
+  assert.equal(wordStats(source, { bodyOnly: true }).chineseCharacters, 4)
+  assert.equal(wordStats(source).chineseCharacters, 15)
+})

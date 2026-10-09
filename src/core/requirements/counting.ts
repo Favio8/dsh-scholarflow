@@ -5,9 +5,9 @@ export function requirementCount(requirement: Requirement, count: { chineseChara
   if (requirement.confirmation !== 'confirmed' || !rule) return { detail: '尚未确认计数约束。' }
   if (requirement.kind === 'length') {
     if (rule.countingPolicyId === 'sf-body-han-plus-western-v1') return { actual: count.chineseCharacters + count.westernWords,
-      detail: `按 sf-body-han-plus-western-v1：${count.chineseCharacters} 汉字 + ${count.westernWords} 西文词元；排除参考文献、代码和公式。` }
+      detail: `按 sf-body-han-plus-western-v1：${count.chineseCharacters} 汉字 + ${count.westernWords} 西文词元；排除摘要、关键词、致谢、附录、参考文献、代码和公式。` }
     if (rule.countingPolicyId === 'sf-body-han-western-v1' && ['zh-characters', 'words'].includes(rule.unit ?? '')) return {
-      actual: rule.unit === 'zh-characters' ? count.chineseCharacters : count.westernWords, detail: `按 ${rule.countingPolicyId} 的 ${rule.unit} 检查；排除参考文献、代码和公式。` }
+      actual: rule.unit === 'zh-characters' ? count.chineseCharacters : count.westernWords, detail: `按 ${rule.countingPolicyId} 的 ${rule.unit} 检查；排除摘要、关键词、致谢、附录、参考文献、代码和公式。` }
     return { detail: '篇幅统计口径未确认或当前不支持。' }
   }
   if (requirement.kind !== 'references') return { detail: '此项不是确定性篇幅／引用计数。' }

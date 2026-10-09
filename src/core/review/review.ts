@@ -63,7 +63,7 @@ export function manualEligibleChecks(report: ReviewReport, input: Awaited<Return
 
 export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): ReviewReport {
   const { current, materialHashes, dependencyHash } = input, { ledger, document } = current
-  const reviewId = newId('review'), projection = projectMarkdown(document.text), count = wordStats(document.text)
+  const reviewId = newId('review'), projection = projectMarkdown(document.text), count = wordStats(document.text, { bodyOnly: true })
   const checks: ReviewReport['checks'] = [], issues: Issue[] = []
   const check = (key: string, status: 'pass' | 'fail' | 'unknown', detail: string, category: Issue['category'], severity: Issue['severity'] = 'B1', refs: Partial<Issue> = {}, method: Issue['checkMethod'] = 'deterministic') => {
     checks.push({ id: key, status, method, detail })

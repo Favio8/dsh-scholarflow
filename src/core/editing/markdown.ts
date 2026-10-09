@@ -177,15 +177,25 @@ export function validateSelection(source: string, selection: SelectionPayload) {
   return range
 }
 
-export function wordStats(source: string) {
+/**
+ * Headings that carry front or back matter. They are never part of the body target, so a
+ * paper with a 300-character abstract is not 300 characters over its 2000-character plan.
+ * Matched on the whole heading text, exactly like the references heading below.
+ */
+const NON_BODY_HEADING = /^(?:摘要|abstract|关键词|keywords|致谢|acknowledgements?|附录|appendix|目录|contents|书目信息)$/i
+
+export function wordStats(source: string, options: { bodyOnly?: boolean } = {}) {
   const projection = projectMarkdown(source), tree = projection.tree, parts: string[] = []
-  let referenceDepth: number | undefined
+  let referenceDepth: number | undefined, matterDepth: number | undefined
   for (const node of tree.children ?? []) {
     if (node.type === 'heading') {
+      if (matterDepth !== undefined && node.depth! <= matterDepth) matterDepth = undefined
       if (referenceDepth !== undefined && node.depth! <= referenceDepth) referenceDepth = undefined
-      if (/^(?:参考文献|引用文献|references|bibliography)$/i.test(textOf(node).trim())) { referenceDepth = node.depth; continue }
+      const title = textOf(node).trim()
+      if (/^(?:参考文献|引用文献|references|bibliography)$/i.test(title)) { referenceDepth = node.depth; continue }
+      if (options.bodyOnly && NON_BODY_HEADING.test(title)) { matterDepth = node.depth; continue }
     }
-    if (referenceDepth !== undefined) continue
+    if (referenceDepth !== undefined || matterDepth !== undefined) continue
     const collect = (item: AstNode) => {
       if (['code', 'inlineCode', 'math', 'inlineMath', 'html', 'image', 'definition', 'footnoteDefinition'].includes(item.type)) return
       if (item.type === 'text') parts.push((item.leafIds ?? []).map(id => projection.leaves.find(leaf => leaf.id === id)!).filter(leaf => !leaf.citationKeys).map(leaf => leaf.text).join(''))
@@ -194,7 +204,8 @@ export function wordStats(source: string) {
     collect(node); parts.push('\n')
   }
   const prose = parts.join(' ')
+  const excluded = options.bodyOnly ? '、摘要、关键词、致谢、附录' : ''
   return { chineseCharacters: [...prose.matchAll(/\p{Script=Han}/gu)].length,
     westernWords: [...prose.matchAll(/[\p{Script=Latin}\p{N}]+(?:['’\-][\p{Script=Latin}\p{N}]+)*/gu)].length,
-    countingPolicyId: 'sf-body-han-western-v1', detail: '正文与标题：汉字逐字符；西文含数字词元，撇号/连字符连接词算一个；排除参考文献、代码、公式、原始 HTML、图片、引用 token。' }
+    countingPolicyId: 'sf-body-han-western-v1', detail: `正文与标题：汉字逐字符；西文含数字词元，撇号/连字符连接词算一个；排除参考文献${excluded}、代码、公式、原始 HTML、图片、引用 token。` }
 }
