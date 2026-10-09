@@ -129,11 +129,13 @@ const draftMarkBody = () => `<div class="sf-app sf-paper-project" style="height:
 ${draftSource('sf-mark-gutter', '<div class="sf-source-marks" aria-hidden="true"><div id="sf-mark-bands"></div></div>')}
 </div></div></div></div>`
 
-/** The preview's half of the mark: the range is coloured on the glyphs themselves. */
+/** The preview's half of the mark: the range is coloured on the glyphs themselves. The marked text
+    is long enough to wrap, because "does the gradient continue across the wrap" is only answerable
+    on a range that actually wraps — a one-line span cannot show a seam. */
 const draftPreviewBody = () => `<div class="sf-app sf-paper-project" style="height:340px;display:flex;flex-direction:column">
 <div class="sf-preview-pane" style="display:flex;flex-direction:column;min-height:0;flex:1">
 <div class="sf-paper-scroll" style="flex:1;min-height:0;overflow:auto"><div class="sf-paper-page">
-<p data-sf-block="p_TEST_ONLY" style="white-space:pre-wrap"><span data-sf-leaf="leaf_TEST_ONLY_plain">同样长度的未标注文字</span><span class="sf-mark-inline" data-sf-marked="true" data-flow="off">同样长度的被标注文字</span></p>
+<p data-sf-block="p_TEST_ONLY" style="white-space:pre-wrap"><span data-sf-leaf="leaf_TEST_ONLY_plain">同样长度的未标注文字</span><span class="sf-mark-inline" data-sf-marked="true" data-flow="off">这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续</span></p>
 </div></div></div></div>`
 
 const presetRow = (title, summary, chosen, current, manage) => `<div style="display:flex;align-items:center">
@@ -187,7 +189,7 @@ const surfaces = {
   draftPreview: { title: '正文预览 · 改写范围标注', body: draftPreviewBody(), width: '520px' }
 }
 
-export function pageHtml(theme, wizard, picker, paper) {
+export function pageHtml(theme, wizard, picker, paper, motion) {
   const stages = Object.entries(surfaces)
     .map(([id, surface], index) => stage(`s${index + 1}`, surface.title, surface.body, surface.width))
     .join('\n')
@@ -202,6 +204,7 @@ body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;colo
 ${wizard}
 ${picker}
 ${paper}
+${motion}
 /* Same specificity as the plugin rule, so this must come after it. The real dialog is a fixed
    overlay, which would sit out of flow and collapse its stage in a static page. */
 .sf-preset-backdrop{position:static;padding:0;background:transparent}
@@ -239,6 +242,7 @@ async function measure(page, base64) {
 
 export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) {
   const theme = extractCss('src/client/theme/tokens.ts', 'THEME_CSS')
+  const motion = extractCss('src/client/motion/tokens.ts', 'MOTION_CSS')
   const wizard = extractCss('src/client/creation-wizard.tsx', 'WIZARD_CSS')
   const picker = extractCss('src/client/preset-picker.tsx', 'PRESET_CSS')
   const paper = extractCss('src/client/paper-workspace.tsx', 'PAPER_CSS')
@@ -253,7 +257,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
     platform: 'browser', format: 'iife', globalName: 'ScholarFlowRange' })
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
-  writeFileSync(join(outDir, 'wizard.html'), pageHtml(theme, wizard, picker, paper + marks))
+  writeFileSync(join(outDir, 'wizard.html'), pageHtml(theme, wizard, picker, paper + marks, motion))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
   const results = [], wrap = [], mark = [], preview = []
@@ -290,6 +294,11 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
           markReport.spread = Math.max(...probes.flatMap((one, index) => probes.slice(index + 1)
             .map(other => Math.hypot(one.r - other.r, one.g - other.g, one.b - other.b))), 0)
           markReport.contrast = Math.hypot(band.r - plain.r, band.g - plain.g, band.b - plain.b)
+          // G-1 on the band: the flow has to move pixels, with the off and reduced-motion captures
+          // as its controls. Before the drag, so the probe cannot disturb what was measured above.
+          markReport.motion = await motionProbe(page, page.locator(`#s${indexPath(id)}>.frame #sf-mark-bands>.sf-range-band`).first(),
+            on => page.evaluate(({ selector, on }) => { document.querySelector(selector).dataset.flow = on ? 'on' : 'off' },
+              { selector: `#s${indexPath(id)}>.frame #sf-mark-bands`, on }))
           // After the capture, so the drag cannot disturb what was measured above.
           markReport.live = await dragRangeProbe(page, `#s${indexPath(id)}>.frame`)
           mark.push({ name, report: markReport, problems: auditMark(name, markReport, wrap.at(-1)?.report.longRows) })
@@ -297,6 +306,14 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
         if (previewReport) {
           const [marked, plain] = await sampleColors(page, shot.toString('base64'), previewReport.sample)
           previewReport.contrast = Math.hypot(marked.r - plain.r, marked.g - plain.g, marked.b - plain.b)
+          // G-2 and G-1 on the glyphs: the wrap seam and whether the flow moves at all — the preview
+          // had never been asked either question.
+          const seam = await seamProbe(page, `#s${indexPath(id)}>.frame .sf-mark-inline`)
+          previewReport.fragments = seam.fragments
+          previewReport.seamDelta = seam.delta
+          previewReport.motion = await motionProbe(page, page.locator(`#s${indexPath(id)}>.frame .sf-mark-inline`),
+            on => page.evaluate(({ selector, on }) => { document.querySelector(selector).dataset.flow = on ? 'on' : 'off' },
+              { selector: `#s${indexPath(id)}>.frame .sf-mark-inline`, on }))
           preview.push({ name, report: previewReport, problems: auditPreview(name, previewReport) })
         }
       }
@@ -343,11 +360,16 @@ async function checkDraftMark(page, selector) {
     const whole = paint(start, end)
     const painted = [...bands.children].map(band => band.getBoundingClientRect())
     // The same band with the candidate ready must stop, and a plain selection must never flow: the
-    // settled states are part of the contract, not a side effect.
+    // settled states are part of the contract, not a side effect. The component drives the flow
+    // from data-flow (written once from state === 'generating'), so the gate drives the same
+    // attribute rather than the state it used to read.
+    bands.dataset.flow = 'on'
     const flow = getComputedStyle(bands.children[0]).animationName
     bands.dataset.state = 'ready'
+    bands.dataset.flow = 'off'
     const settled = getComputedStyle(bands.children[0]).animationName
     bands.dataset.state = 'selected'
+    bands.dataset.flow = 'off'
     const held = getComputedStyle(bands.children[0]).animationName
     // Now reproduce the defect: select the text for real. The selection runs past the marked range,
     // so the last rows it covers carry a band and a row further down carries only the selection.
@@ -429,6 +451,94 @@ async function dragRangeProbe(page, selector) {
 }
 
 /**
+ * G-1: does the flow actually move? An animation that exists but displaces nothing — a percentage
+ * of a box that already equals the image width — produces identical frames, which is exactly the
+ * defect this caught. Two captures of the marked element, one sixth of a sweep apart, are compared
+ * pixel by pixel. The switched-off and reduced-motion captures are the controls: without them a
+ * difference could come from anything else on the surface. Leaves the switch off.
+ */
+async function motionProbe(page, locator, turn) {
+  const capture = async () => (await locator.screenshot()).toString('base64')
+  const delta = (one, other) => page.evaluate(async ({ one, other }) => {
+    const load = async src => { const image = new Image(); image.src = 'data:image/png;base64,' + src; await image.decode(); return image }
+    const [first, second] = [await load(one), await load(other)]
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(first.width, second.width); canvas.height = Math.max(first.height, second.height)
+    const context = canvas.getContext('2d')
+    const read = image => { context.clearRect(0, 0, canvas.width, canvas.height); context.drawImage(image, 0, 0)
+      return context.getImageData(0, 0, canvas.width, canvas.height).data }
+    const [a, b] = [read(first), read(second)]
+    let changed = 0
+    for (let index = 0; index < a.length; index += 4) {
+      if (Math.abs(a[index] - b[index]) > 12 || Math.abs(a[index + 1] - b[index + 1]) > 12 || Math.abs(a[index + 2] - b[index + 2]) > 12) changed++
+    }
+    return changed / (a.length / 4)
+  }, { one, other })
+  await turn(true)
+  const onOne = await capture()
+  await page.waitForTimeout(460)
+  const onTwo = await capture()
+  await turn(false)
+  const offOne = await capture()
+  await page.waitForTimeout(460)
+  const offTwo = await capture()
+  await turn(true)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.waitForTimeout(120)
+  const reducedOne = await capture()
+  await page.waitForTimeout(460)
+  const reducedTwo = await capture()
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await turn(false)
+  return { moving: await delta(onOne, onTwo), still: await delta(offOne, offTwo), reduced: await delta(reducedOne, reducedTwo) }
+}
+
+/**
+ * G-2: does one span's gradient continue across its line breaks? With box-decoration-break:clone
+ * every wrapped fragment repaints the whole gradient from its first stop, so a marked paragraph
+ * reads as a row of colour blocks; with slice the background runs continuously and the seam is
+ * invisible.
+ *
+ * Measured on the background, not the glyphs: clipped to text, a strip's colour is an ink-and-paper
+ * mixture that depends on which glyph happens to sit at the seam, so the number would mostly measure
+ * character shapes. Unclipping the background for one capture turns the same question into a clean
+ * one, and the DOM selection is dropped for that capture so the tint cannot level the difference.
+ */
+async function seamProbe(page, selector) {
+  await page.evaluate(selector => {
+    window.getSelection()?.removeAllRanges()
+    const marked = document.querySelector(selector)
+    marked.style.webkitBackgroundClip = 'border-box'
+    marked.style.backgroundClip = 'border-box'
+  }, selector)
+  await page.waitForTimeout(60)
+  // Unclipping changes paint, not layout, so the geometry read after the capture still describes it.
+  const capture = (await page.locator(selector).screenshot()).toString('base64')
+  const geometry = await page.evaluate(selector => {
+    const marked = document.querySelector(selector)
+    marked.style.webkitBackgroundClip = ''
+    marked.style.backgroundClip = ''
+    const box = marked.getBoundingClientRect(), fragments = [...marked.getClientRects()]
+    const seam = []
+    for (let index = 0; index + 1 < fragments.length; index++) {
+      const one = fragments[index], two = fragments[index + 1]
+      const middle = rect => rect.top + rect.height / 2 - box.top - 2
+      // Flush against both edges: in the unwrapped layout the position after one fragment's last
+      // pixel is the next fragment's first, so a continuous gradient reads the same colour here.
+      // Sampling even a few pixels in from either side measures the gap between the strips, not the
+      // seam — the gradient advances about 1.4 colour units per pixel.
+      seam.push({ x: one.right - box.left - 4, y: middle(one), width: 4, height: 5 },
+        { x: two.left - box.left, y: middle(two), width: 4, height: 5 })
+    }
+    return { fragments: fragments.length, seam }
+  }, selector)
+  if (geometry.fragments < 2) return { fragments: geometry.fragments, delta: undefined }
+  const colours = await sampleColors(page, capture, geometry.seam)
+  return { fragments: geometry.fragments, delta: colours.reduce((worst, one, index) => index % 2
+    ? Math.max(worst, Math.hypot(one.r - colours[index - 1].r, one.g - colours[index - 1].g, one.b - colours[index - 1].b)) : worst, 0) }
+}
+
+/**
  * The preview's half of the same defect: there the range is coloured on the glyphs, and selecting it
  * made the platform paint over that colour. A DOM selection is set over the marked span and its
  * unmarked neighbour, both of which are then sampled from the capture — if the selection covered the
@@ -447,16 +557,35 @@ async function checkDraftPreview(page, selector) {
       return { x: box.left - frame.left + 1, y: box.top - frame.top + 1, width: Math.max(4, box.width - 2), height: Math.max(4, box.height - 2) } }
     const style = getComputedStyle(marked)
     return { selected: selection.toString().length, gradient: style.backgroundImage.includes('linear-gradient'),
+      // The seam measurement only exposes a restart at widths where the wrap lands away from the
+      // period's matching stop, so the wrap mode itself is asserted as well: the pixel check proves
+      // the effect where the layout shows it, this proves the contract everywhere.
+      wrap: style.boxDecorationBreak || style.webkitBoxDecorationBreak,
       colour: style.color, sample: [strip(marked), strip(plain)] }
   }, selector)
+}
+
+/** G-1's three assertions, shared by both surfaces: the flow moves, and only when asked to. The
+    off and reduced-motion legs are what make the first one mean something. */
+function auditMotion(name, report, what) {
+  const problems = []
+  if (report.motion) {
+    if (report.motion.moving < 0.005) problems.push(`${name}: the ${what} does not flow (${(report.motion.moving * 100).toFixed(2)}% of pixels changed between frames)`)
+    if (report.motion.still > 0.0005) problems.push(`${name}: the ${what} keeps moving while switched off (${(report.motion.still * 100).toFixed(2)}%)`)
+    if (report.motion.reduced > 0.0005) problems.push(`${name}: the ${what} ignores reduced motion (${(report.motion.reduced * 100).toFixed(2)}%)`)
+  }
+  return problems
 }
 
 export function auditPreview(name, report) {
   const problems = []
   if (!report.selected) problems.push(`${name}: no text was selected, so nothing was compared`)
   if (!report.gradient) problems.push(`${name}: the marked text lost its gradient`)
+  if (report.wrap !== undefined && report.wrap !== 'slice') problems.push(`${name}: the marked text wraps with ${report.wrap}, so every line restarts the gradient`)
+  if (report.fragments !== undefined && report.fragments < 2) problems.push(`${name}: the marked text does not wrap, so no seam could be measured`)
+  if (report.seamDelta !== undefined && report.seamDelta > 18) problems.push(`${name}: the gradient restarts at a wrap (seam differs by ${report.seamDelta.toFixed(1)})`)
   if (report.contrast !== undefined && report.contrast < 20) problems.push(`${name}: the selection hides the marked colour (marked and unmarked text differ by ${report.contrast.toFixed(1)})`)
-  return problems
+  return [...problems, ...auditMotion(name, report, 'marked text')]
 }
 
 export function auditMark(name, report, expectedRows) {  const problems = []
@@ -477,7 +606,7 @@ export function auditMark(name, report, expectedRows) {  const problems = []
   // If the platform selection colour covered the mark, a selected row with a band and a selected row
   // without one would look the same.
   if (report.contrast !== undefined && report.contrast < 20) problems.push(`${name}: the selection hides the mark (marked and unmarked selected rows differ by ${report.contrast.toFixed(1)})`)
-  return problems
+  return [...problems, ...auditMotion(name, report, 'band')]
 }
 
 /** A capture that renders nothing is the failure this check exists for. */
@@ -536,8 +665,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // paragraph occupies one row" is the difference between a real gate and a vacuous one, and the
   // mark count has to match the rows the same range actually wraps over.
   for (const row of wrap) console.log(`${row.name}: 横向溢出 ${row.report.overflow}px · 长段落 ${row.report.longRows.toFixed(1)} 行 · 行号列 ${row.report.gutterTotal.toFixed(0)}px / 编辑区内容 ${row.report.content.toFixed(0)}px`)
-  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行内色散 ${(row.report.spread ?? 0).toFixed(0)} · 文字对比度 ${(row.report.textContrast ?? 0).toFixed(1)}:1 · 与未标注行色差 ${(row.report.contrast ?? 0).toFixed(1)} · 拖选中可读 ${row.report.live?.during ?? 0}→${row.report.live?.grown ?? 0} 次`)
-  for (const row of preview) console.log(`${row.name}: 选中 ${row.report.selected} 字 · 渐变 ${row.report.gradient ? '在' : '丢失'} · 选中时被标注与未标注文字色差 ${(row.report.contrast ?? 0).toFixed(1)}`)
+  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行内色散 ${(row.report.spread ?? 0).toFixed(0)} · 文字对比度 ${(row.report.textContrast ?? 0).toFixed(1)}:1 · 与未标注行色差 ${(row.report.contrast ?? 0).toFixed(1)} · 拖选中可读 ${row.report.live?.during ?? 0}→${row.report.live?.grown ?? 0} 次 · 流动像素 ${((row.report.motion?.moving ?? 0) * 100).toFixed(2)}%（关 ${((row.report.motion?.still ?? 0) * 100).toFixed(2)}%／减动效 ${((row.report.motion?.reduced ?? 0) * 100).toFixed(2)}%）`)
+  for (const row of preview) console.log(`${row.name}: 选中 ${row.report.selected} 字 · 渐变 ${row.report.gradient ? '在' : '丢失'} · 选中时被标注与未标注文字色差 ${(row.report.contrast ?? 0).toFixed(1)} · 折行 ${row.report.fragments ?? 0} 段接缝色差 ${(row.report.seamDelta ?? 0).toFixed(1)} · 流动像素 ${((row.report.motion?.moving ?? 0) * 100).toFixed(2)}%（关 ${((row.report.motion?.still ?? 0) * 100).toFixed(2)}%／减动效 ${((row.report.motion?.reduced ?? 0) * 100).toFixed(2)}%）`)
   if (problems.length) {
     console.error(`\n${problems.length} check(s) failed:`)
     for (const problem of problems) console.error(`  ${problem}`)

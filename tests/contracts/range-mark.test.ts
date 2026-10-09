@@ -3,6 +3,7 @@
 // rendered to static markup, so the assertion is about the shipped renderer rather than a copy.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -67,4 +68,27 @@ test('a decoded entity is marked as a whole unit rather than by a character gues
   assert.deepEqual(markedSlice(leaf, { start: 3, end: 4 }), { start: 1, end: 2 })
   assert.equal(markedSlice(leaf, { start: 0, end: 0 }), undefined)
   assert.equal(markedSlice({ ...leaf, mappable: false }, { start: 0, end: 7 }), undefined)
+})
+
+test('the mark reads its colours, period and wrap behaviour out of the token layer', () => {
+  // SF-089(d) with SF-088: the stops and the period are decided once, in theme/tokens.ts, and the
+  // component only references them. A hex value reappearing in the mark CSS is a second source of
+  // truth, which is how the two panes used to drift apart.
+  const source = readFileSync(resolve('src/client/range-mark.tsx'), 'utf8')
+  const from = source.indexOf('export const RANGE_MARK_CSS = `') + 'export const RANGE_MARK_CSS = `'.length
+  const css = source.slice(from, source.indexOf('`', from))
+  assert.equal(/#[0-9a-fA-F]{3,8}/.test(css), false, 'the mark CSS carries a literal colour')
+  assert.match(css, /background-image:var\(--sf-mark-gradient\)/)
+  assert.match(css, /background-size:var\(--sf-mark-period\) 100%;background-repeat:repeat-x/)
+  // One period per loop, as a real length: a percentage of a box that already equals the image
+  // displaces nothing at all, which is how the flow used to never happen.
+  assert.match(css, /@keyframes sf-range-flow\{from\{background-position:0 0\}to\{background-position:calc\(-1 \* var\(--sf-mark-period\)\) 0\}\}/)
+  assert.equal(/background-position:100%/.test(css), false, 'a percentage displacement cannot move a full-width image')
+  // slice continues one span's background across its line breaks; clone restarts the gradient on
+  // every wrapped fragment, which is what made a marked paragraph read as a row of colour blocks.
+  assert.match(css, /box-decoration-break:slice/)
+  assert.equal(/box-decoration-break:clone/.test(css), false)
+  const tokens = readFileSync(resolve('src/client/theme/tokens.ts'), 'utf8')
+  assert.match(tokens, /--sf-mark-gradient:linear-gradient/)
+  assert.match(tokens, /--sf-mark-period:\d+px/)
 })

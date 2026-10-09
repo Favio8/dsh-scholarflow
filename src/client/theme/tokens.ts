@@ -27,6 +27,12 @@
  * and the selection tint sit *above* something that has to stay visible through them — the rainbow
  * band behind a selection, the sweep passing over a status row — so they keep an alpha channel.
  * Swapping one for the other is invisible in a screenshot until the thing underneath disappears.
+ *
+ * The mark's gradient, period and paper are one set for both themes on purpose (SPEC v1.6 §8): the
+ * gradient is carried by glyphs on paper in both panes — the preview's paper page and the source
+ * pane's paper chip — so the host theme never enters the glyph contrast calculation, and a dark
+ * override would only split the two panes back into two palettes. The period lives here rather
+ * than in motion/tokens.ts because it is a geometry of the background image, not a duration.
  */
 export const THEME_CSS = `:root{--sf-text:#0f1115;--sf-muted:#5e6472;--sf-text-faint:#697080;
 --sf-border:rgba(15,17,21,.12);--sf-border-soft:rgba(15,17,21,.07);--sf-border-strong:rgba(15,17,21,.26);--sf-fill:rgba(15,17,21,.04);--sf-fill-strong:rgba(15,17,21,.08);--sf-fill-sunken:rgba(15,17,21,.03);
@@ -44,7 +50,8 @@ export const THEME_CSS = `:root{--sf-text:#0f1115;--sf-muted:#5e6472;--sf-text-f
 --sf-radius-sm:4px;--sf-radius-md:6px;--sf-radius-lg:8px;--sf-radius-xl:12px;--sf-radius-pill:999px;
 --sf-font-xs:11px;--sf-font-sm:12px;--sf-font-md:13px;--sf-font-lg:15px;--sf-font-xl:18px;--sf-font-2xl:24px;
 --sf-leading-tight:1.4;--sf-leading-body:1.6;--sf-leading-prose:1.75;
---sf-focus-color:#3f68d8;--sf-focus-width:2px;--sf-disabled-opacity:.5;--sf-mark-band-radius:3px;--sf-mark-band-opacity:.78}
+--sf-focus-color:#3f68d8;--sf-focus-width:2px;--sf-disabled-opacity:.5;--sf-mark-band-radius:3px;--sf-mark-band-opacity:.78;
+--sf-mark-gradient:linear-gradient(90deg,#ff4d6d,#ffc300,#12b981,#2f7bff,#a25bf7,#ff4d6d);--sf-mark-period:320px;--sf-mark-paper:#fff}
 body[data-ds-dark-theme]{--sf-text:#f9fafb;--sf-muted:#9aa0a8;--sf-text-faint:#8b9099;
 --sf-border:rgba(255,255,255,.16);--sf-border-soft:rgba(255,255,255,.09);--sf-border-strong:rgba(255,255,255,.30);--sf-fill:rgba(255,255,255,.05);--sf-fill-strong:rgba(255,255,255,.10);--sf-fill-sunken:rgba(255,255,255,.03);
 --sf-accent-text:#8fb3ff;--sf-accent-soft:rgba(143,179,255,.14);--sf-accent-soft-strong:rgba(143,179,255,.22);--sf-accent-border:rgba(143,179,255,.32);
