@@ -17,12 +17,12 @@ export const PRESET_CSS = `
 .sf-preset-dialog{display:flex;flex-direction:column;width:min(960px,92vw);height:min(80vh,720px);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);overflow:hidden;box-shadow:var(--sf-shadow-3)}
 .sf-preset-dialog>header{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-3) var(--sf-space-4);border-bottom:1px solid var(--sf-border)}
 .sf-preset-dialog>header strong{font-size:var(--sf-font-lg)}
-.sf-preset-dialog>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:var(--sf-font-xl);cursor:pointer}
+.sf-preset-dialog>header button{margin-left:var(--sf-space-2);border:0;background:transparent;color:inherit;font-size:var(--sf-font-xl);cursor:pointer}
 .sf-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .sf-preset-tabs{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-4);border-bottom:1px solid var(--sf-border);flex-wrap:wrap}
 .sf-preset-tabs button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md);cursor:pointer}
 .sf-preset-tabs button[aria-pressed=true]{background:var(--sf-accent-soft);border-color:var(--sf-accent);color:var(--sf-accent-text)}
-.sf-preset-tabs input{margin-left:auto;height:var(--sf-space-6);min-width:180px}
+.sf-preset-tabs input{margin-left:auto;box-sizing:border-box;height:var(--sf-space-6);min-width:180px;padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md)}
 .sf-preset-body{display:flex;min-height:0;flex:1}
 .sf-preset-list{width:40%;min-width:220px;border-right:1px solid var(--sf-border);overflow:auto;padding:var(--sf-space-2)}
 .sf-preset-group{margin:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-xs);color:var(--sf-muted)}
@@ -33,7 +33,8 @@ export const PRESET_CSS = `
 .sf-preset-row small{font-size:var(--sf-font-xs);color:var(--sf-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sf-preset-row em{flex:none;font-size:var(--sf-font-xs);font-style:normal;color:var(--sf-muted)}
 .sf-preset-manage{display:flex;gap:var(--sf-space-1);flex:none}
-.sf-preset-manage button{border:0;background:transparent;color:var(--sf-muted);cursor:pointer;font-size:var(--sf-font-sm);padding:var(--sf-space-1)}
+.sf-preset-manage button{border:0;background:transparent;color:var(--sf-accent-text);cursor:pointer;font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-1)}
+.sf-preset-manage button:last-child{color:var(--sf-danger)}
 .sf-preset-preview{flex:1;min-width:0;overflow:auto;padding:var(--sf-space-4) var(--sf-space-5)}
 .sf-preset-preview h3{margin:0 0 var(--sf-space-2);font-size:var(--sf-font-xl)}
 .sf-preset-preview p{margin:var(--sf-space-2) 0;font-size:var(--sf-font-md);color:var(--dsw-alias-label-secondary,var(--sf-muted));line-height:var(--sf-leading-body)}

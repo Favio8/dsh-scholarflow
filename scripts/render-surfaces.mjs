@@ -41,7 +41,7 @@ const material = (checked, name, note, disabled) => `<label${disabled ? ' class=
   <span>${name}</span><small>${note}</small></label>`
 
 const head = (step) => `<header><span class="sf-wizard-eyebrow">科技论文写作</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p>${step === 0 ? '<button class="sf-wizard-clear">清除草稿</button>' : ''}</header>
-<nav class="sf-wizard-steps">${['写作要求', '资料范围', '行文结构'].map((title, index) => `<button${index === step ? ' aria-current="step"' : ''}${index > step ? ' disabled' : ''}><span>${index + 1}</span>${title}</button>`).join('')}</nav>
+<nav class="sf-wizard-steps">${['写作要求', '资料范围', '行文结构'].map((title, index) => `<button${index === step ? ' aria-current="step"' : ''}${index > step ? ' disabled' : ''}${index < step ? ' data-done="true"' : ''}><span>${index + 1}</span>${title}</button>`).join('')}</nav>
 <p class="sf-wizard-step-compact"${step === 0 ? ' aria-current="step"' : ''}>第 ${step + 1} 步 / 共 3 步 · ${['写作要求', '资料范围', '行文结构'][step]}</p>`
 
 const step1 = `<section class="sf-wizard">${head(0)}
