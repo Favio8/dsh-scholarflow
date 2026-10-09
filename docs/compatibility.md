@@ -1,3 +1,5 @@
+2026-10-09 v1.7：结构预设新增一层子章节与前置后置部分（abstract-en/acknowledgements/cover/toc），写作规格新增 parentId/kind 与 supplementalParts 快照，大纲 sections 新增可选 kind，TypographySpec 新增七个排版字段。全部为可选字段带默认，旧项目与旧预设只读即可，不迁移。docx 9.8.1 的 updateFields 位于顶层 features 而非 settings；封面改为独立 section。Word 与 LaTeX 读同一 scanDocument 计划。详见 [结构与排版决定](decisions/course-paper-structure-and-academic-typography.md)。
+
 # 兼容性记录（ScholarFlow × DSH）
 
 2026-10-07 v1.3：Windows Desktop 0.2.0-rc.2 / Electron 44.0.0 实机验证历史 budget 任务读取、独立要求 Remote、原生开始页 AI Chat 和当前会话模型路由。guide 必须使用当前 tab.actions 的 replaceTab:true 合同；全局 openTab 的替换参数是 tab ID。窗口隐藏时宿主可能保持 document.hidden=false，插件同时观察真实 blur 暂停视觉，业务请求保持一次。实际下载使用原生 will-download；renderer download 事件并不可靠。没有修改 Host 核心或新增插件模型设置；详见 [v1.3 ADR](decisions/workbench-v1.3.md)。
