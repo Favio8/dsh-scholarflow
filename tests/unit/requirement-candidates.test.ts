@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { adoptBrief, adoptionSummary, basisMatches, conflictsOf, coverageOf, describeLength, diffBrief, flattenBrief, outlineDiff, outlineGaps } from '../../src/core/requirements/candidates.ts'
-import { sizeFromLabel, typographyFromText, typographyToDocx, coverFromText, pagePlan, paginationVerdict } from '../../src/core/export/typography.ts'
+import { sizeFromLabel, typographyFromText, typographyToDocx, coverFromText, pagePlan, paginationVerdict, DEFAULT_TYPOGRAPHY } from '../../src/core/export/typography.ts'
 import { classifyNote, groupIssues, mapLegacyNotes, mergeIssue, mergeIssues } from '../../src/core/pipeline/task-issues.ts'
 import type { CreationSpec, RequirementBrief } from '../../src/shared/writing-task.ts'
 
@@ -20,7 +20,7 @@ const brief = (overrides: Partial<RequirementBrief> = {}): RequirementBrief => (
   coverage: [{ id: 'c1', text: '论文题名', kind: 'dimension' }, { id: 'c2', text: '实验结果', kind: 'dimension' }],
   length: { value: 1500, unit: 'zh-characters', approximate: true, pages: 4, coverPages: 1, bodyPages: 3, sourceRef: '作业要求/3.jpg' },
   format: { fileFormat: 'docx', cover: true }, submission: { when: '10 月 30 日 18:00—18:30', where: 'A-327', how: '全部单面打印', needsConfirmation: ['年份'] },
-  typography: { bodyFontZh: '宋体', bodyFontEn: 'Times New Roman', bodySizePt: 12, bodySizeLabel: '小四', lineSpacing: 1.2, marginsMm: 25 },
+  typography: { ...DEFAULT_TYPOGRAPHY },
   decisions: [], origins: { length: 'teacher', 'task.nature': 'teacher' }, readIds: ['read_1'], ...overrides })
 
 test('"约 1500 字" keeps its 约 and its page counts instead of becoming a hard bound', () => {

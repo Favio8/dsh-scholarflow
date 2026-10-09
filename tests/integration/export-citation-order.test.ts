@@ -38,11 +38,15 @@ test('V5: Markdown, LaTeX and Word deliver the same numbered citation order', as
   assert.ok(markdown.includes(keyB) && markdown.includes(keyA), 'Markdown 保留机器引用键')
   assert.ok(markdown.indexOf(keyB) < markdown.indexOf(keyA), 'Markdown 保持正文中的引用顺序')
 
-  // LaTeX: unsorted bibliography style, real keys, and the bib in citation order.
+  // LaTeX: a hand-written thebibliography in citation order, and never both lists at once.
   const tex = deliveries.latex!['paper.tex']!
-  assert.match(tex, /\\bibliographystyle\{unsrt\}/, 'LaTeX 必须按引用顺序编号')
-  assert.match(tex, /\\bibliography\{references\}/)
+  assert.match(tex, /\\begin\{thebibliography\}/, '中文交付按 GB/T 7714 生成参考文献表')
+  assert.equal(/\\bibliographystyle/.test(tex), false, '不允许同时输出两套参考文献')
+  assert.match(tex, /\\cite\{sf_/)
   assert.ok(tex.includes(`\\cite{${keyB},${keyA}}`) || (tex.includes(`\\cite{${keyB}}`) && tex.includes(`\\cite{${keyA}}`)), 'LaTeX 使用真实引用键')
+  assert.ok(tex.indexOf(`\\cite{${keyB}}`) < tex.indexOf(`\\cite{${keyA}}`), 'LaTeX 正文引用顺序保持')
+  assert.ok(tex.indexOf('\\bibitem{ref_1}') < tex.indexOf('\\bibitem{ref_2}'), '文献表顺序与引用顺序一致')
+  assert.ok(tex.indexOf('来源乙') < tex.indexOf('来源甲'), '文献表条目顺序与引用顺序一致')
   const bib = deliveries.latex!['references.bib']!
   assert.ok(bib.includes(keyB) && bib.includes(keyA), 'BibTeX 提供被引来源')
   assert.ok(bib.indexOf(keyB) < bib.indexOf(keyA), 'BibTeX 顺序与引用顺序一致')

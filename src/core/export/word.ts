@@ -5,7 +5,7 @@ import type { AstNode, Projection } from '../editing/markdown.ts'
 import { projectMarkdown, textOf } from '../editing/markdown.ts'
 import type { CoverSpec, TypographySpec } from '../../shared/writing-task.ts'
 import type { Ledger, ProjectConfig, Source } from '../../shared/schema.ts'
-import { typographyToDocx } from './typography.ts'
+import { DEFAULT_TYPOGRAPHY, typographyToDocx } from './typography.ts'
 import { scanDocument } from './scan.ts'
 import { gbt7714Entry, plainEntry } from './citations.ts'
 import { A4, THREE_LINE, firstLineIndentTwips, headingSizes, layoutOf, type LayoutSpec } from './layout.ts'
@@ -52,7 +52,7 @@ export async function buildWord(input: WordInput): Promise<Uint8Array> {
   const { config, ledger } = input
   const language = config.project.language
   const docx = typographyToDocx(input.typography)
-  const layout = input.layout ?? layoutOf(input.typography ?? DEFAULT_TYPOGRAPHY_FALLBACK, language)
+  const layout = input.layout ?? layoutOf(input.typography ?? DEFAULT_TYPOGRAPHY, language)
   const projection: Projection = projectMarkdown(input.text)
   const plan = scanDocument(projection)
   const leaves = new Map(projection.leaves.map(leaf => [leaf.id, leaf]))
@@ -191,9 +191,6 @@ export async function buildWord(input: WordInput): Promise<Uint8Array> {
     sections: cover.length ? [{ properties: { page }, children: cover }, bodySection] : [bodySection] })
   return new Uint8Array(await Packer.toBuffer(document))
 }
-
-const DEFAULT_TYPOGRAPHY_FALLBACK: TypographySpec = { bodyFontZh: '宋体', bodyFontEn: 'Times New Roman', bodySizePt: 12,
-  bodySizeLabel: '小四', lineSpacing: 1.2, marginsMm: 25 }
 
 // The cover carries only what the requirement stated, and nothing from a reference document
 // (SPEC v1.2 §16.2). It is its own section so the body can number its pages from 1.

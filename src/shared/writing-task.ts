@@ -39,13 +39,24 @@ export const countingPolicy = z.object({ unit: z.enum(['zh-CN', 'en']).optional(
 /**
  * Typography is an executable field, not prose about fonts (SPEC v1.2 §16.1): every value
  * here maps onto a DOCX property the exporter actually writes.
+ *
+ * The layout fields below carry the conventions a Chinese coursework paper is normally
+ * submitted under. They are fields, not constants, so a requirement that states otherwise
+ * overrides them; the exporter never prefers its own default over a stated one.
  */
 // Model-authored and user-editable: a number written as a string is coerced, extra keys are
 // stripped, and an absent field keeps its default. `.strict()` here rejected usable 排版 values.
 export const typographySpec = z.object({ bodyFontZh: z.string().trim().min(1).max(80).default('宋体'),
   bodyFontEn: z.string().trim().min(1).max(80).default('Times New Roman'), bodySizePt: z.coerce.number().min(6).max(36).default(12),
   bodySizeLabel: z.string().trim().max(20).default('小四'), lineSpacing: z.coerce.number().min(1).max(3).default(1.2),
-  marginsMm: z.coerce.number().min(10).max(50).default(25) }).prefault({})
+  marginsMm: z.coerce.number().min(10).max(50).default(25),
+  headingNumbering: z.enum(['none', 'decimal', 'chinese']).default('decimal'),
+  headingFontZh: z.string().trim().min(1).max(80).default('黑体'),
+  firstLineIndentChars: z.coerce.number().min(0).max(6).default(2),
+  captionSizePt: z.coerce.number().min(6).max(24).default(10.5),
+  tableStyle: z.enum(['three-line', 'grid']).default('three-line'),
+  referenceStyle: z.enum(['gbt7714', 'plain']).default('gbt7714'),
+  tableOfContents: z.enum(['none', 'field', 'auto']).default('auto') }).prefault({})
 export type TypographySpec = z.infer<typeof typographySpec>
 
 /** Cover fields start empty: no reference document may leak a name or a date in (SPEC §18). */

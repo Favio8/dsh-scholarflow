@@ -1,4 +1,4 @@
-import type { CoverSpec, TypographySpec } from '../../shared/writing-task.ts'
+import { typographySpec, type CoverSpec, type TypographySpec } from '../../shared/writing-task.ts'
 
 /**
  * Typography is executed, not described (SPEC v1.2 §16). Everything the exporter needs is
@@ -6,8 +6,8 @@ import type { CoverSpec, TypographySpec } from '../../shared/writing-task.ts'
  * document builder.
  */
 
-export const DEFAULT_TYPOGRAPHY: TypographySpec = { bodyFontZh: '宋体', bodyFontEn: 'Times New Roman', bodySizePt: 12,
-  bodySizeLabel: '小四', lineSpacing: 1.2, marginsMm: 25 }
+/** The default is the schema's own, so a new field cannot drift from its documented value. */
+export const DEFAULT_TYPOGRAPHY: TypographySpec = typographySpec.parse({})
 
 /** Word measures font size in half-points and line spacing in twentieths of a point. */
 export function typographyToDocx(input: TypographySpec = DEFAULT_TYPOGRAPHY) {
@@ -39,7 +39,9 @@ export function sizeFromLabel(label: string) {
  */
 export function typographyFromText(text: string, base: TypographySpec = DEFAULT_TYPOGRAPHY): TypographySpec {
   const next = { ...base }
-  const chinese = /中文[^。；\n]{0,20}?([\u4e00-\u9fa5]{2,8}体|宋体|黑体|楷体|仿宋)/.exec(text)
+  // A controlled font list, not any two characters before 体: the loose form captured 用楷体
+  // out of 中文用楷体 and stored it as a font name.
+  const chinese = /中文[^。；\n]{0,20}?(宋体|黑体|楷体|仿宋|微软雅黑|思源宋体|幼圆|隶书)/.exec(text)
   if (chinese) next.bodyFontZh = chinese[1]
   const latin = /(?:英文|西文|拉丁)[^。；\n]{0,20}?(Times New Roman|Arial|Calibri|Cambria|Helvetica)/i.exec(text)
   if (latin) next.bodyFontEn = latin[1]
@@ -47,6 +49,18 @@ export function typographyFromText(text: string, base: TypographySpec = DEFAULT_
   if (size) { next.bodySizePt = size.pt; next.bodySizeLabel = size.label }
   const spacing = /([\d.]+)\s*倍行距/.exec(text)
   if (spacing && Number(spacing[1]) >= 1 && Number(spacing[1]) <= 3) next.lineSpacing = Number(spacing[1])
+  // A stated convention overrides the default one. Nothing below is inferred from silence:
+  // a requirement that says nothing about headings keeps the shipped default.
+  if (/(?:标题|各级标题|章节标题)[^。；\n]{0,12}(?:不编号|无需编号|不用编号)|不使用自动编号/.test(text)) next.headingNumbering = 'none'
+  else if (/第\s*[1一]\s*章/.test(text)) next.headingNumbering = 'chinese'
+  const headingFont = /(?:标题|章标题)[^。；\n]{0,12}?(黑体|宋体|楷体|仿宋)/.exec(text)
+  if (headingFont) next.headingFontZh = headingFont[1]!
+  const indent = /(?:首行缩进|段落缩进)\s*(\d+)\s*字符/.exec(text)
+  if (indent && Number(indent[1]) >= 0 && Number(indent[1]) <= 6) next.firstLineIndentChars = Number(indent[1])
+  if (/三线表/.test(text)) next.tableStyle = 'three-line'
+  if (/GB\/?T\s*7714|信息与文献\s*参考文献/.test(text)) next.referenceStyle = 'gbt7714'
+  if (/(?:不需要|无需|不要)(?:目录|目次)|不生成目录/.test(text)) next.tableOfContents = 'none'
+  else if (/(?:需要|要有|含|包括)(?:目录|目次)/.test(text)) next.tableOfContents = 'field'
   return next
 }
 

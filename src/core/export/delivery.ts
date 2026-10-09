@@ -81,7 +81,8 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
       '- 本报告不提供课程成绩、接收概率或学术真实性保证。', '' ].join('\n')
     const root = `${config.paths.manuscriptDir}/exports/${deliveryId}`
     const files: Array<{ relativePath: string; text: string; encoding?: 'base64' }> = [{ relativePath: 'paper.md', text: current.document.text }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger) }, { relativePath: 'quality-report.md', text: report }]
-    if (plan.format === 'latex') files.unshift({ relativePath: 'paper.tex', text: latexDocument(current.document.text, config) })
+    if (plan.format === 'latex') files.unshift({ relativePath: 'paper.tex',
+      text: latexDocument(current.document.text, config, current.ledger, writingSpec?.typography) })
     // 排版 is read from the confirmed spec, not from prose: the requirement's own fields are
     // what actually shapes the exported page (SPEC v1.2 §16.1).
     if (plan.format === 'docx') {

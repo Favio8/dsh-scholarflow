@@ -40,11 +40,21 @@ export const A4 = { width: 11906, height: 16838, margin: Math.round(25 * 56.6929
 /** 1.5 pt top and bottom rules, 0.75 pt under the header row: a three-line table. */
 export const THREE_LINE = { top: 12, bottom: 12, header: 6 }
 
+/**
+ * The layout decisions for this delivery. The spec wins over the defaults; the language only
+ * fills in what the spec cannot express, because a Chinese heading font name means nothing in
+ * an English document and GB/T 7714 is a Chinese national standard.
+ */
 export function layoutOf(typography: TypographySpec, language: 'zh-CN' | 'en'): LayoutSpec {
-  // Chinese projects get the Chinese academic conventions. An English paper keeps western
-  // ones: no Chinese heading font, no GB/T reference style, decimal numbering only when the
-  // manuscript's own headings ask for it.
-  if (language !== 'zh-CN') return { ...DEFAULT_LAYOUT, headingFontZh: typography.bodyFontEn, referenceStyle: 'plain',
-    headingNumbering: 'none' }
-  return { ...DEFAULT_LAYOUT }
+  const base: LayoutSpec = {
+    headingNumbering: typography.headingNumbering ?? DEFAULT_LAYOUT.headingNumbering,
+    headingFontZh: typography.headingFontZh ?? DEFAULT_LAYOUT.headingFontZh,
+    firstLineIndentChars: typography.firstLineIndentChars ?? DEFAULT_LAYOUT.firstLineIndentChars,
+    captionSizePt: typography.captionSizePt ?? DEFAULT_LAYOUT.captionSizePt,
+    tableStyle: typography.tableStyle ?? DEFAULT_LAYOUT.tableStyle,
+    referenceStyle: typography.referenceStyle ?? DEFAULT_LAYOUT.referenceStyle,
+    tableOfContents: typography.tableOfContents ?? DEFAULT_LAYOUT.tableOfContents,
+  }
+  if (language !== 'zh-CN') return { ...base, headingFontZh: typography.bodyFontEn, referenceStyle: 'plain' }
+  return base
 }
