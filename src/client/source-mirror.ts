@@ -91,7 +91,11 @@ export function paintSourceMark(layer: HTMLElement, area: HTMLTextAreaElement, r
       marked.dataset.sfMarked = 'true'
       marked.dataset.flow = range.state === 'generating' ? 'on' : 'off'
       marked.textContent = parts.marked
-      mirror.append(marked, document.createTextNode(parts.after))
+      // A pane whose text ends in a newline still shows one more row than a laid-out copy does,
+      // because the caret can sit on it; a zero-width space gives that row a box, the same way the
+      // line numbers give one to an empty line (gutter-rows.ts).
+      const trailing = area.value.endsWith('\n') ? '​' : ''
+      mirror.append(marked, document.createTextNode(parts.after + trailing))
     }
     layer.append(paper, mirror)
     layer.dataset.state = range.state

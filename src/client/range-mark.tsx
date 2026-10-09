@@ -42,8 +42,19 @@ export function SourceRangeMark({ area, host, range, text, zoom }: {
   // rather than the one they were created with.
   const latest = useRef(paint)
   latest.current = paint
+  // The scroll listener is attached by the first paint rather than beside it: the pane's ref can still
+  // be empty when this component's own effects run, and a listener attached to nothing follows
+  // nothing — which is how the layer used to stay behind while the line numbers kept up.
+  const detach = useRef<(() => void) | null>(null)
+  const followScroll = (input: HTMLTextAreaElement) => {
+    if (detach.current) return
+    const follow = () => { const node = stack.current; if (node) place(input, node) }
+    input.addEventListener('scroll', follow, { passive: true })
+    detach.current = () => input.removeEventListener('scroll', follow)
+  }
+  useLayoutEffect(() => () => detach.current?.(), [])
   useLayoutEffect(() => {
-    const frame = requestAnimationFrame(() => latest.current())
+    const frame = requestAnimationFrame(() => { if (area.current) followScroll(area.current); latest.current() })
     return () => cancelAnimationFrame(frame)
   }, [text, zoom, range?.start, range?.end, range?.state])
   // The pane's width decides where it wraps, and the copy follows the wrapping rather than the text:
@@ -55,13 +66,6 @@ export function SourceRangeMark({ area, host, range, text, zoom }: {
     observer.observe(container)
     return () => observer.disconnect()
   }, [host])
-  useLayoutEffect(() => {
-    const input = area.current
-    if (!input) return
-    const follow = () => { const node = stack.current; if (node) place(input, node) }
-    input.addEventListener('scroll', follow, { passive: true })
-    return () => input.removeEventListener('scroll', follow)
-  }, [area])
   return <div className="sf-source-marks" aria-hidden="true"><div ref={stack} /></div>
 }
 
