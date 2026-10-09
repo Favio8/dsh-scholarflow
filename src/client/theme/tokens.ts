@@ -18,9 +18,9 @@
  * `--sf-editor-line`) and the source padding that aligns the gutter are deliberately not here:
  * the wrap gate measures them.
  *
- * The mark band's two constants are here but off the ladder, for the same reason: the mark gate
- * samples a strip across the band's top edge, so its corner radius moves the measured spread — the
- * 3px below holds the recorded 173, and the 4px ladder step drops it to 172.
+ * The mark chip's radius is here but off the ladder: the chip is the paper the gradient glyphs sit
+ * on, and a corner that cuts into a glyph would put that glyph's pixels on the pane's own background
+ * instead of on paper, so it is set by the measurement rather than by the radius scale.
  *
  * Two kinds of accent tint, and the difference is measurable: a `--sf-*-soft` is a panel's own
  * background, so it is opaque and themed for contrast against the text it carries. A `--sf-wash-*`
@@ -31,8 +31,12 @@
  * The mark's gradient, period and paper are one set for both themes on purpose (SPEC v1.6 §8): the
  * gradient is carried by glyphs on paper in both panes — the preview's paper page and the source
  * pane's paper chip — so the host theme never enters the glyph contrast calculation, and a dark
- * override would only split the two panes back into two palettes. The period lives here rather
- * than in motion/tokens.ts because it is a geometry of the background image, not a duration.
+ * override would only split the two panes back into two palettes. Every stop is dark enough to read
+ * on that paper (worst measured 4.9:1, gate 4.5:1); the band-era stops were bright and measured
+ * 1.6:1, which is why the mark moved onto glyphs in the first place. The period lives here rather
+ * than in motion/tokens.ts because it is a geometry of the background image, not a duration, and it
+ * is the smallest value that still fits one whole cycle inside the narrowest pane the gate measures
+ * — a line narrower than the period would show a slice of the rainbow instead of all of it.
  */
 export const THEME_CSS = `:root{--sf-text:#0f1115;--sf-muted:#5e6472;--sf-text-faint:#697080;
 --sf-border:rgba(15,17,21,.12);--sf-border-soft:rgba(15,17,21,.07);--sf-border-strong:rgba(15,17,21,.26);--sf-fill:rgba(15,17,21,.04);--sf-fill-strong:rgba(15,17,21,.08);--sf-fill-sunken:rgba(15,17,21,.03);
@@ -50,8 +54,8 @@ export const THEME_CSS = `:root{--sf-text:#0f1115;--sf-muted:#5e6472;--sf-text-f
 --sf-radius-sm:4px;--sf-radius-md:6px;--sf-radius-lg:8px;--sf-radius-xl:12px;--sf-radius-pill:999px;
 --sf-font-xs:11px;--sf-font-sm:12px;--sf-font-md:13px;--sf-font-lg:15px;--sf-font-xl:18px;--sf-font-2xl:24px;
 --sf-leading-tight:1.4;--sf-leading-body:1.6;--sf-leading-prose:1.75;
---sf-focus-color:#3f68d8;--sf-focus-width:2px;--sf-disabled-opacity:.5;--sf-mark-band-radius:3px;--sf-mark-band-opacity:.78;
---sf-mark-gradient:linear-gradient(90deg,#ff4d6d,#ffc300,#12b981,#2f7bff,#a25bf7,#ff4d6d);--sf-mark-period:320px;--sf-mark-paper:#fff}
+--sf-focus-color:#3f68d8;--sf-focus-width:2px;--sf-disabled-opacity:.5;--sf-mark-radius:3px;
+--sf-mark-gradient:linear-gradient(90deg,#d6246e,#c2410c,#a16207,#15803d,#1d4ed8,#7e22ce,#d6246e);--sf-mark-period:240px;--sf-mark-paper:#fff}
 body[data-ds-dark-theme]{--sf-text:#f9fafb;--sf-muted:#9aa0a8;--sf-text-faint:#8b9099;
 --sf-border:rgba(255,255,255,.16);--sf-border-soft:rgba(255,255,255,.09);--sf-border-strong:rgba(255,255,255,.30);--sf-fill:rgba(255,255,255,.05);--sf-fill-strong:rgba(255,255,255,.10);--sf-fill-sunken:rgba(255,255,255,.03);
 --sf-accent-text:#8fb3ff;--sf-accent-soft:rgba(143,179,255,.14);--sf-accent-soft-strong:rgba(143,179,255,.22);--sf-accent-border:rgba(143,179,255,.32);
@@ -64,4 +68,4 @@ body[data-ds-dark-theme]{--sf-text:#f9fafb;--sf-muted:#9aa0a8;--sf-text-faint:#8
 --sf-shadow-1:0 1px 2px rgba(0,0,0,.5),0 1px 3px rgba(0,0,0,.4);
 --sf-shadow-2:0 6px 20px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.4);
 --sf-shadow-3:0 18px 44px rgba(0,0,0,.6);
---sf-focus-color:#8fb3ff;--sf-disabled-opacity:.4;--sf-mark-band-opacity:.45}`
+--sf-focus-color:#8fb3ff;--sf-disabled-opacity:.4}`

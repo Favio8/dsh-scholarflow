@@ -492,6 +492,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
               onMouseDown={() => { selecting.current = true; setSelectionAnchor(undefined) }}
               onMouseUp={e => { selecting.current = false; selectSource(e.currentTarget) }}
               onSelect={e => selectSource(e.currentTarget)}
+              onCompositionStart={() => sourceEditor.current?.setAttribute('data-composing', '')}
+              onCompositionEnd={() => sourceEditor.current?.removeAttribute('data-composing')}
               onBeforeInput={e => {
                 const kind = (e.nativeEvent as InputEvent).inputType ?? ''
                 const area = e.currentTarget
