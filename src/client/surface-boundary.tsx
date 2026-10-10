@@ -35,9 +35,9 @@ export class SurfaceBoundary extends React.Component<{ label: string; children: 
 }
 
 export const SURFACE_BOUNDARY_CSS = `
-.sf-boundary{max-width:640px;margin:var(--sf-space-8) auto;padding:var(--sf-space-5);border:1px solid var(--sf-danger-border);border-radius:var(--sf-radius-xl);background:var(--dsw-alias-bg-base,var(--sf-surface));font-size:var(--sf-font-prose);line-height:var(--sf-leading-prose)}
+.sf-boundary{max-width:640px;margin:var(--sf-space-8) auto;padding:var(--sf-space-5);border:1px solid var(--sf-danger-border);border-radius:var(--sf-radius-xl);background:var(--sf-surface);font-size:var(--sf-font-prose);line-height:var(--sf-leading-prose)}
 .sf-boundary h3{margin:0 0 var(--sf-space-2);font-size:var(--sf-font-display-2)}
-.sf-boundary p{margin:0 0 var(--sf-space-3);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-boundary p{margin:0 0 var(--sf-space-3);color:var(--sf-muted)}
 .sf-boundary pre{margin:0 0 var(--sf-space-4);padding:var(--sf-space-3);border-radius:var(--sf-radius-lg);background:var(--sf-fill);font-size:var(--sf-font-sm);white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}
 .sf-boundary-actions{display:flex;gap:var(--sf-space-3);flex-wrap:wrap}
 .sf-boundary button{height:32px;padding:0 var(--sf-space-4);border:1px solid var(--sf-accent);border-radius:var(--sf-radius-lg);background:var(--sf-accent);color:var(--sf-on-accent);font:inherit;cursor:pointer}

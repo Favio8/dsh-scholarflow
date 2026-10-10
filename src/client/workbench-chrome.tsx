@@ -40,6 +40,6 @@ export const CHAT_CSS = `
 .sf-chat-empty p{margin:0 0 var(--sf-space-4);font-size:var(--sf-font-sm);line-height:var(--sf-leading-prose)}
 .sf-chat-empty button{display:block;width:100%;margin:var(--sf-space-2) 0;padding:var(--sf-space-2);text-align:left;font:inherit;color:var(--dsw-alias-label-secondary);background:transparent;border:1px solid var(--dsw-alias-border-l3);border-radius:var(--sf-radius-md);cursor:pointer}
 .sf-chat-empty button:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.sf-chat-error{margin:0;padding:var(--sf-space-1) var(--sf-space-3);color:var(--dsw-alias-state-error-primary,var(--sf-danger));font-size:var(--sf-font-sm)}
+.sf-chat-error{margin:0;padding:0 var(--sf-space-2);color:var(--dsw-alias-state-error-primary,var(--sf-danger));font-size:var(--sf-font-sm)}
 @media(max-height:620px){.sf-chat-empty{top:8%;left:var(--sf-space-4);right:var(--sf-space-4)}.sf-chat-empty button{display:inline-block;width:auto;margin-right:var(--sf-space-1);padding:var(--sf-space-2)}.sf-chat-empty p{margin-bottom:var(--sf-space-2)}}
 `

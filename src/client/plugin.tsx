@@ -45,10 +45,10 @@ const LAYOUT_CSS = `.sf-agent-resize{width:var(--sf-space-2);flex-shrink:0;curso
 const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);padding:var(--sf-space-2);resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:var(--sf-space-2);border-bottom:1px solid var(--sf-border-strong);padding:var(--sf-space-3) 0;margin:var(--sf-space-3) 0}.sf-tabs button[aria-selected=true]{background:var(--sf-fill-strong);border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:var(--sf-focus-width)}`
 // The settings surface reached from the top entry: the same component as the global
 // settings section, so the two can never drift into two configurations.
-const SETTINGS_CSS = `.sf-caption-settings{position:absolute;top:calc(100% + var(--sf-space-1));left:var(--sf-caption-left,150px);width:min(600px,94vw);max-height:min(72vh,640px);overflow:auto;background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-3);z-index:1200}
-.sf-caption-settings>header{position:sticky;top:0;display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-3) var(--sf-space-4);border-bottom:1px solid var(--sf-border);background:var(--dsw-alias-bg-base,var(--sf-surface))}
+const SETTINGS_CSS = `.sf-caption-settings{position:absolute;top:calc(100% + var(--sf-space-1));left:var(--sf-caption-left,150px);width:min(600px,94vw);max-height:min(72vh,640px);overflow:auto;background:var(--sf-surface);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-3);z-index:1200}
+.sf-caption-settings>header{position:sticky;top:0;display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-4) var(--sf-space-5);border-bottom:1px solid var(--sf-border);background:var(--sf-surface)}
 .sf-caption-settings>header strong{font-size:var(--sf-font-prose);font-weight:600}
-.sf-caption-settings>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:var(--sf-font-display-2);line-height:1;cursor:pointer;padding:0 var(--sf-space-1)}
+.sf-caption-settings>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:var(--sf-font-display-2);line-height:1;cursor:pointer;padding:0 var(--sf-space-2)}
 .sf-caption-settings .sf-settings{max-width:none;padding:var(--sf-space-4)}`
 
 export function apply(ctx: Host) {
@@ -284,7 +284,7 @@ export function apply(ctx: Host) {
       {registrationError && <p role="alert" className="sf-error">{registrationError} <button disabled={registering} onClick={() => void repairRegistration()}>{registering ? '正在登记…' : '重试会话登记'}</button></p>}
       {!ready && <div className="sf-create-scroll">
         {!workspace && <div className="sf-create-card"><h3>选择论文工作区</h3><select value={selectedWorkspace} onChange={e => setSelectedWorkspace(e.target.value)}><option value="">请选择</option>{workspaces.map((item: Host) => <option key={item.workspaceId} value={item.workspaceId}>{item.title}</option>)}</select><button disabled={busy || !selectedWorkspace} onClick={startSession}>进入 ScholarFlow</button></div>}
-        {workspace && !project && !error && <p className="sf-muted" style={{ padding: 24 }}>正在打开论文工作区…</p>}
+        {workspace && !project && !error && <p className="sf-muted" style={{ padding: 'var(--sf-space-5)'}}>正在打开论文工作区…</p>}
         {project?.readonly && <ReadonlyProject value={project.readonly} />}
         {project?.identityConflict && <ProjectIdentity project={project} workspaceTitle={workspace.title} workspaces={workspaces} context={context} api={api} publish={publish} run={act} busy={busy} />}
         {project && !project.initialized && !project.readonly && !project.identityConflict && (project.recovery ? <div className="sf-create-card"><h3>恢复未完成的创建</h3><button disabled={busy} onClick={() => act(async () => publish(await api('project.recover', { context: context(), planId: project.recovery.planId, planHash: project.recovery.planHash })))}>继续已确认的创建</button></div>

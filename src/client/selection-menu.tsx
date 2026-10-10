@@ -150,9 +150,9 @@ export function SelectionMenu({ anchor, busy, onAction, onClose, hasModels = tru
 
 export const SELECTION_MENU_CSS = `
 .sf-selection-menu{position:fixed;z-index:60;display:flex;gap:var(--sf-space-hair);padding:var(--sf-space-1);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);
-  background:var(--dsw-alias-bg-base,var(--sf-surface));box-shadow:var(--sf-shadow-2);
+  background:var(--sf-surface);box-shadow:var(--sf-shadow-2);
   animation:sf-menu-in var(--sf-dur-quick,150ms) var(--sf-ease-out,cubic-bezier(.22,.61,.36,1))}
-.sf-selection-menu button{font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-1) var(--sf-space-2);border:0;border-radius:var(--sf-radius-md);background:transparent;color:inherit;cursor:pointer}
+.sf-selection-menu button{font:inherit;font-size:var(--sf-font-sm);padding:0 var(--sf-space-2);border:0;border-radius:var(--sf-radius-md);background:transparent;color:inherit;cursor:pointer}
 .sf-selection-menu button:hover:not(:disabled){background:var(--sf-accent-soft);color:var(--sf-accent-text)}
 .sf-selection-menu button:disabled{opacity:var(--sf-disabled-opacity);cursor:default}
 .sf-selection-menu button:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:1px}

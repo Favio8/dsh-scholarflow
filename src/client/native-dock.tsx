@@ -165,10 +165,10 @@ export function NativeTools({ source, sessionId, renderFactorySlot, extra }: { s
 }
 
 export const NATIVE_DOCK_CSS = `
-.sf-native-header{flex-shrink:0;display:flex;align-items:center;flex-wrap:nowrap;gap:var(--sf-space-3);height:44px;padding:0 var(--sf-space-5);border-bottom:1px solid var(--sf-border-strong)}
+.sf-native-header{flex-shrink:0;display:flex;align-items:center;flex-wrap:nowrap;gap:var(--sf-space-3);height:44px;padding:0 var(--sf-space-4);border-bottom:1px solid var(--sf-border-strong)}
 .sf-workspace-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sf-native-tools{margin-left:auto;display:flex;align-items:center;gap:var(--sf-space-3);flex-shrink:0}
-.sf-dock-chat{height:100%;width:100%;min-width:0;border:0;box-sizing:border-box}
+.sf-agent.sf-dock-chat{height:100%;width:100%;min-width:0;border:0;box-sizing:border-box}
 .sf-chat-resume{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sf-space-3);padding:var(--sf-space-5);box-sizing:border-box;font-size:var(--sf-font-md)}
 .sf-chat-guide{box-sizing:border-box;width:100%;min-height:56px;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--sf-radius-xl);cursor:pointer;display:flex;align-items:center;gap:var(--sf-space-4);padding:var(--sf-space-4) var(--sf-space-5)}
 .sf-chat-guide:hover{background:var(--dsw-alias-interactive-bg-hover)}

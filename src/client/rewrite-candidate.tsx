@@ -122,16 +122,16 @@ export const REWRITE_CSS = `
 @keyframes sf-candidate-in{from{opacity:0}to{opacity:1}}
 .sf-rewrite>header{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-3);border-bottom:1px solid var(--sf-border);flex-wrap:wrap}
 .sf-rewrite>header strong{font-size:var(--sf-font-sm)}
-.sf-rewrite-instruction{flex:1;min-width:120px;font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sf-rewrite-state{font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-rewrite-instruction{flex:1;min-width:120px;font-size:var(--sf-font-sm);color:var(--sf-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-rewrite-state{font-size:var(--sf-font-sm);color:var(--sf-muted)}
 .sf-rewrite-sweep{position:relative;display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-3)}
 .sf-rewrite-sweep::before{content:"";position:absolute;inset:0;pointer-events:none;
-  background:linear-gradient(100deg,transparent,var(--sf-wash-accent),var(--sf-wash-violet),var(--sf-wash-ok),transparent);
+  background:linear-gradient(100deg,transparent,var(--sf-wash-accent),var(--sf-wash-accent-strong),var(--sf-wash-ok),transparent);
   background-size:300% 100%;animation:sf-sweep var(--sf-sweep,2.8s) var(--sf-ease-in-out,cubic-bezier(.4,0,.2,1)) infinite}
 .sf-rewrite-spinner{flex:none;width:12px;height:12px;border:2px solid var(--sf-accent);border-right-color:transparent;border-radius:50%;animation:sf-spin 1s linear infinite}
-.sf-rewrite-sweep>span:nth-child(2){flex:1;font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
-.sf-rewrite-elapsed{font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted));font-variant-numeric:tabular-nums}
-.sf-rewrite-sweep>button{font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-1) var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;cursor:pointer}
+.sf-rewrite-sweep>span:nth-child(2){flex:1;font-size:var(--sf-font-sm);color:var(--sf-muted)}
+.sf-rewrite-elapsed{font-size:var(--sf-font-sm);color:var(--sf-muted);font-variant-numeric:tabular-nums}
+.sf-rewrite-sweep>button{font:inherit;font-size:var(--sf-font-sm);padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;cursor:pointer}
 /* A finished, stopped or failed candidate must not keep animating. */
 .sf-rewrite[data-state=ready] .sf-rewrite-sweep::before,.sf-rewrite[data-state=stopped] .sf-rewrite-sweep::before,
 .sf-rewrite[data-state=failed] .sf-rewrite-sweep::before,.sf-rewrite[data-state=discarded] .sf-rewrite-sweep::before,
@@ -140,22 +140,21 @@ export const REWRITE_CSS = `
 .sf-rewrite-before,.sf-rewrite-after{padding:var(--sf-space-2) var(--sf-space-3)}
 .sf-rewrite-before{border-bottom:1px solid var(--sf-border);background:var(--sf-danger-soft)}
 .sf-rewrite-after{background:var(--sf-ok-soft)}
-.sf-rewrite-diff b{display:block;font-size:var(--sf-font-xs);color:var(--dsw-alias-label-secondary,var(--sf-muted));margin-bottom:var(--sf-space-1)}
+.sf-rewrite-diff b{display:block;font-size:var(--sf-font-xs);color:var(--sf-muted);margin-bottom:var(--sf-space-1)}
 .sf-rewrite-diff p{margin:0;line-height:var(--sf-leading-prose);white-space:pre-wrap;overflow-wrap:anywhere}
 .sf-rewrite-before del{background:var(--sf-danger-soft);text-decoration:line-through;text-decoration-color:var(--sf-danger)}
 .sf-rewrite-after del{background:var(--sf-danger-soft);color:var(--sf-danger);text-decoration:line-through}
 .sf-rewrite-after ins{background:var(--sf-ok-soft);text-decoration:none}
 .sf-rewrite-facts{padding:var(--sf-space-2) var(--sf-space-3);border-top:1px solid var(--sf-border);font-size:var(--sf-font-sm)}
-.sf-rewrite-facts summary{cursor:pointer;color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-rewrite-facts summary{cursor:pointer;color:var(--sf-muted)}
 .sf-rewrite-facts p{margin:var(--sf-space-2) 0 0;line-height:var(--sf-leading-body)}
-.sf-rewrite-note{margin:0;padding:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-rewrite-note{margin:0;padding:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-sm);color:var(--sf-muted)}
 .sf-rewrite-actions{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap;padding:var(--sf-space-2) var(--sf-space-3);border-top:1px solid var(--sf-border)}
 .sf-rewrite-actions button{font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-2) var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;cursor:pointer}
-.sf-rewrite-actions button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent)}
-.sf-rewrite-reading{padding:var(--sf-space-2) var(--sf-space-4);max-height:300px;overflow:auto}
+.sf-rewrite-reading{padding:var(--sf-space-2) var(--sf-space-3);max-height:300px;overflow:auto}
 .sf-rewrite-reading .sf-prose{font-size:inherit!important;line-height:var(--sf-leading-prose)!important}
 .sf-rewrite-technical{padding:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-sm)}.sf-rewrite-technical summary{cursor:pointer;color:var(--dsw-alias-label-secondary)}
-.sf-rewrite-actions{position:sticky;bottom:0;background:var(--dsw-alias-bg-base,var(--sf-surface));z-index:1}
+.sf-rewrite-actions{position:sticky;bottom:0;background:var(--sf-surface);z-index:1}
 .sf-rewrite-reading .sf-prose p{margin:var(--sf-space-2) 0!important}
 @keyframes sf-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){

@@ -18,7 +18,7 @@ import { build } from 'esbuild'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { visualSourceMetrics } from './visual-source-metrics.mjs'
-import { FONT_TOKENS, typographyInPage, systemSerifInPage } from './visual-language-contracts.mjs'
+import { FONT_TOKENS, typographyInPage, systemSerifInPage, geometryInPage } from './visual-language-contracts.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -201,6 +201,8 @@ const splitBody = () => `<div class="sf-app sf-paper-project" style="height:620p
 <p>TEST_ONLY 用于测量屏幕与导出标题比率及分屏接缝，不是学术生成结果。</p>
 </article></div></div></div></div></div>`
 
+const controlsBody = () => `<div class="sf-app" style="height:auto;min-height:320px"><p>TEST_ONLY · 四种按钮与三档尺寸</p><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sf-space-4)">${['primary','secondary','ghost','danger'].flatMap(variant => ['sm','md','lg'].map(size => `<div><button class="sf-${variant}" data-size="${size}" data-contract-control="${variant}-${size}">测试</button><button class="sf-${variant}" data-size="${size}" disabled>禁用</button></div>`)).join('')}</div></div>`
+
 export const surfaces = {
   step1: { title: '第 1 步 · 写作要求', body: step1, width: '830px' },
   step2: { title: '第 2 步 · 资料范围', body: step2, width: '830px' },
@@ -209,7 +211,7 @@ export const surfaces = {
   presetDetail: { title: '结构预设弹窗（窄屏详情栏）', body: modal('detail'), width: '100%' },
   draftWrap: { title: '正文源码区 · 长行软换行', body: draftBody(), width: '100%' },
   draftMark: { title: '正文源码区 · 改写范围标注', body: draftMarkBody(), width: '1060px' },
-  draftPreview: { title: '正文预览 · 改写范围标注', body: draftPreviewBody(), width: '520px' },
+  draftPreview: { title: '正文预览 · 改写范围标注', body: draftPreviewBody(), width: '680px' },
   split: { title: 'TEST_ONLY · 编辑与预览并置', body: splitBody(), width: '100%' },
   empty: { title: 'TEST_ONLY · 资料为空', body: '<div data-sf-fixture="empty"></div>', width: '830px' },
   loading: { title: 'TEST_ONLY · 正在读取', body: '<div data-sf-fixture="loading"></div>', width: '830px' },
@@ -218,7 +220,8 @@ export const surfaces = {
   dock: { title: 'TEST_ONLY · 原生 dock 入口', body: '<div data-sf-fixture="dock"></div>', width: '360px' },
   chat: { title: 'TEST_ONLY · 原生聊天面', body: '<div data-sf-fixture="chat" style="height:620px"></div>', width: '360px' },
   settings: { title: 'TEST_ONLY · 插件设置', body: '<div data-sf-fixture="settings"></div>', width: '830px' },
-  caption: { title: 'TEST_ONLY · 桌面标题栏入口', body: '<div data-sf-fixture="caption" style="height:40px"></div>', width: '830px' }
+  caption: { title: 'TEST_ONLY · 桌面标题栏入口', body: '<div data-sf-fixture="caption" style="height:40px"></div>', width: '830px' },
+  controls: { title: 'TEST_ONLY · 控件状态矩阵', body: controlsBody(), width: '830px' }
 }
 
 export function pageHtml(theme, wizard, picker, paper, motion, dark = false) {
@@ -314,7 +317,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
   writeFileSync(join(outDir, 'wizard-dark.html'), pageHtml(theme, wizard, picker, paper + marks, motion, true))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
-  const results = [], wrap = [], mark = [], preview = [], typography = []
+  const results = [], wrap = [], mark = [], preview = [], typography = [], geometry = [], controls = []
   let systemSerif
   try {
     for (const pass of passes) {
@@ -334,6 +337,35 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
       for (const id of pass.ids) {
         const name = `surface-${id}${pass.suffix}.png`
         typography.push({ name, ...await page.evaluate(typographyInPage, `#s${indexPath(id)}>.frame`) })
+        geometry.push({ name, ...await page.evaluate(geometryInPage, `#s${indexPath(id)}>.frame`) })
+        if (id === 'controls') {
+          const rows = []
+          for (const control of await page.locator('[data-contract-control]').all()) {
+            await control.scrollIntoViewIfNeeded()
+            const relativeBox = el => {
+              const box = el.getBoundingClientRect(), frame = el.closest('.frame').getBoundingClientRect()
+              return { x: box.x - frame.x, y: box.y - frame.y }
+            }
+            const before = await control.evaluate(relativeBox)
+            await control.hover()
+            const after = await control.evaluate(relativeBox)
+            await page.mouse.down()
+            await control.evaluate(async el => { await Promise.allSettled(el.getAnimations().map(animation => animation.finished)) })
+            const pressedShadow = await control.evaluate(el => getComputedStyle(el).boxShadow)
+            await page.mouse.up()
+            // Pointer focus deliberately has no :focus-visible ring. Establish keyboard
+            // modality before measuring the keyboard-focus state.
+            await page.keyboard.press('Tab')
+            await control.focus()
+            rows.push(await control.evaluate((el, rects) => ({ id: el.dataset.contractControl,
+              height: el.getBoundingClientRect().height, radius: getComputedStyle(el).borderRadius,
+              outline: getComputedStyle(el).outlineStyle, outlineWidth: getComputedStyle(el).outlineWidth,
+              hoverShift: Math.hypot(rects.before.x - rects.after.x, rects.before.y - rects.after.y),
+              pressedShadow: rects.pressedShadow,
+              disabledOpacity: Number(getComputedStyle(el.nextElementSibling).opacity) }), { before, after, pressedShadow }))
+          }
+          controls.push({ name, narrow: pass.viewport.width <= 720, rows })
+        }
         const file = join(outDir, name)
         // The wrap and mark surfaces are measured before they are captured, so the capture shows the
         // state the check just accepted instead of an unmeasured column or an unpainted pane.
@@ -403,6 +435,25 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
   } finally { await browser.close() }
   const sourceMetrics = visualSourceMetrics(join(root, 'src/client'))
   const typographyProblems = []
+  const geometryProblems = []
+  for (const row of controls) for (const control of row.rows) {
+    const expected = row.narrow ? 44 : { sm: 30, md: 34, lg: 40 }[control.id.split('-')[1]]
+    if (Math.abs(control.height - expected) > 1) geometryProblems.push(`AT-128 ${row.name}: ${control.id} height ${control.height} instead of ${expected}`)
+    if (control.outline !== 'solid' || parseFloat(control.outlineWidth) < 2) geometryProblems.push(`AT-128 ${row.name}: ${control.id} lacks a visible focus ring`)
+    if (control.disabledOpacity <= 0 || control.disabledOpacity >= 1) geometryProblems.push(`AT-128 ${row.name}: ${control.id} disabled state lacks its appearance`)
+    if (control.hoverShift > .01) geometryProblems.push(`AT-131 ${row.name}: ${control.id} shifts on hover`)
+    if (control.pressedShadow !== 'none') geometryProblems.push(`AT-128 ${row.name}: ${control.id} lacks the pressed state`)
+  }
+  if (sourceMetrics.paddingDeclarationKinds.length > 20) geometryProblems.push(`AT-126: ${sourceMetrics.paddingDeclarationKinds.length} padding declaration kinds`)
+  if (sourceMetrics.primaryDefinitions.length !== 1) geometryProblems.push(`AT-128: ${sourceMetrics.primaryDefinitions.length} primary definitions`)
+  if (sourceMetrics.importantOccurrences > 54) geometryProblems.push(`AT-128: !important occurrences increased to ${sourceMetrics.importantOccurrences}`)
+  for (const row of geometry) {
+    if (row.radiusFailures.length) geometryProblems.push(`AT-127 ${row.name}: ${row.radiusFailures.length} unmapped radii`)
+    if (row.depths.length) geometryProblems.push(`AT-127 ${row.name}: ${row.depths.length} container chains deeper than two`)
+    if (row.selects.some(select => select.appearance !== 'none')) geometryProblems.push(`AT-128 ${row.name}: native select appearance remains`)
+    for (const page of row.pages) if (page.characters > 42 || !page.constrainedByPane && page.characters < 34)
+      geometryProblems.push(`AT-126 ${row.name}: reading measure ${page.characters.toFixed(1)} characters`)
+  }
   if (sourceMetrics.fontSizeLiterals.length) typographyProblems.push(`AT-122: ${sourceMetrics.fontSizeLiterals.length} literal font sizes`)
   if (sourceMetrics.fontTokenKinds.length > 7) typographyProblems.push(`AT-122: ${sourceMetrics.fontTokenKinds.length} font token kinds`)
   for (const row of sourceMetrics.serifDeclarations.filter(row => !row.allowed)) typographyProblems.push(`AT-121: serif outside the whitelist — ${row.selectors}`)
@@ -419,8 +470,8 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
     const value = Number(cssText.match(new RegExp(`${token}:([0-9]+)px`))?.[1])
     if (!value || !usedSizes.has(value)) typographyProblems.push(`AT-122: ${token} is unused by real rendering seats`)
   }
-  const report = { outDir, results, wrap, mark, preview, typography, systemSerif, sourceMetrics,
-    problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems), ...preview.flatMap(row => row.problems), ...typographyProblems] }
+  const report = { outDir, results, wrap, mark, preview, typography, geometry, controls, systemSerif, sourceMetrics,
+    problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems), ...preview.flatMap(row => row.problems), ...typographyProblems, ...geometryProblems] }
   writeFileSync(join(outDir, 'report.json'), JSON.stringify({ at: new Date().toISOString(), ...report }, null, 2))
   return report
 }

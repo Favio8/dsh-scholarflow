@@ -14,12 +14,12 @@ export const PRESET_CSS = `
    and body[data-ds-dark-theme], so an extra copy is a no-op, and the dialog follows the same
    dark theme as the rest of the workbench. */
 .sf-preset-backdrop{position:fixed;inset:0;background:var(--sf-scrim);z-index:1400;display:flex;align-items:center;justify-content:center;padding:var(--sf-space-5)}
-.sf-preset-dialog{line-height:var(--sf-leading-body);color:var(--sf-text);font-size:var(--sf-font-md);display:flex;flex-direction:column;width:min(960px,92vw);height:min(80vh,720px);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);overflow:hidden;box-shadow:var(--sf-shadow-3)}
-.sf-preset-dialog>header{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-3) var(--sf-space-4);border-bottom:1px solid var(--sf-border)}
+.sf-preset-dialog{line-height:var(--sf-leading-body);color:var(--sf-text);font-size:var(--sf-font-md);display:flex;flex-direction:column;width:min(960px,92vw);height:min(80vh,720px);background:var(--sf-surface);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);overflow:hidden;box-shadow:var(--sf-shadow-3)}
+.sf-preset-dialog>header{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-4) var(--sf-space-5);border-bottom:1px solid var(--sf-border)}
 .sf-preset-dialog>header strong{font-size:var(--sf-font-prose)}
 .sf-preset-dialog>header button{margin-left:var(--sf-space-2);border:0;background:transparent;color:inherit;font-size:var(--sf-font-md);cursor:pointer}
 .sf-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.sf-preset-tabs{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-4);border-bottom:1px solid var(--sf-border);flex-wrap:wrap}
+.sf-preset-tabs{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-3);border-bottom:1px solid var(--sf-border);flex-wrap:wrap}
 .sf-preset-tabs button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md);cursor:pointer}
 .sf-preset-tabs button[aria-pressed=true]{background:var(--sf-accent-soft);border-color:var(--sf-accent);color:var(--sf-accent-text)}
 .sf-preset-dialog .sf-preset-tabs input{width:auto;flex:1 1 200px;margin-left:auto;box-sizing:border-box;height:var(--sf-space-6);min-width:180px;padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md)}
@@ -39,8 +39,8 @@ export const PRESET_CSS = `
 .sf-preset-manage button:last-child{color:var(--sf-danger)}
 .sf-preset-preview{flex:1;min-width:0;overflow:auto;padding:var(--sf-space-4) var(--sf-space-5)}
 .sf-preset-preview h3{margin:0 0 var(--sf-space-2);font-size:var(--sf-font-display-2)}
-.sf-preset-preview p{margin:var(--sf-space-2) 0;font-size:var(--sf-font-md);color:var(--dsw-alias-label-secondary,var(--sf-muted));line-height:var(--sf-leading-body)}
-.sf-preset-scene{margin:var(--sf-space-2) 0 0;padding-left:18px;font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-preset-preview p{margin:var(--sf-space-2) 0;font-size:var(--sf-font-md);color:var(--sf-muted);line-height:var(--sf-leading-body)}
+.sf-preset-scene{margin:var(--sf-space-2) 0 0;padding-left:18px;font-size:var(--sf-font-sm);color:var(--sf-muted)}
 .sf-preset-share{display:flex;align-items:center;gap:var(--sf-space-2);font-size:var(--sf-font-sm);margin:var(--sf-space-2) 0 0}
 .sf-preset-bar{flex:1;height:var(--sf-space-2);border-radius:var(--sf-radius-sm);background:var(--sf-fill-strong);overflow:hidden;display:flex}
 .sf-preset-bar i{display:block;height:100%;background:var(--sf-accent);opacity:.85}
@@ -48,8 +48,8 @@ export const PRESET_CSS = `
 .sf-preset-sections li{padding:var(--sf-space-3) 0;border-bottom:1px solid var(--sf-border-soft)}
 .sf-preset-sections strong{font-weight:500}
 .sf-preset-sections small{line-height:var(--sf-leading-body);display:block;color:var(--sf-muted);font-size:var(--sf-font-sm);margin-top:var(--sf-space-hair)}
-.sf-preset-subsections{margin:var(--sf-space-hair) 0 0;padding:0 0 0 var(--sf-space-4);list-style:none;border-left:2px solid var(--sf-border)}
-.sf-preset-subsections li{padding:var(--sf-space-1) 0 var(--sf-space-1) var(--sf-space-2);border-bottom:0;color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-preset-subsections{margin:var(--sf-space-hair) 0 0;padding:0;list-style:none;border-left:2px solid var(--sf-border)}
+.sf-preset-subsections li{padding:var(--sf-space-2) var(--sf-space-3);border-bottom:0;color:var(--sf-muted)}
 .sf-preset-subsections em{font-style:normal;font-size:var(--sf-font-xs);color:var(--sf-muted);margin-left:var(--sf-space-2)}
 .sf-preset-parts{margin:var(--sf-space-3) 0 0;padding:var(--sf-space-2) var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);font-size:var(--sf-font-sm)}
 .sf-preset-parts p{margin:0 0 var(--sf-space-2);font-size:var(--sf-font-sm)}
@@ -58,16 +58,15 @@ export const PRESET_CSS = `
 .sf-preset-part{display:inline-flex;align-items:baseline;gap:var(--sf-space-1)}
 .sf-preset-part small{color:var(--sf-muted);font-size:var(--sf-font-xs)}
 .sf-preset-parts-note{margin:var(--sf-space-2) 0 0;color:var(--sf-muted);font-size:var(--sf-font-xs)}
-.sf-preset-dialog>footer{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-3) var(--sf-space-4);border-top:1px solid var(--sf-border)}
+.sf-preset-dialog>footer{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-4) var(--sf-space-5);border-top:1px solid var(--sf-border)}
 .sf-preset-dialog>footer>span{flex:1}
 .sf-preset-dialog>footer button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;cursor:pointer}
-.sf-preset-dialog>footer button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent)}
-.sf-preset-error{margin:0;padding:var(--sf-space-2) var(--sf-space-4);color:var(--sf-danger);font-size:var(--sf-font-sm)}
+.sf-preset-error{margin:0;padding:var(--sf-space-2) var(--sf-space-3);color:var(--sf-danger);font-size:var(--sf-font-sm)}
 .sf-preset-dialog>header .sf-preset-new{margin-left:auto;height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md);cursor:pointer}
 .sf-preset-back{height:var(--sf-space-6);padding:0 var(--sf-space-2);margin-bottom:var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-sm);cursor:pointer}
 .sf-preset-draft{flex:1;min-width:0;overflow:auto;padding:var(--sf-space-4) var(--sf-space-5);display:flex;flex-direction:column;gap:var(--sf-space-3);align-items:flex-start}
 .sf-preset-draft h3{margin:0;font-size:var(--sf-font-display-2)}
-.sf-preset-draft p{margin:0;font-size:var(--sf-font-md);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-preset-draft p{margin:0;font-size:var(--sf-font-md);color:var(--sf-muted)}
 .sf-preset-draft label{display:flex;flex-direction:column;gap:var(--sf-space-2);font-size:var(--sf-font-sm);width:100%}
 .sf-preset-draft input{height:var(--sf-space-6);padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;font:inherit}
 .sf-preset-draft .sf-preset-sections{width:100%}
@@ -79,7 +78,6 @@ export const PRESET_CSS = `
 .sf-preset-draft-length button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:var(--sf-font-prose)}
 .sf-preset-draft-actions{display:flex;gap:var(--sf-space-2);margin-top:var(--sf-space-1)}
 .sf-preset-draft-actions button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;cursor:pointer}
-.sf-preset-draft-actions button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent)}
 .sf-preset-dialog button:not(.sf-preset-row){font-family:inherit;font-size:var(--sf-font-md);line-height:var(--sf-leading-tight)}
 .sf-preset-dialog .sf-preset-part{flex-direction:row;margin:var(--sf-space-1) 0}
 .sf-preset-dialog .sf-preset-part input{width:auto;min-height:0;height:auto}

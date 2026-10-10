@@ -12,6 +12,7 @@ import { mkdir, writeFile, symlink } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { extractCss, pageHtml, prepareSurfaceMarkup, surfaces } from './render-surfaces.mjs'
 import { visualSourceMetrics } from './visual-source-metrics.mjs'
+import { geometryInPage } from './visual-language-contracts.mjs'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
 const testHome = resolve('.dsh-tmp/appearance', String(Date.now()))
@@ -231,6 +232,7 @@ try {
     report[scheme] = {
       evidence: 'installed-dsh-client',
       step1: await page.evaluate(auditInPage, '[aria-label="创建论文向导"]'),
+      projectGeometry: await page.evaluate(geometryInPage, '.sf-project'),
       step1Narrow: null,
       zoom200: null
     }
@@ -292,6 +294,7 @@ for (const scheme of ['light', 'dark']) {
     if (view.tinyText?.length) problems.push(`${scheme} ${where}: ${view.tinyText.length} 处字号小于 11px`)
   }
   for (const row of surface.zoom200?.targetsUnder44 ?? []) problems.push(`${scheme} 200% 缩放: 点击目标 ${row.h}px < 44px — ${row.t}（设计 05 §9）`)
+  if (surface.projectGeometry?.depths.length) problems.push(`${scheme} Host: ${surface.projectGeometry.depths.length} container chains deeper than two`)
 }
 
 report.coverageComplete = report.hostThemeActivated === true && ['light', 'dark'].every(scheme =>
