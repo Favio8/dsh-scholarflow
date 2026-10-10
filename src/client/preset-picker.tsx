@@ -1,5 +1,6 @@
 import { useTextPrompt } from './text-prompt.tsx'
 import React, { useEffect, useState } from 'react'
+import { THEME_CSS } from './theme/tokens.ts'
 import { localized, SUPPLEMENTAL_LABELS, SUPPLEMENTAL_PLACEMENT, SUPPLEMENTAL_PRODUCTION, type Preset } from '../shared/presets.ts'
 import { sectionsFromPreset } from '../core/presets/apply.ts'
 
@@ -8,77 +9,79 @@ import { sectionsFromPreset } from '../core/presets/apply.ts'
  * the paper. Management writes only through the explicit operator actions. */
 
 export const PRESET_CSS = `
-/* The dialog can render without the wizard's stylesheet, so it carries the same tokens. */
-:root{--sf-accent:#3f68d8;--sf-accent-text:#2f5bc4;--sf-muted:#697080;--sf-danger:#b04a4a;--sf-warn-text:#8a5c15}
-@media(prefers-color-scheme:dark){:root{--sf-accent-text:#8fb3ff;--sf-muted:#9aa0a8;--sf-danger:#f0a0a0;--sf-warn-text:#f0b860}}
-.sf-preset-backdrop{position:fixed;inset:0;background:#00000052;z-index:1400;display:flex;align-items:center;justify-content:center;padding:24px}
-.sf-preset-dialog{display:flex;flex-direction:column;width:min(960px,92vw);height:min(80vh,720px);background:var(--dsw-alias-bg-base,#fff);border:1px solid #8883;border-radius:14px;overflow:hidden;box-shadow:0 24px 60px #00000030}
-.sf-preset-dialog>header{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #8882}
-.sf-preset-dialog>header strong{font-size:15px}
-.sf-preset-dialog>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:18px;cursor:pointer}
+/* Colours and density come from src/client/theme/tokens.ts, and this dialog injects that layer
+   itself instead of relying on another surface having been mounted: the layer is keyed to :root
+   and body[data-ds-dark-theme], so an extra copy is a no-op, and the dialog follows the same
+   dark theme as the rest of the workbench. */
+.sf-preset-backdrop{position:fixed;inset:0;background:var(--sf-scrim);z-index:1400;display:flex;align-items:center;justify-content:center;padding:var(--sf-space-5)}
+.sf-preset-dialog{display:flex;flex-direction:column;width:min(960px,92vw);height:min(80vh,720px);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);overflow:hidden;box-shadow:var(--sf-shadow-3)}
+.sf-preset-dialog>header{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-3) var(--sf-space-4);border-bottom:1px solid var(--sf-border)}
+.sf-preset-dialog>header strong{font-size:var(--sf-font-lg)}
+.sf-preset-dialog>header button{margin-left:var(--sf-space-2);border:0;background:transparent;color:inherit;font-size:var(--sf-font-xl);cursor:pointer}
 .sf-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.sf-preset-tabs{display:flex;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid #8882;flex-wrap:wrap}
-.sf-preset-tabs button{height:32px;padding:0 12px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
-.sf-preset-tabs button[aria-pressed=true]{background:#4475e714;border-color:var(--sf-accent);color:var(--sf-accent-text)}
-.sf-preset-tabs input{margin-left:auto;height:32px;min-width:180px}
+.sf-preset-tabs{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-4);border-bottom:1px solid var(--sf-border);flex-wrap:wrap}
+.sf-preset-tabs button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md);cursor:pointer}
+.sf-preset-tabs button[aria-pressed=true]{background:var(--sf-accent-soft);border-color:var(--sf-accent);color:var(--sf-accent-text)}
+.sf-preset-tabs input{margin-left:auto;box-sizing:border-box;height:var(--sf-space-6);min-width:180px;padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md)}
 .sf-preset-body{display:flex;min-height:0;flex:1}
-.sf-preset-list{width:40%;min-width:220px;border-right:1px solid #8882;overflow:auto;padding:8px}
-.sf-preset-group{margin:6px 10px;font-size:11.5px;color:var(--sf-muted)}
-.sf-preset-row{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:8px;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
-.sf-preset-row:hover{background:#8881}
-.sf-preset-row[aria-pressed=true]{background:#4475e714;border-color:var(--sf-accent)}
+.sf-preset-list{width:40%;min-width:220px;border-right:1px solid var(--sf-border);overflow:auto;padding:var(--sf-space-2)}
+.sf-preset-group{margin:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-xs);color:var(--sf-muted)}
+.sf-preset-row{display:flex;align-items:center;gap:var(--sf-space-2);width:100%;padding:var(--sf-space-2);border:1px solid transparent;border-radius:var(--sf-radius-lg);background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.sf-preset-row:hover{background:var(--sf-fill)}
+.sf-preset-row[aria-pressed=true]{background:var(--sf-accent-soft);border-color:var(--sf-accent)}
 .sf-preset-row>span{display:flex;flex-direction:column;flex:1;min-width:0}
-.sf-preset-row small{font-size:11.5px;color:var(--sf-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sf-preset-row em{flex:none;font-size:11px;font-style:normal;color:var(--sf-muted)}
-.sf-preset-manage{display:flex;gap:4px;flex:none}
-.sf-preset-manage button{border:0;background:transparent;color:var(--sf-muted);cursor:pointer;font-size:12px;padding:2px 4px}
-.sf-preset-preview{flex:1;min-width:0;overflow:auto;padding:16px 20px}
-.sf-preset-preview h3{margin:0 0 6px;font-size:16px}
-.sf-preset-preview p{margin:6px 0;font-size:13px;color:var(--dsw-alias-label-secondary,#727780);line-height:1.6}
-.sf-preset-scene{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--dsw-alias-label-secondary,#727780)}
-.sf-preset-share{display:flex;align-items:center;gap:8px;font-size:12.5px;margin:8px 0 0}
-.sf-preset-bar{flex:1;height:8px;border-radius:4px;background:#8882;overflow:hidden;display:flex}
+.sf-preset-row small{font-size:var(--sf-font-xs);color:var(--sf-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-preset-row em{flex:none;font-size:var(--sf-font-xs);font-style:normal;color:var(--sf-muted)}
+.sf-preset-manage{display:flex;gap:var(--sf-space-1);flex:none}
+.sf-preset-manage button{border:0;background:transparent;color:var(--sf-accent-text);cursor:pointer;font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-1)}
+.sf-preset-manage button:last-child{color:var(--sf-danger)}
+.sf-preset-preview{flex:1;min-width:0;overflow:auto;padding:var(--sf-space-4) var(--sf-space-5)}
+.sf-preset-preview h3{margin:0 0 var(--sf-space-2);font-size:var(--sf-font-xl)}
+.sf-preset-preview p{margin:var(--sf-space-2) 0;font-size:var(--sf-font-md);color:var(--dsw-alias-label-secondary,var(--sf-muted));line-height:var(--sf-leading-body)}
+.sf-preset-scene{margin:var(--sf-space-2) 0 0;padding-left:18px;font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-preset-share{display:flex;align-items:center;gap:var(--sf-space-2);font-size:var(--sf-font-sm);margin:var(--sf-space-2) 0 0}
+.sf-preset-bar{flex:1;height:var(--sf-space-2);border-radius:var(--sf-radius-sm);background:var(--sf-fill-strong);overflow:hidden;display:flex}
 .sf-preset-bar i{display:block;height:100%;background:var(--sf-accent);opacity:.85}
-.sf-preset-sections{margin:10px 0 0;padding:0;list-style:none;font-size:13px}
-.sf-preset-sections li{padding:7px 0;border-bottom:1px solid #8881}
+.sf-preset-sections{margin:var(--sf-space-2) 0 0;padding:0;list-style:none;font-size:var(--sf-font-md)}
+.sf-preset-sections li{padding:var(--sf-space-2) 0;border-bottom:1px solid var(--sf-border-soft)}
 .sf-preset-sections strong{font-weight:500}
-.sf-preset-sections small{display:block;color:var(--sf-muted);font-size:12px;margin-top:2px}
-.sf-preset-subsections{margin:2px 0 0;padding:0 0 0 14px;list-style:none;border-left:2px solid #8882}
-.sf-preset-subsections li{padding:5px 0 5px 8px;border-bottom:0;color:var(--dsw-alias-label-secondary,#727780)}
-.sf-preset-subsections em{font-style:normal;font-size:11.5px;color:var(--sf-muted);margin-left:6px}
-.sf-preset-parts{margin:12px 0 0;padding:10px 12px;border:1px solid #8883;border-radius:8px;font-size:12.5px}
-.sf-preset-parts p{margin:0 0 6px;font-size:12.5px}
-.sf-preset-parts-row{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline}
-.sf-preset-parts-label{color:var(--sf-muted);font-size:11.5px}
-.sf-preset-part{display:inline-flex;align-items:baseline;gap:5px}
-.sf-preset-part small{color:var(--sf-muted);font-size:11px}
-.sf-preset-parts-note{margin:6px 0 0;color:var(--sf-muted);font-size:11.5px}
-.sf-preset-dialog>footer{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid #8882}
+.sf-preset-sections small{display:block;color:var(--sf-muted);font-size:var(--sf-font-sm);margin-top:var(--sf-space-hair)}
+.sf-preset-subsections{margin:var(--sf-space-hair) 0 0;padding:0 0 0 var(--sf-space-4);list-style:none;border-left:2px solid var(--sf-border)}
+.sf-preset-subsections li{padding:var(--sf-space-1) 0 var(--sf-space-1) var(--sf-space-2);border-bottom:0;color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-preset-subsections em{font-style:normal;font-size:var(--sf-font-xs);color:var(--sf-muted);margin-left:var(--sf-space-2)}
+.sf-preset-parts{margin:var(--sf-space-3) 0 0;padding:var(--sf-space-2) var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);font-size:var(--sf-font-sm)}
+.sf-preset-parts p{margin:0 0 var(--sf-space-2);font-size:var(--sf-font-sm)}
+.sf-preset-parts-row{display:flex;flex-wrap:wrap;gap:var(--sf-space-2) var(--sf-space-4);align-items:baseline}
+.sf-preset-parts-label{color:var(--sf-muted);font-size:var(--sf-font-xs)}
+.sf-preset-part{display:inline-flex;align-items:baseline;gap:var(--sf-space-1)}
+.sf-preset-part small{color:var(--sf-muted);font-size:var(--sf-font-xs)}
+.sf-preset-parts-note{margin:var(--sf-space-2) 0 0;color:var(--sf-muted);font-size:var(--sf-font-xs)}
+.sf-preset-dialog>footer{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-3) var(--sf-space-4);border-top:1px solid var(--sf-border)}
 .sf-preset-dialog>footer>span{flex:1}
-.sf-preset-dialog>footer button{height:36px;padding:0 14px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;cursor:pointer}
-.sf-preset-dialog>footer button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:#fff}
-.sf-preset-error{margin:0;padding:8px 18px;color:var(--sf-danger);font-size:12.5px}
-.sf-preset-dialog>header .sf-preset-new{margin-left:auto;height:32px;padding:0 12px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
-.sf-preset-back{height:30px;padding:0 10px;margin-bottom:10px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:12.5px;cursor:pointer}
-.sf-preset-draft{flex:1;min-width:0;overflow:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
-.sf-preset-draft h3{margin:0;font-size:16px}
-.sf-preset-draft p{margin:0;font-size:13px;color:var(--dsw-alias-label-secondary,#727780)}
-.sf-preset-draft label{display:flex;flex-direction:column;gap:6px;font-size:12.5px;width:100%}
-.sf-preset-draft input{height:34px;padding:0 10px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;font:inherit}
+.sf-preset-dialog>footer button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;cursor:pointer}
+.sf-preset-dialog>footer button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent)}
+.sf-preset-error{margin:0;padding:var(--sf-space-2) var(--sf-space-4);color:var(--sf-danger);font-size:var(--sf-font-sm)}
+.sf-preset-dialog>header .sf-preset-new{margin-left:auto;height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md);cursor:pointer}
+.sf-preset-back{height:var(--sf-space-6);padding:0 var(--sf-space-2);margin-bottom:var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-sm);cursor:pointer}
+.sf-preset-draft{flex:1;min-width:0;overflow:auto;padding:var(--sf-space-4) var(--sf-space-5);display:flex;flex-direction:column;gap:var(--sf-space-3);align-items:flex-start}
+.sf-preset-draft h3{margin:0;font-size:var(--sf-font-xl)}
+.sf-preset-draft p{margin:0;font-size:var(--sf-font-md);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-preset-draft label{display:flex;flex-direction:column;gap:var(--sf-space-2);font-size:var(--sf-font-sm);width:100%}
+.sf-preset-draft input{height:var(--sf-space-6);padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;font:inherit}
 .sf-preset-draft .sf-preset-sections{width:100%}
-.sf-preset-draft .sf-preset-sections li{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sf-preset-draft .sf-preset-sections li{display:flex;flex-wrap:wrap;gap:var(--sf-space-2);align-items:center}
 .sf-preset-draft .sf-preset-sections li>input:first-child{flex:1 1 160px;min-width:0}
 .sf-preset-draft .sf-preset-sections li>input:nth-child(2){flex:1 1 200px;min-width:0}
-.sf-preset-draft-length{display:flex;align-items:center;gap:4px;flex:none}
+.sf-preset-draft-length{display:flex;align-items:center;gap:var(--sf-space-1);flex:none}
 .sf-preset-draft-length input{width:80px}
-.sf-preset-draft-length button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px}
-.sf-preset-draft-actions{display:flex;gap:10px;margin-top:4px}
-.sf-preset-draft-actions button{height:34px;padding:0 14px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;font:inherit;cursor:pointer}
-.sf-preset-draft-actions button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:#fff}
+.sf-preset-draft-length button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:var(--sf-font-lg)}
+.sf-preset-draft-actions{display:flex;gap:var(--sf-space-2);margin-top:var(--sf-space-1)}
+.sf-preset-draft-actions button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;cursor:pointer}
+.sf-preset-draft-actions button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent)}
 /* Narrow containers show one column at a time; the apply button stays reachable. */
 @media(max-width:720px){.sf-preset-body{flex-direction:column}.sf-preset-body[data-view=list] .sf-preset-preview{display:none}
 .sf-preset-body[data-view=detail] .sf-preset-list{display:none}
-.sf-preset-list{width:100%;min-width:0;border-right:0;border-bottom:1px solid #8882;flex:0 0 auto;max-height:45%}
+.sf-preset-list{width:100%;min-width:0;border-right:0;border-bottom:1px solid var(--sf-border);flex:0 0 auto;max-height:45%}
 .sf-preset-dialog>footer{flex-wrap:wrap}}
 `
 
@@ -137,7 +140,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
     && draftedKinds(selected).includes('abstract') && draftedKinds(selected).includes('keywords')
   return <>{textPrompt.dialog}<div className="sf-preset-backdrop" onClick={event => { if (event.target === event.currentTarget) onClose() }}>
     <section className="sf-preset-dialog" role="dialog" aria-modal="true" aria-label="选择结构预设">
-      <style>{PRESET_CSS}</style>
+      <style>{THEME_CSS + PRESET_CSS}</style>
       <header><strong>结构预设</strong>
         <button className="sf-preset-new" disabled={busy} onClick={() => { setDetail(false)
           setDraft({ title: '', sections: [{ key: 'k-section-1', title: '引言', focus: '', targetLength: 1000 }] }) }}>新建我的预设</button>

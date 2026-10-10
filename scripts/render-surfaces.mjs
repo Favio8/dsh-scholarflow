@@ -41,7 +41,7 @@ const material = (checked, name, note, disabled) => `<label${disabled ? ' class=
   <span>${name}</span><small>${note}</small></label>`
 
 const head = (step) => `<header><span class="sf-wizard-eyebrow">科技论文写作</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p>${step === 0 ? '<button class="sf-wizard-clear">清除草稿</button>' : ''}</header>
-<nav class="sf-wizard-steps">${['写作要求', '资料范围', '行文结构'].map((title, index) => `<button${index === step ? ' aria-current="step"' : ''}${index > step ? ' disabled' : ''}><span>${index + 1}</span>${title}</button>`).join('')}</nav>
+<nav class="sf-wizard-steps">${['写作要求', '资料范围', '行文结构'].map((title, index) => `<button${index === step ? ' aria-current="step"' : ''}${index > step ? ' disabled' : ''}${index < step ? ' data-done="true"' : ''}><span>${index + 1}</span>${title}</button>`).join('')}</nav>
 <p class="sf-wizard-step-compact"${step === 0 ? ' aria-current="step"' : ''}>第 ${step + 1} 步 / 共 3 步 · ${['写作要求', '资料范围', '行文结构'][step]}</p>`
 
 const step1 = `<section class="sf-wizard">${head(0)}
@@ -122,18 +122,31 @@ const draftBody = () => `<div class="sf-app sf-paper-project" style="height:420p
 ${draftSource('sf-wrap-gutter')}
 </div></div></div></div>`
 
-/** The same pane with the marking layer the component renders, so the bands can be measured. */
-const draftMarkBody = () => `<div class="sf-app sf-paper-project" style="height:420px;display:flex;flex-direction:column">
+/** The same pane with the marking layer the component renders, so the mirror can be measured. Taller
+    than the real pane so a long marked range shows enough of its rows to measure the seams between
+    them; nothing else about the surface depends on the height. */
+const draftMarkBody = () => `<div class="sf-app sf-paper-project" style="height:620px;display:flex;flex-direction:column">
 <div class="sf-editor-grid" data-view="split">
 <div class="sf-source-pane" style="--sf-editor-font:13px;--sf-editor-line:24px">
-${draftSource('sf-mark-gutter', '<div class="sf-source-marks" aria-hidden="true"><div id="sf-mark-bands"></div></div>')}
-</div></div></div></div>`
+${draftSource('sf-mark-gutter', '<div class="sf-source-marks" aria-hidden="true"><div id="sf-mark-stack"></div></div>')}
+</div></div></div>
+<script>
+// The pane's own wiring, reproduced so the composition retreat can be driven the way the app drives
+// it: draft.tsx writes the attribute from the two composition events and nothing else.
+document.querySelectorAll('.sf-source-editor').forEach(editor => {
+  const area = editor.querySelector('textarea')
+  area.addEventListener('compositionstart', () => editor.setAttribute('data-composing', ''))
+  area.addEventListener('compositionend', () => editor.removeAttribute('data-composing'))
+})
+</script>`
 
-/** The preview's half of the mark: the range is coloured on the glyphs themselves. */
+/** The preview's half of the mark: the range is coloured on the glyphs themselves. The marked text
+    is long enough to wrap, because "does the gradient continue across the wrap" is only answerable
+    on a range that actually wraps — a one-line span cannot show a seam. */
 const draftPreviewBody = () => `<div class="sf-app sf-paper-project" style="height:340px;display:flex;flex-direction:column">
 <div class="sf-preview-pane" style="display:flex;flex-direction:column;min-height:0;flex:1">
 <div class="sf-paper-scroll" style="flex:1;min-height:0;overflow:auto"><div class="sf-paper-page">
-<p data-sf-block="p_TEST_ONLY" style="white-space:pre-wrap"><span data-sf-leaf="leaf_TEST_ONLY_plain">同样长度的未标注文字</span><span class="sf-mark-inline" data-sf-marked="true" data-flow="off">同样长度的被标注文字</span></p>
+<p data-sf-block="p_TEST_ONLY" style="white-space:pre-wrap"><span data-sf-leaf="leaf_TEST_ONLY_plain">同样长度的未标注文字</span><span class="sf-mark-inline" data-sf-marked="true" data-flow="off">这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续</span></p>
 </div></div></div></div>`
 
 const presetRow = (title, summary, chosen, current, manage) => `<div style="display:flex;align-items:center">
@@ -183,16 +196,19 @@ const surfaces = {
   preset: { title: '结构预设弹窗（宽屏双栏）', body: modal('wide'), width: '100%' },
   presetDetail: { title: '结构预设弹窗（窄屏详情栏）', body: modal('detail'), width: '100%' },
   draftWrap: { title: '正文源码区 · 长行软换行', body: draftBody(), width: '100%' },
-  draftMark: { title: '正文源码区 · 改写范围标注', body: draftMarkBody(), width: '100%' },
+  draftMark: { title: '正文源码区 · 改写范围标注', body: draftMarkBody(), width: '1060px' },
   draftPreview: { title: '正文预览 · 改写范围标注', body: draftPreviewBody(), width: '520px' }
 }
 
-export function pageHtml(wizard, picker, paper) {
+export function pageHtml(theme, wizard, picker, paper, motion, dark = false) {
   const stages = Object.entries(surfaces)
     .map(([id, surface], index) => stage(`s${index + 1}`, surface.title, surface.body, surface.width))
     .join('\n')
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ScholarFlow 界面静态渲染</title><style>
+${theme}
 :root{--dsw-alias-bg-layer-1:#fafbfc;--dsw-alias-bg-base:#fff;--dsw-alias-label-secondary:#727780;--dsw-alias-interactive-bg-hover:#f0f1f3}
+${dark ? `body[data-ds-dark-theme]{--dsw-alias-bg-layer-1:#1c1c1f;--dsw-alias-bg-base:#151517;--dsw-alias-label-secondary:#9aa0a8;--dsw-alias-interactive-bg-hover:#26262a}
+body[data-ds-dark-theme]{background:#101013;color:#e8eaed}` : ''}
 body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:#1f2329;background:#e9ecef}
 .stage{padding:18px 20px 28px}
 .stage>h1{font-size:13px;font-weight:600;margin:0 0 10px;color:#4b5157}
@@ -201,18 +217,23 @@ body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;colo
 ${wizard}
 ${picker}
 ${paper}
+${motion}
 /* Same specificity as the plugin rule, so this must come after it. The real dialog is a fixed
    overlay, which would sit out of flow and collapse its stage in a static page. */
 .sf-preset-backdrop{position:static;padding:0;background:transparent}
-</style></head><body>
+</style></head><body${dark ? ' data-ds-dark-theme' : ''}>
 ${stages}
 </body></html>`
 }
 
-/** Wide captures both columns; narrow captures the single column the component switches to. */
+/** Wide captures both columns; narrow captures the single column the component switches to. The dark
+    pass is its own page rather than a second screenshot of every surface: the tokens key off
+    body[data-ds-dark-theme], and what has to be proven in the dark is that the mark still reads —
+    its paper is paper in either theme, so the glyphs keep their contrast (AT-88 (2)). */
 const passes = [
   { viewport: { width: 1100, height: 900 }, suffix: '', ids: ['step1', 'step2', 'step3', 'preset', 'draftWrap', 'draftMark', 'draftPreview'] },
-  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: ['step1', 'step2', 'step3', 'presetDetail', 'draftWrap', 'draftMark', 'draftPreview'] }
+  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: ['step1', 'step2', 'step3', 'presetDetail', 'draftWrap', 'draftMark', 'draftPreview'] },
+  { viewport: { width: 1100, height: 900 }, suffix: '-dark', dark: true, ids: ['draftWrap', 'draftMark', 'draftPreview'] }
 ]
 
 const indexPath = (id) => Object.keys(surfaces).indexOf(id) + 1
@@ -228,15 +249,22 @@ async function measure(page, base64) {
     const context = canvas.getContext('2d')
     context.drawImage(image, 0, 0)
     const data = context.getImageData(0, 0, canvas.width, canvas.height).data
-    let ink = 0
+    // "Renders nothing" is a question about how much of the capture is one colour, not about how dark
+    // it is: a dark theme is legitimately mostly dark pixels, and only a capture that is almost
+    // entirely a single colour says nothing rendered.
+    const buckets = new Map()
     for (let i = 0; i < data.length; i += 4) {
-      if ((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000 < 235) ink++
+      const key = ((data[i] >> 4) << 8) | ((data[i + 1] >> 4) << 4) | (data[i + 2] >> 4)
+      buckets.set(key, (buckets.get(key) ?? 0) + 1)
     }
-    return { width: image.width, height: image.height, ink: ink / (canvas.width * canvas.height) }
+    const dominant = Math.max(...buckets.values()) / (canvas.width * canvas.height)
+    return { width: image.width, height: image.height, dominant }
   }, base64)
 }
 
 export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) {
+  const theme = extractCss('src/client/theme/tokens.ts', 'THEME_CSS')
+  const motion = extractCss('src/client/motion/tokens.ts', 'MOTION_CSS')
   const wizard = extractCss('src/client/creation-wizard.tsx', 'WIZARD_CSS')
   const picker = extractCss('src/client/preset-picker.tsx', 'PRESET_CSS')
   const paper = extractCss('src/client/paper-workspace.tsx', 'PAPER_CSS')
@@ -249,52 +277,77 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
     platform: 'browser', format: 'iife', globalName: 'ScholarFlowMeasure' })
   const rangeModule = await build({ entryPoints: [join(root, 'src/client/rewrite-range.ts')], bundle: true, write: false,
     platform: 'browser', format: 'iife', globalName: 'ScholarFlowRange' })
+  const mirrorModule = await build({ entryPoints: [join(root, 'src/client/source-mirror.ts')], bundle: true, write: false,
+    platform: 'browser', format: 'iife', globalName: 'ScholarFlowMirror' })
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
-  writeFileSync(join(outDir, 'wizard.html'), pageHtml(wizard, picker, paper + marks))
+  writeFileSync(join(outDir, 'wizard.html'), pageHtml(theme, wizard, picker, paper + marks, motion))
+  writeFileSync(join(outDir, 'wizard-dark.html'), pageHtml(theme, wizard, picker, paper + marks, motion, true))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
   const results = [], wrap = [], mark = [], preview = []
   try {
     for (const pass of passes) {
       const page = await (await browser.newContext({ viewport: pass.viewport })).newPage()
-      await page.goto(pathToFileURL(join(outDir, 'wizard.html')).href)
+      await page.goto(pathToFileURL(join(outDir, pass.dark ? 'wizard-dark.html' : 'wizard.html')).href)
       await page.addScriptTag({ content: gutterModule.outputFiles[0].text })
       await page.addScriptTag({ content: measureModule.outputFiles[0].text })
       await page.addScriptTag({ content: rangeModule.outputFiles[0].text })
+      await page.addScriptTag({ content: mirrorModule.outputFiles[0].text })
       await page.waitForTimeout(500)
+      // The mark surface is checked against the wrapping of its own pass: every pass measures its own
+      // wrap surface, so the comparison is between two measurements of the same page.
+      let passWrap
       for (const id of pass.ids) {
         const name = `surface-${id}${pass.suffix}.png`
         const file = join(outDir, name)
         // The wrap and mark surfaces are measured before they are captured, so the capture shows the
         // state the check just accepted instead of an unmeasured column or an unpainted pane.
-        if (id === 'draftWrap') { const report = await checkDraftWrap(page, `#s${indexPath(id)}>.frame`); wrap.push({ name, report, problems: auditWrap(name, report) }) }
+        if (id === 'draftWrap') { const report = await checkDraftWrap(page, `#s${indexPath(id)}>.frame`); passWrap = report; wrap.push({ name, report, problems: auditWrap(name, report) }) }
         const markReport = id === 'draftMark' ? await checkDraftMark(page, `#s${indexPath(id)}>.frame`) : undefined
         const previewReport = id === 'draftPreview' ? await checkDraftPreview(page, `#s${indexPath(id)}>.frame`) : undefined
         const shot = await page.locator(`#s${indexPath(id)}>.frame`).screenshot()
         writeFileSync(file, shot)
         results.push({ name, ...(await measure(page, shot.toString('base64'))) })
         if (markReport) {
-          // Read the two sampled strips back out of the capture: this is what decides whether the
-          // platform selection colour is hiding the mark.
-          const samples = await sampleColors(page, shot.toString('base64'), markReport.sample)
-          const probes = samples.slice(0, -1), plain = samples.at(-1)
-          const band = probes.reduce((sum, row) => ({ r: sum.r + row.r / probes.length, g: sum.g + row.g / probes.length, b: sum.b + row.b / probes.length }), { r: 0, g: 0, b: 0 })
-          // The band sits behind the text, so its own lightness decides whether the text is readable;
-          // the lightest point of the spectrum is the one that matters.
-          const text = { r: markReport.colour[0], g: markReport.colour[1], b: markReport.colour[2] }
-          markReport.band = band
-          markReport.textContrast = Math.min(...probes.map(row => contrastRatio(row, text)))
-          markReport.spread = Math.max(...probes.flatMap((one, index) => probes.slice(index + 1)
+          // Read the marked row back out of the capture with the platform selection over it: if that
+          // selection covered the mark, the row would read as one flat colour and its spread would
+          // collapse, which is what this measures.
+          const probes = await sampleColors(page, shot.toString('base64'), markReport.sample.slice(0, -1))
+          markReport.selected = Math.max(...probes.flatMap((one, index) => probes.slice(index + 1)
             .map(other => Math.hypot(one.r - other.r, one.g - other.g, one.b - other.b))), 0)
-          markReport.contrast = Math.hypot(band.r - plain.r, band.g - plain.g, band.b - plain.b)
+          // The background itself, for the wrap seam, the row's spread and the glyph contrast. The
+          // full range is repainted first: the selection reproduction above left a shorter one.
+          const background = await backgroundProbe(page, `#s${indexPath(id)}>.frame .sf-source-mirror .sf-mark-inline`,
+            `#s${indexPath(id)}>.frame .sf-source-paper>i`,
+            () => page.evaluate(({ selector, start, end }) => {
+              const root = document.querySelector(selector)
+              window.ScholarFlowMirror.paintSourceMark(root.querySelector('#sf-mark-stack'),
+                root.querySelector('textarea.sf-source-input'), { start, end, state: 'ready' },
+                root.querySelector('.sf-source-editor'))
+            }, { selector: `#s${indexPath(id)}>.frame`, start: MARK_START, end: FULL_END }))
+          markReport.seam = background
+          // G-1 on the glyphs: the flow has to move pixels, with the off and reduced-motion captures
+          // as its controls. Before the drag, so the probe cannot disturb what was measured above.
+          markReport.motion = await motionProbe(page, page.locator(`#s${indexPath(id)}>.frame .sf-source-mirror .sf-mark-inline`),
+            on => page.evaluate(({ selector, on }) => { document.querySelector(selector).dataset.flow = on ? 'on' : 'off' },
+              { selector: `#s${indexPath(id)}>.frame .sf-source-mirror .sf-mark-inline`, on }))
           // After the capture, so the drag cannot disturb what was measured above.
           markReport.live = await dragRangeProbe(page, `#s${indexPath(id)}>.frame`)
-          mark.push({ name, report: markReport, problems: auditMark(name, markReport, wrap.at(-1)?.report.longRows) })
+          mark.push({ name, report: markReport, problems: auditMark(name, markReport, passWrap?.longRows) })
         }
         if (previewReport) {
           const [marked, plain] = await sampleColors(page, shot.toString('base64'), previewReport.sample)
           previewReport.contrast = Math.hypot(marked.r - plain.r, marked.g - plain.g, marked.b - plain.b)
+          // G-2 and G-3 on the glyphs: the wrap seam and whether the gradient is readable on the
+          // paper it is carried on — the preview had never been asked either question.
+          previewReport.seam = await backgroundProbe(page, `#s${indexPath(id)}>.frame .sf-mark-inline`,
+            `#s${indexPath(id)}>.frame .sf-paper-page`)
+          previewReport.fragments = previewReport.seam.fragments
+          // G-1 on the glyphs: the preview had never been asked whether its flow moves at all.
+          previewReport.motion = await motionProbe(page, page.locator(`#s${indexPath(id)}>.frame .sf-mark-inline`),
+            on => page.evaluate(({ selector, on }) => { document.querySelector(selector).dataset.flow = on ? 'on' : 'off' },
+              { selector: `#s${indexPath(id)}>.frame .sf-mark-inline`, on }))
           preview.push({ name, report: previewReport, problems: auditPreview(name, previewReport) })
         }
       }
@@ -309,68 +362,167 @@ function chromePath() {
 }
 
 /**
- * AT-87 (1) in a real browser page: the shipped range measurement is applied to a marked range and
- * the bands are painted the way the component paints them, then measured. A mark that silently
- * collapsed to one band would still screenshot fine, so these numbers are the point.
+ * AT-87 (1)(2) and SF-090 in a real browser page. The shipped painter is run against a real textarea
+ * and measured: the mirror, the chips and the three-way split are the implementation under test, so
+ * they are bundled into the page rather than re-implemented here — a copy would pass against a stale
+ * rule. A mark that silently collapsed to one chip would still screenshot fine, so these numbers are
+ * the point.
  */
 async function checkDraftMark(page, selector) {
   return page.evaluate(({ selector, start, end, markEnd, selectionEnd }) => {
     const root = document.querySelector(selector)
     const area = root.querySelector('textarea.sf-source-input')
-    const layer = root.querySelector('.sf-source-marks'), bands = root.querySelector('#sf-mark-bands')
+    const editor = root.querySelector('.sf-source-editor')
+    const layer = root.querySelector('.sf-source-marks'), stack = root.querySelector('#sf-mark-stack')
     const style = getComputedStyle(area), row = parseFloat(style.lineHeight)
-    const box = area.getBoundingClientRect(), layerBox = layer.getBoundingClientRect()
+    const layerBox = layer.getBoundingClientRect()
     const contentWidth = area.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
-    const paint = (from, to) => {
-      const rects = window.ScholarFlowMeasure.lineBoxes(window.ScholarFlowMeasure.sourceRangeRects(area, from, to), row)
-      bands.replaceChildren()
-      for (const rect of rects) {
-        const band = document.createElement('div')
-        band.className = 'sf-range-band'
-        Object.assign(band.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` })
-        bands.append(band)
-      }
-      bands.style.transform = `translate(${box.left - layerBox.left}px, ${box.top - layerBox.top - area.scrollTop}px)`
-      // The component marks the pane while bands are up, which is what switches the selection to a
-      // tint. Reproducing the defect means reproducing that too.
-      const pane = area.closest('.sf-source-editor')
-      if (pane) pane.dataset.marked = ''
-      return rects
+    // The layer's origin is read fresh each time: the pane can scroll — and the page with it — between
+    // one paint and the next, and a stale origin would place the whole mirror where it used to be.
+    const place = () => { const box = area.getBoundingClientRect()
+      stack.style.transform = `translate(${box.left - layerBox.left}px, ${box.top - layerBox.top - area.scrollTop}px)` }
+    const paint = (from, to, state) => {
+      window.ScholarFlowMirror.paintSourceMark(stack, area, { start: from, end: to, state }, editor)
+      place()
+      return window.ScholarFlowMeasure.sourceRangeRects(area, from, to)
     }
-    bands.dataset.state = 'generating'
-    const whole = paint(start, end)
-    const painted = [...bands.children].map(band => band.getBoundingClientRect())
-    // The same band with the candidate ready must stop, and a plain selection must never flow: the
-    // settled states are part of the contract, not a side effect.
-    const flow = getComputedStyle(bands.children[0]).animationName
-    bands.dataset.state = 'ready'
-    const settled = getComputedStyle(bands.children[0]).animationName
-    bands.dataset.state = 'selected'
-    const held = getComputedStyle(bands.children[0]).animationName
-    // Now reproduce the defect: select the text for real. The selection runs past the marked range,
-    // so the last rows it covers carry a band and a row further down carries only the selection.
-    const marked = paint(start, markEnd)
-    area.focus(); area.setSelectionRange(start, selectionEnd); area.scrollTop = 0
-    bands.style.transform = `translate(${box.left - layerBox.left}px, ${box.top - layerBox.top}px)`
-    const first = bands.children[0].getBoundingClientRect()
-    // The reference row is two rows below the last band, in the pane's content coordinates: it is
-    // inside the selection but carries no band, and measuring from the bands keeps it in view at any
+    // Everything about the mirror is read from this one paint: the selection reproduction below
+    // repaints with a shorter range, and a measurement taken after it would describe the wrong mark.
+    paint(start, end, 'generating')
+    const chips = [...stack.querySelectorAll('.sf-source-paper>i')].map(chip => chip.getBoundingClientRect())
+    const mirror = stack.querySelector('.sf-source-mirror'), marked = mirror.querySelector('.sf-mark-inline')
+    // The three-way split is the mirror's whole content contract: the copy is the pane's text, and
+    // the middle node is exactly the range.
+    const split = { whole: mirror.textContent === area.value,
+      slice: marked.textContent === area.value.slice(start, end) }
+    // Alignment against the pane's own measurement, line by line: the measurement splits a line where
+    // a space hangs at the wrap and the mirror does not, so fragment boundaries inside a line
+    // legitimately differ while where a line starts and ends must not.
+    const byLine = list => { const lines = new Map()
+      for (const rect of list) { const key = Math.round(rect.top); if (!lines.has(key)) lines.set(key, []); lines.get(key).push(rect) }
+      return [...lines.entries()].sort((a, b) => a[0] - b[0])
+        .map(([top, rects]) => ({ top, left: rects[0].left, right: Math.max(...rects.map(rect => rect.right)) })) }
+    const bounds = area.getBoundingClientRect()
+    const mine = byLine([...marked.getClientRects()])
+    const truth = byLine(window.ScholarFlowMeasure.sourceRangeRects(area, start, end)
+      .map(rect => ({ left: rect.left + bounds.left - area.scrollLeft, top: rect.top + bounds.top - area.scrollTop,
+        right: rect.left + bounds.left - area.scrollLeft + rect.width })))
+    const align = Math.max(...mine.flatMap((line, index) => { const other = truth[index]
+      return other ? [Math.abs(line.left - other.left), Math.abs(line.top - other.top), Math.abs(line.right - other.right)] : [99] }),
+      mine.length === truth.length ? 0 : 99)
+    // The same mark with the candidate ready must stop, and a plain selection must never flow: the
+    // settled states are part of the contract, not a side effect. The painter writes data-flow from
+    // the single truth, and the animation is off by default, so the gate drives the same attribute.
+    const flowOf = value => { marked.dataset.flow = value; return getComputedStyle(marked).animationName }
+    const flow = flowOf('on'), settled = flowOf('off'), held = flowOf('off')
+    // What the pane looks like while the mirror is up, and what it falls back to without one.
+    const markedLook = { colour: getComputedStyle(area).color, caret: getComputedStyle(area).caretColor }
+    editor.removeAttribute('data-mirrored')
+    const plainLook = { colour: getComputedStyle(area).color, caret: getComputedStyle(area).caretColor }
+    editor.setAttribute('data-mirrored', '')
+    // The composition retreat, driven the way the app drives it: the attribute comes from the
+    // composition events (the pane's own wiring, reproduced in the page), and the CSS does the rest.
+    area.dispatchEvent(new CompositionEvent('compositionstart'))
+    const composing = { attribute: editor.hasAttribute('data-composing'),
+      mirror: getComputedStyle(mirror).visibility, colour: getComputedStyle(area).color }
+    area.dispatchEvent(new CompositionEvent('compositionend'))
+    const mirrorState = { hidden: mirror.getAttribute('aria-hidden'), events: getComputedStyle(mirror).pointerEvents,
+      height: Math.abs(mirror.scrollHeight - Math.max(area.scrollHeight, area.clientHeight)) }
+    // The mark's contract with the token layer: the painted gradient is the token's, not a copy. The
+    // expected value is computed from the token in the page, so the comparison is between two
+    // computed backgrounds rather than between a computed one and a hand-parsed literal.
+    const probe = document.createElement('div')
+    probe.style.backgroundImage = 'var(--sf-mark-gradient)'
+    document.body.append(probe)
+    const tokenImage = getComputedStyle(probe).backgroundImage
+    probe.remove()
+    const image = getComputedStyle(marked).backgroundImage
+    const paper = getComputedStyle(stack.querySelector('.sf-source-paper>i')).backgroundColor
+    // Now reproduce the selection defect: select the text for real. The selection runs past the
+    // marked range, so the last rows it covers carry a mark and a row further down carries only the
+    // selection.
+    const selected = paint(start, markEnd, 'ready')
+    area.focus(); area.setSelectionRange(start, selectionEnd); area.scrollTop = 0; place()
+    // Everything the strips are positioned from is read after the pane is in its final state:
+    // focusing the textarea scrolls it — and with it the page — so a rectangle read before that would
+    // place the strips where the mark used to be. The second paint's first chip sits where the full
+    // range's does, because both start at the same offset.
+    const box = area.getBoundingClientRect(), frame = root.getBoundingClientRect()
+    const first = stack.querySelector('.sf-source-paper>i')?.getBoundingClientRect() ?? chips[0]
+    // The reference row is two rows below the last chip, in the pane's content coordinates: it is
+    // inside the selection but carries no mark, and measuring from the chips keeps it in view at any
     // column width instead of relying on a character offset that only fits one of them.
-    const last = marked[marked.length - 1]
-    const plainTop = box.top + last.top + row * 2, frame = root.getBoundingClientRect()
+    const last = selected[selected.length - 1]
+    const plainTop = box.top + last.top + row * 2
     const strip = (left, top, width) => ({ x: left - frame.left + 2, y: top - frame.top + 1, width: Math.max(4, width - 4), height: 5 })
-    // Sampled across one band, because "is it a rainbow" is a question about the spread of colours
-    // within a row, not about its average: the average of any spectrum is a muted mid-tone.
+    // Sampled across one marked row at that row's vertical middle, because the glyphs sit in the
+    // middle of the line box: "is it a rainbow" is a question about the spread of colours within a
+    // row, not about its average, and a strip above or below the glyphs would read the bare paper.
     const probeWidth = Math.max(6, first.width / 10)
-    const across = [0.04, 0.28, 0.5, 0.72, 0.96].map(share => strip(first.left + first.width * share - probeWidth / 2, first.top, probeWidth))
-    const lefts = painted.map(rect => rect.left - (box.left + parseFloat(style.paddingLeft)))
-    const colour = style.color.match(/[\d.]+/g).slice(0, 3).map(Number)
-    return { row, count: whole.length, marked: marked.length, contentWidth, heights: painted.map(rect => rect.height), colour,
-      minLeft: Math.min(...lefts), maxRight: Math.max(...painted.map((rect, index) => lefts[index] + rect.width)),
-      gaps: painted.slice(1).map((rect, index) => rect.top - painted[index].bottom), flow, settled, held,
+    const across = [0.04, 0.28, 0.5, 0.72, 0.96]
+      .map(share => strip(first.left + first.width * share - probeWidth / 2, first.top + first.height / 2 - 2, probeWidth))
+    const lefts = chips.map(chip => chip.left - (box.left + parseFloat(style.paddingLeft)))
+    return { row, count: chips.length, marked: selected.length, contentWidth, paper, tokenImage, image,
+      heights: chips.map(chip => chip.height), minLeft: Math.min(...lefts),
+      maxRight: Math.max(...chips.map((chip, index) => lefts[index] + chip.width)),
+      gaps: chips.slice(1).map((chip, index) => chip.top - chips[index].bottom),
+      flow, settled, held, split, align, mirror: mirrorState, markedLook, plainLook, composing,
       inView: box.top <= plainTop && plainTop + row <= box.bottom, view: { probe: plainTop, top: box.top, bottom: box.bottom, last: last.top },
       sample: [...across, strip(box.left + parseFloat(style.paddingLeft), plainTop, contentWidth)] }
   }, { selector, start: MARK_START, end: FULL_END, markEnd: MARK_END, selectionEnd: SELECT_END })
+}
+
+/**
+ * The mark's background, measured once for three questions: does the gradient continue across a wrap
+ * (G-2), is it a rainbow within one line, and is every stop readable on the paper it is carried on
+ * (G-3). With the gradient clipped to the glyphs a strip's colour is an ink-and-paper mixture that
+ * depends on which glyph happens to sit there, so the background is unclipped for one capture and the
+ * same question is asked of the paint itself. The DOM selection is dropped for that capture so the
+ * tint cannot level the differences, and only fragments the pane's window shows are sampled — a
+ * clipped line paints no background at all and would read the page behind the pane.
+ */
+async function backgroundProbe(page, selector, paperSelector, prepare) {
+  // A caller may need to put the mark back the way it wants it measured: the selection reproduction
+  // leaves a shorter range painted, and the background questions are about the full one.
+  if (prepare) await prepare()
+  await page.evaluate(selector => {
+    window.getSelection()?.removeAllRanges()
+    const marked = document.querySelector(selector)
+    marked.style.webkitBackgroundClip = 'border-box'; marked.style.backgroundClip = 'border-box'
+  }, selector)
+  await page.waitForTimeout(60)
+  const shot = await page.locator(selector).screenshot()
+  const geometry = await page.evaluate(({ selector, paperSelector }) => {
+    const marked = document.querySelector(selector)
+    marked.style.webkitBackgroundClip = ''; marked.style.backgroundClip = ''
+    const editor = marked.closest('.sf-source-editor')?.getBoundingClientRect()
+    const box = marked.getBoundingClientRect(), fragments = [...marked.getClientRects()]
+    const shows = rect => !editor || (rect.top >= editor.top - 1 && rect.bottom <= editor.bottom + 1)
+    const across = rect => [0.06, 0.28, 0.5, 0.72, 0.94].map(share =>
+      ({ x: rect.left - box.left + (rect.right - rect.left) * share - 5, y: rect.top + rect.height / 2 - box.top - 3, width: 10, height: 6 }))
+    const seam = []
+    for (let index = 0; index + 1 < fragments.length; index++) {
+      const one = fragments[index], two = fragments[index + 1]
+      if (!shows(one) || !shows(two)) continue
+      const middle = rect => rect.top + rect.height / 2 - box.top - 2
+      seam.push({ x: one.right - box.left - 4, y: middle(one), width: 4, height: 5 },
+        { x: two.left - box.left, y: middle(two), width: 4, height: 5 })
+    }
+    // The widest visible fragment shows the most of the period, so the row's spread is read from it.
+    const widest = fragments.filter(shows).sort((one, two) => two.width - one.width)[0]
+    const paper = document.querySelector(paperSelector)
+    return { fragments: fragments.length, visible: seam.length / 2, seam, across: widest ? across(widest) : [],
+      paper: paper ? getComputedStyle(paper).backgroundColor.match(/[\d.]+/g).slice(0, 3).map(Number) : null }
+  }, { selector, paperSelector })
+  const colours = await sampleColors(page, shot.toString('base64'), [...geometry.seam, ...geometry.across])
+  const seamColours = colours.slice(0, geometry.seam.length), across = colours.slice(geometry.seam.length)
+  const seamDelta = seamColours.reduce((worst, one, index) => index % 2
+    ? Math.max(worst, Math.hypot(one.r - seamColours[index - 1].r, one.g - seamColours[index - 1].g, one.b - seamColours[index - 1].b)) : worst, 0)
+  const spread = Math.max(...across.flatMap((one, index) => across.slice(index + 1)
+    .map(other => Math.hypot(one.r - other.r, one.g - other.g, one.b - other.b))), 0)
+  const contrast = geometry.paper && across.length
+    ? Math.min(...across.map(one => contrastRatio(one, { r: geometry.paper[0], g: geometry.paper[1], b: geometry.paper[2] }))) : undefined
+  return { fragments: geometry.fragments, visible: geometry.visible, seamDelta, spread, contrast }
 }
 
 /** WCAG relative luminance and contrast ratio, for the text sitting on a band. */
@@ -427,6 +579,50 @@ async function dragRangeProbe(page, selector) {
 }
 
 /**
+ * G-1: does the flow actually move? An animation that exists but displaces nothing — a percentage
+ * of a box that already equals the image width — produces identical frames, which is exactly the
+ * defect this caught. Two captures of the marked element, one sixth of a sweep apart, are compared
+ * pixel by pixel. The switched-off and reduced-motion captures are the controls: without them a
+ * difference could come from anything else on the surface. Leaves the switch off.
+ */
+async function motionProbe(page, locator, turn) {
+  const capture = async () => (await locator.screenshot()).toString('base64')
+  const delta = (one, other) => page.evaluate(async ({ one, other }) => {
+    const load = async src => { const image = new Image(); image.src = 'data:image/png;base64,' + src; await image.decode(); return image }
+    const [first, second] = [await load(one), await load(other)]
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(first.width, second.width); canvas.height = Math.max(first.height, second.height)
+    const context = canvas.getContext('2d')
+    const read = image => { context.clearRect(0, 0, canvas.width, canvas.height); context.drawImage(image, 0, 0)
+      return context.getImageData(0, 0, canvas.width, canvas.height).data }
+    const [a, b] = [read(first), read(second)]
+    let changed = 0
+    for (let index = 0; index < a.length; index += 4) {
+      if (Math.abs(a[index] - b[index]) > 12 || Math.abs(a[index + 1] - b[index + 1]) > 12 || Math.abs(a[index + 2] - b[index + 2]) > 12) changed++
+    }
+    return changed / (a.length / 4)
+  }, { one, other })
+  await turn(true)
+  const onOne = await capture()
+  await page.waitForTimeout(460)
+  const onTwo = await capture()
+  await turn(false)
+  const offOne = await capture()
+  await page.waitForTimeout(460)
+  const offTwo = await capture()
+  await turn(true)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.waitForTimeout(120)
+  const reducedOne = await capture()
+  await page.waitForTimeout(460)
+  const reducedTwo = await capture()
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await turn(false)
+  return { moving: await delta(onOne, onTwo), still: await delta(offOne, offTwo), reduced: await delta(reducedOne, reducedTwo) }
+}
+
+
+/**
  * The preview's half of the same defect: there the range is coloured on the glyphs, and selecting it
  * made the platform paint over that colour. A DOM selection is set over the marked span and its
  * unmarked neighbour, both of which are then sampled from the capture — if the selection covered the
@@ -445,37 +641,86 @@ async function checkDraftPreview(page, selector) {
       return { x: box.left - frame.left + 1, y: box.top - frame.top + 1, width: Math.max(4, box.width - 2), height: Math.max(4, box.height - 2) } }
     const style = getComputedStyle(marked)
     return { selected: selection.toString().length, gradient: style.backgroundImage.includes('linear-gradient'),
+      // The seam measurement only exposes a restart at widths where the wrap lands away from the
+      // period's matching stop, so the wrap mode itself is asserted as well: the pixel check proves
+      // the effect where the layout shows it, this proves the contract everywhere.
+      wrap: style.boxDecorationBreak || style.webkitBoxDecorationBreak,
       colour: style.color, sample: [strip(marked), strip(plain)] }
   }, selector)
+}
+
+/** G-1's three assertions, shared by both surfaces: the flow moves, and only when asked to. The
+    off and reduced-motion legs are what make the first one mean something. */
+function auditMotion(name, report, what) {
+  const problems = []
+  if (report.motion) {
+    if (report.motion.moving < 0.005) problems.push(`${name}: the ${what} does not flow (${(report.motion.moving * 100).toFixed(2)}% of pixels changed between frames)`)
+    if (report.motion.still > 0.0005) problems.push(`${name}: the ${what} keeps moving while switched off (${(report.motion.still * 100).toFixed(2)}%)`)
+    if (report.motion.reduced > 0.0005) problems.push(`${name}: the ${what} ignores reduced motion (${(report.motion.reduced * 100).toFixed(2)}%)`)
+  }
+  return problems
+}
+
+/** The mark's shared assertions, for whichever surface carries it (the source pane's mirror or the
+    preview's inline span): one gradient, one period, a continuous wrap, a readable stop and a flow
+    that moves only when asked to. */
+function auditMarkCommon(name, report) {
+  const problems = []
+  if (!report.gradient) problems.push(`${name}: the marked text lost its gradient`)
+  if (report.wrap !== undefined && report.wrap !== 'slice') problems.push(`${name}: the marked text wraps with ${report.wrap}, so every line restarts the gradient`)
+  if (report.fragments !== undefined && report.fragments < 2) problems.push(`${name}: the marked text does not wrap, so no seam could be measured`)
+  const seam = report.seam ?? {}
+  if (seam.visible !== undefined && seam.visible < 1) problems.push(`${name}: no seam is visible to measure`)
+  if (seam.seamDelta !== undefined && seam.seamDelta > 18) problems.push(`${name}: the gradient restarts at a wrap (seam differs by ${seam.seamDelta.toFixed(1)})`)
+  if (seam.spread !== undefined && seam.spread < 140) problems.push(`${name}: the gradient reads as one colour rather than a rainbow (spread ${seam.spread.toFixed(0)} across the row)`)
+  if (seam.contrast !== undefined && seam.contrast < 4.5) problems.push(`${name}: a gradient stop is only ${seam.contrast.toFixed(2)}:1 on the paper it is carried on`)
+  return [...problems, ...auditMotion(name, report, 'marked text')]
 }
 
 export function auditPreview(name, report) {
   const problems = []
   if (!report.selected) problems.push(`${name}: no text was selected, so nothing was compared`)
-  if (!report.gradient) problems.push(`${name}: the marked text lost its gradient`)
   if (report.contrast !== undefined && report.contrast < 20) problems.push(`${name}: the selection hides the marked colour (marked and unmarked text differ by ${report.contrast.toFixed(1)})`)
-  return problems
+  return [...problems, ...auditMarkCommon(name, report)]
 }
 
 export function auditMark(name, report, expectedRows) {  const problems = []
-  if (report.count <= 1) problems.push(`${name}: the marked range produced ${report.count} band(s)`)
-  if (expectedRows !== undefined && Math.abs(report.count - expectedRows) > 1) problems.push(`${name}: ${report.count} bands for a range the pane wraps over ${expectedRows.toFixed(0)} rows`)
-  if (report.gaps.some(gap => Math.abs(gap) > 1)) problems.push(`${name}: the bands are not on consecutive lines (largest gap ${Math.max(...report.gaps.map(Math.abs)).toFixed(2)}px)`)
+  if (report.count <= 1) problems.push(`${name}: the marked range produced ${report.count} chip(s)`)
+  if (expectedRows !== undefined && Math.abs(report.count - expectedRows) > 1) problems.push(`${name}: ${report.count} chips for a range the pane wraps over ${expectedRows.toFixed(0)} rows`)
+  if (report.gaps.some(gap => Math.abs(gap) > 1)) problems.push(`${name}: the chips are not on consecutive lines (largest gap ${Math.max(...report.gaps.map(Math.abs)).toFixed(2)}px)`)
   const short = report.heights.find(height => Math.abs(height - report.row) > 1)
-  if (short !== undefined) problems.push(`${name}: a band is ${short.toFixed(1)}px tall instead of one line (${report.row}px)`)
-  if (report.minLeft < -1 || report.maxRight > report.contentWidth + 1) problems.push(`${name}: a band leaves the pane's content box (${report.minLeft.toFixed(1)} to ${report.maxRight.toFixed(1)} of ${report.contentWidth.toFixed(1)}px)`)
-  if (!report.flow.includes('sf-range-flow')) problems.push(`${name}: the band is not flowing while the candidate is generating (${report.flow})`)
-  if (report.settled !== 'none') problems.push(`${name}: the band keeps flowing after the candidate is ready (${report.settled})`)
-  if (report.spread !== undefined && report.spread < 140) problems.push(`${name}: the band reads as one colour rather than a rainbow (spread ${report.spread.toFixed(0)} across the row)`)
-  if (report.textContrast !== undefined && report.textContrast < 4.5) problems.push(`${name}: the text on the band is only ${report.textContrast.toFixed(1)}:1 (rgb(${report.band.r.toFixed(0)},${report.band.g.toFixed(0)},${report.band.b.toFixed(0)}))`)
+  if (short !== undefined) problems.push(`${name}: a chip is ${short.toFixed(1)}px tall instead of one line (${report.row}px)`)
+  if (report.minLeft < -1 || report.maxRight > report.contentWidth + 1) problems.push(`${name}: a chip leaves the pane's content box (${report.minLeft.toFixed(1)} to ${report.maxRight.toFixed(1)} of ${report.contentWidth.toFixed(1)}px)`)
+  // The mirror is the pane's own text, three ways: the copy is the whole value, the middle node is
+  // exactly the range, and every marked line sits where the pane's own text sits.
+  if (!report.split.whole) problems.push(`${name}: the mirror does not render the pane's whole text`)
+  if (!report.split.slice) problems.push(`${name}: the mirror's marked node is not exactly the marked range`)
+  if (report.align > 1) problems.push(`${name}: the mirror's marked lines sit ${report.align.toFixed(1)}px away from the pane's own text`)
+  if (report.mirror.height > 2) problems.push(`${name}: the mirror is ${report.mirror.height.toFixed(1)}px taller or shorter than the pane's content`)
+  if (!report.mirror.hidden) problems.push(`${name}: the mirror is not hidden from assistive technology`)
+  if (report.mirror.events !== 'none') problems.push(`${name}: the mirror takes pointer events (${report.mirror.events})`)
+  // The pane's glyphs step aside only while a mirror is up, and the caret keeps its own colour.
+  if (report.markedLook.colour !== 'rgba(0, 0, 0, 0)') problems.push(`${name}: the pane's text does not step aside while the mirror is up (${report.markedLook.colour})`)
+  if (report.markedLook.caret === 'rgba(0, 0, 0, 0)') problems.push(`${name}: the caret would be invisible while the mirror is up`)
+  if (report.plainLook.colour === 'rgba(0, 0, 0, 0)') problems.push(`${name}: the pane's text stays transparent with no mark to show`)
+  // The composition retreat: the mirror steps aside and the pane's own glyphs come back, because the
+  // composition preview is painted in the pane's text colour.
+  if (!report.composing.attribute) problems.push(`${name}: a composition does not put the pane into its composing state`)
+  if (report.composing.mirror !== 'hidden') problems.push(`${name}: the mirror does not step aside during a composition`)
+  if (report.composing.colour === 'rgba(0, 0, 0, 0)') problems.push(`${name}: the characters being spelled would be invisible`)
+  // The painted gradient is the token's, not a second copy of it.
+  if (!report.image || report.image !== report.tokenImage) problems.push(`${name}: the painted gradient is not the token's (${report.image} vs ${report.tokenImage})`)
+  // The flow states: generating flows, ready and a plain selection hold still.
+  if (!report.flow.includes('sf-range-flow')) problems.push(`${name}: the mark is not flowing while the candidate is generating (${report.flow})`)
+  if (report.settled !== 'none') problems.push(`${name}: the mark keeps flowing after the candidate is ready (${report.settled})`)
   if (report.held !== 'none') problems.push(`${name}: a plain selection flows instead of holding still (${report.held})`)
-  if (!report.inView) problems.push(`${name}: the unmarked row used as the colour reference is outside the pane (probe ${report.view.probe.toFixed(1)} vs pane ${report.view.top.toFixed(1)}–${report.view.bottom.toFixed(1)}, last band ${report.view.last.toFixed(1)})`)
+  // If the platform selection colour covered the mark, the marked row would read as one flat colour
+  // instead of a sweep of hues.
+  if (report.selected !== undefined && report.selected < 60) problems.push(`${name}: the selection flattens the mark (spread ${report.selected.toFixed(0)} across the marked row)`)
+  if (!report.inView) problems.push(`${name}: the unmarked row used as the colour reference is outside the pane (probe ${report.view.probe.toFixed(1)} vs pane ${report.view.top.toFixed(1)}–${report.view.bottom.toFixed(1)}, last chip ${report.view.last.toFixed(1)})`)
   if (report.live && report.live.during < 2) problems.push(`${name}: the range cannot be read while the pointer is still down (${report.live.during} updates during the drag)`)
   if (report.live && report.live.grown <= report.live.during) problems.push(`${name}: the live range stopped keeping up with the drag`)
-  // If the platform selection colour covered the mark, a selected row with a band and a selected row
-  // without one would look the same.
-  if (report.contrast !== undefined && report.contrast < 20) problems.push(`${name}: the selection hides the mark (marked and unmarked selected rows differ by ${report.contrast.toFixed(1)})`)
-  return problems
+  return [...problems, ...auditMarkCommon(name, { ...report, gradient: true })]
 }
 
 /** A capture that renders nothing is the failure this check exists for. */
@@ -483,8 +728,7 @@ export function audit(results) {
   const problems = []
   for (const shot of results) {
     if (shot.width < 300 || shot.height < 300) problems.push(`${shot.name}: collapsed to ${shot.width}x${shot.height}`)
-    else if (shot.ink < 0.01) problems.push(`${shot.name}: blank (${(shot.ink * 100).toFixed(2)}% ink)`)
-    else if (shot.ink > 0.95) problems.push(`${shot.name}: single-colour (${(shot.ink * 100).toFixed(2)}% ink)`)
+    else if (shot.dominant > 0.95) problems.push(`${shot.name}: renders as a single colour (${(shot.dominant * 100).toFixed(1)}% of its pixels)`)
   }
   return problems
 }
@@ -528,14 +772,14 @@ export function auditWrap(name, report) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { outDir, results, wrap, mark, preview, problems } = await renderSurfaces()
   for (const shot of results) {
-    console.log(`${shot.name.padEnd(30)} ${String(shot.width).padStart(4)}x${String(shot.height).padStart(4)}  ink ${(shot.ink * 100).toFixed(2)}%`)
+    console.log(`${shot.name.padEnd(30)} ${String(shot.width).padStart(4)}x${String(shot.height).padStart(4)}  主色占比 ${(shot.dominant * 100).toFixed(2)}%`)
   }
   // The measured numbers are printed, not just asserted: a wrapping check that reports "the long
   // paragraph occupies one row" is the difference between a real gate and a vacuous one, and the
   // mark count has to match the rows the same range actually wraps over.
   for (const row of wrap) console.log(`${row.name}: 横向溢出 ${row.report.overflow}px · 长段落 ${row.report.longRows.toFixed(1)} 行 · 行号列 ${row.report.gutterTotal.toFixed(0)}px / 编辑区内容 ${row.report.content.toFixed(0)}px`)
-  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 行内色散 ${(row.report.spread ?? 0).toFixed(0)} · 文字对比度 ${(row.report.textContrast ?? 0).toFixed(1)}:1 · 与未标注行色差 ${(row.report.contrast ?? 0).toFixed(1)} · 拖选中可读 ${row.report.live?.during ?? 0}→${row.report.live?.grown ?? 0} 次`)
-  for (const row of preview) console.log(`${row.name}: 选中 ${row.report.selected} 字 · 渐变 ${row.report.gradient ? '在' : '丢失'} · 选中时被标注与未标注文字色差 ${(row.report.contrast ?? 0).toFixed(1)}`)
+  for (const row of mark) console.log(`${row.name}: 标注 ${row.report.count} 条 · 内容宽 ${row.report.contentWidth}px · 镜像对齐 ${row.report.align}px · 内容高差 ${row.report.mirror?.height ?? 0}px · 行内色散 ${(row.report.seam?.spread ?? 0).toFixed(0)} · 字形对比 ${(row.report.seam?.contrast ?? 0).toFixed(2)}:1 · 接缝色差 ${(row.report.seam?.seamDelta ?? 0).toFixed(1)} · 拖选中可读 ${row.report.live?.during ?? 0}→${row.report.live?.grown ?? 0} 次 · 流动像素 ${((row.report.motion?.moving ?? 0) * 100).toFixed(2)}%（关 ${((row.report.motion?.still ?? 0) * 100).toFixed(2)}%／减动效 ${((row.report.motion?.reduced ?? 0) * 100).toFixed(2)}%）`)
+  for (const row of preview) console.log(`${row.name}: 选中 ${row.report.selected} 字 · 渐变 ${row.report.gradient ? '在' : '丢失'} · 选中时被标注与未标注文字色差 ${(row.report.contrast ?? 0).toFixed(1)} · 折行 ${row.report.fragments ?? 0} 段接缝色差 ${(row.report.seam?.seamDelta ?? 0).toFixed(1)} · 行内色散 ${(row.report.seam?.spread ?? 0).toFixed(0)} · 字形对比 ${(row.report.seam?.contrast ?? 0).toFixed(2)}:1 · 流动像素 ${((row.report.motion?.moving ?? 0) * 100).toFixed(2)}%（关 ${((row.report.motion?.still ?? 0) * 100).toFixed(2)}%／减动效 ${((row.report.motion?.reduced ?? 0) * 100).toFixed(2)}%）`)
   if (problems.length) {
     console.error(`\n${problems.length} check(s) failed:`)
     for (const problem of problems) console.error(`  ${problem}`)

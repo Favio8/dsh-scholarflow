@@ -72,29 +72,28 @@ export const OVERLAY_CSS = `
 /* Bottom space is added only while the overlay is present, so the resting editor has none. */
 .sf-middle-column[data-overlay-open=true] .sf-source-input{padding-bottom:calc(var(--sf-overlay-space,0px) + 220px)}
 .sf-middle-column[data-overlay-open=true] .sf-paper-scroll{padding-bottom:calc(var(--sf-overlay-space,0px) + 40px)}
-.sf-overlay{position:absolute;left:10px;right:10px;bottom:10px;z-index:30;box-sizing:border-box;
-  background:var(--dsw-alias-bg-base,#fff);border:1px solid #8884;border-radius:11px;box-shadow:0 10px 28px #0000001a;
-  padding:10px 12px;font-size:13px;max-height:60%;overflow:auto;pointer-events:auto}
-.sf-app[data-theme=dark] .sf-overlay,html[data-theme=dark] .sf-overlay{background:#1c1d20}
-.sf-overlay-tabs{display:flex;gap:4px;margin-bottom:8px}
-.sf-overlay-tabs button{font:inherit;font-size:12px;padding:4px 9px;border:1px solid #8884;border-radius:999px;background:transparent;color:inherit;cursor:pointer}
-.sf-overlay-tabs button[aria-selected=true]{background:#4475e714;border-color:var(--sf-accent,#3f68d8);color:var(--sf-accent-text,#2f5bc4)}
-.sf-overlay-head{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.sf-overlay{position:absolute;left:var(--sf-space-3);right:var(--sf-space-3);bottom:var(--sf-space-3);z-index:30;box-sizing:border-box;
+  background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-2);
+  padding:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-md);max-height:45%;overflow:auto;pointer-events:auto}
+/* The host sets data-ds-dark-theme on body; the old .sf-app[data-theme=dark] selector was never written by anything. */
+.sf-overlay-tabs{display:flex;gap:var(--sf-space-1);margin-bottom:var(--sf-space-2)}
+.sf-overlay-tabs button{font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-1) var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-pill);background:transparent;color:inherit;cursor:pointer}
+.sf-overlay-tabs button[aria-selected=true]{background:var(--sf-accent-soft);border-color:var(--sf-accent);color:var(--sf-accent-text)}
+.sf-overlay-head{display:flex;align-items:center;gap:var(--sf-space-2);font-size:var(--sf-font-sm)}
 .sf-overlay-title{flex:1;font-weight:500}
-.sf-overlay-head button{font:inherit;font-size:12px;padding:3px 8px;border:1px solid #8884;border-radius:6px;background:transparent;color:inherit;cursor:pointer}
-.sf-overlay-collapsed{display:flex;align-items:center;gap:10px;font-size:12px}
-.sf-overlay-collapsed span{flex:1;color:var(--dsw-alias-label-secondary,#727780)}
-.sf-overlay-row{display:flex;align-items:flex-end;gap:8px;margin-top:8px}
-.sf-overlay-row textarea,.sf-overlay-row input{flex:1;min-width:0;font:inherit;font-size:13px;padding:7px 9px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;resize:vertical}
-.sf-overlay-row button{flex:none;font:inherit;font-size:12.5px;padding:7px 12px;border:1px solid #8884;border-radius:7px;background:transparent;color:inherit;cursor:pointer}
-.sf-overlay-row button.sf-primary{background:var(--sf-accent,#3f68d8);border-color:var(--sf-accent,#3f68d8);color:#fff}
-.sf-overlay-note{margin:7px 0 0;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary,#8b9099)}
-.sf-overlay{left:14px;right:14px;bottom:14px;padding:8px 10px;max-height:45%;border-color:#8883;border-radius:14px}
-.sf-overlay-mini{left:auto;width:auto;padding:4px 8px}.sf-overlay-mini button{border:0!important;font-size:12px!important}
-.sf-overlay-row{margin:0;align-items:center;gap:6px}
-.sf-app .sf-overlay-row textarea{min-height:32px;max-height:96px;resize:none;line-height:22px;font-size:13px;border:0;padding:5px 6px;border-radius:6px;overflow-y:auto}
-.sf-overlay-row select{width:70px;flex:none;border:0!important;padding:6px 0!important;font-size:12px!important;white-space:nowrap}
-.sf-overlay-row button{white-space:nowrap;min-width:32px;min-height:32px;padding:4px 8px!important}
+.sf-overlay-head button{font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-1) var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;cursor:pointer}
+.sf-overlay-collapsed{display:flex;align-items:center;gap:var(--sf-space-3);font-size:var(--sf-font-sm)}
+.sf-overlay-collapsed span{flex:1;color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-overlay-row{display:flex;align-items:flex-end;gap:var(--sf-space-2);margin-top:var(--sf-space-2)}
+.sf-overlay-row textarea,.sf-overlay-row input{flex:1;min-width:0;font:inherit;font-size:var(--sf-font-md);padding:var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;resize:vertical}
+.sf-overlay-row button{flex:none;font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-2) var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;cursor:pointer}
+.sf-overlay-row button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent)}
+.sf-overlay-note{margin:var(--sf-space-2) 0 0;font-size:var(--sf-font-sm);line-height:var(--sf-leading-body);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-overlay-mini{left:auto;width:auto;padding:var(--sf-space-1) var(--sf-space-2)}.sf-overlay-mini button{border:0!important;font-size:var(--sf-font-sm)!important}
+.sf-overlay-row{margin:0;align-items:center;gap:var(--sf-space-2)}
+.sf-app .sf-overlay-row textarea{min-height:32px;max-height:96px;resize:none;line-height:22px;font-size:var(--sf-font-md);border:0;padding:var(--sf-space-1) var(--sf-space-2);border-radius:var(--sf-radius-md);overflow-y:auto}
+.sf-overlay-row select{width:70px;flex:none;border:0!important;padding:var(--sf-space-2) 0!important;font-size:var(--sf-font-sm)!important;white-space:nowrap}
+.sf-overlay-row button{white-space:nowrap;min-width:var(--sf-space-6);min-height:var(--sf-space-6);padding:var(--sf-space-1) var(--sf-space-2)!important}
 .sf-overlay-row .sf-overlay-close{border:0!important;background:transparent!important;color:inherit!important}
-@container (max-width:640px){.sf-overlay{left:8px;right:8px;bottom:8px}.sf-overlay-mini{left:auto}}
+@container (max-width:640px){.sf-overlay{left:var(--sf-space-2);right:var(--sf-space-2);bottom:var(--sf-space-2)}.sf-overlay-mini{left:auto}}
 `

@@ -40,7 +40,7 @@ export function connectNewSessionEntry(ctx: any) {
     function Notice() {
       const error = useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener) } }, () => message, () => message)
       return error ? <div role="alert" style={{ position: 'fixed', right: 20, bottom: 20, zIndex: 1500, padding: 16,
-        background: 'var(--dsw-alias-bg-base, white)', border: '1px solid #d45151', borderRadius: 8 }}>
+        background: 'var(--dsw-alias-bg-base, var(--sf-surface))', border: '1px solid var(--sf-danger)', borderRadius: 'var(--sf-radius-lg)' }}>
         <p>新会话未能创建：{error}</p><button onClick={() => publish('')}>关闭</button>
       </div> : null
     }
