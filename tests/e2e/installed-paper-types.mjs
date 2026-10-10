@@ -191,7 +191,7 @@ async function verifyLegacyRecovery() {
   const oldContext = { requestId: 'req_native_legacy', workspaceId, sessionId: oldSessionId, projectId: saved.projectId, expectedLedgerRevision: saved.revision }
   const refused = await rpc('scholarflow.v1/project.inspect', { request: { context: oldContext } })
   assert.equal(refused.value.ok, false)
-  assert.equal(refused.value.error.code, 'SESSION_READ_FAILED')
+  assert.equal(refused.value.error.code, 'SESSION_FORMAT_UNSUPPORTED')
   assert.ok(!JSON.stringify(refused.value.error).includes(oldLog))
   await page.locator('.sf-project').getByRole('combobox', { name: 'DSH 工作区', exact: true }).selectOption(workspaceId)
   await page.getByRole('button', { name: '新建 ScholarFlow 会话', exact: true }).click()
