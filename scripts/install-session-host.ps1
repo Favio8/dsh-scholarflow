@@ -65,5 +65,6 @@ if($sfArchiveHash -ne (Get-FileHash -LiteralPath (Join-Path $sfArtifact 'resourc
 if($sfOriginalPaperHash -ne (Get-FileHash -LiteralPath (Join-Path $ProjectRoot 'manuscript-1\paper.md') -Algorithm SHA256).Hash){throw 'Paper changed during installation; retained backup is available.'}
 $sfRecord=[pscustomobject]@{Installed=$true;SessionFormat=5;Backup=$sfBackup;Install=$sfInstall;ArchiveSHA256=$sfArchiveHash;PaperSHA256=$sfOriginalPaperHash}
 $sfRecord | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $sfBackup 'installation.json') -Encoding utf8
-Start-Process -FilePath (Join-Path $sfInstall 'DeepSeek Harness.exe') -WindowStyle Hidden
+# Reopen the user's interactive application after the update.
+Start-Process -FilePath (Join-Path $sfInstall 'DeepSeek Harness.exe') -WindowStyle Normal
 $sfRecord | ConvertTo-Json

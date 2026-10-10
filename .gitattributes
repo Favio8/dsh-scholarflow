@@ -1,0 +1,2 @@
+# Preserve the reproducible host patch byte for byte on Windows checkouts.
+patches/*.patch -text
