@@ -1,6 +1,6 @@
 import { WorkbenchIcon } from './workbench-chrome.tsx'
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { projectMarkdown, wordStats, textOf, validateRange, validateProseRange } from '../core/editing/markdown.ts'
+import { projectMarkdown, wordStatsFromProjection, textOf, validateRange, validateProseRange } from '../core/editing/markdown.ts'
 import { sectionTarget } from '../core/editing/sections.ts'
 import { MarkdownView, captureSelection } from './markdown.tsx'
 import type { SelectionPayload } from '../shared/editing.ts'
@@ -202,7 +202,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const followStream = useRef(true), previousScroll = useRef(0), generationAnchor = useRef<HTMLSpanElement>(null)
   const [showReturnToStream,setShowReturnToStream] = useState(false)
   const livePreview = useMemo(() => {
-    try { return { projection: projectMarkdown(displayedText), statistics: wordStats(displayedText), error: '' } }
+    try { const projection = projectMarkdown(displayedText)
+      return { projection, statistics: wordStatsFromProjection(projection), error: '' } }
     catch (error) { return { projection: undefined, statistics: undefined, error: (error as Error).message } }
   }, [displayedText])
   useEffect(() => {

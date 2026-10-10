@@ -889,16 +889,34 @@ async function checkDraftWrap(page, selector) {
     const style = getComputedStyle(area), row = parseFloat(style.lineHeight)
     const boxes = [...gutter.children].map(cell => cell.getBoundingClientRect())
     const heights = boxes.map(box => box.height)
-    return { row, overflow: area.scrollWidth - area.clientWidth, heights,
+    const baseline = { row, overflow: area.scrollWidth - area.clientWidth, heights,
       gaps: boxes.slice(1).map((box, index) => Math.abs(box.top - boxes[index].bottom)),
       gutterTotal: heights.reduce((sum, height) => sum + height, 0),
       content: area.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
       longRows: heights[longLine] / row }
+    const original = area.value, originalStyle = area.style.cssText
+    const checks = []
+    const check = name => {
+      window.ScholarFlowGutter.applyGutterRows(gutter, area, area.value)
+      const style = getComputedStyle(area), row = parseFloat(style.lineHeight)
+      const heights = [...gutter.children].map(cell => cell.getBoundingClientRect().height)
+      const content = area.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+      checks.push({ name, difference: Math.abs(heights.reduce((sum, value) => sum + value, 0) - content),
+        integerRows: heights.every(height => Math.abs(height - Math.round(height/row)*row) <= 1) })
+    }
+    area.value = original.replace('结束。', 'TEST_ONLY 编辑末行并触发更多折行。'.repeat(30)); check('edit')
+    area.style.setProperty('font-family', 'Microsoft YaHei', 'important'); check('font-family')
+    area.style.setProperty('font-size', '16px', 'important'); area.style.setProperty('line-height', '28px', 'important'); check('zoom')
+    area.value = original; area.style.cssText = originalStyle
+    window.ScholarFlowGutter.applyGutterRows(gutter, area, original)
+    return { ...baseline, cacheChecks: checks }
   }, { selector, longLine: DRAFT_LONG_LINE })
 }
 
 export function auditWrap(name, report) {
   const problems = []
+  for (const check of report.cacheChecks ?? []) if (check.difference > 1.5 || !check.integerRows)
+    problems.push(`${name}: ${check.name} cached gutter differs from actual wrapping (${check.difference.toFixed(1)}px)`)
   if (report.overflow > 1) problems.push(`${name}: the pane still overflows horizontally by ${report.overflow}px`)
   if (report.longRows < 1.5) problems.push(`${name}: the long paragraph did not wrap (${report.longRows.toFixed(2)} rows)`)
   report.heights.forEach((height, index) => {

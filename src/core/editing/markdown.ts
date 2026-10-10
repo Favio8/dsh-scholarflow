@@ -184,8 +184,16 @@ export function validateSelection(source: string, selection: SelectionPayload) {
  */
 const NON_BODY_HEADING = /^(?:摘要|abstract|关键词|keywords|致谢|acknowledgements?|附录|appendix|目录|contents|书目信息)$/i
 
-export function wordStats(source: string, options: { bodyOnly?: boolean; sectionKinds?: readonly { title: string; kind?: 'body' | 'front' | 'back' }[] } = {}) {
-  const projection = projectMarkdown(source), tree = projection.tree, parts: string[] = []
+type WordStatsOptions = { bodyOnly?: boolean; sectionKinds?: readonly { title: string; kind?: 'body' | 'front' | 'back' }[] }
+
+export function wordStats(source: string, options: WordStatsOptions = {}) {
+  return wordStatsFromProjection(projectMarkdown(source), options)
+}
+
+/** Reuse an already parsed document without maintaining a second counting policy. */
+export function wordStatsFromProjection(projection: Projection, options: WordStatsOptions = {}) {
+  const tree = projection.tree, parts: string[] = []
+  const leaves = new Map(projection.leaves.map(leaf => [leaf.id, leaf]))
   let referenceDepth: number | undefined, matterDepth: number | undefined
   for (const node of tree.children ?? []) {
     if (node.type === 'heading') {
@@ -200,7 +208,7 @@ export function wordStats(source: string, options: { bodyOnly?: boolean; section
     if (referenceDepth !== undefined || matterDepth !== undefined) continue
     const collect = (item: AstNode) => {
       if (['code', 'inlineCode', 'math', 'inlineMath', 'html', 'image', 'definition', 'footnoteDefinition'].includes(item.type)) return
-      if (item.type === 'text') parts.push((item.leafIds ?? []).map(id => projection.leaves.find(leaf => leaf.id === id)!).filter(leaf => !leaf.citationKeys).map(leaf => leaf.text).join(''))
+      if (item.type === 'text') parts.push((item.leafIds ?? []).map(id => leaves.get(id)!).filter(leaf => !leaf.citationKeys).map(leaf => leaf.text).join(''))
       for (const child of item.children ?? []) collect(child)
     }
     collect(node); parts.push('\n')

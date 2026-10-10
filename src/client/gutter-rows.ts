@@ -1,4 +1,4 @@
-import { mirrorOf } from './source-measure.ts'
+import { mirrorOf, MEASURE_PROPERTIES } from './source-measure.ts'
 
 /**
  * Line numbers follow visual rows (SF-086): a wrapped paragraph keeps its number on its first row
@@ -12,29 +12,37 @@ import { mirrorOf } from './source-measure.ts'
  * This is derived view state. A hidden pane, an unchanged pane, or a measurement that cannot run
  * leaves the gutter exactly as it was: nothing here may block editing or touch project data.
  */
-const measured = new WeakMap<HTMLTextAreaElement, [width: number, fontSize: string, text: string]>()
+type Measurement = { signature: string; text: string; heights: Map<string, number> }
+const measured = new WeakMap<HTMLTextAreaElement, Measurement>()
 
 export function applyGutterRows(gutter: HTMLElement, area: HTMLTextAreaElement, text: string): void {
   const cells = gutter.children
-  const previous = measured.get(area), fontSize = window.getComputedStyle(area).fontSize
-  // The pane's width and font size decide where it breaks lines, so an unchanged pane is skipped.
+  const previous = measured.get(area), style = window.getComputedStyle(area)
+  // Every layout property is part of the cache key, including the font family (SF-134).
+  const signature = [area.clientWidth, ...MEASURE_PROPERTIES.map(property => style.getPropertyValue(property))].join('|')
   if (!cells.length || !area.clientWidth) return
-  if (previous && previous[0] === area.clientWidth && previous[1] === fontSize && previous[2] === text) return
-  const mirror = mirrorOf(area)
-  const blocks = text.split(/\r\n|\r|\n/).map(line => {
+  if (previous?.signature === signature && previous.text === text) return
+  const lines = text.split(/\r\n|\r|\n/)
+  const reusable = previous?.signature === signature ? previous.heights : new Map<string, number>()
+  const missing = [...new Set(lines)].filter(line => !reusable.has(line))
+  const mirror = missing.length ? mirrorOf(area) : undefined
+  const blocks = missing.map(line => {
     const block = document.createElement('div')
     // An empty logical line still occupies one row; a zero-width space gives it a line box.
     block.textContent = line === '' ? '\u200b' : line
-    mirror.append(block)
+    mirror!.append(block)
     return block
   })
-  document.body.append(mirror)
+  if (mirror) document.body.append(mirror)
   try {
-    const heights = blocks.map(block => block.offsetHeight)
-    for (const [index, height] of heights.entries()) {
+    const newlyMeasured = new Map(missing.map((line, index) => [line, blocks[index]!.offsetHeight]))
+    // Keep only this document's current unique lines; typing cannot grow the cache forever.
+    const heights = new Map(lines.map(line => [line, reusable.get(line) ?? newlyMeasured.get(line)!]))
+    for (const [index, line] of lines.entries()) {
       const cell = cells[index] as HTMLElement | undefined
-      if (cell) cell.style.height = `${height}px`
+      const value = `${heights.get(line)}px`
+      if (cell && cell.style.height !== value) cell.style.height = value
     }
-    measured.set(area, [area.clientWidth, fontSize, text])
-  } finally { mirror.remove() }
+    measured.set(area, { signature, text, heights })
+  } finally { mirror?.remove() }
 }
