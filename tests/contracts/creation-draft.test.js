@@ -19,6 +19,22 @@ const legacy = { title: '', type: 'course-paper', language: 'zh-CN', format: 'do
   materials: ['课件/第3讲.pdf'], online: false, targetLength: 4000, manuscriptDir: 'manuscript',
   sections: [{ id: 'section_1', title: '引言', purpose: '', targetLength: 900 }] }
 
+test('a requested cover is displayed before the outline and disappears when disabled', () => {
+  const previous = globalThis.localStorage
+  try {
+    for (const enabled of [true, false]) {
+      globalThis.localStorage = { getItem: () => JSON.stringify({ step: 2, spec: { ...legacy, requirements: 'TEST_ONLY',
+        cover: { enabled, title: 'TEST_ONLY 封面', date: '', fields: [{ label: '姓名', value: 'TEST_ONLY' }] } } }) }
+      const html = renderToStaticMarkup(React.createElement(CreationWizard, { scope: 'TEST_ONLY', api: async () => ({}), context: () => ({}), onCreated() {} }))
+      if (enabled) {
+        assert.match(html, /封面 · 第 1 页/)
+        assert(html.indexOf('class="sf-cover-fields"') < html.indexOf('class="sf-outline-toolbar"'))
+        assert(html.indexOf('class="sf-cover-fields"') < html.indexOf('class="sf-outline-editor"'))
+      } else assert(!html.includes('class="sf-cover-fields"'))
+    }
+  } finally { if (previous === undefined) delete globalThis.localStorage; else globalThis.localStorage = previous }
+})
+
 test('all three wizard steps render from a pre-upgrade local draft without discarding input', () => {
   const previous = globalThis.localStorage
   try {

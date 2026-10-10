@@ -663,6 +663,12 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <div className="sf-outline-heading"><div><span className="sf-wizard-eyebrow">第 3 步 · 确认后开始写作</span><h3>行文结构</h3></div>
           <span className="sf-outline-status">{acceptedOutline === inputKey ? '结构已确认' : outlineRunning ? '理解要求并检查覆盖…' : '等待确认'}</span></div>
         <p className="sf-outline-summary">{spec.brief?.task.nature || '根据你确认的写作要求组织章节'}{spec.brief?.task.subject ? ` · ${spec.brief.task.subject}` : ''}</p>
+        {spec.cover?.enabled && <fieldset className="sf-cover-fields"><legend>封面 · 第 1 页</legend>
+          <label>封面标题<input value={spec.cover.title} onChange={event => update({ cover: { ...spec.cover!, title: event.target.value } })} /></label>
+          {spec.cover.fields.map((field, index) => <label key={index}>{field.label}<input value={field.value} onChange={event => update({ cover: {
+            ...spec.cover!, fields: spec.cover!.fields.map((row, at) => at === index ? { ...row, value: event.target.value } : row) } })} /></label>)}
+          <small>位于正文之前，独立成页，不计入正文篇幅；姓名等信息不会用于正文生成。</small>
+        </fieldset>}
         <div className="sf-outline-toolbar">
           <label>正文目标<span className="sf-length-input"><input type="number" min={200} max={60000} aria-label="目标篇幅" value={spec.targetLength}
             onChange={e => update({ targetLength: Number(e.target.value), targetLengthOrigin: 'user' })} /><span>{spec.language === 'en' ? '词' : '字'}</span></span></label>
@@ -697,12 +703,6 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         </div>
         {/* A short summary next to the create button, expandable for the full scope. The large
             pre-creation confirmation block is gone: nothing here is asked twice. */}
-        {spec.cover?.enabled && <fieldset className="sf-cover-fields"><legend>封面</legend>
-          <label>封面标题<input value={spec.cover.title} onChange={event => update({ cover: { ...spec.cover!, title: event.target.value } })} /></label>
-          {spec.cover.fields.map((field, index) => <label key={index}>{field.label}<input value={field.value} onChange={event => update({ cover: {
-            ...spec.cover!, fields: spec.cover!.fields.map((row, at) => at === index ? { ...row, value: event.target.value } : row) } })} /></label>)}
-          <small>仅用于封面，不作为正文生成资料。</small>
-        </fieldset>}
         <section className="sf-create-summary" aria-label="创建摘要">
           <div className="sf-create-line">
             <strong>{FORMAT_LABELS[spec.format]} · {spec.language === 'en' ? `约 ${spec.targetLength} 词` : `约 ${spec.targetLength} 字`}
@@ -961,6 +961,9 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-outline-heading h3{margin-top:var(--sf-space-1)}
 .sf-outline-status{display:inline-flex;align-items:center;flex:none;padding:var(--sf-space-1) var(--sf-space-2);border-radius:var(--sf-radius-md);background:var(--sf-accent-soft);color:var(--sf-accent-text);font-size:var(--sf-font-sm)}
 .sf-wizard .sf-outline-summary{font-size:var(--sf-font-md);margin:var(--sf-space-3) 0;overflow-wrap:anywhere}
+.sf-wizard .sf-cover-fields{margin:var(--sf-space-4) 0;padding:var(--sf-space-3) var(--sf-space-4);border:1px solid var(--sf-border);border-radius:var(--sf-radius-lg)}
+.sf-cover-fields legend{padding:0 var(--sf-space-2);font-size:var(--sf-font-md);font-weight:600}
+.sf-cover-fields>small{display:block;margin-top:var(--sf-space-2);font-size:var(--sf-font-sm);color:var(--sf-muted)}
 .sf-outline-toolbar{display:flex;align-items:center;gap:var(--sf-space-4);flex-wrap:wrap;padding:var(--sf-space-3) 0;border-bottom:1px solid var(--sf-border)}
 .sf-wizard .sf-outline-toolbar>label{display:flex;flex-direction:row;align-items:center;gap:var(--sf-space-2);margin:0;white-space:nowrap}
 .sf-outline-toolbar .sf-length-input{display:flex;align-items:center;gap:var(--sf-space-1)}

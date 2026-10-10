@@ -13,7 +13,7 @@ await build({ entryPoints: ['src/host/bridge/writing-controller.ts'], bundle: tr
   plugins: [{ name: 'controlled-host-seams', setup(builder) {
     builder.onLoad({ filter: /[\\/]executor[\\/]model\.ts$/ }, () => ({ contents: `
       export async function selectedModel(ctx) { return { selected: {provider:'TEST_ONLY',model:'fixture'}, session:{}, contextWindow:100000, maxOutputTokens:4096 } }
-      export async function callStageModel(ctx, session, selected, call) { call.signal.throwIfAborted(); ctx.calls.push(call); return JSON.stringify(ctx.answers.shift()) }
+      export async function callStageModel(ctx, session, selected, call) { call.signal.throwIfAborted(); ctx.calls.push(call); const answer=ctx.answers.shift(); return typeof answer==='string'?answer:JSON.stringify(answer) }
       export async function callStageModelWithImage() { throw new Error('No image model call permitted') }
     `, loader: 'ts' }))
     builder.onLoad({ filter: /[\\/]bridge[\\/]project-api\.ts$/ }, () => ({ contents: `export async function resolveStore(ctx) { return { io: ctx.io } }`, loader: 'ts' }))
@@ -63,4 +63,23 @@ test('an invalid generated requirement stops before semantic review and leaves t
   await assert.rejects(f.controller.suggestOutline({ context, spec: f.spec }, 'owner', new AbortController().signal), /无法回到/)
   assert.equal(f.host.calls.length, 1)
   assert.deepEqual(f.spec.sections, [])
+})
+
+test('fenced generation and review responses pass the real controller without a repair call', async () => {
+  const f = fixture()
+  f.host.answers = f.host.answers.map(answer => '```json\n' + JSON.stringify(answer) + '\n```')
+  const { candidate } = await f.controller.suggestOutline({ context, spec: f.spec }, 'owner', new AbortController().signal)
+  assert.equal(candidate.sections[0].title, section.title)
+  assert.equal(candidate.coverage[0].covered, true)
+  assert.equal(f.host.calls.length, 2)
+})
+
+test('a malformed generation is repaired once before the separate semantic review', async () => {
+  const f = fixture(), valid = structuredClone(f.host.answers[0])
+  delete f.host.answers[0].taskSummary
+  f.host.answers.splice(1, 0, valid)
+  const { candidate } = await f.controller.suggestOutline({ context, spec: f.spec }, 'owner', new AbortController().signal)
+  assert.equal(candidate.coverage[0].covered, true)
+  assert.equal(f.host.calls.length, 3)
+  assert.deepEqual(f.host.calls[1].context.formatIssues, [{ path: 'taskSummary', code: 'invalid_type' }])
 })
