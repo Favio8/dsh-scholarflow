@@ -13,7 +13,7 @@ export type StoredCandidate = RequirementCandidate | OutlineCandidate
 export class CandidateStore {
   private rows = new Map<string, StoredCandidate>()
 
-  put(candidate: StoredCandidate) {
+  put<T extends StoredCandidate>(candidate: T): T {
     this.prune()
     this.rows.set(candidate.candidateId, candidate)
     return candidate

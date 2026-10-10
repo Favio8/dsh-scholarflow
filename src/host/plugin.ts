@@ -1227,6 +1227,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async creationStructure(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.structure(request, this.requireOperator(), signal)) }
   @Remote('outline.suggest')
   async outlineSuggest(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.suggestOutline(request, this.requireOperator(), signal)) }
+  @Remote('outline.stop')
+  async outlineStop(request: unknown) { return applicationResult(async () => this.writingController.stopOutline(request, this.requireOperator())) }
   @Remote('candidates.list')
   async candidatesList(request: unknown) { return applicationResult(async () => { this.requireOperator(); return this.writingController.candidateList(request) }) }
   @Remote('candidates.adopt')

@@ -24,7 +24,7 @@ export async function readOutlineResponse<T>(raw: string, validate: (value: unkn
       if (!attempt) { raw = await repair(raw, issues); continue }
       const label = stage === 'generation' ? '大纲' : '大纲覆盖检查'
       throw new ScholarError(stage === 'generation' ? 'OUTLINE_INVALID' : 'OUTLINE_REVIEW_INVALID',
-        `${label}返回格式仍不符合要求，已尝试修复一次；请重试，原结构未改变。`, { operation: `outline.${stage}`, fields: issues })
+        `${label}返回格式仍不符合要求，已尝试修复一次；请重试，原结构未改变。`, { operation: `outline.${stage}`, fields: issues.map(issue => issue.path), formatIssues: issues })
     }
   }
   throw new Error('Unreachable outline response state')

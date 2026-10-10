@@ -2,6 +2,25 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { callStageModel, selectedModel } from '../../src/host/executor/model.ts'
 
+test('streamed and thrown provider errors retain safe diagnostics and report rate limits without an HTTP status', async () => {
+  for (const thrown of [false, true]) {
+    const logs: any[] = []
+    const session = { id: 's_test', append: (_: string, data: any) => logs.push(JSON.parse(data.content[0].text)) }
+    const failure = { code: 'RATE_LIMIT', message: 'SECRET_KEY_AND_PRIVATE_PROMPT', providerRetryAfterMs: 5000 }
+    const ctx = { sessions: { flush: async () => true }, llm: { async *stream() {
+      if (thrown) throw Object.assign(new Error('PRIVATE_PROMPT'), { failure })
+      yield { type: 'finish', reason: { kind: 'error', failure } }
+    } } }
+    await assert.rejects(callStageModel(ctx, session, { provider: 'TEST_ONLY', model: 'TEST_ONLY' },
+      { system: 'test', instruction: 'test', context: {}, runId: 'run_test', signal: new AbortController().signal }),
+    (error: any) => error.code === 'RATE_LIMIT' && /频率或并发/.test(error.message) && error.details.providerRetryAfterMs === 5000)
+    const result = logs.find(row => row.phase === 'result')
+    assert.equal(result.payload.failure.code, 'RATE_LIMIT')
+    assert.equal(JSON.stringify(logs).includes('PRIVATE_PROMPT'), false)
+    assert.equal(JSON.stringify(logs).includes('SECRET_KEY'), false)
+  }
+})
+
 test('each operation follows the current Host selection and keeps a frozen request without a plugin default', async () => {
   let projection: any = { pending: { provider: 'TEST_ONLY-current', model: 'model-A', reasoningEffort: 'high' }, lastUsed: { provider: 'TEST_ONLY-old', model: 'old' } }
   const session = { id: 'session_TEST_ONLY' }, seen: string[] = []

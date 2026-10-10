@@ -4,7 +4,7 @@ import type { ModelCall } from '../../core/pipeline/generation.ts'
 
 type Host = any
 function modelFailure(failure: Host, selected: { provider: string; model: string }, runId: string) {
-  const code = /^[A-Z_]{1,64}$/.test(failure?.code ?? '') ? failure.code : 'MODEL_CALL_FAILED'
+  const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(failure?.code ?? '') ? failure.code : 'MODEL_CALL_FAILED'
   const details: Record<string, unknown> = { category: 'provider/transport', operation: 'model.request', phase: 'provider-stream', runId,
     provider: selected.provider, model: selected.model }
   if (Number.isInteger(failure?.status) && failure.status >= 100 && failure.status <= 599) details.status = failure.status
@@ -12,8 +12,13 @@ function modelFailure(failure: Host, selected: { provider: string; model: string
   const message = failure?.status === 401 ? '当前模型服务拒绝了身份认证，请检查 DSH 当前提供方的授权。'
     : failure?.status === 403 ? '当前模型服务拒绝访问，请检查 DSH 当前提供方的权限。'
     : failure?.status === 429 ? '当前模型服务正在限流，请稍后重试。'
+    : code === 'RATE_LIMIT' ? '当前模型服务触发了请求频率或并发限制，请等待当前请求结束后再重试。'
+    : code === 'AUTH' ? '当前模型服务认证失败，请检查当前提供方的授权。'
+    : code === 'TIMEOUT' ? '当前模型服务响应超时，本次未采用结果；可以稍后重试。'
+    : code === 'SERVER' || (failure?.status >= 500 && failure?.status <= 599) ? '当前模型服务暂时不可用，本次未采用结果；可以稍后重试。'
+    : code === 'NO_ADAPTER' ? '当前模型未找到可用提供方，请在宿主中检查模型配置。'
     : code === 'TRANSPORT' ? '当前模型请求的连接中断，本次未改动正文；可以重试。'
-    : '当前模型未能完成请求，本次未改动正文；可以重试或查看详情。'
+    : `当前模型请求失败（${code}${details.status ? `，HTTP ${details.status}` : ''}），本次未采用结果；可查看详情。`
   return new ScholarError(code, message, details)
 }
 declare module '@deepseek-ai/dsh-llm/message' {
@@ -66,23 +71,7 @@ export async function callStageModelWithImage(ctx: Host, session: Host, selected
   const request = { ...selected, sessionId: session.id, temperature: 0.2, messages }
   logStage(session, call.runId, 'request', { ...request, messages: messages.map(message => ({ ...message, content: message.content.map((part: { type: string }) => part.type === 'image' ? { type: 'image', attachment: '<附件>' } : part) })) })
   invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认请求日志持久化；未调用模型。')
-  let text = '', finish: Host, usage: Host
-  for await (const chunk of ctx.llm.stream({ ...request, signal: call.signal })) {
-    if (chunk.type === 'text-delta') {
-      text += chunk.text
-      invariant(Buffer.byteLength(text) <= 2 * 1024 * 1024, 'MODEL_OUTPUT_TOO_LARGE', '模型输出超过阶段限额。')
-    } else if (chunk.type === 'finish') finish = chunk.reason
-    else if (chunk.type === 'usage') usage = chunk.usage
-  }
-  logStage(session, call.runId, 'result', { text, finish: finish?.kind ?? 'missing', ...(usage && { usage }) })
-  invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认结果日志持久化；未发布识别结果。')
-  if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '操作已停止。', { category: 'cancelled', operation: 'model.request' })
-  if (finish?.kind === 'max-tokens') throw new ScholarError('MODEL_OUTPUT_LIMIT_REACHED', '模型输出达到提供方上限而未完整返回；本次调用已计费，请重试或缩小范围。')
-  if (finish?.kind === 'error') {
-    throw modelFailure(finish.failure, selected, call.runId)
-  }
-  if (!(finish?.kind === 'stop' && text.trim())) throw new ScholarError('MODEL_OUTPUT_INCOMPLETE', '模型输出未正常结束或为空，请重试。', { category: 'model-response', operation: 'model.request' })
-  return text
+  return consumeStage(ctx, session, selected, request, call)
 }
 
 export async function callStageModel(ctx: Host, session: Host, selected: { provider: string; model: string; reasoningEffort?: string }, call: ModelCall) {
@@ -97,21 +86,39 @@ export async function callStageModel(ctx: Host, session: Host, selected: { provi
   // owning session log. No raw prompt is duplicated into project diagnostic logs.
   logStage(session, call.runId, 'request', request)
   invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认请求日志持久化；未调用模型。')
-  let text = '', finish: Host, usage: Host
-  for await (const chunk of ctx.llm.stream({ ...request, signal: call.signal })) {
-    if (chunk.type === 'text-delta') {
-      text += chunk.text
-      invariant(Buffer.byteLength(text) <= 2 * 1024 * 1024, 'MODEL_OUTPUT_TOO_LARGE', '模型输出超过阶段限额。')
-    } else if (chunk.type === 'finish') finish = chunk.reason
-    else if (chunk.type === 'usage') usage = chunk.usage
-  }
-  logStage(session, call.runId, 'result', { text, finish: finish?.kind ?? 'missing', ...(usage && { usage }) })
-  invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认结果日志持久化；未发布正文建议。')
+  return consumeStage(ctx, session, selected, request, call)
+}
+
+
+/** Persist safe provider facts even on thrown errors; never log raw provider messages,
+ * which may echo credentials or complete prompts. */
+function failureFacts(failure: Host) {
+  const raw = failure?.failure ?? failure
+  const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(raw?.code ?? '') ? raw.code : 'MODEL_CALL_FAILED'
+  return { code, ...(Number.isInteger(raw?.status) && raw.status >= 100 && raw.status <= 599 ? { status: raw.status } : {}),
+    ...(Number.isFinite(raw?.providerRetryAfterMs) && raw.providerRetryAfterMs > 0 ? { providerRetryAfterMs: raw.providerRetryAfterMs } : {}) }
+}
+
+async function consumeStage(ctx: Host, session: Host, selected: { provider: string; model: string }, request: Host, call: ModelCall) {
+  let text = '', finish: Host, usage: Host, thrown: unknown
+  try {
+    call.signal.throwIfAborted()
+    for await (const chunk of ctx.llm.stream({ ...request, signal: call.signal })) {
+      if (chunk.type === 'text-delta') {
+        text += chunk.text
+        invariant(Buffer.byteLength(text) <= 2 * 1024 * 1024, 'MODEL_OUTPUT_TOO_LARGE', '模型输出超过阶段限额。')
+      } else if (chunk.type === 'finish') finish = chunk.reason
+      else if (chunk.type === 'usage') usage = chunk.usage
+    }
+  } catch (error) { thrown = error }
+  const failure = thrown ? failureFacts(thrown) : finish?.kind === 'error' ? failureFacts(finish.failure) : undefined
+  logStage(session, call.runId, 'result', { text, finish: call.signal.aborted ? 'aborted' : thrown ? 'error' : finish?.kind ?? 'missing',
+    ...(failure && { failure }), ...(usage && { usage }) })
+  invariant(await ctx.sessions.flush(session), 'UNSUPPORTED_DSH_CAPABILITY', '宿主未确认结果日志持久化；未发布候选。')
   if (finish?.kind === 'aborted' || call.signal.aborted) throw new ScholarError('CANCELLED', '操作已停止。', { category: 'cancelled', operation: 'model.request' })
+  if (thrown instanceof ScholarError) throw thrown
+  if (failure) throw modelFailure(failure, selected, call.runId)
   if (finish?.kind === 'max-tokens') throw new ScholarError('MODEL_OUTPUT_LIMIT_REACHED', '模型输出达到提供方上限而未完整返回；本次调用已计费，请重试或缩小范围。')
-  if (finish?.kind === 'error') {
-    throw modelFailure(finish.failure, selected, call.runId)
-  }
   if (!(finish?.kind === 'stop' && text.trim())) throw new ScholarError('MODEL_OUTPUT_INCOMPLETE', '模型输出未正常结束或为空，请重试。', { category: 'model-response', operation: 'model.request' })
   return text
 }

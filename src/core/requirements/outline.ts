@@ -60,7 +60,25 @@ export function assessOutline(generated: ReturnType<typeof validateGeneration>, 
 
 export function outlineInputKey(spec: CreationSpec) {
   return JSON.stringify([spec.title, spec.requirements, spec.brief, spec.requirementSources, spec.materials,
-    spec.type, spec.language, spec.format, spec.targetLength, spec.targetLengthOrigin, spec.typography, spec.cover, spec.overrides])
+    spec.type, spec.language, spec.format, spec.targetLength, spec.targetLengthOrigin, spec.typography, spec.cover?.enabled, spec.overrides])
+}
+
+/** Preserve existing attempt/acceptance markers across this fingerprint refinement. */
+export function restoreOutlineInputKey(value: string) {
+  try {
+    const fields = JSON.parse(value)
+    if (Array.isArray(fields) && fields.length === 13 && fields[11] && typeof fields[11] === 'object' && 'enabled' in fields[11]) {
+      fields[11] = fields[11].enabled
+      return JSON.stringify(fields)
+    }
+  } catch { /* Empty or older markers remain unconfirmed. */ }
+  return value
+}
+
+/** Personal cover fields do not enter the outline model. Keep them editable without
+ * invalidating its candidate; adoption preserves the latest operator-entered fields. */
+export function outlineCandidateKey(spec: CreationSpec) {
+  return JSON.stringify({ ...spec, cover: spec.cover ? { enabled: spec.cover.enabled } : undefined })
 }
 
 /** Root sections move with their children; children never escape their parent. */

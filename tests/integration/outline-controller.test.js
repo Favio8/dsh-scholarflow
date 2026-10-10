@@ -83,3 +83,21 @@ test('a malformed generation is repaired once before the separate semantic revie
   assert.equal(f.host.calls.length, 3)
   assert.deepEqual(f.host.calls[1].context.formatIssues, [{ path: 'taskSummary', code: 'invalid_type' }])
 })
+
+test('concurrent cover edits share one host execution and adoption retains the latest cover', async () => {
+  const f = fixture()
+  const requests = Array.from({ length: 15 }, (_, i) => ({ ...f.spec,
+    cover: { enabled: true, title: `封面 ${i}`, date: '', fields: [{ label: '姓名', value: `TEST_ONLY_${i}` }] } }))
+  const results = await Promise.all(requests.map((spec, i) => f.controller.suggestOutline({ context, spec, operationId: `op_${i}` }, 'owner', new AbortController().signal)))
+  assert.equal(new Set(results.map(row => row.candidate.candidateId)).size, 1)
+  assert.equal(f.host.calls.length, 2, 'one generation and one review, not 15 pairs')
+  const adopted = await f.controller.adoptCandidate({ context, spec: requests[14], candidateId: results[0].candidate.candidateId }, 'owner')
+  assert.equal(adopted.spec.cover.fields[0].value, 'TEST_ONLY_14')
+})
+
+test('an explicit stop arriving before setup completes prevents provider calls', async () => {
+  const f = fixture()
+  f.controller.stopOutline({ context, operationId: 'op_early' }, 'owner')
+  await assert.rejects(f.controller.suggestOutline({ context, spec: f.spec, operationId: 'op_early' }, 'owner', new AbortController().signal), { name: 'AbortError' })
+  assert.equal(f.host.calls.length, 0)
+})

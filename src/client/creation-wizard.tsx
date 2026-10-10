@@ -2,8 +2,9 @@ import { useTextPrompt } from './text-prompt.tsx'
 import React, { useEffect, useRef, useState } from 'react'
 import { useConfirmationFocus } from './confirmation-focus.ts'
 import { creationSpec, requirementDraftSpec, type CreationSpec } from '../shared/writing-task.ts'
+import { ErrorNotice } from './application-error.tsx'
 import { creationErrorMessage } from './creation-errors.ts'
-import { outlineInputKey, moveOutlineSection, validateOutline } from '../core/requirements/outline.ts'
+import { outlineInputKey, outlineCandidateKey, restoreOutlineInputKey, moveOutlineSection, validateOutline } from '../core/requirements/outline.ts'
 import { allocate } from '../core/presets/allocation.ts'
 import { sectionsFromPreset, selectionFromPreset } from '../core/presets/apply.ts'
 import { FORMAT_LABELS, TYPE_LABELS } from './paper-workspace.tsx'
@@ -190,8 +191,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     cover: { enabled: false, title: '', fields: [], date: '' } }
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') } catch { return null } })
   const [spec, setSpec] = useState<CreationSpec>(() => saved?.spec ? restoreCreationDraft(saved.spec) : initial), [step, setStep] = useState(saved?.step ?? 0)
-  const [attemptedOutline, setAttemptedOutline] = useState<string>(saved?.attemptedOutline ?? '')
-  const [acceptedOutline, setAcceptedOutline] = useState<string>(saved?.acceptedOutline ?? '')
+  const [attemptedOutline, setAttemptedOutline] = useState<string>(() => restoreOutlineInputKey(saved?.attemptedOutline ?? ''))
+  const [acceptedOutline, setAcceptedOutline] = useState<string>(() => restoreOutlineInputKey(saved?.acceptedOutline ?? ''))
   const inputKey = outlineInputKey(spec)
   const latestSpec = useRef(spec); latestSpec.current = spec
   // The direction the user actually moved in, so going back does not look like going forward.
@@ -201,6 +202,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     setDirection(next >= step ? 1 : -1); setStep(next)
   }
   const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [conflict, setConflict] = useState(false)
+  const [errorInfo, setErrorInfo] = useState<Error>()
   const [scanning, setScanning] = useState(false), [truncated, setTruncated] = useState(false)
   const [materialQuery, setMaterialQuery] = useState('')
   const [presetOpen, setPresetOpen] = useState(false)
@@ -244,7 +246,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     }).catch(() => undefined)
     return () => { live = false }
   }, [key])
-  const act = async (fn: () => Promise<void>) => { setBusy(true); setError(''); try { await fn() } catch (error) { if ((error as Error).name !== 'AbortError') setError((error as Error).message) } finally { setBusy(false) } }
+  const act = async (fn: () => Promise<void>) => { setBusy(true); setError(''); setErrorInfo(undefined); try { await fn() } catch (error) { if ((error as Error).name !== 'AbortError') { setError((error as Error).message); setErrorInfo(error as Error) } } finally { setBusy(false) } }
   // Requirement sources stand on their own: they are never merged into the materials
   // list, and extraction reads them under their own authorisation (SPEC v1.1 §7).
   const readySpec = () => ({ ...spec, title: spec.title.trim() || spec.requirements.trim().split('\n')[0].slice(0, 60) })
@@ -356,9 +358,15 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const outlineController = useRef<AbortController | undefined>(undefined)
   const [outlineRunning, setOutlineRunning] = useState(false), [outlineElapsed, setOutlineElapsed] = useState(0)
   const outlineOp = useRef(0), automaticAttempt = useRef('')
-  useEffect(() => () => outlineController.current?.abort(), [])
+  const outlineOperation = useRef<string | undefined>(undefined)
+  const cancelOutlineRequest = () => {
+    const operationId = outlineOperation.current
+    if (operationId) void api('outline.stop', { context: context(), operationId }).catch(() => undefined)
+    outlineOperation.current = undefined; outlineController.current?.abort()
+  }
+  useEffect(() => () => cancelOutlineRequest(), [])
   const stopOutline = () => {
-    outlineOp.current++; outlineController.current?.abort(); setOutlineRunning(false)
+    outlineOp.current++; cancelOutlineRequest(); setOutlineRunning(false)
   }
   const suggestStructure = () => act(async () => {
     const current = requirementDraftSpec.parse(readySpec())
@@ -368,16 +376,17 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     catch { throw new Error('无法保存本次生成记录，尚未调用模型。请检查浏览器存储后重试。') }
     setAttemptedOutline(startedKey); setOutline(undefined); setIssues([])
     const controller = new AbortController(); outlineController.current = controller
+    const operationId = `outline_${crypto.randomUUID()}`; outlineOperation.current = operationId
     const startedAt = Date.now(); setOutlineRunning(true); setOutlineElapsed(0)
     const timer = window.setInterval(() => setOutlineElapsed(Date.now() - startedAt), 400)
     try {
-      const result = await api('outline.suggest', { context: context(), spec: current }, controller.signal)
+      const result = await api('outline.suggest', { context: context(), spec: current, operationId }, controller.signal)
       if (!controller.signal.aborted && op === outlineOp.current
         && startedKey === outlineInputKey(latestSpec.current)
         && JSON.stringify(current.sections) === JSON.stringify(requirementDraftSpec.parse({ ...latestSpec.current, title: current.title }).sections))
-        setOutline({ ...result.candidate, inputSpecJson: JSON.stringify(current) })
+        setOutline({ ...result.candidate, inputSpecJson: outlineCandidateKey(current) })
     } catch (error) { if (!controller.signal.aborted) throw error
-    } finally { window.clearInterval(timer); if (outlineController.current === controller) setOutlineRunning(false) }
+    } finally { window.clearInterval(timer); if (outlineController.current === controller) { outlineOperation.current = undefined; setOutlineRunning(false) } }
   })
   const [outline, setOutline] = useState<any>()
   useEffect(() => {
@@ -387,16 +396,16 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     return () => window.clearTimeout(timer)
   }, [step, inputKey, busy, outlineRunning, attemptedOutline, acceptedOutline])
   useEffect(() => {
-    return () => { outlineOp.current++; outlineController.current?.abort() }
+    return () => { outlineOp.current++; cancelOutlineRequest() }
   }, [inputKey])
   const adoptOutline = () => act(async () => {
-    const before = JSON.stringify(requirementDraftSpec.parse(readySpec()))
+    const before = outlineCandidateKey(requirementDraftSpec.parse(readySpec()))
     const result = await api('candidates.adopt', { context: context(), candidateId: outline.candidateId, spec: requirementDraftSpec.parse(readySpec()), all: true })
     const next = requirementDraftSpec.parse(result.spec)
-    if (JSON.stringify(requirementDraftSpec.parse({ ...latestSpec.current, title: latestSpec.current.title.trim() || latestSpec.current.requirements.trim().split('\n')[0].slice(0, 60) })) !== before)
+    if (outlineCandidateKey(requirementDraftSpec.parse({ ...latestSpec.current, title: latestSpec.current.title.trim() || latestSpec.current.requirements.trim().split('\n')[0].slice(0, 60) })) !== before)
       throw new Error('采用期间输入已改变，请重新生成大纲；你的修改已保留。')
     setHistory(rows => [...rows.slice(-9), spec.sections])
-    const accepted = { ...next, title: spec.title }
+    const accepted = { ...next, title: spec.title, cover: latestSpec.current.cover }
     setSpec(accepted); setAcceptedOutline(outlineInputKey(accepted)); setAttemptedOutline(outlineInputKey(accepted))
     setOutline(undefined); setIssues(['已采用大纲候选，可以继续编辑章节。'])
   })
@@ -680,7 +689,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <p className="sf-field-hint">{spec.preset ? '已选预设仅作参考，具体要求优先。' : '不套固定模板；根据要求与所选资料规划，再由你确认。'}正文与附属部分分开计数。</p>
         {outlineRunning && <div className="sf-long-op" role="status" aria-live="polite"><span className="sf-long-op-dot" aria-hidden="true" />
           <strong>读取资料、规划章节并检查要求覆盖</strong><span>已用 {formatElapsed(outlineElapsed)}</span><span>原结构保持，完成后由你确认采用。</span></div>}
-        {outline && <OutlineCandidate candidate={outline} stale={outline.inputSpecJson !== JSON.stringify(requirementDraftSpec.safeParse(readySpec()).data)} busy={busy} onAdopt={adoptOutline}
+        {outline && <OutlineCandidate candidate={outline} stale={outline.inputSpecJson !== (requirementDraftSpec.safeParse(readySpec()).success ? outlineCandidateKey(requirementDraftSpec.parse(readySpec())) : undefined)} busy={busy} onAdopt={adoptOutline}
           onDiscard={() => act(async () => { await api('candidates.discard', { context: context(), candidateId: outline.candidateId }); setOutline(undefined) })} />}
         {!outline && !outlineRunning && !spec.sections.length && <p className="sf-outline-empty">{attemptedOutline === inputKey ? '尚未采用大纲。可以重新生成，或手工添加章节。' : '即将根据已确认要求生成大纲候选。'}</p>}
         {spec.sections.length > 0 && <details className="sf-outline-current" open={!outline} key={outline ? 'comparison' : 'editor'}><summary>{outline ? '查看原有结构（未改动）' : '当前大纲 · 可直接编辑'}</summary>
@@ -725,7 +734,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         {conflict && <label>论文输出目录<input value={spec.manuscriptDir} onChange={e => update({ manuscriptDir: e.target.value })} /><small>此处已有文件，请选择新的输出目录。</small></label>}
       </>}
     </div>
-    {error && <p className="sf-wizard-error" role="alert">{creationErrorMessage({ message: error })}</p>}
+    {error && <div className="sf-wizard-error"><ErrorNotice error={Object.assign(new Error(creationErrorMessage({ message: error })), errorInfo?.message === error ? { code: (errorInfo as any).code, details: (errorInfo as any).details } : {})} /></div>}
     {issues.length > 0 && <ul className="sf-wizard-issues" role="alert">{issues.map(issue => <li key={issue}>{issue}</li>)}</ul>}
     <footer className="sf-wizard-footer">{step > 0 && <button className="sf-wizard-nav sf-wizard-back" disabled={busy && !outlineRunning} onClick={() => goToStep(step - 1)}><WizardIcon name="back" /><span>上一步</span></button>}<span />
       {step < 2 ? <button className="sf-primary sf-wizard-nav" disabled={busy} onClick={() => {
@@ -948,6 +957,8 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-wizard button:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:2px}
 .sf-primary{background:var(--sf-accent)!important;border-color:var(--sf-accent)!important;color:var(--sf-on-accent)!important}
 .sf-wizard .sf-wizard-error{padding:var(--sf-space-3);border:1px solid var(--sf-danger-border);border-radius:var(--sf-radius-lg);background:var(--sf-danger-soft);color:var(--sf-danger);font-size:var(--sf-font-md)}
+.sf-wizard .sf-wizard-error p{color:inherit}
+.sf-wizard .sf-wizard-error pre{max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--sf-font-sm)}
 .sf-wizard button{cursor:pointer}
 .sf-wizard button:disabled{opacity:var(--sf-disabled-opacity);cursor:default}
 @keyframes sf-step-forward{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}

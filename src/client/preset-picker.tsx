@@ -14,7 +14,7 @@ export const PRESET_CSS = `
    and body[data-ds-dark-theme], so an extra copy is a no-op, and the dialog follows the same
    dark theme as the rest of the workbench. */
 .sf-preset-backdrop{position:fixed;inset:0;background:var(--sf-scrim);z-index:1400;display:flex;align-items:center;justify-content:center;padding:var(--sf-space-5)}
-.sf-preset-dialog{display:flex;flex-direction:column;width:min(960px,92vw);height:min(80vh,720px);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);overflow:hidden;box-shadow:var(--sf-shadow-3)}
+.sf-preset-dialog{line-height:var(--sf-leading-body);color:var(--sf-text);font-size:var(--sf-font-md);display:flex;flex-direction:column;width:min(960px,92vw);height:min(80vh,720px);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);overflow:hidden;box-shadow:var(--sf-shadow-3)}
 .sf-preset-dialog>header{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-3) var(--sf-space-4);border-bottom:1px solid var(--sf-border)}
 .sf-preset-dialog>header strong{font-size:var(--sf-font-lg)}
 .sf-preset-dialog>header button{margin-left:var(--sf-space-2);border:0;background:transparent;color:inherit;font-size:var(--sf-font-xl);cursor:pointer}
@@ -22,15 +22,17 @@ export const PRESET_CSS = `
 .sf-preset-tabs{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-4);border-bottom:1px solid var(--sf-border);flex-wrap:wrap}
 .sf-preset-tabs button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md);cursor:pointer}
 .sf-preset-tabs button[aria-pressed=true]{background:var(--sf-accent-soft);border-color:var(--sf-accent);color:var(--sf-accent-text)}
-.sf-preset-tabs input{margin-left:auto;box-sizing:border-box;height:var(--sf-space-6);min-width:180px;padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md)}
+.sf-preset-dialog .sf-preset-tabs input{width:auto;flex:1 1 200px;margin-left:auto;box-sizing:border-box;height:var(--sf-space-6);min-width:180px;padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md)}
 .sf-preset-body{display:flex;min-height:0;flex:1}
-.sf-preset-list{width:40%;min-width:220px;border-right:1px solid var(--sf-border);overflow:auto;padding:var(--sf-space-2)}
+.sf-preset-list{box-sizing:border-box;width:40%;min-width:220px;border-right:1px solid var(--sf-border);overflow:auto;padding:var(--sf-space-3)}
 .sf-preset-group{margin:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-xs);color:var(--sf-muted)}
-.sf-preset-row{display:flex;align-items:center;gap:var(--sf-space-2);width:100%;padding:var(--sf-space-2);border:1px solid transparent;border-radius:var(--sf-radius-lg);background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
-.sf-preset-row:hover{background:var(--sf-fill)}
-.sf-preset-row[aria-pressed=true]{background:var(--sf-accent-soft);border-color:var(--sf-accent)}
-.sf-preset-row>span{display:flex;flex-direction:column;flex:1;min-width:0}
-.sf-preset-row small{font-size:var(--sf-font-xs);color:var(--sf-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-preset-dialog button.sf-preset-row{min-width:0;white-space:normal;flex:1;height:auto;min-height:76px;box-sizing:border-box;line-height:var(--sf-leading-body);display:flex;align-items:center;gap:var(--sf-space-2);width:100%;padding:var(--sf-space-3);border:1px solid transparent;border-radius:var(--sf-radius-lg);background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.sf-preset-dialog button.sf-preset-row:hover{background:var(--sf-fill)}
+.sf-preset-dialog button.sf-preset-row[aria-pressed=true]{background:var(--sf-accent-soft);border-color:var(--sf-accent)}
+.sf-preset-dialog .sf-preset-row>span{display:flex;flex-direction:column;gap:var(--sf-space-1);flex:1;min-width:0}
+.sf-preset-item{display:flex;align-items:center;gap:var(--sf-space-2);margin-bottom:var(--sf-space-2)}
+.sf-preset-row strong{overflow-wrap:anywhere;font-size:var(--sf-font-md);font-weight:600;line-height:var(--sf-leading-body)}
+.sf-preset-dialog .sf-preset-row small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:var(--sf-font-sm);line-height:var(--sf-leading-body);color:var(--sf-muted);overflow:hidden;white-space:normal;overflow-wrap:anywhere}
 .sf-preset-row em{flex:none;font-size:var(--sf-font-xs);font-style:normal;color:var(--sf-muted)}
 .sf-preset-manage{display:flex;gap:var(--sf-space-1);flex:none}
 .sf-preset-manage button{border:0;background:transparent;color:var(--sf-accent-text);cursor:pointer;font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-1)}
@@ -43,9 +45,9 @@ export const PRESET_CSS = `
 .sf-preset-bar{flex:1;height:var(--sf-space-2);border-radius:var(--sf-radius-sm);background:var(--sf-fill-strong);overflow:hidden;display:flex}
 .sf-preset-bar i{display:block;height:100%;background:var(--sf-accent);opacity:.85}
 .sf-preset-sections{margin:var(--sf-space-2) 0 0;padding:0;list-style:none;font-size:var(--sf-font-md)}
-.sf-preset-sections li{padding:var(--sf-space-2) 0;border-bottom:1px solid var(--sf-border-soft)}
+.sf-preset-sections li{padding:var(--sf-space-3) 0;border-bottom:1px solid var(--sf-border-soft)}
 .sf-preset-sections strong{font-weight:500}
-.sf-preset-sections small{display:block;color:var(--sf-muted);font-size:var(--sf-font-sm);margin-top:var(--sf-space-hair)}
+.sf-preset-sections small{line-height:var(--sf-leading-body);display:block;color:var(--sf-muted);font-size:var(--sf-font-sm);margin-top:var(--sf-space-hair)}
 .sf-preset-subsections{margin:var(--sf-space-hair) 0 0;padding:0 0 0 var(--sf-space-4);list-style:none;border-left:2px solid var(--sf-border)}
 .sf-preset-subsections li{padding:var(--sf-space-1) 0 var(--sf-space-1) var(--sf-space-2);border-bottom:0;color:var(--dsw-alias-label-secondary,var(--sf-muted))}
 .sf-preset-subsections em{font-style:normal;font-size:var(--sf-font-xs);color:var(--sf-muted);margin-left:var(--sf-space-2)}
@@ -56,7 +58,7 @@ export const PRESET_CSS = `
 .sf-preset-part{display:inline-flex;align-items:baseline;gap:var(--sf-space-1)}
 .sf-preset-part small{color:var(--sf-muted);font-size:var(--sf-font-xs)}
 .sf-preset-parts-note{margin:var(--sf-space-2) 0 0;color:var(--sf-muted);font-size:var(--sf-font-xs)}
-.sf-preset-dialog>footer{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-3) var(--sf-space-4);border-top:1px solid var(--sf-border)}
+.sf-preset-dialog>footer{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-3) var(--sf-space-4);border-top:1px solid var(--sf-border)}
 .sf-preset-dialog>footer>span{flex:1}
 .sf-preset-dialog>footer button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;cursor:pointer}
 .sf-preset-dialog>footer button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent)}
@@ -78,10 +80,16 @@ export const PRESET_CSS = `
 .sf-preset-draft-actions{display:flex;gap:var(--sf-space-2);margin-top:var(--sf-space-1)}
 .sf-preset-draft-actions button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;cursor:pointer}
 .sf-preset-draft-actions button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent)}
+.sf-preset-dialog button:not(.sf-preset-row){font-family:inherit;font-size:var(--sf-font-md);line-height:var(--sf-leading-tight)}
+.sf-preset-dialog .sf-preset-part{flex-direction:row;margin:var(--sf-space-1) 0}
+.sf-preset-dialog .sf-preset-part input{width:auto;min-height:0;height:auto}
+.sf-preset-dialog .sf-preset-tabs{align-items:center}
+.sf-preset-dialog .sf-preset-row:focus-visible{outline:2px solid var(--sf-focus-color);outline-offset:-2px}
 /* Narrow containers show one column at a time; the apply button stays reachable. */
 @media(max-width:720px){.sf-preset-body{flex-direction:column}.sf-preset-body[data-view=list] .sf-preset-preview{display:none}
 .sf-preset-body[data-view=detail] .sf-preset-list{display:none}
 .sf-preset-list{width:100%;min-width:0;border-right:0;border-bottom:1px solid var(--sf-border);flex:0 0 auto;max-height:45%}
+.sf-preset-body[data-view=list] .sf-preset-list{flex:1 1 auto;max-height:none}
 .sf-preset-dialog>footer{flex-wrap:wrap}}
 `
 
@@ -183,7 +191,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
           {(['user', 'builtin'] as const).map(source => { const group = rows.filter(preset => preset.source === source)
             if (!group.length) return null
             return <div key={source}><p className="sf-preset-group">{source === 'user' ? '我的预设' : '内置'}</p>
-              {group.map(preset => <div key={preset.id} style={{ display: 'flex', alignItems: 'center' }}>
+              {group.map(preset => <div key={preset.id} className="sf-preset-item">
                 <button className="sf-preset-row" aria-pressed={chosen === preset.id} onClick={() => { setChosen(preset.id); if (narrow) setDetail(true) }}>
                   <span><strong>{localized(preset.title, language)}</strong><small>{localized(preset.summary, language)}</small></span>
                   {applied?.id === preset.id && <em>当前</em>}

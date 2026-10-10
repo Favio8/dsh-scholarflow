@@ -28,6 +28,7 @@ window.fixture = { calls: [], mode: 'ready', release: null }
 const api = async (name, request) => {
   window.fixture.calls.push({ name, request })
   if (name === 'creation.materials') return { files }
+  if (name === 'outline.stop') return { stopped: true }
   if (name === 'presets.list') return { all: [], byType: {} }
   if (request?.spec) requirementDraftSpec.parse(request.spec)
   if (name === 'creation.readRequirements') {

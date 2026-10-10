@@ -50,6 +50,9 @@ try {
   const sessionId = (await rpc('session/create', { request: { workspaceId, agentPreset: 'scholarflow' } })).sessionId
   const context = { requestId: 'req_TEST_ONLY', workspaceId, sessionId }
   const api = (method, data) => rpc('scholarflow.v1/' + method, { request: { context, ...data } })
+  const stopped = await api('outline.stop', { operationId: 'op_TEST_ONLY' })
+  assert.equal(typeof stopped.stopped, 'boolean')
+  pass('outline stop is registered on the actual installed-host bridge')
   const base = { title: '', requirements: '', type: 'course-paper', language: 'zh-CN', format: 'docx',
     materials: [], targetLength: 4000, sections: [{ id: 'section_1', title: '引言', targetLength: 4000 }] }
   const source = { resourceId: 'req_folder', origin: 'workspace', kind: 'folder', path: '作业要求',
