@@ -1,3 +1,4 @@
+import { WorkbenchIcon } from './workbench-chrome.tsx'
 import React, { useMemo, useState } from 'react'
 import { projectMarkdown } from '../core/editing/markdown.ts'
 import { MarkdownView } from './markdown.tsx'
@@ -93,11 +94,11 @@ export function RewriteCandidateView({ candidate, onAccept, onDiscard, onUndo, o
     <div className="sf-rewrite-actions">
       {ready && <>
         <button type="button" className="sf-primary" disabled={busy || !canAccept} onClick={onAccept} data-sf-accept>√ 采用</button>
-        <button type="button" disabled={busy} onClick={onDiscard} data-sf-discard>× 放弃</button>
+        <button type="button" disabled={busy} onClick={onDiscard} data-sf-discard><WorkbenchIcon kind="close" /> 放弃</button>
       </>}
       {(candidate.state === 'stopped' || candidate.state === 'failed') && onRegenerate &&
         <button type="button" disabled={busy} onClick={onRegenerate}>重新生成</button>}
-      {(candidate.state === 'stopped' || candidate.state === 'failed') && <button type="button" disabled={busy} onClick={onDiscard}>× 放弃</button>}
+      {(candidate.state === 'stopped' || candidate.state === 'failed') && <button type="button" disabled={busy} onClick={onDiscard}><WorkbenchIcon kind="close" /> 放弃</button>}
       {candidate.state === 'accepted' && onUndo && <button type="button" disabled={busy} onClick={onUndo} data-sf-undo>撤销接受</button>}
     </div>
   </section>
@@ -153,7 +154,7 @@ export const REWRITE_CSS = `
 .sf-rewrite-actions button{font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-2) var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;cursor:pointer}
 .sf-rewrite-reading{padding:var(--sf-space-2) var(--sf-space-3);max-height:300px;overflow:auto}
 .sf-rewrite-reading .sf-prose{font-size:inherit!important;line-height:var(--sf-leading-prose)!important}
-.sf-rewrite-technical{padding:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-sm)}.sf-rewrite-technical summary{cursor:pointer;color:var(--dsw-alias-label-secondary)}
+.sf-rewrite-technical{padding:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-sm)}.sf-rewrite-technical summary{cursor:pointer;color:var(--sf-muted)}
 .sf-rewrite-actions{position:sticky;bottom:0;background:var(--sf-surface);z-index:1}
 .sf-rewrite-reading .sf-prose p{margin:var(--sf-space-2) 0!important}
 @keyframes sf-spin{to{transform:rotate(360deg)}}

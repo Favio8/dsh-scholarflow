@@ -1,3 +1,4 @@
+import { WorkbenchIcon } from './workbench-chrome.tsx'
 import React, { useEffect, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -66,7 +67,7 @@ export function SelectionDetails({ card, onClose, onTool }: { card: SelectionCon
   }, [onClose])
   return createPortal(<div className="sf-selection-detail-backdrop" onPointerDown={onClose}>
     <section className="sf-selection-detail" role="dialog" aria-modal="true" aria-label="选文详情" onPointerDown={event => event.stopPropagation()}>
-      <header><strong>选文详情</strong><button aria-label="关闭选文详情" onClick={onClose}>×</button></header>
+      <header><strong>选文详情</strong><button aria-label="关闭选文详情" onClick={onClose}><WorkbenchIcon kind="close" /></button></header>
       <p className="sf-selection-origin">{card.snapshot.documentPath} · {card.snapshot.selectedCharacters} 字</p>
       {card.snapshot.chapterPath.length > 0 && <p className="sf-selection-origin">{card.snapshot.chapterPath.join(' / ')}</p>}
       <blockquote>{card.snapshot.sourceText}</blockquote>

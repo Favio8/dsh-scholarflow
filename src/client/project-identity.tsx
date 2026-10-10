@@ -23,7 +23,7 @@ export function ProjectIdentity({ project, workspaceTitle, workspaces, context, 
       <button disabled={busy || !!plan || reason.trim().length < 10} onClick={() => run(async () => setPlan(await api('project.prepareCopy', { context: context(), reason })))}>预览绑定为副本</button>
     </>}
     {plan && <section role="dialog" aria-modal="false" aria-label="绑定为副本确认"><h4>确认仅改变这个工作区的身份</h4>
-      <p>{workspaceTitle} · {plan.title}</p><p>{plan.oldProjectId} → {plan.projectId}</p><p>{plan.reason}</p>
+      <p>{workspaceTitle} · {plan.title}</p><p>{plan.oldProjectId} 改为 {plan.projectId}</p><p>{plan.reason}</p>
       <details><summary>原项目配置</summary><pre>{plan.oldConfigText}</pre></details>
       <details open><summary>副本项目配置</summary><pre>{plan.newConfigText}</pre></details>
       <p>原始身份档案将保留以下文件的全文及摘要：</p><ul>{plan.originals.map((row: any) => <li key={row.relativePath}>{row.relativePath} · {row.contentHash}</li>)}</ul>
@@ -43,7 +43,7 @@ export function ProjectIdentityHistory({ context, api, run, busy }: Pick<Props, 
     {history && <>
       {!history.records.length && <p>当前项目没有副本身份变更记录。</p>}
       <p>历史会话 ID 仅用于来源追踪。旧执行记录和已计费／未知请求不会因此获得当前会话权限，也不能从历史档案重新执行。</p>
-      {history.records.map((row: any) => <details key={row.operationId}><summary>{row.oldProjectId} → {row.projectId} · {row.confirmedAt}</summary>
+      {history.records.map((row: any) => <details key={row.operationId}><summary>{row.oldProjectId} 改为 {row.projectId} · {row.confirmedAt}</summary>
         <p>{row.reason}</p><p>确认操作 {row.operationId} · 来源会话 {row.sourceSessionId}</p>
         <ul>{row.originals.map((file: any) => <li key={file.relativePath}>{file.relativePath} · {file.contentHash}</li>)}</ul>
         <button disabled={busy} onClick={() => run(async () => {

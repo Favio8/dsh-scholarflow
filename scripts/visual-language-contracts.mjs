@@ -3,6 +3,7 @@ export const SERIF_SELECTORS = [
   '.sf-paper-page',
   '.sf-wizard .sf-outline-edit-row>.sf-outline-title',
   'body .sf-wizard .sf-outline-title',
+  'body .sf-state.sf-state h3',
   'body :is(.sf-wizard h2,.sf-wizard h3,.sf-paper-title,.sf-paper-project h2,.sf-paper-project h3,.sf-paper-project h4,.sf-preset-preview h3,.sf-preset-draft h3,.sf-preset-dialog>header strong,.sf-preset-row strong,.sf-preset-sections strong,.sf-preset-subsections li>span,.sf-boundary h3,.sf-chat-empty h3,.sf-settings h2,.sf-settings h3)',
 ]
 export const FONT_TOKENS = ['--sf-font-xs', '--sf-font-sm', '--sf-font-md', '--sf-font-prose', '--sf-font-title', '--sf-font-display-2', '--sf-font-display-1']
@@ -79,4 +80,53 @@ export function systemSerifInPage() {
   for (let index = 0; index < serif.length; index += 4)
     if (serif[index + 3] !== sans[index + 3]) differingPixels++
   return { serif: 'SimSun', sans: 'Microsoft YaHei', differingPixels, status: differingPixels > 0 ? 'passed' : 'pending' }
+}
+
+export function paletteInPage() {
+  const root = getComputedStyle(document.body), probe = document.createElement('span')
+  probe.hidden = true; document.body.append(probe)
+  const rgb = token => {
+    probe.style.color = `var(${token})`
+    return getComputedStyle(probe).color.match(/[\d.]+/g)?.slice(0, 3).map(Number)
+  }
+  const neutral = ['paper','surface','surface-2','hover','text','muted','text-faint','border','border-soft','border-strong','fill','scrim','page-bg','page-text','page-muted','page-faint']
+    .map(name => ({ name: `--sf-${name}`, rgb: rgb(`--sf-${name}`) }))
+  const luminance = value => { const c = value.map(n => { const s = n / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4 }); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2] }
+  const hue = value => {
+    const [r,g,b] = value.map(n => n / 255), max = Math.max(r,g,b), min = Math.min(r,g,b), c = max-min
+    return { degrees: c ? ((max === r ? (g-b)/c : max === g ? (b-r)/c+2 : (r-g)/c+4) * 60 + 360) % 360 : 0,
+      saturation: max ? c/max : 0, chroma: c*255 }
+  }
+  const accent = hue(rgb('--sf-accent')), hueFailures = []
+  for (const name of root) {
+    if (!name.startsWith('--sf-') || /^--sf-(danger|ok|warn|mark-|wash-)/.test(name) || name === '--sf-selection-tint') continue
+    const value = root.getPropertyValue(name).trim()
+    if (!CSS.supports('color', value)) continue
+    const current = hue(rgb(name)), delta = Math.abs(current.degrees - accent.degrees)
+    // The PRD distinguishes neutral families from non-neutral accents. Absolute chroma
+    // keeps near-white/warm-ink neutral shades from being misclassified by HSV saturation.
+    if (current.chroma > 24 && current.saturation >= .15 && Math.min(delta, 360-delta) > 15) hueFailures.push({ name, ...current })
+  }
+  const surfaceBrighterThanPaper = luminance(rgb('--sf-surface')) > luminance(rgb('--sf-paper'))
+  probe.remove()
+  return { neutral, hueFailures, surfaceBrighterThanPaper }
+}
+
+export function stateAndIconsInPage(selector) {
+  const root = document.querySelector(selector)
+  const visible = el => { const box=el.getBoundingClientRect();return box.width>0 && box.height>0 && el.checkVisibility() }
+  const icons = [...root.querySelectorAll('svg')].filter(visible).filter(el => !el.closest('.sf-native-tools,[data-conversation-content]'))
+    .map(el => ({ width: parseFloat(getComputedStyle(el).width), stroke: getComputedStyle(el).strokeWidth }))
+  const states = [...root.querySelectorAll('.sf-state')].filter(visible).map(el => ({
+    kind: [...el.classList].find(name => ['sf-state-empty','sf-state-loading','sf-state-error'].includes(name)),
+    title: el.querySelector('h3')?.textContent, description: el.querySelector('.sf-state-body>p')?.textContent,
+    actions: el.querySelectorAll(':scope>button').length,
+    totalActions: el.querySelectorAll('button').length,
+  }))
+  const source = root.querySelector('.sf-source-pane'), page = root.querySelector('.sf-paper-page')
+  const seam = source && page ? { sourceBackground: getComputedStyle(source).backgroundColor,
+    pageBackground: getComputedStyle(page).backgroundColor, sourceBorder: getComputedStyle(source).borderRightColor,
+    pageBorder: getComputedStyle(page).borderColor, sourceShadow: getComputedStyle(source).boxShadow,
+    pageShadow: getComputedStyle(page).boxShadow } : null
+  return { icons, states, seam }
 }

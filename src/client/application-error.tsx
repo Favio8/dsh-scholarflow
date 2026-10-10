@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useState } from 'react'
+import { SfState } from './sf-state.tsx'
 
 export class ApplicationError extends Error {
   code: string
@@ -10,11 +11,15 @@ export class ApplicationError extends Error {
   }
 }
 export function ErrorNotice({ error }: { error?: Error }) {
+  const [detailsOpen, setDetailsOpen] = useState(false)
   if (!error) return null
   const row = error as ApplicationError
-  return <div role="alert"><p>{row.message}</p>{row.code && <details><summary>查看详情</summary>
+  return <SfState kind="error" compact title="这一步未能完成" description={row.message}
+    action={{ label: detailsOpen ? '收起问题详情' : '查看问题详情', onClick: () => setDetailsOpen(value => !value) }}>
+    {detailsOpen && <div className="sf-state-details">
     <small>{row.code}{row.details?.operation && ` · ${row.details.operation}`}</small>
     {!!row.details?.fields?.length && <p>字段：{row.details.fields.join('、')}</p>}
     {row.details && <pre>{JSON.stringify(row.details, null, 2)}</pre>}
-  </details>}</div>
+    {!row.code && <p>请根据提示调整输入，再重新提交这一步。</p>}
+  </div>}</SfState>
 }

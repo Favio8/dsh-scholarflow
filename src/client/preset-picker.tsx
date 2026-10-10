@@ -1,3 +1,4 @@
+import { WorkbenchIcon } from './workbench-chrome.tsx'
 import { useTextPrompt } from './text-prompt.tsx'
 import React, { useEffect, useState } from 'react'
 import { THEME_CSS } from './theme/tokens.ts'
@@ -150,7 +151,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
       <header><strong>结构预设</strong>
         <button className="sf-preset-new" disabled={busy} onClick={() => { setDetail(false)
           setDraft({ title: '', sections: [{ key: 'k-section-1', title: '引言', focus: '', targetLength: 1000 }] }) }}>新建我的预设</button>
-        <button aria-label="关闭" onClick={onClose}><span className="sf-visually-hidden">关闭</span><span aria-hidden="true">×</span></button></header>
+        <button aria-label="关闭" onClick={onClose}><span className="sf-visually-hidden">关闭</span><WorkbenchIcon kind="close" /></button></header>
       <div className="sf-preset-tabs" role="group" aria-label="论文类型">
         {(['course-paper', 'research-paper', 'literature-review'] as const).map(name => <button key={name} aria-pressed={tab === name}
           onClick={() => setTab(name)}>{name === 'course-paper' ? '课程论文' : name === 'research-paper' ? '研究论文' : '文献综述'}</button>)}
@@ -173,7 +174,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
               <span className="sf-preset-draft-length"><input aria-label={`第${index + 1}章篇幅`} type="number" min={50} value={section.targetLength}
                 onChange={event => setDraft({ ...draft, sections: draft.sections.map(row => row.key === section.key ? { ...row, targetLength: Number(event.target.value) } : row) })} />
                 <button aria-label="删除章节" disabled={draft.sections.length === 1}
-                  onClick={() => setDraft({ ...draft, sections: draft.sections.filter(row => row.key !== section.key) })}>×</button></span>
+                  onClick={() => setDraft({ ...draft, sections: draft.sections.filter(row => row.key !== section.key) })}><WorkbenchIcon kind="close" /></button></span>
             </li>)}</ul>
             <button onClick={() => setDraft({ ...draft, sections: [...draft.sections,
               { key: `k-section-${draft.sections.length + 1}`, title: '新章节', focus: '', targetLength: 500 }] })}>+ 添加章节</button>
@@ -205,7 +206,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
           {tab !== paperType && !rows.some(preset => preset.source === 'builtin') && <p className="sf-preset-group">该类型还没有内置预设。</p>}
         </div>
         <div className="sf-preset-preview">
-          {narrow && <button className="sf-preset-back" onClick={() => setDetail(false)}>← 返回列表</button>}
+          {narrow && <button className="sf-preset-back" onClick={() => setDetail(false)}><WorkbenchIcon kind="back" /> 返回列表</button>}
           {selected ? <>
             <h3>{localized(selected.title, language)}</h3>
             <p>{localized(selected.summary, language)}</p>

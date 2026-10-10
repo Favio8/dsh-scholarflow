@@ -16,8 +16,15 @@ export function visualSourceMetrics(directory) {
   walk(directory)
   const fontTokens = new Set(), padding = new Set(), literalFontSizes = [], primaryDefinitions = [], serifDeclarations = []
   let importantOccurrences = 0, selectElements = 0
+  let textOperationGlyphs = 0
+  const hostAliasReferences = []
   for (const file of files) {
     const text = readFileSync(file, 'utf8')
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    textOperationGlyphs += (code.match(/[↑↓×↗←→▾⋯■⌄]/g) ?? []).length
+    const aliases = [...new Set([...code.matchAll(/var\((--dsw-alias-[\w-]+)/g)].map(match => match[1]))]
+    if (aliases.length) hostAliasReferences.push({ file, aliases,
+      role: /workbench-chrome|native-dock|selection-card|paper-workspace|new-session-entry/.test(file) ? 'host-shell' : 'content-leak' })
     importantOccurrences += (text.match(/!important\b/g) ?? []).length
     selectElements += (text.match(/<select\b/g) ?? []).length
     for (const match of text.matchAll(/\bfont-size\s*:\s*([^;}\n]+)/g)) {
@@ -40,7 +47,7 @@ export function visualSourceMetrics(directory) {
     scope: 'src/client', mode: 'baseline-observation',
     fontSizeLiterals: literalFontSizes, fontTokenKinds: [...fontTokens].sort(),
     paddingDeclarationKinds: [...padding].sort(),
-    primaryDefinitions, selectElements, importantOccurrences, serifDeclarations,
+    primaryDefinitions, selectElements, importantOccurrences, serifDeclarations, textOperationGlyphs, hostAliasReferences,
     thresholds: { fontSizeLiterals: 0, fontTokenKinds: 7, paddingDeclarationKinds: 20, primaryDefinitions: 1, importantOccurrences: 54 },
   }
 }

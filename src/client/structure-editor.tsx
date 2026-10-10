@@ -1,3 +1,4 @@
+import { WorkbenchIcon } from './workbench-chrome.tsx'
 import React from 'react'
 import type { CreationSpec } from '../shared/writing-task.ts'
 type Section = CreationSpec['sections'][number]
@@ -26,7 +27,7 @@ export function StructureEditor({ sections, busy, onEdit, onMove, onAdd }: {
             value={section.title} onChange={event => replace(section.id, { title: event.target.value })} />
           <label className="sf-outline-budget"><input type="number" min={50} aria-label={`第${index + 1}章篇幅`} value={section.targetLength}
             onChange={event => replace(section.id, { targetLength: Number(event.target.value), allocationMode: 'manual' })} /><span>{children.length ? '导语字数' : '字'}</span></label>
-          <details className="sf-outline-menu"><summary aria-label={`${section.title}的章节操作`}>⋯</summary><div>
+          <details className="sf-outline-menu"><summary aria-label={`${section.title}的章节操作`}><WorkbenchIcon kind="more" /></summary><div>
             {kind === 'body' && !section.parentId && <button disabled={busy} onClick={() => onAdd(section.id)}>添加子节</button>}
             <button disabled={busy || position === 0} onClick={() => onMove(index, -1)}>上移</button>
             <button disabled={busy || position === peers.length - 1} onClick={() => onMove(index, 1)}>下移</button>

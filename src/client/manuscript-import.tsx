@@ -26,12 +26,12 @@ export function ManuscriptImport({ project, context, api, refresh, run, busy, di
         context: context(), sourcePath: source.sourcePath, sourceHash: source.sourceHash, mappings, reason }))) }>预览采用原稿差异与备份</button>
     </fieldset>}
     {plan && <section role="dialog" aria-modal="false" aria-label="采用已有稿件确认"><h4>确认采用差异与备份方案</h4>
-      <p>{plan.sourcePath} → {plan.destinationPath}</p><p>{plan.reason}</p>
+      <p>{plan.sourcePath} 改为 {plan.destinationPath}</p><p>{plan.reason}</p>
       <p>当前修订 {plan.baseRevisionId} 将保留。源文件版本：{plan.sourceHash}</p>
       <details open><summary>当前主稿全文</summary><pre>{plan.beforeText}</pre></details>
       <details open><summary>将采用的主稿全文</summary><pre>{plan.text}</pre></details>
-      {Object.entries(plan.mappings).map(([from, to]) => <p key={from}>明确引用映射：{from} → {String(to)}</p>)}
-      {plan.resourceChanges.map((row: any) => <p key={row.startUtf16}>资源地址：{row.raw} → {row.replacement} · 项目目标 {row.projectRelativeTarget}</p>)}
+      {Object.entries(plan.mappings).map(([from, to]) => <p key={from}>明确引用映射：{from} 改为 {String(to)}</p>)}
+      {plan.resourceChanges.map((row: any) => <p key={row.startUtf16}>资源地址：{row.raw} 改为 {row.replacement} · 项目目标 {row.projectRelativeTarget}</p>)}
       {plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy || dirty} onClick={() => run(async () => { await api('document.applyImport', { context: context(), planId: plan.planId, planHash: plan.planHash });
         setPlan(undefined); setSource(undefined); setPath(''); setReason(''); await refresh() })}>确认采用原稿并保留备份</button>

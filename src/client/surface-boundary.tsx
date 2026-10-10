@@ -1,4 +1,5 @@
 import React from 'react'
+import { SfState } from './sf-state.tsx'
 
 /**
  * Keeps one failing surface from blanking the whole pane.
@@ -22,15 +23,14 @@ export class SurfaceBoundary extends React.Component<{ label: string; children: 
 
   render() {
     if (!this.state.error) return this.props.children
-    return <div className="sf-boundary" role="alert">
-      <h3>ScholarFlow 界面出错了</h3>
-      <p>这一部分没能渲染。可以重试；如果一直失败，用下面的按钮交还给普通对话，输入框和模型都能照常用。</p>
+    return <div className="sf-boundary"><SfState kind="error" compact title="ScholarFlow 界面出错了"
+      description="这一部分没能渲染。可以重试；如果一直失败，用下面的按钮交还给普通对话，输入框和模型都能照常用。"
+      action={{ label: '重试', onClick: () => this.setState(state => ({ error: undefined, attempt: state.attempt + 1 })) }}>
       <pre>{this.state.error.message || String(this.state.error)}</pre>
       <div className="sf-boundary-actions">
-        <button onClick={() => this.setState(state => ({ error: undefined, attempt: state.attempt + 1 }))}>重试</button>
         {this.props.onEscape && <button className="sf-boundary-escape" onClick={() => { this.setState({ error: undefined }); this.props.onEscape!() }}>返回普通对话</button>}
       </div>
-    </div>
+    </SfState></div>
   }
 }
 

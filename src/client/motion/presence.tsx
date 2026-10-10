@@ -1,6 +1,6 @@
 import React from 'react'
 import { AnimatePresence, MotionConfig, motion, useReducedMotion, useIsPresent } from 'motion/react'
-import { SCENE } from './tokens.ts'
+import { SCENE, paperEase } from './tokens.ts'
 
 /**
  * Enter/exit coordination (SPEC v1.2 §15.2). Only the cases where an element has to outlive
@@ -15,7 +15,6 @@ export function SfMotion({ children }: { children: React.ReactNode }) {
   return <MotionConfig reducedMotion="user">{children}</MotionConfig>
 }
 
-const ease = [0.22, 0.61, 0.36, 1] as const
 export type SfPresenceProps = { open: boolean; children: React.ReactNode; className?: string; offset?: number
   role?: React.AriaRole; label?: string }
 
@@ -29,7 +28,7 @@ function PresenceContent({ children, className, role, label, offset = SCENE.over
   const reduce = useReducedMotion(), present = useIsPresent()
   return <motion.div className={className} role={role} aria-label={label} inert={!present} aria-hidden={!present || undefined}
       initial={{ opacity: reduce ? 1 : 0, y: reduce ? 0 : offset }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reduce ? 0 : offset }}
-      transition={{ duration: reduce ? .001 : SCENE.overlay / 1000, ease }}>
+      transition={{ duration: reduce ? .001 : (present ? SCENE.enter : SCENE.exit) / 1000, ease: paperEase() }}>
       {children}
     </motion.div>
 }
@@ -41,18 +40,21 @@ function PresenceContent({ children, className, role, label, offset = SCENE.over
  */
 export function SfStep({ stepKey, direction, children }: { stepKey: string | number; direction: 1 | -1; children: React.ReactNode }) {
   return <AnimatePresence mode="wait" initial={false}>
-    <motion.div key={stepKey} initial={{ opacity: 0, x: direction * SCENE.wizardShift }} animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -direction * SCENE.wizardShift }} style={{ minHeight: 0 }}
-      transition={{ duration: SCENE.wizardStep / 1000, ease }}>
-      {children}
-    </motion.div>
+    <StepContent key={stepKey} direction={direction}>{children}</StepContent>
   </AnimatePresence>
+}
+function StepContent({ direction, children }: { direction: 1 | -1; children: React.ReactNode }) {
+  const reduce = useReducedMotion(), present = useIsPresent()
+  return <motion.div initial={{ opacity: reduce ? 1 : 0, y: reduce ? 0 : direction * SCENE.wizardShift }} animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: reduce ? 0 : -direction * SCENE.wizardShift }} style={{ minHeight: 0 }}
+    transition={{ duration: reduce ? .001 : (present ? SCENE.enter : SCENE.exit) / 1000, ease: paperEase() }}>{children}</motion.div>
 }
 
 /** A list row that arrived or moved. Used for outline rows and issue groups, never for prose. */
 export function SfRow({ children, id }: { children: React.ReactNode; id: string }) {
-  return <motion.div layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-    transition={{ duration: SCENE.listShift / 1000, ease }} data-sf-row={id}>{children}</motion.div>
+  const reduce = useReducedMotion(), present = useIsPresent()
+  return <motion.div layout="position" initial={{ opacity: reduce ? 1 : 0, y: reduce ? 0 : SCENE.wizardShift }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+    transition={{ duration: reduce ? .001 : (present ? SCENE.enter : SCENE.exit) / 1000, ease: paperEase() }} data-sf-row={id}>{children}</motion.div>
 }
 
 export function prefersReducedMotion() {

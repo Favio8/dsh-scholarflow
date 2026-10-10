@@ -44,7 +44,7 @@ export function sourceRangeRect(area: HTMLTextAreaElement, start: number, end: n
 
 /**
  * Bring a source offset into view with a top margin. Measured rather than estimated from a line
- * index: a wrapped paragraph does not occupy one row per logical line, so "line index × line
+ * index: a wrapped paragraph does not occupy one row per logical line, so "line index times line
  * height" lands somewhere else entirely once the pane wraps (SF-086).
  */
 export function revealSourceOffset(area: HTMLTextAreaElement, offset: number, margin: number): void {

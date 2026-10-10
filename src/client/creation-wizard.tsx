@@ -27,7 +27,7 @@ function WizardIcon({ name }: { name: 'folder' | 'file' | 'plus' | 'down' | 'bac
     plus: 'M12 5v14M5 12h14', down: 'm6 9 6 6 6-6', back: 'm12 5-7 7 7 7M5 12h14',
     next: 'm12 5 7 7-7 7M5 12h14', close: 'm6 6 12 12M6 18 18 6' }
   return <svg className="sf-wizard-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>
+    strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>
 }
 
 /**
@@ -55,7 +55,7 @@ function BriefCandidate({ candidate, stale, busy, onAdopt, onDiscard }: any) {
     </dl>
     {!!brief.submission?.needsConfirmation?.length && <p className="sf-brief-note">需要你确认：{brief.submission.needsConfirmation.join('、')}。来源没有写明，产品不推断。</p>}
     {candidate.diff?.length > 0 && <details className="sf-brief-diff"><summary>与当前输入的差异（{candidate.diff.length} 项）</summary>
-      {candidate.diff.map((row: any) => <p key={row.path}><b>{row.label}</b>：{row.before ? `${row.before} → ` : ''}{row.after}</p>)}</details>}
+      {candidate.diff.map((row: any) => <p key={row.path}><b>{row.label}</b>：{row.before ? `${row.before} 改为 ` : ''}{row.after}</p>)}</details>}
     {candidate.conflicts?.map((conflict: any) => <div className="sf-brief-conflict" key={conflict.topic}>
       <b>需要决定：{conflict.topic}</b> {conflict.current}；候选 {conflict.candidate}{conflict.source ? `（来源 ${conflict.source}）` : ''}。
       {conflict.preferred === 'candidate' && <span>建议采用候选，因为它是作业要求的原文。</span>}
@@ -733,7 +733,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
               {spec.cover?.enabled ? ` · 封面 ${spec.brief?.length?.coverPages ?? 1} 页` : ' · 无封面'}。
               导出成功不等于排版合格：页数要在 Word 或等效查看环境中核对。</p>
             <p>能力缺口：{capabilityGaps.join('；')}。这些会作为要求保留，不会被当作已满足。</p>
-            {!!spec.overrides.length && <p>你选择覆盖过的要求：{spec.overrides.map(row => `${row.field}（要求 ${row.requirementValue} → 采用 ${row.chosenValue}）`).join('；')}。</p>}
+            {!!spec.overrides.length && <p>你选择覆盖过的要求：{spec.overrides.map(row => `${row.field}（要求 ${row.requirementValue} 改为 采用 ${row.chosenValue}）`).join('；')}。</p>}
             <p>模型调用次数与耗时只作为统计展示，不再限制本次任务。</p>
           </details>
         </section>
@@ -984,8 +984,8 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-wizard .sf-wizard-error pre{max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--sf-font-sm)}
 .sf-wizard button{cursor:pointer}
 .sf-wizard button:disabled{opacity:var(--sf-disabled-opacity);cursor:default}
-@keyframes sf-step-forward{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
-@keyframes sf-step-back{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
+@keyframes sf-step-forward{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes sf-step-back{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
 @media(prefers-reduced-motion:reduce){.sf-wizard-page[data-direction]{animation:none}}
 
 .sf-wizard-header-compact{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3)}

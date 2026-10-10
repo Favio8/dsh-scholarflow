@@ -172,7 +172,7 @@ export const NATIVE_DOCK_CSS = `
 .sf-chat-resume{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sf-space-3);padding:var(--sf-space-5);box-sizing:border-box;font-size:var(--sf-font-md)}
 .sf-chat-guide{box-sizing:border-box;width:100%;min-height:56px;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--sf-radius-xl);cursor:pointer;display:flex;align-items:center;gap:var(--sf-space-4);padding:var(--sf-space-4) var(--sf-space-5)}
 .sf-chat-guide:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.sf-chat-guide>svg{width:26px;height:26px;flex:none;color:var(--dsw-alias-label-secondary)}
+.sf-chat-guide>svg{width:20px;height:20px;flex:none;color:var(--dsw-alias-label-secondary)}
 .sf-chat-guide>span{display:flex;flex-direction:column;gap:var(--sf-space-hair);font-size:var(--sf-font-md);line-height:var(--sf-leading-tight)}
 .sf-chat-guide small{font-size:var(--sf-font-xs);color:var(--dsw-alias-label-tertiary)}
 `

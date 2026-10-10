@@ -92,14 +92,14 @@ export const PAPER_CSS = `
 .sf-app textarea.sf-source-input{flex:1;width:0;min-width:0;height:100%;resize:none!important;border:0!important;border-radius:0;padding:20px 18px;white-space:pre-wrap;overflow-wrap:break-word;overflow-x:hidden;overflow-y:auto;outline:none!important;background:transparent;position:relative;z-index:1}
 .sf-preview-pane{background:var(--sf-surface-2)}
 .sf-paper-scroll{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-6)}
-.sf-paper-page{box-sizing:border-box;width:100%;max-width:794px;min-height:900px;margin:auto;padding:var(--sf-space-5) var(--sf-space-6);background:#fff;color:#252a34;box-shadow:0 1px 8px #19243a0c;border:1px solid #e8e9ec}
+.sf-paper-page{box-sizing:border-box;width:100%;max-width:var(--sf-measure);min-height:900px;margin:auto;padding:var(--sf-space-5) var(--sf-space-6);background:var(--sf-page-bg);color:var(--sf-page-text);box-shadow:var(--sf-shadow-1);border:1px solid var(--sf-page-border)}
 .sf-paper-page{font-family:var(--sf-family-serif);font-size:var(--sf-font-prose)}
 .sf-paper-page .sf-prose{font-size:var(--sf-font-prose);line-height:var(--sf-leading-prose);overflow-wrap:anywhere}
 .sf-paper-page .sf-prose h1{font-size:var(--sf-font-display-2);line-height:var(--sf-leading-display-2);text-align:center;margin:0 0 28px}
 .sf-paper-page .sf-prose h2{font-size:var(--sf-font-title);line-height:var(--sf-leading-title);margin:26px 0 12px}
 .sf-paper-page .sf-prose h3{font-size:var(--sf-font-prose);margin:22px 0 10px}
-.sf-paper-page .sf-prose p{margin:12px 0}.sf-paper-page .sf-prose pre{padding:var(--sf-space-2);background:#f6f7f9}
-.sf-paper-page .sf-prose table{border-collapse:collapse;width:100%}.sf-paper-page .sf-prose td{padding:var(--sf-space-2);border:1px solid #dfe2e8}
+.sf-paper-page .sf-prose p{margin:.9em 0}.sf-paper-page .sf-prose pre{padding:var(--sf-space-2);background:var(--sf-surface-2)}
+.sf-paper-page .sf-prose table{border-collapse:collapse;width:100%}.sf-paper-page .sf-prose td{padding:var(--sf-space-2);border:1px solid var(--sf-border)}
 .sf-paper-page .katex-display{overflow-x:auto;overflow-y:hidden;padding:var(--sf-space-2) 0}
 .sf-paper-references{border-top:1px solid #e5e7eb;margin-top:30px;font-size:var(--sf-font-sm);line-height:1.8}
 .sf-draft-status{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3);min-height:28px;padding:0 var(--sf-space-4);border-top:1px solid var(--sf-border);flex-shrink:0;font-size:var(--sf-font-xs);color:var(--sf-muted)}

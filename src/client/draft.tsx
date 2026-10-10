@@ -1,3 +1,4 @@
+import { WorkbenchIcon } from './workbench-chrome.tsx'
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { projectMarkdown, wordStats, textOf, validateRange, validateProseRange } from '../core/editing/markdown.ts'
 import { sectionTarget } from '../core/editing/sections.ts'
@@ -622,9 +623,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
                 event.preventDefault(); if (candidate?.state !== 'generating') submitRewrite(candidate && candidate.state !== 'accepted' ? { start: candidate.start, end: candidate.end } : undefined)
               }
             }} />
-          {candidate?.state === 'generating' ? <button type="button" aria-label="停止生成" onClick={stopRewrite}>■</button>
-            : <button type="button" className="sf-primary" aria-label="提交修改" disabled={busy || !rewrite} onClick={() => submitRewrite(candidate && candidate.state !== 'accepted' ? { start: candidate.start, end: candidate.end } : undefined)}>↑</button>}
-          <button type="button" className="sf-overlay-close" aria-label="收起输入" onClick={() => setOverlayCollapsed(true)}>×</button>
+          {candidate?.state === 'generating' ? <button type="button" aria-label="停止生成" onClick={stopRewrite}><WorkbenchIcon kind="stop" /></button>
+            : <button type="button" className="sf-primary" aria-label="提交修改" disabled={busy || !rewrite} onClick={() => submitRewrite(candidate && candidate.state !== 'accepted' ? { start: candidate.start, end: candidate.end } : undefined)}><WorkbenchIcon kind="up" /></button>}
+          <button type="button" className="sf-overlay-close" aria-label="收起输入" onClick={() => setOverlayCollapsed(true)}><WorkbenchIcon kind="close" /></button>
         </div>
       </>}
     </OverlayHost>
@@ -685,7 +686,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         setSelection(undefined); setAnchorId(''); setAnchorClaimIds([]); await refresh(); setMessage('段落论点关联已明确保存，证据与论证审查需复查。')
       })}>确认保存段落论点关联</button></section>}
     {!!Object.keys(project.ledger.claimAnchors).length && <section aria-label="正文论点定位"><h4>正文段落与论点</h4>
-      {(Object.values(project.ledger.claimAnchors) as any[]).map(anchor => <p key={anchor.id}>{anchor.blockId} · {anchor.status === 'current' && anchor.documentHash === project.document.contentHash ? '当前关联' : '待重新定位'} → {anchor.claimIds.join('、')}
+      {(Object.values(project.ledger.claimAnchors) as any[]).map(anchor => <p key={anchor.id}>{anchor.blockId} · {anchor.status === 'current' && anchor.documentHash === project.document.contentHash ? '当前关联' : '待重新定位'} 改为 {anchor.claimIds.join('、')}
         <button disabled={anchor.status !== 'current' || anchor.documentHash !== project.document.contentHash} onClick={() => {
           root.current?.querySelector<HTMLElement>(`[data-sf-block="${anchor.blockId}"]`)?.scrollIntoView({ block: 'center' })
         }}>定位段落 {anchor.id}</button></p>)}</section>}
@@ -757,7 +758,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       {proposal.proposal.edits.map((edit: any, index: number) => <div key={index}><p>源码 [{edit.startUtf16}, {edit.endUtf16})</p><b>− 原文</b><pre>{edit.expectedText}</pre><b>+ 新文</b><pre>{edit.replacementText}</pre></div>)}
       <p>引用新增：{proposal.proposal.citationChanges.added.join('、') || '无'}；删除：{proposal.proposal.citationChanges.removed.join('、') || '无'}。</p>
       {proposal.proposal.section && <div><p>章节 {proposal.proposal.section.sectionId} · 大纲版本 {proposal.proposal.section.outlineVersion}。段落映射是待核对的关联，不能证明证据支持。</p>
-        {proposal.proposal.section.paragraphClaims.map((row: any) => <p key={row.paragraphIndex}>段落 {row.paragraphIndex + 1} → {row.claimIds.join('、') || '无论点关联／待补'}</p>)}
+        {proposal.proposal.section.paragraphClaims.map((row: any) => <p key={row.paragraphIndex}>段落 {row.paragraphIndex + 1} 改为 {row.claimIds.join('、') || '无论点关联／待补'}</p>)}
         {proposal.proposal.section.limitations.map((gap: string, i: number) => <p key={i}>缺口：{gap}</p>)}</div>}
       {proposal.proposal.protectedFactChanges.map((change: string) => <p key={change}>{change}</p>)}
       {proposal.proposal.checks.map((check: any) => <p key={check.id}>{check.status} · {check.detail}</p>)}

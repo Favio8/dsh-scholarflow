@@ -1,12 +1,16 @@
 import React from 'react'
 
-export function WorkbenchIcon({ kind = 'book' }: { kind?: 'book' | 'chat' | 'close' | 'plus' | 'panel' }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+export function WorkbenchIcon({ kind = 'book', size = 16 }: { kind?: 'book' | 'chat' | 'close' | 'plus' | 'panel' | 'up' | 'down' | 'back' | 'next' | 'more' | 'stop' | 'external' | 'warning' | 'loading'; size?: 16 | 20 }) {
+  const paths: Record<string, string> = { up: 'm6 12 6-6 6 6M12 6v14', down: 'm6 9 6 6 6-6', back: 'm12 5-7 7 7 7M5 12h14', next: 'm12 5 7 7-7 7M5 12h14',
+    more: 'M5 12h.01M12 12h.01M19 12h.01', stop: 'M6 6h12v12H6Z', external: 'M8 5H4v15h15v-4M11 4h9v9M20 4 9 15',
+    warning: 'm12 3 10 18H2L12 3ZM12 9v5M12 17h.01', loading: 'M20 12a8 8 0 1 1-8-8' }
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {paths[kind] ? <path d={paths[kind]} /> : <>
     {kind === 'book' ? <><path d="M12 5v15M3 4c4-1 6 0 9 2 3-2 5-3 9-2v14c-4-1-6 0-9 2-3-2-5-3-9-2Z" /></>
       : kind === 'chat' ? <path d="M4 4h16v12H9l-5 4Z" />
         : kind === 'close' ? <path d="m6 6 12 12M18 6 6 18" />
           : kind === 'plus' ? <path d="M12 5v14M5 12h14" />
-            : <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>}
+            : <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>}</>}
   </svg>
 }
 

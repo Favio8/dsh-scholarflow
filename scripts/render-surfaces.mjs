@@ -18,7 +18,7 @@ import { build } from 'esbuild'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { visualSourceMetrics } from './visual-source-metrics.mjs'
-import { FONT_TOKENS, typographyInPage, systemSerifInPage, geometryInPage } from './visual-language-contracts.mjs'
+import { FONT_TOKENS, typographyInPage, systemSerifInPage, geometryInPage, paletteInPage, stateAndIconsInPage } from './visual-language-contracts.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -317,7 +317,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
   writeFileSync(join(outDir, 'wizard-dark.html'), pageHtml(theme, wizard, picker, paper + marks, motion, true))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
-  const results = [], wrap = [], mark = [], preview = [], typography = [], geometry = [], controls = []
+  const results = [], wrap = [], mark = [], preview = [], typography = [], geometry = [], controls = [], palettes = [], effects = []
   let systemSerif
   try {
     for (const pass of passes) {
@@ -326,6 +326,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
       await page.addScriptTag({ content: fixtures.outputFiles[0].text })
       await page.waitForFunction(() => window.sfVisualFixturesReady === true)
       systemSerif ??= await page.evaluate(systemSerifInPage)
+      palettes.push({ suffix: pass.suffix, ...await page.evaluate(paletteInPage) })
       await page.addScriptTag({ content: gutterModule.outputFiles[0].text })
       await page.addScriptTag({ content: measureModule.outputFiles[0].text })
       await page.addScriptTag({ content: rangeModule.outputFiles[0].text })
@@ -338,6 +339,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
         const name = `surface-${id}${pass.suffix}.png`
         typography.push({ name, ...await page.evaluate(typographyInPage, `#s${indexPath(id)}>.frame`) })
         geometry.push({ name, ...await page.evaluate(geometryInPage, `#s${indexPath(id)}>.frame`) })
+        effects.push({ name, ...await page.evaluate(stateAndIconsInPage, `#s${indexPath(id)}>.frame`) })
         if (id === 'controls') {
           const rows = []
           for (const control of await page.locator('[data-contract-control]').all()) {
@@ -436,6 +438,16 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
   const sourceMetrics = visualSourceMetrics(join(root, 'src/client'))
   const typographyProblems = []
   const geometryProblems = []
+  for (const row of palettes) {
+    if (!row.surfaceBrighterThanPaper) geometryProblems.push(`AT-124 ${row.suffix}: surface is not brighter than paper`)
+    if (row.neutral.some(color => color.rgb[0] < color.rgb[2])) geometryProblems.push(`AT-124 ${row.suffix}: cold neutral colour remains`)
+    if (row.hueFailures.length) geometryProblems.push(`AT-125 ${row.suffix}: an additional accent hue remains`)
+  }
+  for (const row of effects) {
+    if (row.icons.some(icon => ![16,20].includes(icon.width) || Math.abs(parseFloat(icon.stroke)-1.6)>.01)) geometryProblems.push(`AT-129 ${row.name}: icon size/stroke outside the contract`)
+    if (row.states.some(state => !state.title || !state.description || state.actions>1 || state.kind==='sf-state-error' && !state.actions)) geometryProblems.push(`AT-130 ${row.name}: incomplete state layout/action`)
+    if (row.seam && Object.values(row.seam).slice(0,4).some(value => { const rgb=value.match(/[\d.]+/g)?.slice(0,3).map(Number); return rgb && rgb[0]<rgb[2] })) geometryProblems.push(`AT-135 ${row.name}: cold colour across the split seam`)
+  }
   for (const row of controls) for (const control of row.rows) {
     const expected = row.narrow ? 44 : { sm: 30, md: 34, lg: 40 }[control.id.split('-')[1]]
     if (Math.abs(control.height - expected) > 1) geometryProblems.push(`AT-128 ${row.name}: ${control.id} height ${control.height} instead of ${expected}`)
@@ -447,6 +459,8 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
   if (sourceMetrics.paddingDeclarationKinds.length > 20) geometryProblems.push(`AT-126: ${sourceMetrics.paddingDeclarationKinds.length} padding declaration kinds`)
   if (sourceMetrics.primaryDefinitions.length !== 1) geometryProblems.push(`AT-128: ${sourceMetrics.primaryDefinitions.length} primary definitions`)
   if (sourceMetrics.importantOccurrences > 54) geometryProblems.push(`AT-128: !important occurrences increased to ${sourceMetrics.importantOccurrences}`)
+  if (sourceMetrics.textOperationGlyphs) geometryProblems.push(`AT-129: ${sourceMetrics.textOperationGlyphs} text operation glyphs remain`)
+  if (sourceMetrics.hostAliasReferences.some(row => row.role === 'content-leak')) geometryProblems.push('AT-132: Host aliases leaked into a document content surface')
   for (const row of geometry) {
     if (row.radiusFailures.length) geometryProblems.push(`AT-127 ${row.name}: ${row.radiusFailures.length} unmapped radii`)
     if (row.depths.length) geometryProblems.push(`AT-127 ${row.name}: ${row.depths.length} container chains deeper than two`)
@@ -470,7 +484,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
     const value = Number(cssText.match(new RegExp(`${token}:([0-9]+)px`))?.[1])
     if (!value || !usedSizes.has(value)) typographyProblems.push(`AT-122: ${token} is unused by real rendering seats`)
   }
-  const report = { outDir, results, wrap, mark, preview, typography, geometry, controls, systemSerif, sourceMetrics,
+  const report = { outDir, results, wrap, mark, preview, typography, geometry, controls, palettes, effects, systemSerif, sourceMetrics,
     problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems), ...preview.flatMap(row => row.problems), ...typographyProblems, ...geometryProblems] }
   writeFileSync(join(outDir, 'report.json'), JSON.stringify({ at: new Date().toISOString(), ...report }, null, 2))
   return report

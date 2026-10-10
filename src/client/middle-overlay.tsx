@@ -1,3 +1,4 @@
+import { WorkbenchIcon } from './workbench-chrome.tsx'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { SfPresence } from './motion/presence.tsx'
 import { SCENE } from './motion/tokens.ts'
@@ -36,7 +37,7 @@ export function OverlayHost({ open, tabs, active, onTab, children, onCollapse, c
         {tabs.map(tab => <button key={tab.id} role="tab" type="button" aria-selected={tab.id === active} aria-pressed={tab.id === active}
           onClick={() => onTab?.(tab.id)}>{tab.label}{tab.badge ? ` · ${tab.badge}` : ''}</button>)}
       </div>}
-      {collapsed ? <button type="button" onClick={onCollapse} aria-label="恢复修改输入">{active === 'task' ? '待答问题' : '继续修改'} ↗</button> : children}
+      {collapsed ? <button type="button" onClick={onCollapse} aria-label="恢复修改输入">{active === 'task' ? '待答问题' : '继续修改'} <WorkbenchIcon kind="external" /></button> : children}
     </div>
   </SfPresence>
 }
