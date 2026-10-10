@@ -17,6 +17,7 @@ import { chromium } from '@playwright/test'
 import { build } from 'esbuild'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { visualSourceMetrics } from './visual-source-metrics.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -31,19 +32,24 @@ export function extractCss(file, name) {
   return text.slice(from, end)
 }
 
-// Render the actual structure editor, not a second copy of its markup.
-const editorModule = join(root, '.dsh-tmp/render-structure-editor.mjs')
-mkdirSync(join(root, '.dsh-tmp'), { recursive: true })
-await build({ entryPoints: [join(root, 'src/client/structure-editor.tsx')], outfile: editorModule,
-  bundle: true, platform: 'node', format: 'esm', packages: 'external' })
-const { StructureEditor } = await import(pathToFileURL(editorModule).href)
-const structureMarkup = renderToStaticMarkup(React.createElement(StructureEditor, { busy: false,
-  sections: [
-    { id:'demo_a',title:'问题与材料范围',purpose:'TEST_ONLY 说明本次比较的对象与依据。',targetLength:300,kind:'body',allocationMode:'auto' },
-    { id:'demo_b',title:'案例比较',purpose:'TEST_ONLY 组织不同案例之间的联系与差异。',targetLength:100,kind:'body',allocationMode:'auto' },
-    { id:'demo_b1',parentId:'demo_b',title:'比较维度',purpose:'TEST_ONLY 解释选择这些维度的理由。',targetLength:600,kind:'body',allocationMode:'auto' },
-    { id:'demo_c',title:'比较所得与适用边界',purpose:'TEST_ONLY 回应任务，明确材料能支持到哪里。',targetLength:500,kind:'body',allocationMode:'auto' },
-  ], onEdit(){}, onMove(){}, onAdd(){} }))
+// Importing the surface registry must not build or write files. Both gates explicitly prepare it.
+export async function prepareSurfaceMarkup() {
+  const editorModule = join(root, '.dsh-tmp/render-structure-editor.mjs')
+  mkdirSync(join(root, '.dsh-tmp'), { recursive: true })
+  await build({ entryPoints: [join(root, 'src/client/structure-editor.tsx')], outfile: editorModule,
+    bundle: true, platform: 'node', format: 'esm', packages: 'external' })
+  const { StructureEditor } = await import(pathToFileURL(editorModule).href)
+  const structureMarkup = renderToStaticMarkup(React.createElement(StructureEditor, { busy: false,
+    sections: [
+      { id:'demo_a',title:'问题与材料范围',purpose:'TEST_ONLY 说明本次比较的对象与依据。',targetLength:300,kind:'body',allocationMode:'auto' },
+      { id:'demo_b',title:'案例比较',purpose:'TEST_ONLY 组织不同案例之间的联系与差异。',targetLength:100,kind:'body',allocationMode:'auto' },
+      { id:'demo_b1',parentId:'demo_b',title:'比较维度',purpose:'TEST_ONLY 解释选择这些维度的理由。',targetLength:600,kind:'body',allocationMode:'auto' },
+      { id:'demo_c',title:'比较所得与适用边界',purpose:'TEST_ONLY 回应任务，明确材料能支持到哪里。',targetLength:500,kind:'body',allocationMode:'auto' },
+    ], onEdit(){}, onMove(){}, onAdd(){} }))
+  surfaces.step3.body = step3.replace('<!-- SF_STRUCTURE_EDITOR -->', structureMarkup)
+  return build({ entryPoints: [join(root, 'tests/fixtures/visual-surfaces.tsx')], bundle: true, write: false,
+    platform: 'browser', format: 'iife', define: { __SF_KATEX_CSS__: '""' } })
+}
 
 const sourceRow = (badge, kind, name, dir, actions) => `<li class="sf-source-row"><span class="sf-source-badge"${kind ? ` data-kind="${kind}"` : ''}>${badge}</span>
   <span class="sf-source-name">${name}<small>${dir}</small></span>${actions}</li>`
@@ -90,7 +96,7 @@ const step3 = `<section class="sf-wizard"><header class="sf-wizard-header-compac
 <p class="sf-outline-summary">TEST_ONLY 根据本次案例比较任务组织结构。</p>
 <div class="sf-outline-toolbar"><label>正文目标<span class="sf-length-input"><input value="1500" readonly /><span>字</span></span></label>
 <div class="sf-outline-tools"><button>参考预设</button><button>重新按要求生成</button></div></div>
-${structureMarkup}
+<!-- SF_STRUCTURE_EDITOR -->
 <div class="sf-outline-totals"><span>正文计划 1500 / 1500 字</span><button>重新分配正文篇幅</button></div>
 </div><footer class="sf-wizard-footer"><button class="sf-wizard-nav sf-wizard-back">← 上一步</button><span></span><button class="sf-primary sf-wizard-nav">创建论文并开始撰写</button></footer></section>`
 
@@ -167,10 +173,10 @@ ${presetRow('读书报告/书评型', '以文本细读与评价为主，不要�
 <ul class="sf-preset-scene"><li>老师给了议题或问题，要求表态并论证</li><li>没有自己采集的数据，材料以文本与文献为主</li><li>需要呈现对反方观点的理解</li></ul>
 <div class="sf-preset-share"><span>建议分配</span><span class="sf-preset-bar"><i style="width:12%"></i><i style="width:65%"></i><i style="width:13%"></i><i style="width:10%"></i></span></div>
 <ul class="sf-preset-sections">
-<li><strong>引言</strong><em style="margin-left:8px;font-size:12px;color:#8b9099">12%</em><small>交代议题背景，给出可被辩护的中心观点，并说明为什么这个问题值得讨论。</small></li>
-<li><strong>主题论证</strong><em style="margin-left:8px;font-size:12px;color:#8b9099">65%</em><small>按分论点组织段落，每段先给主题句再给证据与解释，与中心观点形成一条线。</small></li>
-<li><strong>反方观点与回应</strong><em style="margin-left:8px;font-size:12px;color:#8b9099">13%</em><small>选择有代表性的反对意见，公平陈述后说明为何不推翻本文观点。</small></li>
-<li><strong>结论</strong><em style="margin-left:8px;font-size:12px;color:#8b9099">10%</em><small>回到最初的问题，说明证据支持到什么程度；不引入未经论证的新结论。</small></li>
+<li><strong>引言</strong><em style="margin-left:8px;font-size:12px;color:var(--sf-muted)">12%</em><small>交代议题背景，给出可被辩护的中心观点，并说明为什么这个问题值得讨论。</small></li>
+<li><strong>主题论证</strong><em style="margin-left:8px;font-size:12px;color:var(--sf-muted)">65%</em><small>按分论点组织段落，每段先给主题句再给证据与解释，与中心观点形成一条线。</small></li>
+<li><strong>反方观点与回应</strong><em style="margin-left:8px;font-size:12px;color:var(--sf-muted)">13%</em><small>选择有代表性的反对意见，公平陈述后说明为何不推翻本文观点。</small></li>
+<li><strong>结论</strong><em style="margin-left:8px;font-size:12px;color:var(--sf-muted)">10%</em><small>回到最初的问题，说明证据支持到什么程度；不引入未经论证的新结论。</small></li>
 </ul>
 <p>附属部分：参考文献（不计入正文目标）</p>
 <p>结构依据：Purdue OWL · Argumentative Essays</p>
@@ -186,7 +192,15 @@ ${presetBody(view)}
 
 const stage = (id, title, body, width) => `<div class="stage" id="${id}"><h1>${title}</h1><div class="frame" style="width:${width}">${body}</div></div>`
 
-const surfaces = {
+const splitBody = () => `<div class="sf-app sf-paper-project" style="height:620px">
+<div class="sf-editor-grid" data-view="split">
+<div class="sf-source-pane" style="--sf-editor-font:13px;--sf-editor-line:24px">${draftSource('sf-split-gutter')}</div></div>
+<div class="sf-preview-pane"><div class="sf-paper-scroll"><div class="sf-paper-page" data-format="docx"><article class="sf-prose">
+<h1>TEST_ONLY 科技论文</h1><h2>研究背景</h2><h3>材料范围</h3>
+<p>TEST_ONLY 用于测量屏幕与导出标题比率及分屏接缝，不是学术生成结果。</p>
+</article></div></div></div></div></div>`
+
+export const surfaces = {
   step1: { title: '第 1 步 · 写作要求', body: step1, width: '830px' },
   step2: { title: '第 2 步 · 资料范围', body: step2, width: '830px' },
   step3: { title: '第 3 步 · 行文结构与创建前确认', body: step3, width: '830px' },
@@ -194,7 +208,16 @@ const surfaces = {
   presetDetail: { title: '结构预设弹窗（窄屏详情栏）', body: modal('detail'), width: '100%' },
   draftWrap: { title: '正文源码区 · 长行软换行', body: draftBody(), width: '100%' },
   draftMark: { title: '正文源码区 · 改写范围标注', body: draftMarkBody(), width: '1060px' },
-  draftPreview: { title: '正文预览 · 改写范围标注', body: draftPreviewBody(), width: '520px' }
+  draftPreview: { title: '正文预览 · 改写范围标注', body: draftPreviewBody(), width: '520px' },
+  split: { title: 'TEST_ONLY · 编辑与预览并置', body: splitBody(), width: '100%' },
+  empty: { title: 'TEST_ONLY · 资料为空', body: '<div data-sf-fixture="empty"></div>', width: '830px' },
+  loading: { title: 'TEST_ONLY · 正在读取', body: '<div data-sf-fixture="loading"></div>', width: '830px' },
+  error: { title: 'TEST_ONLY · 应用错误', body: '<div data-sf-fixture="error"></div>', width: '830px' },
+  boundary: { title: 'TEST_ONLY · 渲染错误边界', body: '<div data-sf-fixture="boundary"></div>', width: '830px' },
+  dock: { title: 'TEST_ONLY · 原生 dock 入口', body: '<div data-sf-fixture="dock"></div>', width: '360px' },
+  chat: { title: 'TEST_ONLY · 原生聊天面', body: '<div data-sf-fixture="chat" style="height:620px"></div>', width: '360px' },
+  settings: { title: 'TEST_ONLY · 插件设置', body: '<div data-sf-fixture="settings"></div>', width: '830px' },
+  caption: { title: 'TEST_ONLY · 桌面标题栏入口', body: '<div data-sf-fixture="caption" style="height:40px"></div>', width: '830px' }
 }
 
 export function pageHtml(theme, wizard, picker, paper, motion, dark = false) {
@@ -204,8 +227,10 @@ export function pageHtml(theme, wizard, picker, paper, motion, dark = false) {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ScholarFlow 界面静态渲染</title><style>
 ${theme}
 :root{--dsw-alias-bg-layer-1:#fafbfc;--dsw-alias-bg-base:#fff;--dsw-alias-label-secondary:#727780;--dsw-alias-interactive-bg-hover:#f0f1f3}
+:root{--dsw-alias-label-primary:#1f2329;--dsw-alias-label-tertiary:#697080;--dsw-alias-border-l3:rgba(15,17,21,.12);--dsw-alias-border-l2:rgba(15,17,21,.26);--dsh-windows-titlebar-height:32px}
 ${dark ? `body[data-ds-dark-theme]{--dsw-alias-bg-layer-1:#1c1c1f;--dsw-alias-bg-base:#151517;--dsw-alias-label-secondary:#9aa0a8;--dsw-alias-interactive-bg-hover:#26262a}
 body[data-ds-dark-theme]{background:#101013;color:#e8eaed}` : ''}
+${dark ? 'body[data-ds-dark-theme]{--dsw-alias-label-primary:#f9fafb;--dsw-alias-label-tertiary:#9aa0a8;--dsw-alias-border-l3:rgba(255,255,255,.16);--dsw-alias-border-l2:rgba(255,255,255,.3)}' : ''}
 body{margin:0;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:#1f2329;background:#e9ecef}
 .stage{padding:18px 20px 28px}
 .stage>h1{font-size:13px;font-weight:600;margin:0 0 10px;color:#4b5157}
@@ -218,6 +243,11 @@ ${motion}
 /* Same specificity as the plugin rule, so this must come after it. The real dialog is a fixed
    overlay, which would sit out of flow and collapse its stage in a static page. */
 .sf-preset-backdrop{position:static;padding:0;background:transparent}
+/* Test seats only: preserve caption layout while bringing its fixed host seat into the capture. */
+[data-sf-fixture=caption] .sf-caption-entry{position:relative;left:0}
+[data-sf-fixture]{min-height:320px}
+[data-sf-fixture=caption]{min-height:40px}
+[data-sf-fixture=chat] .sf-agent{display:flex;flex-direction:column}
 </style></head><body${dark ? ' data-ds-dark-theme' : ''}>
 ${stages}
 </body></html>`
@@ -228,9 +258,9 @@ ${stages}
     body[data-ds-dark-theme], and what has to be proven in the dark is that the mark still reads —
     its paper is paper in either theme, so the glyphs keep their contrast (AT-88 (2)). */
 const passes = [
-  { viewport: { width: 1100, height: 900 }, suffix: '', ids: ['step1', 'step2', 'step3', 'preset', 'draftWrap', 'draftMark', 'draftPreview'] },
-  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: ['step1', 'step2', 'step3', 'presetDetail', 'draftWrap', 'draftMark', 'draftPreview'] },
-  { viewport: { width: 1100, height: 900 }, suffix: '-dark', dark: true, ids: ['draftWrap', 'draftMark', 'draftPreview'] }
+  { viewport: { width: 1100, height: 900 }, suffix: '', ids: Object.keys(surfaces) },
+  { viewport: { width: 420, height: 900 }, suffix: '-narrow', ids: Object.keys(surfaces).filter(id => id !== 'preset' && id !== 'caption') },
+  { viewport: { width: 1100, height: 900 }, suffix: '-dark', dark: true, ids: Object.keys(surfaces) }
 ]
 
 const indexPath = (id) => Object.keys(surfaces).indexOf(id) + 1
@@ -255,11 +285,12 @@ async function measure(page, base64) {
       buckets.set(key, (buckets.get(key) ?? 0) + 1)
     }
     const dominant = Math.max(...buckets.values()) / (canvas.width * canvas.height)
-    return { width: image.width, height: image.height, dominant }
+    return { width: image.width, height: image.height, dominant, paintedBuckets: buckets.size }
   }, base64)
 }
 
 export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) {
+  const fixtures = await prepareSurfaceMarkup()
   const theme = extractCss('src/client/theme/tokens.ts', 'THEME_CSS')
   const motion = extractCss('src/client/motion/tokens.ts', 'MOTION_CSS')
   const wizard = extractCss('src/client/creation-wizard.tsx', 'WIZARD_CSS')
@@ -287,6 +318,8 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
     for (const pass of passes) {
       const page = await (await browser.newContext({ viewport: pass.viewport })).newPage()
       await page.goto(pathToFileURL(join(outDir, pass.dark ? 'wizard-dark.html' : 'wizard.html')).href)
+      await page.addScriptTag({ content: fixtures.outputFiles[0].text })
+      await page.waitForFunction(() => window.sfVisualFixturesReady === true)
       await page.addScriptTag({ content: gutterModule.outputFiles[0].text })
       await page.addScriptTag({ content: measureModule.outputFiles[0].text })
       await page.addScriptTag({ content: rangeModule.outputFiles[0].text })
@@ -305,13 +338,26 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
         const previewReport = id === 'draftPreview' ? await checkDraftPreview(page, `#s${indexPath(id)}>.frame`) : undefined
         const shot = await page.locator(`#s${indexPath(id)}>.frame`).screenshot()
         writeFileSync(file, shot)
-        results.push({ name, ...(await measure(page, shot.toString('base64'))) })
+        const fixture = surfaces[id].body.includes('data-sf-fixture')
+        const renderedTextCharacters = await page.locator(`#s${indexPath(id)}>.frame`).evaluate(root =>
+          [...root.querySelectorAll('*')].filter(el => {
+            const rect = el.getBoundingClientRect()
+            return rect.width > 0 && rect.height > 0 && el.checkVisibility() && getComputedStyle(el).visibility !== 'hidden'
+          }).reduce((count, el) => count + (el.matches('textarea,input') ? el.value.length : [...el.childNodes].filter(node => node.nodeType === 3)
+            .map(node => node.textContent.trim()).join('').length), 0))
+        results.push({ name, compact: id === 'caption', fixture, renderedTextCharacters, ...(await measure(page, shot.toString('base64'))) })
         if (markReport) {
           // Read the marked row back out of the capture with the platform selection over it: if that
           // selection covered the mark, the row would read as one flat colour and its spread would
           // collapse, which is what this measures.
           const probes = await sampleColors(page, shot.toString('base64'), markReport.sample.slice(0, -1))
           markReport.selected = Math.max(...probes.flatMap((one, index) => probes.slice(index + 1)
+            .map(other => Math.hypot(one.r - other.r, one.g - other.g, one.b - other.b))), 0)
+          // Paper dominates a strip average when its glyphs are sparse. Independently compare
+          // actual chromatic glyph pixels after removing paper and normalising brightness;
+          // an opaque monochrome selection still has no between-strip hue spread.
+          const glyphs = (await sampleColors(page, shot.toString('base64'), markReport.sample.slice(0, -1), true)).filter(row => row.n > 0)
+          markReport.selectedGlyphSpread = Math.max(...glyphs.flatMap((one, index) => glyphs.slice(index + 1)
             .map(other => Math.hypot(one.r - other.r, one.g - other.g, one.b - other.b))), 0)
           // The background itself, for the wrap seam, the row's spread and the glyph contrast. The
           // full range is repainted first: the selection reproduction above left a shorter one.
@@ -351,7 +397,10 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
       await page.close()
     }
   } finally { await browser.close() }
-  return { outDir, results, wrap, mark, preview, problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems), ...preview.flatMap(row => row.problems)] }
+  const report = { outDir, results, wrap, mark, preview, sourceMetrics: visualSourceMetrics(join(root, 'src/client')),
+    problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems), ...preview.flatMap(row => row.problems)] }
+  writeFileSync(join(outDir, 'report.json'), JSON.stringify({ at: new Date().toISOString(), ...report }, null, 2))
+  return report
 }
 
 function chromePath() {
@@ -372,11 +421,10 @@ async function checkDraftMark(page, selector) {
     const editor = root.querySelector('.sf-source-editor')
     const layer = root.querySelector('.sf-source-marks'), stack = root.querySelector('#sf-mark-stack')
     const style = getComputedStyle(area), row = parseFloat(style.lineHeight)
-    const layerBox = layer.getBoundingClientRect()
     const contentWidth = area.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
     // The layer's origin is read fresh each time: the pane can scroll — and the page with it — between
     // one paint and the next, and a stale origin would place the whole mirror where it used to be.
-    const place = () => { const box = area.getBoundingClientRect()
+    const place = () => { const box = area.getBoundingClientRect(), layerBox = layer.getBoundingClientRect()
       stack.style.transform = `translate(${box.left - layerBox.left}px, ${box.top - layerBox.top - area.scrollTop}px)` }
     const paint = (from, to, state) => {
       window.ScholarFlowMirror.paintSourceMark(stack, area, { start: from, end: to, state }, editor)
@@ -531,7 +579,7 @@ function contrastRatio(one, other) {
 }
 
 /** Average colour of each sampled strip, read back out of the capture. */
-async function sampleColors(page, base64, rects) {  return page.evaluate(async ({ src, rects }) => {
+async function sampleColors(page, base64, rects, glyphsOnly = false) {  return page.evaluate(async ({ src, rects, glyphsOnly }) => {
     const image = new Image(); image.src = 'data:image/png;base64,' + src
     await image.decode()
     const canvas = document.createElement('canvas')
@@ -542,10 +590,15 @@ async function sampleColors(page, base64, rects) {  return page.evaluate(async (
       const data = context.getImageData(Math.max(0, Math.round(x)), Math.max(0, Math.round(y)),
         Math.max(1, Math.round(width)), Math.max(1, Math.round(height))).data
       let r = 0, g = 0, b = 0, n = 0
-      for (let i = 0; i < data.length; i += 4) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++ }
-      return { r: r / n, g: g / n, b: b / n }
+      for (let i = 0; i < data.length; i += 4) {
+        const rgb = [data[i], data[i + 1], data[i + 2]], min = Math.min(...rgb), chroma = Math.max(...rgb) - min
+        if (glyphsOnly && chroma < 40) continue
+        const colour = glyphsOnly ? rgb.map(value => 255 * (value - min) / chroma) : rgb
+        r += colour[0]; g += colour[1]; b += colour[2]; n++
+      }
+      return { r: n ? r / n : 0, g: n ? g / n : 0, b: n ? b / n : 0, n }
     })
-  }, { src: base64, rects })
+  }, { src: base64, rects, glyphsOnly })
 }
 
 /**
@@ -713,7 +766,8 @@ export function auditMark(name, report, expectedRows) {  const problems = []
   if (report.held !== 'none') problems.push(`${name}: a plain selection flows instead of holding still (${report.held})`)
   // If the platform selection colour covered the mark, the marked row would read as one flat colour
   // instead of a sweep of hues.
-  if (report.selected !== undefined && report.selected < 60) problems.push(`${name}: the selection flattens the mark (spread ${report.selected.toFixed(0)} across the marked row)`)
+  if (report.selected !== undefined && report.selected < 60 && (report.selectedGlyphSpread ?? 0) < 60)
+    problems.push(`${name}: the selection flattens the mark (average spread ${report.selected.toFixed(0)}, glyph hue spread ${(report.selectedGlyphSpread ?? 0).toFixed(0)})`)
   if (!report.inView) problems.push(`${name}: the unmarked row used as the colour reference is outside the pane (probe ${report.view.probe.toFixed(1)} vs pane ${report.view.top.toFixed(1)}–${report.view.bottom.toFixed(1)}, last chip ${report.view.last.toFixed(1)})`)
   if (report.live && report.live.during < 2) problems.push(`${name}: the range cannot be read while the pointer is still down (${report.live.during} updates during the drag)`)
   if (report.live && report.live.grown <= report.live.during) problems.push(`${name}: the live range stopped keeping up with the drag`)
@@ -724,8 +778,12 @@ export function auditMark(name, report, expectedRows) {  const problems = []
 export function audit(results) {
   const problems = []
   for (const shot of results) {
-    if (shot.width < 300 || shot.height < 300) problems.push(`${shot.name}: collapsed to ${shot.width}x${shot.height}`)
-    else if (shot.dominant > 0.95) problems.push(`${shot.name}: renders as a single colour (${(shot.dominant * 100).toFixed(1)}% of its pixels)`)
+    if (shot.width < 300 || shot.height < (shot.compact ? 28 : 300)) problems.push(`${shot.name}: collapsed to ${shot.width}x${shot.height}`)
+    // A uniform paper background is legitimate even above 95%. Require visible client text
+    // AND non-background painted pixels AND multiple paint colours. A blank/single-colour
+    // capture fails without mistaking a sparse state or manuscript for an empty render.
+    else if (!shot.renderedTextCharacters || shot.width * shot.height * (1 - shot.dominant) < 32 || shot.paintedBuckets < 3)
+      problems.push(`${shot.name}: renders no readable content (${(shot.dominant * 100).toFixed(1)}% dominant pixels)`)
   }
   return problems
 }

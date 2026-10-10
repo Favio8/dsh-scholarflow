@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import { chromium, _electron as electron, expect } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile, symlink } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, symlink, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
@@ -43,6 +43,7 @@ const rows = [], errors = []
 let page
 const record = (name, ok, detail) => { rows.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${JSON.stringify(detail)}`) }
 try {
+  record('client artifact bytes (SF-134 baseline observation)', true, { bytes: (await stat(resolve('dist/client.js'))).size })
   if (nativeDesktop) {
     const env = { ...process.env, DSH_HOME: root, DSH_PERMISSION_MODE: 'workspace-write' }; delete env.ELECTRON_RUN_AS_NODE
     desktopApp = await electron.launch({ executablePath: join(install, 'DeepSeek Harness.exe'), args: [`--user-data-dir=${join(root, 'electron')}`], env })
@@ -121,6 +122,8 @@ try {
   const start=Date.now();await page.keyboard.type('TEST_ONLY steady typing '.repeat(31),{delay:43});const durationMs=Date.now()-start
   const measured=await page.evaluate(()=>{cancelAnimationFrame(window.sfFrame);const p=window.sfPerf,sort=p.inputs.toSorted((a,b)=>a-b);return {samples:sort.length,inputP95Ms:sort[Math.floor(sort.length*.95)],inputMaxMs:Math.max(...sort),longTasks:p.longTasks,frameOver100ms:p.frames.filter(x=>x>100).length}})
   record('30 seconds of input in a manuscript over 8000 Chinese characters',durationMs>=30000&&manuscript.match(/[\p{Script=Han}]/gu).length>=8000,{durationMs,chineseCharacters:manuscript.match(/[\p{Script=Han}]/gu).length,...measured})
+  record('AT-134 typing p95 within the approved performance limit', measured.samples > 0 && measured.inputP95Ms <= 24.1 * 1.1,
+    { measuredP95Ms: measured.inputP95Ms, limitMs: 24.1 * 1.1, nativeDesktop })
   record('typing preserves all input with no client failure',(await area.inputValue()).endsWith('TEST_ONLY steady typing '.repeat(31))&&errors.length===0,{errors})
   const rect=await area.boundingBox();await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2)
   const offsets=[];for(let i=0;i<30;i++){await page.mouse.wheel(0,-1200);await page.waitForTimeout(35);offsets.push(await area.evaluate(el=>el.scrollTop))}
@@ -133,8 +136,10 @@ try {
   const menuAction = page.locator('.sf-selection-menu button').first()
   await menuAction.focus(); await page.keyboard.press('Enter')
   await expect(page.locator('.sf-overlay')).toBeVisible()
-  const scope=await page.locator('.sf-overlay-note').first().innerText()
-  record('cross-paragraph selection opens an input for the actual selected range',scope.includes('第 2 段'),{scope})
+  // The current compact rewrite input no longer repeats the target in .sf-overlay-note.
+  // Inspect the source's actual selection and the real instruction control instead.
+  const scope=await area.evaluate(el=>el.value.slice(el.selectionStart,el.selectionEnd))
+  record('cross-paragraph selection opens an input for the actual selected range',scope.includes('第 2 段') && await page.getByRole('textbox', { name: '局部修改要求', exact: true }).isVisible(),{scope})
   if (process.argv.includes('--live-visual-only')) {
     let calls = 0, failed = false
     page.on('requestfailed', request => { if (request.url().endsWith('/cowrite.propose')) failed = true })
