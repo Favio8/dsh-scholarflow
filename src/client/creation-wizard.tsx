@@ -201,7 +201,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     if (step === 2 && next !== 2) stopOutline()
     setDirection(next >= step ? 1 : -1); setStep(next)
   }
-  const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [conflict, setConflict] = useState(false)
+  const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState('')
+  const [outputConflict, setOutputConflict] = useState<{ outputDir?: string; suggestedDir?: string; reason?: string }>()
   const [errorInfo, setErrorInfo] = useState<Error>()
   const [scanning, setScanning] = useState(false), [truncated, setTruncated] = useState(false)
   const [materialQuery, setMaterialQuery] = useState('')
@@ -221,6 +222,9 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const [recognition, setRecognition] = useState<Record<string, { state: 'idle' | 'running' | 'candidate' | 'confirmed' | 'failed' | 'unsupported'; text?: string; note?: string; model?: string }>>({})
   const update = (change: Partial<CreationSpec>) => { setIssues([]); setSpec(previous => ({ ...previous,
     ...(change.requirements !== undefined && change.requirements !== previous.requirements ? { brief: undefined } : {}), ...change })) }
+  const changeOutput = (manuscriptDir: string) => {
+    update({ manuscriptDir }); setOutputConflict(undefined); setError(''); setErrorInfo(undefined)
+  }
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify({ spec, step, attemptedOutline, acceptedOutline })) } catch { setError('创建信息暂未保存，请保留当前页面。') } }, [spec, step, key, attemptedOutline, acceptedOutline])
   const loadFiles = async (selectAll: boolean) => {
     setScanning(true)
@@ -414,6 +418,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     try { localStorage.removeItem(key) } catch { /* storage may be unavailable */ }
     stopOutline(); setAttemptedOutline(''); setAcceptedOutline(''); automaticAttempt.current = ''
     setHistory([]); setIssues([]); setRecognition({}); setStep(0)
+    setOutputConflict(undefined); setError(''); setErrorInfo(undefined)
     setSpec({ ...initial, sections: [] })
   }
   const newSourceId = () => `req_${crypto.randomUUID().replaceAll('-', '')}`
@@ -731,7 +736,16 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
             <p>模型调用次数与耗时只作为统计展示，不再限制本次任务。</p>
           </details>
         </section>
-        {conflict && <label>论文输出目录<input value={spec.manuscriptDir} onChange={e => update({ manuscriptDir: e.target.value })} /><small>此处已有文件，请选择新的输出目录。</small></label>}
+        <div className="sf-output-directory">
+          <label htmlFor="sf-output-directory">论文输出目录<input id="sf-output-directory" disabled={busy} value={spec.manuscriptDir}
+            onChange={e => changeOutput(e.target.value)} aria-describedby="sf-output-directory-hint" /></label>
+          <p id="sf-output-directory-hint" className="sf-field-hint">相对于当前工作区。将创建论文与引用文件；选择新目录可保留已有内容。</p>
+          {outputConflict && <div className="sf-output-conflict" role="status">
+            <p>{outputConflict.reason === 'existing-project' ? '此工作区已有项目记录，请打开或恢复原项目。更换输出目录不能解决此冲突。'
+              : `无法使用「${outputConflict.outputDir ?? spec.manuscriptDir}」作为论文输出目录，请选择新目录。已确认的大纲会保留。`}</p>
+            {outputConflict.suggestedDir && <button type="button" disabled={busy} onClick={() => changeOutput(outputConflict.suggestedDir!)}>使用新目录 {outputConflict.suggestedDir}</button>}
+          </div>}
+        </div>
       </>}
     </div>
     {error && <div className="sf-wizard-error"><ErrorNotice error={Object.assign(new Error(creationErrorMessage({ message: error })), errorInfo?.message === error ? { code: (errorInfo as any).code, details: (errorInfo as any).details } : {})} /></div>}
@@ -757,10 +771,18 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           ]
           if (blockers.length) { setIssues(blockers)
             document.getElementById(empty >= 0 ? `sf-section-title-${empty}` : 'sf-field-title')?.focus(); return }
+          setIssues([])
           void act(async () => {
             const value = creationSpec.parse(readySpec())
             try { const plan = await api('creation.prepare', { context: context(), spec: value }); await api('creation.start', { context: context(), planId: plan.planId, planHash: plan.planHash }) }
-            catch (error) { if ((error as Error).message.includes('OUTPUT_PATH_CONFLICT')) setConflict(true); throw error }
+            catch (error) {
+              const failure = error as Error & { code?: string; details?: { outputDir?: string; suggestedDir?: string; reason?: string } }
+              if (failure.code === 'OUTPUT_PATH_CONFLICT' || failure.message.includes('OUTPUT_PATH_CONFLICT')) {
+                setOutputConflict(failure.details ?? { outputDir: value.manuscriptDir })
+                window.setTimeout(() => document.getElementById('sf-output-directory')?.focus(), 0)
+              }
+              throw error
+            }
             try { localStorage.removeItem(key) } catch {}
             await onCreated()
           }) }}>{busy ? '正在创建…' : '创建论文并开始撰写'}</button>}
@@ -780,6 +802,9 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-wizard h3{font-size:var(--sf-font-xl);margin:0}
 .sf-wizard p,.sf-muted{color:var(--dsw-alias-label-secondary,var(--sf-muted));line-height:var(--sf-leading-body)}
 .sf-wizard-eyebrow{font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-output-directory{margin-top:var(--sf-space-4)}
+.sf-output-conflict{padding:var(--sf-space-3);margin-top:var(--sf-space-2);border:1px solid var(--sf-border);border-radius:var(--sf-radius-md)}
+.sf-output-conflict p{margin:0 0 var(--sf-space-2)}
 .sf-wizard label,.sf-wizard .sf-assignment-field{display:flex;flex-direction:column;gap:var(--sf-space-2);font-size:var(--sf-font-md);margin:var(--sf-space-4) 0 0}
 .sf-wizard button{font:inherit;font-size:var(--sf-font-md);height:var(--sf-space-6);min-height:var(--sf-control-min-height);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:var(--sf-surface);color:var(--sf-text);cursor:pointer}
 .sf-wizard input:not([type=checkbox]),.sf-wizard select{box-sizing:border-box;font-family:inherit;height:var(--sf-space-7);width:100%;padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit}

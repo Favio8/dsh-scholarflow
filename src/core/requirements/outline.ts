@@ -108,9 +108,11 @@ export function restoreOutlineInputKey(value: string) {
 }
 
 /** Personal cover fields do not enter the outline model. Keep them editable without
- * invalidating its candidate; adoption preserves the latest operator-entered fields. */
+ * invalidating its candidate. Output placement is independent of content; adoption
+ * preserves the latest operator-entered cover and manuscript directory. */
 export function outlineCandidateKey(spec: CreationSpec) {
-  return JSON.stringify({ ...spec, cover: spec.cover ? { enabled: spec.cover.enabled } : undefined })
+  const { manuscriptDir: _output, ...content } = spec
+  return JSON.stringify({ ...content, cover: spec.cover ? { enabled: spec.cover.enabled } : undefined })
 }
 
 /** Root sections move with their children; children never escape their parent. */

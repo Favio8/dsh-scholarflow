@@ -134,3 +134,12 @@ test('an explicitly chapter-scoped empty reference gets one review-contract repa
   assert.equal(f.host.calls[2].context.formatIssues[0].path, 'coverage.r1.sectionIds')
   assert.equal(f.host.calls.filter(call => call.system.includes('结构规划助手')).length, 1)
 })
+
+test('changing only the output directory preserves an unadopted outline and adopts into the latest draft', async () => {
+  const f = fixture()
+  const { candidate } = await f.controller.suggestOutline({ context, spec: f.spec }, 'owner', new AbortController().signal)
+  const adopted = await f.controller.adoptCandidate({ context, spec: { ...f.spec, manuscriptDir: '新成果目录' }, candidateId: candidate.candidateId }, 'owner')
+  assert.equal(adopted.spec.manuscriptDir, '新成果目录')
+  assert.equal(adopted.spec.sections[0].title, section.title)
+  assert.equal(f.host.calls.length, 2, 'no regenerated outline or repeated semantic review')
+})

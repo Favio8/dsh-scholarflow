@@ -22,6 +22,59 @@ test('AT-02: a pre-existing manuscript or metadata directory is never overwritte
   }
 })
 
+test('an output collision reports its directory and an unused alternative without writing or adopting existing files', async () => {
+  const original = 'TEST_ONLY previous export, preserve these bytes'
+  const io = new MemoryStore({ 'manuscript/exports/delivery_old/paper.docx': original, 'manuscript-2/paper.md': 'TEST_ONLY occupied too' })
+  const before = [...io.files.entries()]
+  await assert.rejects(prepareInit(io, { title: 'TEST_ONLY', type: 'course-paper' }), (error: any) => {
+    assert.equal(error.code, 'OUTPUT_PATH_CONFLICT')
+    assert.equal(error.details.reason, 'output-not-empty')
+    assert.equal(error.details.outputDir, 'manuscript')
+    assert.equal(error.details.suggestedDir, 'manuscript-3')
+    assert.deepEqual(error.details.fields, ['manuscriptDir'])
+    assert.deepEqual(error.details.entries, [{ path: 'manuscript/exports', type: 'directory' }])
+    return true
+  })
+  assert.deepEqual([...io.files.entries()], before)
+  assert.equal(io.writes, 0)
+  const plan = await prepareInit(io, { title: 'TEST_ONLY', type: 'course-paper', manuscriptDir: 'manuscript-3' })
+  assert.equal(io.writes, 0, 'a suggestion and preparation do not create a directory')
+  await initialize(io, plan)
+  assert.equal((await snapshot(io)).config.paths.mainDocument, 'manuscript-3/paper.md')
+  assert.equal((await io.read('manuscript/exports/delivery_old/paper.docx'))!.text, original)
+  assert.equal((await io.read('manuscript-2/paper.md'))!.text, 'TEST_ONLY occupied too')
+})
+
+test('files and reserved directories receive actionable collisions; existing metadata is not solved by changing output', async () => {
+  const file = new MemoryStore({ manuscript: 'TEST_ONLY file, not a directory' })
+  await assert.rejects(prepareInit(file, { title: 'TEST_ONLY', type: 'course-paper' }), (error: any) => {
+    assert.equal(error.details.reason, 'output-not-directory'); assert.equal(error.details.suggestedDir, 'manuscript-2'); return true
+  })
+  for (const manuscriptDir of ['.GIT', '.ScholarFlow/new', 'NODE_MODULES'])
+    await assert.rejects(prepareInit(new MemoryStore(), { title: 'TEST_ONLY', type: 'course-paper', manuscriptDir }), (error: any) => {
+      assert.equal(error.code, 'OUTPUT_PATH_CONFLICT'); assert.equal(error.details.reason, 'reserved-directory'); return true
+    })
+  const metadata = new MemoryStore({ '.scholarflow/private.txt': 'TEST_ONLY existing records' })
+  await assert.rejects(prepareInit(metadata, { title: 'TEST_ONLY', type: 'course-paper', manuscriptDir: 'manuscript-2' }), (error: any) => {
+    assert.equal(error.details.reason, 'existing-project'); assert.equal(error.details.suggestedDir, undefined); return true
+  })
+  assert.equal(metadata.writes, 0)
+})
+
+test('a suggested output occupied after preparation is checked again before publishing the plan', async () => {
+  const io = new MemoryStore({ 'manuscript/old.md': 'TEST_ONLY existing manuscript' })
+  const plan = await prepareInit(io, { title: 'TEST_ONLY', type: 'course-paper', manuscriptDir: 'manuscript-2' })
+  io.externalEdit('manuscript-2/manual.md', 'TEST_ONLY concurrent manual draft')
+  const before = [...io.files.entries()]
+  await assert.rejects(initialize(io, plan), (error: any) => {
+    assert.equal(error.details.operation, 'project.initialize')
+    assert.equal(error.details.outputDir, 'manuscript-2')
+    assert.equal(error.details.reason, 'output-not-empty')
+    return true
+  })
+  assert.deepEqual([...io.files.entries()], before)
+})
+
 test('initialization is complete, JSON/YAML validated, and recoverable from disk alone', async () => {
   const io = new MemoryStore({ '资料/研究.md': '原始资料保持只读' })
   const plan = await prepareInit(io, { title: 'TEST_ONLY 文献综述', type: 'literature-review', manuscriptDir: '写作成果' })

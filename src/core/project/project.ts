@@ -53,13 +53,39 @@ export function parseLedger(text: string): Ledger {
 export interface InitPlan {
   id: string; config: ProjectConfig; files: Array<{ path: string; text: string }>; contentHash: string; risks: string[]
 }
+
+/** Read-only suggestion. Selecting it still needs the user's explicit creation action. */
+async function unusedOutput(io: FileStore, output: string) {
+  for (let suffix = 2; suffix <= 50; suffix++) {
+    const candidate = `${output}-${suffix}`
+    if (!relativePath.safeParse(candidate).success) return undefined
+    try { if (!await io.stat(candidate)) return candidate }
+    catch (error) {
+      if (!(error instanceof ScholarError && error.code === 'PATH_OUTSIDE_ALLOWED_ROOT')) throw error
+      // A linked sibling that leaves the workspace cannot be suggested.
+    }
+  }
+}
+
+async function assertOutputAvailable(io: FileStore, output: string, operation: string) {
+  const existing = await io.stat(output)
+  const entries = existing?.type === 'directory' ? await io.list(output) : []
+  if (existing && (existing.type !== 'directory' || entries.length))
+    throw new ScholarError('OUTPUT_PATH_CONFLICT', `输出目录「${output}」已有内容，请选择一个新目录；原文件已保留。`, {
+      category: 'file-conflict', operation, reason: existing.type === 'directory' ? 'output-not-empty' : 'output-not-directory',
+      fields: ['manuscriptDir'], outputDir: output, suggestedDir: await unusedOutput(io, output),
+      entries: entries.slice(0, 5).map(row => ({ path: row.path, type: row.type })), entryCount: entries.length,
+    })
+}
+
 export async function prepareInit(io: FileStore, input: { title: string; type: string; language?: string; manuscriptDir?: string; maxModelCalls?: number }): Promise<InitPlan> {
   const output = relativePath.parse(input.manuscriptDir ?? 'manuscript')
-  invariant(!['.scholarflow', '.git', 'node_modules'].includes(output.split('/')[0]), 'OUTPUT_PATH_CONFLICT', '请选择论文输出专属目录。')
-  invariant(!await io.stat('.scholarflow'), 'OUTPUT_PATH_CONFLICT', '.scholarflow 已存在，请检查或恢复原项目。')
-  const existing = await io.stat(output)
-  invariant(!existing || (existing.type === 'directory' && (await io.list(output)).length === 0),
-    'OUTPUT_PATH_CONFLICT', '输出目录已有文件；请选择不同目录或先明确采用现有稿件。')
+  if (['.scholarflow', '.git', 'node_modules'].includes(output.split('/')[0].toLowerCase()))
+    throw new ScholarError('OUTPUT_PATH_CONFLICT', '请选择论文输出专属目录。', { category: 'file-conflict', operation: 'project.prepareInit', reason: 'reserved-directory', fields: ['manuscriptDir'], outputDir: output })
+  if (await io.stat('.scholarflow'))
+    throw new ScholarError('OUTPUT_PATH_CONFLICT', '.scholarflow 已存在，请打开或恢复原项目；更换输出目录不能重新初始化此项目。',
+      { category: 'file-conflict', operation: 'project.prepareInit', reason: 'existing-project', conflictPath: '.scholarflow' })
+  await assertOutputAvailable(io, output, 'project.prepareInit')
   const projectId = newId('prj')
   const config = configSchema.parse({ schemaVersion: 1,
     project: { id: projectId, title: input.title, type: projectType.parse(input.type), language: input.language ?? 'zh-CN' },
@@ -108,9 +134,10 @@ export async function initialize(io: FileStore, plan: InitPlan) {
   await io.lock(async () => {
     // Lock metadata lives under .scholarflow/tmp; user-facing files still must be absent.
     const output = plan.config.paths.manuscriptDir
-    const existing = await io.stat(output)
-    invariant(!existing || (existing.type === 'directory' && (await io.list(output)).length === 0), 'OUTPUT_PATH_CONFLICT', '确认期间输出目录已改变，未覆盖文件。')
-    for (const file of plan.files) invariant(!await io.stat(file.path), 'OUTPUT_PATH_CONFLICT', '确认期间出现文件冲突，未覆盖文件。')
+    await assertOutputAvailable(io, output, 'project.initialize')
+    for (const file of plan.files) if (await io.stat(file.path))
+      throw new ScholarError('OUTPUT_PATH_CONFLICT', '确认期间出现文件冲突，未覆盖文件。',
+        { category: 'file-conflict', operation: 'project.initialize', reason: 'file-appeared', conflictPath: file.path, outputDir: output })
     await commit(io, plan.files.map(file => ({ path: file.path, before: undefined, after: file.text })))
   })
   return plan.config.project.id

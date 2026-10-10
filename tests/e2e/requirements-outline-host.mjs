@@ -7,7 +7,7 @@
 // shows up as a number rather than as an opinion.
 import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdir, writeFile, symlink } from 'node:fs/promises'
+import { mkdir, writeFile, readFile, symlink } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import assert from 'node:assert/strict'
 import { requirementDraftSpec } from '../../src/shared/writing-task.ts'
@@ -22,6 +22,9 @@ await mkdir(join(root, '课程要求'), { recursive: true })
 await writeFile(join(root, 'TEST_ONLY 作业说明.md'), 'TEST_ONLY 要求：四页，第一页封面。\n')
 await writeFile(join(root, '课程要求', 'TEST_ONLY 评分标准.md'), 'TEST_ONLY 评分标准。\n')
 await writeFile(join(root, 'TEST_ONLY 无法解析.bin'), new Uint8Array([0, 255, 13, 10]))
+// Mirrors the actual collision: prior exports, without an initialized ScholarFlow project.
+await mkdir(join(root,'manuscript/exports/delivery_TEST_ONLY'),{recursive:true})
+await writeFile(join(root,'manuscript/exports/delivery_TEST_ONLY/old.md'),'TEST_ONLY previous export must remain unchanged')
 await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'p', private: true,
   dependencies: { 'dsh-scholarflow': `link:${resolve('.').replaceAll('\\', '/')}` },
   dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-scholarflow'] } } }))
@@ -224,6 +227,30 @@ try {
   report.adoptedRows = await page.locator('.sf-outline-edit-row').count()
   assert.equal(await page.getByRole('button',{name:'创建论文并开始撰写',exact:true}).isEnabled(),true)
   report.creationEnabled=true
+  await page.getByRole('button',{name:'创建论文并开始撰写',exact:true}).click()
+  const errorNotice=page.locator('.sf-wizard-error')
+  await errorNotice.waitFor()
+  await errorNotice.getByText('查看详情',{exact:true}).click()
+  assert((await errorNotice.innerText()).includes('OUTPUT_PATH_CONFLICT'))
+  assert((await errorNotice.innerText()).includes('manuscript/exports'))
+  await page.getByRole('button',{name:'使用新目录 manuscript-2',exact:true}).waitFor()
+  assert.equal(await page.getByRole('textbox',{name:'论文输出目录',exact:true}).inputValue(),'manuscript')
+  await page.getByRole('button',{name:'使用新目录 manuscript-2',exact:true}).click()
+  assert.equal(await page.getByRole('textbox',{name:'论文输出目录',exact:true}).inputValue(),'manuscript-2')
+  assert.equal(await page.locator('.sf-wizard-error').count(),0)
+  assert.equal(await readFile(join(root,'manuscript/exports/delivery_TEST_ONLY/old.md'),'utf8'),'TEST_ONLY previous export must remain unchanged')
+  // Real prepare bridge, but stop at the paid launch boundary. This is not full drafting.
+  let selectedPlan
+  await page.route('**/api/scholarflow.v1/creation.start',async route=>{
+    const body=route.request().postDataJSON()
+    selectedPlan=body.payload.args.request
+    await route.fulfill({json:{type:'server-response',rpcId:body.rpcId,result:{ok:true,value:{ok:false,error:{code:'TEST_ONLY_STOP_BEFORE_MODEL',message:'TEST_ONLY 已准备新目录，停止在付费模型之前。',details:{}}}}}})
+  })
+  await page.getByRole('button',{name:'创建论文并开始撰写',exact:true}).click()
+  await page.getByText('TEST_ONLY 已准备新目录，停止在付费模型之前。',{exact:true}).waitFor()
+  assert(selectedPlan?.planId && selectedPlan.planHash)
+  assert.equal(report.outlineRequests,1,'changing only output keeps adopted structure, without regeneration')
+  report.outputCollision={detailVisible:true,userSelected:'manuscript-2',reprepared:true,oldExportUnchanged:true,paidModelCalls:0}
   await page.getByRole('button',{name:'上一步',exact:true}).click()
   await page.getByRole('button',{name:'下一步',exact:true}).click()
   await page.waitForTimeout(700)
@@ -251,4 +278,4 @@ try {
 
 await writeFile(resolve('.dsh-tmp/outline-host-report.json'),JSON.stringify(report,null,2))
 console.log(JSON.stringify(report,null,2))
-if(report.error || report.outlineRequests !== 1 || !report.noAutomaticTemplate || report.adoptedRows !== 9 || !report.creationEnabled || report.candidateViews?.length!==4 || report.candidateViews.some(row=>row.overflow||row.contrastFailures.length) || report.views?.length !== 6 || report.views.some(row=>row.overflow||row.contrastFailures.length)) process.exitCode=1
+if(report.error || !report.outputCollision?.reprepared || report.outlineRequests !== 1 || !report.noAutomaticTemplate || report.adoptedRows !== 9 || !report.creationEnabled || report.candidateViews?.length!==4 || report.candidateViews.some(row=>row.overflow||row.contrastFailures.length) || report.views?.length !== 6 || report.views.some(row=>row.overflow||row.contrastFailures.length)) process.exitCode=1
