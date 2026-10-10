@@ -2,6 +2,8 @@
 
 # 兼容性记录（ScholarFlow × DSH）
 
+2026-10-11 v1.11／v1.12：论文会话登记与标题同步使用基于官方 rc.2 的本地宿主补丁，写入 v5 日志并提供正式相邻迁移。已更新当前 Windows 安装，保留原安装与数据备份；实际论文标题登记、v4 原字节保留、v5 后继和正文不变均已核验。旧官方宿主不能读取 v5，缺能力时给出明确诊断。详见 [会话登记决定](decisions/session-history-registration.md)。
+
 2026-10-07 v1.3：Windows Desktop 0.2.0-rc.2 / Electron 44.0.0 实机验证历史 budget 任务读取、独立要求 Remote、原生开始页 AI Chat 和当前会话模型路由。guide 必须使用当前 tab.actions 的 replaceTab:true 合同；全局 openTab 的替换参数是 tab ID。窗口隐藏时宿主可能保持 document.hidden=false，插件同时观察真实 blur 暂停视觉，业务请求保持一次。实际下载使用原生 will-download；renderer download 事件并不可靠。没有修改 Host 核心或新增插件模型设置；详见 [v1.3 ADR](decisions/workbench-v1.3.md)。
 
 2026-10-06 UI-08：新增创建向导、持久写作任务、缓冲绑定的双写建议与默认格式直接导出。沿用 Windows Desktop 0.2.0-rc.2 的公共 Slot、会话、模型和文件能力。只读源码确认原生预设 seat 与工作区快照；本次未进行运行时测试或界面验收。旧项目的新字段可缺省，既有稿件与交付记录保留，无需重新初始化。DSH web.fetch 不提供 PDF 二进制响应，公开全文使用插件 Host 网关，元数据与已读取正文分别记录。详见 [实现决定](decisions/continuous-writing-and-cowrite.md)。

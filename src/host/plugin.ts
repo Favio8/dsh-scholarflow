@@ -65,6 +65,7 @@ import { listProjectSkills, projectSkillEntry } from '../core/skills/project-res
 import { prepareProjectSkillCopy, applyProjectSkillCopy, type ProjectSkillCopyPlan } from '../core/skills/project-copy.ts'
 import type { FileStore } from '../core/store/files.ts'
 import { WritingController } from './bridge/writing-controller.ts'
+import { SessionRegistration } from './bridge/session-registration.ts'
 import { readRun, inspectRuns, prepareRunMigration, migrateRun } from '../core/pipeline/run-store.ts'
 import { prepareRunAction, validateRunAction, closeRun, readGenerationCheckpoint, type RunActionPlan } from '../core/pipeline/run-control.ts'
 import { newProjectDefaultsSchema, resolveInitDefaults } from '../shared/project-defaults.ts'
@@ -106,6 +107,7 @@ const mutationRevision = (context: RequestContext) => {
 
 export class ScholarFlowRemote extends TypertRemoteService {
   private writingController: WritingController
+  private sessionRegistration: SessionRegistration
   private initPlans = new Map<string, StoredInitPlan>()
   private workflowPlans = new Map<string, { plan: WorkflowStartPlan | WorkflowActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
   private automaticPlans = new Map<string, { plan: AutomaticPlan | AutomaticActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
@@ -143,7 +145,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private runMigrationPlans = new Map<string, { plan: Awaited<ReturnType<typeof prepareRunMigration>>; context: RequestContext; peerId: string; expires: number }>()
   constructor(ctx: Host) {
     super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
-    this.writingController = new WritingController(ctx, this.bootInstance)
+    this.sessionRegistration = new SessionRegistration(ctx)
+    this.writingController = new WritingController(ctx, this.bootInstance, (context, signal) => this.sessionRegistration.sync(context, signal))
     this.researchProvider = crossrefProvider(ctx.web)
     this.githubProvider = githubSkills(ctx.web)
     ctx.effect(() => () => this.proposalRevisionPlans.clear(), 'scholarflow: clear operator candidate previews')
@@ -1843,7 +1846,17 @@ export class ScholarFlowRemote extends TypertRemoteService {
     return applicationResult(async () => {
       this.requireOperator(); const { context, baseConfigHash, ...input } = projectPresentationRequest.parse(request)
       const { io } = await resolveStore(this.ctx, context, signal)
-      return updatePresentation(io, mutationRevision(context), baseConfigHash, input)
+      const result = await updatePresentation(io, mutationRevision(context), baseConfigHash, input)
+      return { ...result, sessionRegistration: await this.sessionRegistration.trySync(context, signal) }
+    })
+  }
+
+  @Remote('project.repairSessionRegistration')
+  async projectRepairSessionRegistration(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => {
+      this.requireOperator()
+      const { context } = inspectRequest.parse(request)
+      return this.sessionRegistration.sync(context, signal)
     })
   }
 

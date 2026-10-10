@@ -26,8 +26,8 @@ export function ProjectSettings({ project, api, context, refresh, run, busy, dia
       {Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label>论文语言<select value={language} onChange={e => setLanguage(e.target.value)}><option value="zh-CN">中文</option><option value="en">英文</option></select></label></div>
     <button className="sf-primary" disabled={busy || !title.trim()} onClick={() => run(async () => {
-      await api('project.updatePresentation', { context: context(), baseConfigHash: baseHash, title: title.trim(), type, language })
-      await refresh(); setMessage('项目设置已保存。')
+      const result = await api('project.updatePresentation', { context: context(), baseConfigHash: baseHash, title: title.trim(), type, language })
+      await refresh(); setMessage(result.sessionRegistration?.diagnostic ? `项目设置已保存；${result.sessionRegistration.diagnostic.message}` : '项目设置已保存。')
     })}>保存设置</button><p role="status">{message}</p>
     <details onToggle={e => { if (e.currentTarget.open && !hostInfo && diagnostics) diagnostics().then(setHostInfo).catch((error: Error) => setMessage(error.message)) }}><summary>项目详情</summary>
       {hostInfo && <p>已连接 Host · 协议 v{hostInfo.protocol} · {hostInfo.settings.length ? '设置可持久化' : '设置能力不足'}</p>}

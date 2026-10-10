@@ -22,6 +22,19 @@ await build({entryPoints:['src/host/bridge/writing-controller.ts'],bundle:true,p
 const {WritingController}=await import(pathToFileURL(output).href)
 const until=async(predicate)=>{const deadline=Date.now()+5000;while(Date.now()<deadline){if(await predicate())return;await new Promise(done=>setTimeout(done,10))}throw Error('TEST_ONLY stage timeout')}
 
+test('failed native history registration prevents all model stages and preserves the initialized paper',async()=>{
+  const f=await sourceConflictFixture(false)
+  f.task.mode='first-draft';f.task.firstDraftApproval=await approveFirstDraft(f.io,f.task.spec,f.task.sessionId);await saveWritingTask(f.io,f.task)
+  const context={requestId:'req_test',workspaceId:'workspace_test',sessionId:f.task.sessionId,projectId:f.task.projectId}
+  let calls=0
+  const ctx={io:f.io,effect(){},stageModel(){calls++;throw Error('TEST_ONLY model must not run')}}
+  const before=(await snapshot(f.io)).document.text
+  const controller=new WritingController(ctx,'owner_test',async()=>{throw Error('TEST_ONLY history flush failed')})
+  await assert.rejects(controller.action({context,action:'resume'},new AbortController().signal),/history flush failed/)
+  assert.equal(calls,0);assert.equal((await snapshot(f.io)).document.text,before)
+  assert.equal(controller.active.size,0)
+})
+
 test('real controller shows partial body before completion, cancels immediately, isolates readers and resumes one unfinished call',async()=>{
   const f=await sourceConflictFixture(false)
   f.task.mode='first-draft';f.task.firstDraftApproval=await approveFirstDraft(f.io,f.task.spec,f.task.sessionId);await saveWritingTask(f.io,f.task)

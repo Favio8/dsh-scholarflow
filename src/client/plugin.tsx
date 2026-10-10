@@ -183,6 +183,9 @@ export function apply(ctx: Host) {
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
     const [tab, setTab] = useState<(typeof TABS)[number]>('Draft')
+    const [registrationError, setRegistrationError] = useState('')
+    const [registering, setRegistering] = useState(false)
+    const registrationSequence = useRef(0)
     const [issueLocation, setIssueLocation] = useState<Host>()
     const [view, setView] = useState<PaperView>('split'), [format, setFormat] = useState<ExportFormat>('markdown')
     const [editor, setEditor] = useState<DraftController>(), [exportPrompt, setExportPrompt] = useState(false), [exportTrigger, setExportTrigger] = useState(0)
@@ -246,6 +249,21 @@ export function apply(ctx: Host) {
       navigation.open(sessionId)
     })
     const ready = !!project?.initialized && project.binding.sessionId === props.sessionId && project.binding.workspaceId === workspace?.workspaceId
+    const repairRegistration = async () => {
+      const scope = bindingKey, sequence = ++registrationSequence.current
+      setRegistering(true); setRegistrationError('')
+      try {
+        const result = await api('project.repairSessionRegistration', { context: context() })
+        if (scope !== liveBinding.current || sequence !== registrationSequence.current) return
+        if (result.registered) await ctx.sessions.refresh()
+      } catch (error) { if (scope === liveBinding.current && sequence === registrationSequence.current) setRegistrationError((error as Error).message) }
+      finally { if (scope === liveBinding.current && sequence === registrationSequence.current) setRegistering(false) }
+    }
+    useEffect(() => {
+      setRegistrationError(''); setRegistering(false)
+      if (ready) void repairRegistration()
+      return () => { registrationSequence.current++ }
+    }, [ready, bindingKey, project?.binding?.projectId, project?.config?.project?.title])
     useEffect(() => { if (project?.initialized) setFormat(project.config.output.defaultFormat ?? 'markdown') }, [project?.config?.output?.defaultFormat, project?.binding.projectId])
     const changeFormat = (value: ExportFormat) => act(async () => { await api('writingTask.format', { context: context(), format: value }); setFormat(value); await refresh() })
     const draftTool = tab === 'Changes' ? tab : undefined
@@ -263,6 +281,7 @@ export function apply(ctx: Host) {
         </div></details></div>)}
       </header>
       {error && <p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}
+      {registrationError && <p role="alert" className="sf-error">{registrationError} <button disabled={registering} onClick={() => void repairRegistration()}>{registering ? '正在登记…' : '重试会话登记'}</button></p>}
       {!ready && <div className="sf-create-scroll">
         {!workspace && <div className="sf-create-card"><h3>选择论文工作区</h3><select value={selectedWorkspace} onChange={e => setSelectedWorkspace(e.target.value)}><option value="">请选择</option>{workspaces.map((item: Host) => <option key={item.workspaceId} value={item.workspaceId}>{item.title}</option>)}</select><button disabled={busy || !selectedWorkspace} onClick={startSession}>进入 ScholarFlow</button></div>}
         {workspace && !project && !error && <p className="sf-muted" style={{ padding: 24 }}>正在打开论文工作区…</p>}

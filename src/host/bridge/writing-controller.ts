@@ -84,7 +84,8 @@ export class WritingController {
   private reads = new ReadingJobs()
   private candidates = new CandidateStore()
   private outlineJobs = new OutlineJobs<{ candidate: OutlineCandidate }>()
-  constructor(private ctx: Host, private owner: string) {
+  constructor(private ctx: Host, private owner: string,
+    private registerSession?: (context: z.infer<typeof requestContext>, signal: AbortSignal) => Promise<unknown>) {
     ctx.effect(() => () => { for (const run of this.active.values()) run.controller.abort('plugin-unload'); this.plans.clear(); this.external.clear(); this.reads.clear(); this.outlineJobs.clear(); this.watchers.clear() }, 'scholarflow: stop writing tasks')
   }
 
@@ -739,6 +740,7 @@ export class WritingController {
   private async launch(context: z.infer<typeof requestContext>, task: WritingTask) {
     invariant(!this.active.has(task.id), 'WRITING_IN_PROGRESS', '任务已启动。')
     const controller = new AbortController(), active = { controller, pause: false, task, promise: undefined as Promise<void> | undefined }
+    await this.registerSession?.(context, controller.signal)
     const { io } = await resolveStore(this.ctx, context, new AbortController().signal)
     const model = await selectedModel(this.ctx, context.sessionId, controller.signal)
     const skill = (binding: any) => readPrivateSkill(binding, io)

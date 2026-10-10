@@ -21,8 +21,17 @@ async function inspectSession(ctx: Host, sessionId: string, signal: AbortSignal)
   catch (error) {
     signal.throwIfAborted()
     if (error instanceof ScholarError) throw error
-    // The pinned Host may wrap a format refusal. Classify by the failed seam,
-    // not private SDK text, and keep raw-log paths and content out of responses.
+    // Follow the host's typed refusal through wrappers without exposing raw
+    // paths or depending on provider error text. Bound cycles from adapters.
+    const seen = new Set<unknown>()
+    let cause = error
+    while (cause instanceof Error && !seen.has(cause)) {
+      seen.add(cause)
+      if (cause.name === 'SessionFormatUnsupportedError') {
+        throw new ScholarError('SESSION_FORMAT_UNSUPPORTED', '当前 Harness 不支持此会话格式，请使用支持 v5 的配套修复版。原日志与论文已保留，请勿直接用旧日志替代新数据。')
+      }
+      cause = cause.cause
+    }
     throw new ScholarError('SESSION_READ_FAILED', '当前会话读取失败。原日志与项目文件已保留；可重试连接，或在同一工作区新建 ScholarFlow 会话读取项目。')
   }
 }

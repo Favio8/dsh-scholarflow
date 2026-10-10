@@ -157,8 +157,8 @@ node tests/e2e/installed-host-smoke.mjs --live-skills
 
 ## 实现依据与证据
 
-- 产品基线：../docs/ScholarFlow_PRD_v1.10.md（版本链自 v1.0 起，见 ../AGENTS.md 规则三）
-- 实现合同：../docs/ScholarFlow_Design_SPEC_v1.10.md
+- 产品基线：../docs/ScholarFlow_PRD_v1.12.md（版本链自 v1.0 起，见 ../AGENTS.md 规则三）
+- 实现合同：../docs/ScholarFlow_Design_SPEC_v1.12.md
 - 最新真实宿主验证：[G0 installed Host](docs/g0-installed-host-2026-10-04.md)
 - 项目持久化验证：[M1 project store](docs/m1-project-store-2026-10-04.md)
 - 本地证据链验证：[M2 local evidence](docs/m2-local-evidence-2026-10-04.md)
