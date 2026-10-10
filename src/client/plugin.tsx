@@ -47,8 +47,8 @@ const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-
 // settings section, so the two can never drift into two configurations.
 const SETTINGS_CSS = `.sf-caption-settings{position:absolute;top:calc(100% + var(--sf-space-1));left:var(--sf-caption-left,150px);width:min(600px,94vw);max-height:min(72vh,640px);overflow:auto;background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-3);z-index:1200}
 .sf-caption-settings>header{position:sticky;top:0;display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-3) var(--sf-space-4);border-bottom:1px solid var(--sf-border);background:var(--dsw-alias-bg-base,var(--sf-surface))}
-.sf-caption-settings>header strong{font-size:var(--sf-font-lg);font-weight:600}
-.sf-caption-settings>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:var(--sf-font-xl);line-height:1;cursor:pointer;padding:0 var(--sf-space-1)}
+.sf-caption-settings>header strong{font-size:var(--sf-font-prose);font-weight:600}
+.sf-caption-settings>header button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:var(--sf-font-display-2);line-height:1;cursor:pointer;padding:0 var(--sf-space-1)}
 .sf-caption-settings .sf-settings{max-width:none;padding:var(--sf-space-4)}`
 
 export function apply(ctx: Host) {

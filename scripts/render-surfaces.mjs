@@ -18,6 +18,7 @@ import { build } from 'esbuild'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { visualSourceMetrics } from './visual-source-metrics.mjs'
+import { FONT_TOKENS, typographyInPage, systemSerifInPage } from './visual-language-contracts.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -149,7 +150,7 @@ document.querySelectorAll('.sf-source-editor').forEach(editor => {
 const draftPreviewBody = () => `<div class="sf-app sf-paper-project" style="height:340px;display:flex;flex-direction:column">
 <div class="sf-preview-pane" style="display:flex;flex-direction:column;min-height:0;flex:1">
 <div class="sf-paper-scroll" style="flex:1;min-height:0;overflow:auto"><div class="sf-paper-page">
-<p data-sf-block="p_TEST_ONLY" style="white-space:pre-wrap"><span data-sf-leaf="leaf_TEST_ONLY_plain">同样长度的未标注文字</span><span class="sf-mark-inline" data-sf-marked="true" data-flow="off">这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续</span></p>
+<article class="sf-prose"><p data-sf-block="p_TEST_ONLY" style="white-space:pre-wrap"><span data-sf-leaf="leaf_TEST_ONLY_plain">同样长度的未标注文字</span><span class="sf-mark-inline" data-sf-marked="true" data-flow="off">这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续</span></p></article>
 </div></div></div></div>`
 
 const presetRow = (title, summary, chosen, current, manage) => `<div style="display:flex;align-items:center">
@@ -313,13 +314,15 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
   writeFileSync(join(outDir, 'wizard-dark.html'), pageHtml(theme, wizard, picker, paper + marks, motion, true))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
-  const results = [], wrap = [], mark = [], preview = []
+  const results = [], wrap = [], mark = [], preview = [], typography = []
+  let systemSerif
   try {
     for (const pass of passes) {
       const page = await (await browser.newContext({ viewport: pass.viewport })).newPage()
       await page.goto(pathToFileURL(join(outDir, pass.dark ? 'wizard-dark.html' : 'wizard.html')).href)
       await page.addScriptTag({ content: fixtures.outputFiles[0].text })
       await page.waitForFunction(() => window.sfVisualFixturesReady === true)
+      systemSerif ??= await page.evaluate(systemSerifInPage)
       await page.addScriptTag({ content: gutterModule.outputFiles[0].text })
       await page.addScriptTag({ content: measureModule.outputFiles[0].text })
       await page.addScriptTag({ content: rangeModule.outputFiles[0].text })
@@ -330,6 +333,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
       let passWrap
       for (const id of pass.ids) {
         const name = `surface-${id}${pass.suffix}.png`
+        typography.push({ name, ...await page.evaluate(typographyInPage, `#s${indexPath(id)}>.frame`) })
         const file = join(outDir, name)
         // The wrap and mark surfaces are measured before they are captured, so the capture shows the
         // state the check just accepted instead of an unmeasured column or an unpainted pane.
@@ -397,8 +401,26 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
       await page.close()
     }
   } finally { await browser.close() }
-  const report = { outDir, results, wrap, mark, preview, sourceMetrics: visualSourceMetrics(join(root, 'src/client')),
-    problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems), ...preview.flatMap(row => row.problems)] }
+  const sourceMetrics = visualSourceMetrics(join(root, 'src/client'))
+  const typographyProblems = []
+  if (sourceMetrics.fontSizeLiterals.length) typographyProblems.push(`AT-122: ${sourceMetrics.fontSizeLiterals.length} literal font sizes`)
+  if (sourceMetrics.fontTokenKinds.length > 7) typographyProblems.push(`AT-122: ${sourceMetrics.fontTokenKinds.length} font token kinds`)
+  for (const row of sourceMetrics.serifDeclarations.filter(row => !row.allowed)) typographyProblems.push(`AT-121: serif outside the whitelist — ${row.selectors}`)
+  if (systemSerif?.status !== 'passed') typographyProblems.push('AT-121: system serif fallback remains pending')
+  for (const row of typography) {
+    if (row.smallSerif?.length) typographyProblems.push(`AT-121 ${row.name}: ${row.smallSerif.length} serif elements below 15px`)
+    for (const heading of row.headings ?? []) for (const exportRow of row.exportRatios)
+      if (Math.abs(heading.ratio / exportRow.ratios[heading.level - 1] - 1) > .05)
+        typographyProblems.push(`AT-123 ${row.name}: H${heading.level} differs from headingSizes(${exportRow.bodySize})`)
+  }
+  const usedSizes = new Set(typography.flatMap(row => row.sizes ?? []))
+  const cssText = readFileSync(join(root, 'src/client/theme/tokens.ts'), 'utf8')
+  for (const token of FONT_TOKENS) {
+    const value = Number(cssText.match(new RegExp(`${token}:([0-9]+)px`))?.[1])
+    if (!value || !usedSizes.has(value)) typographyProblems.push(`AT-122: ${token} is unused by real rendering seats`)
+  }
+  const report = { outDir, results, wrap, mark, preview, typography, systemSerif, sourceMetrics,
+    problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems), ...preview.flatMap(row => row.problems), ...typographyProblems] }
   writeFileSync(join(outDir, 'report.json'), JSON.stringify({ at: new Date().toISOString(), ...report }, null, 2))
   return report
 }

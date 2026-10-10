@@ -2,6 +2,7 @@
 // These expose existing debt before SF-121/122/126/128; later steps enforce their thresholds.
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { SERIF_SELECTORS } from './visual-language-contracts.mjs'
 
 export function visualSourceMetrics(directory) {
   const files = []
@@ -13,7 +14,7 @@ export function visualSourceMetrics(directory) {
     }
   }
   walk(directory)
-  const fontTokens = new Set(), padding = new Set(), literalFontSizes = [], primaryDefinitions = []
+  const fontTokens = new Set(), padding = new Set(), literalFontSizes = [], primaryDefinitions = [], serifDeclarations = []
   let importantOccurrences = 0, selectElements = 0
   for (const file of files) {
     const text = readFileSync(file, 'utf8')
@@ -30,12 +31,16 @@ export function visualSourceMetrics(directory) {
       // Count rule definitions (including grouped selectors), never JSX references.
       if (selectors.split(',').some(selector => /\.sf-primary\s*$/.test(selector))) primaryDefinitions.push({ file, selectors })
     }
+    for (const match of text.matchAll(/([^{}]+)\{([^{}]*font-family\s*:\s*var\(--sf-family-serif\)[^{}]*)\}/g)) {
+      const selectors = match[1].trim()
+      serifDeclarations.push({ file, selectors, allowed: SERIF_SELECTORS.includes(selectors) })
+    }
   }
   return {
     scope: 'src/client', mode: 'baseline-observation',
     fontSizeLiterals: literalFontSizes, fontTokenKinds: [...fontTokens].sort(),
     paddingDeclarationKinds: [...padding].sort(),
-    primaryDefinitions, selectElements, importantOccurrences,
+    primaryDefinitions, selectElements, importantOccurrences, serifDeclarations,
     thresholds: { fontSizeLiterals: 0, fontTokenKinds: 7, paddingDeclarationKinds: 20, primaryDefinitions: 1, importantOccurrences: 54 },
   }
 }

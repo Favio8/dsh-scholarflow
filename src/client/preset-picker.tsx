@@ -16,8 +16,8 @@ export const PRESET_CSS = `
 .sf-preset-backdrop{position:fixed;inset:0;background:var(--sf-scrim);z-index:1400;display:flex;align-items:center;justify-content:center;padding:var(--sf-space-5)}
 .sf-preset-dialog{line-height:var(--sf-leading-body);color:var(--sf-text);font-size:var(--sf-font-md);display:flex;flex-direction:column;width:min(960px,92vw);height:min(80vh,720px);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);overflow:hidden;box-shadow:var(--sf-shadow-3)}
 .sf-preset-dialog>header{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-3) var(--sf-space-4);border-bottom:1px solid var(--sf-border)}
-.sf-preset-dialog>header strong{font-size:var(--sf-font-lg)}
-.sf-preset-dialog>header button{margin-left:var(--sf-space-2);border:0;background:transparent;color:inherit;font-size:var(--sf-font-xl);cursor:pointer}
+.sf-preset-dialog>header strong{font-size:var(--sf-font-prose)}
+.sf-preset-dialog>header button{margin-left:var(--sf-space-2);border:0;background:transparent;color:inherit;font-size:var(--sf-font-md);cursor:pointer}
 .sf-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .sf-preset-tabs{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-4);border-bottom:1px solid var(--sf-border);flex-wrap:wrap}
 .sf-preset-tabs button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md);cursor:pointer}
@@ -38,7 +38,7 @@ export const PRESET_CSS = `
 .sf-preset-manage button{border:0;background:transparent;color:var(--sf-accent-text);cursor:pointer;font:inherit;font-size:var(--sf-font-sm);padding:var(--sf-space-1)}
 .sf-preset-manage button:last-child{color:var(--sf-danger)}
 .sf-preset-preview{flex:1;min-width:0;overflow:auto;padding:var(--sf-space-4) var(--sf-space-5)}
-.sf-preset-preview h3{margin:0 0 var(--sf-space-2);font-size:var(--sf-font-xl)}
+.sf-preset-preview h3{margin:0 0 var(--sf-space-2);font-size:var(--sf-font-display-2)}
 .sf-preset-preview p{margin:var(--sf-space-2) 0;font-size:var(--sf-font-md);color:var(--dsw-alias-label-secondary,var(--sf-muted));line-height:var(--sf-leading-body)}
 .sf-preset-scene{margin:var(--sf-space-2) 0 0;padding-left:18px;font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
 .sf-preset-share{display:flex;align-items:center;gap:var(--sf-space-2);font-size:var(--sf-font-sm);margin:var(--sf-space-2) 0 0}
@@ -66,7 +66,7 @@ export const PRESET_CSS = `
 .sf-preset-dialog>header .sf-preset-new{margin-left:auto;height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-md);cursor:pointer}
 .sf-preset-back{height:var(--sf-space-6);padding:0 var(--sf-space-2);margin-bottom:var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-sm);cursor:pointer}
 .sf-preset-draft{flex:1;min-width:0;overflow:auto;padding:var(--sf-space-4) var(--sf-space-5);display:flex;flex-direction:column;gap:var(--sf-space-3);align-items:flex-start}
-.sf-preset-draft h3{margin:0;font-size:var(--sf-font-xl)}
+.sf-preset-draft h3{margin:0;font-size:var(--sf-font-display-2)}
 .sf-preset-draft p{margin:0;font-size:var(--sf-font-md);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
 .sf-preset-draft label{display:flex;flex-direction:column;gap:var(--sf-space-2);font-size:var(--sf-font-sm);width:100%}
 .sf-preset-draft input{height:var(--sf-space-6);padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;font:inherit}
@@ -76,7 +76,7 @@ export const PRESET_CSS = `
 .sf-preset-draft .sf-preset-sections li>input:nth-child(2){flex:1 1 200px;min-width:0}
 .sf-preset-draft-length{display:flex;align-items:center;gap:var(--sf-space-1);flex:none}
 .sf-preset-draft-length input{width:80px}
-.sf-preset-draft-length button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:var(--sf-font-lg)}
+.sf-preset-draft-length button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:var(--sf-font-prose)}
 .sf-preset-draft-actions{display:flex;gap:var(--sf-space-2);margin-top:var(--sf-space-1)}
 .sf-preset-draft-actions button{height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);background:transparent;color:inherit;font:inherit;cursor:pointer}
 .sf-preset-draft-actions button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent)}
@@ -215,7 +215,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
             <div className="sf-preset-share"><span>建议分配</span><span className="sf-preset-bar">
               {selected.sections.map(section => <i key={section.key} style={{ width: `${section.share * 100}%` }} />)}</span></div>
             <ul className="sf-preset-sections">{selected.sections.map(section => <li key={section.key}>
-              <strong>{localized(section.title, language)}</strong><em style={{ marginLeft: 8, fontSize: 12, color: 'var(--sf-muted)' }}>{Math.round(section.share * 100)}%</em>
+              <strong>{localized(section.title, language)}</strong><em style={{ marginLeft: 8, fontSize: 'var(--sf-font-sm)', color: 'var(--sf-muted)' }}>{Math.round(section.share * 100)}%</em>
               <small>{localized(section.focus, language)}</small>
               {section.subsections.length > 0 && <ul className="sf-preset-subsections">
                 {section.subsections.map(subsection => <li key={subsection.key}>
@@ -250,7 +250,7 @@ export function PresetPicker({ open, language, paperType, applied, structure, ap
         <button disabled={busy} onClick={() => void manage(() => api('presets.save', structure()))}>保存当前结构为我的预设</button>
         <button disabled={busy || !selected} onClick={() => selected && void manage(() => api('presets.copy', { id: selected.id }))}>复制为我的预设</button>
         <span />
-        {halfPair && <span style={{ fontSize: 12, color: 'var(--sf-warn-text)' }}>摘要与关键词通常一起出现，请同时勾选或同时取消。</span>}
+        {halfPair && <span style={{ fontSize: 'var(--sf-font-sm)', color: 'var(--sf-warn-text)' }}>摘要与关键词通常一起出现，请同时勾选或同时取消。</span>}
         <button className="sf-primary" disabled={busy || !selected || halfPair} onClick={apply}>使用此预设</button>
       </footer>
     </section>

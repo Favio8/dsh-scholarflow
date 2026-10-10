@@ -14,7 +14,7 @@ export function WorkbenchIcon({ kind = 'book' }: { kind?: 'book' | 'chat' | 'clo
 // shell.overlay control to its measured box; never move or edit native menu DOM.
 export const CAPTION_CSS = `
 .sf-caption-entry{position:fixed;left:var(--sf-caption-left,150px);top:0;height:var(--dsh-windows-titlebar-height);z-index:1100;display:flex;align-items:center;-webkit-app-region:no-drag}
-.sf-caption-entry button{display:flex;align-items:center;gap:var(--sf-space-2);height:28px;padding:0 var(--sf-space-2);border:0;border-radius:var(--sf-radius-md);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:var(--sf-font-lg);cursor:pointer}
+.sf-caption-entry button{display:flex;align-items:center;gap:var(--sf-space-2);height:28px;padding:0 var(--sf-space-2);border:0;border-radius:var(--sf-radius-md);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:var(--sf-font-md);cursor:pointer}
 .sf-caption-entry button:hover,.sf-caption-entry button[aria-pressed=true],.sf-caption-entry button[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .sf-caption-entry button:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:-2px}
 `
@@ -36,7 +36,7 @@ export const CHAT_CSS = `
 .sf-chat-content [data-composer-card]{border:1px solid var(--dsw-alias-border-l2);border-radius:var(--sf-radius-lg);box-shadow:none}
 .sf-chat-content [data-composer-input]{font-size:var(--sf-font-md);line-height:var(--sf-leading-body)}
 .sf-chat-empty{position:absolute;top:20%;left:var(--sf-space-5);right:var(--sf-space-5);z-index:1;color:var(--dsw-alias-label-secondary)}
-.sf-chat-empty h3{margin:var(--sf-space-3) 0 var(--sf-space-2);font-size:var(--sf-font-lg);font-weight:600;color:var(--dsw-alias-label-primary)}
+.sf-chat-empty h3{margin:var(--sf-space-3) 0 var(--sf-space-2);font-size:var(--sf-font-prose);font-weight:600;color:var(--dsw-alias-label-primary)}
 .sf-chat-empty p{margin:0 0 var(--sf-space-4);font-size:var(--sf-font-sm);line-height:var(--sf-leading-prose)}
 .sf-chat-empty button{display:block;width:100%;margin:var(--sf-space-2) 0;padding:var(--sf-space-2);text-align:left;font:inherit;color:var(--dsw-alias-label-secondary);background:transparent;border:1px solid var(--dsw-alias-border-l3);border-radius:var(--sf-radius-md);cursor:pointer}
 .sf-chat-empty button:hover{background:var(--dsw-alias-interactive-bg-hover)}

@@ -57,8 +57,10 @@ export const THEME_CSS = `:root{--sf-paper:#fbf9f5;--sf-text:#1f1c17;--sf-muted:
 --sf-shadow-3:0 18px 44px rgba(31,28,23,.16);
 --sf-space-hair:2px;--sf-space-1:4px;--sf-space-2:8px;--sf-space-3:12px;--sf-space-4:16px;--sf-space-5:24px;--sf-space-6:32px;--sf-space-7:40px;--sf-space-8:48px;
 --sf-radius-sm:4px;--sf-radius-md:6px;--sf-radius-lg:8px;--sf-radius-xl:12px;--sf-radius-pill:999px;
---sf-font-xs:11px;--sf-font-sm:12px;--sf-font-md:13px;--sf-font-lg:15px;--sf-font-xl:18px;--sf-font-2xl:24px;
---sf-leading-tight:1.4;--sf-leading-body:1.6;--sf-leading-prose:1.75;
+--sf-font-xs:11px;--sf-font-sm:12px;--sf-font-md:13px;--sf-font-prose:15px;--sf-font-title:17px;--sf-font-display-2:20px;--sf-font-display-1:28px;
+--sf-family-serif:'Source Han Serif SC','Noto Serif SC','华文中宋','SimSun','宋体',Georgia,'Times New Roman',serif;
+--sf-family-sans:'Microsoft YaHei UI','微软雅黑',system-ui,'Segoe UI',sans-serif;--sf-family-mono:Consolas,'SFMono-Regular',monospace;
+--sf-leading-tight:1.4;--sf-leading-body:1.6;--sf-leading-prose:1.8;--sf-leading-display-1:1.25;--sf-leading-display-2:1.35;--sf-leading-title:1.45;--sf-leading-sm:1.55;
 --sf-focus-color:#2d55a8;--sf-focus-width:2px;--sf-disabled-opacity:.5;--sf-mark-radius:3px;
 --sf-mark-gradient:linear-gradient(90deg,#d6246e,#c2410c,#a16207,#15803d,#1d4ed8,#7e22ce,#d6246e);--sf-mark-period:240px;--sf-mark-paper:#fbf9f5}
 body[data-ds-dark-theme]{--sf-paper:#1a1917;--sf-text:#f1ede6;--sf-muted:#a8a196;--sf-text-faint:#a8a196;
@@ -74,7 +76,16 @@ body[data-ds-dark-theme]{--sf-paper:#1a1917;--sf-text:#f1ede6;--sf-muted:#a8a196
 --sf-shadow-2:0 6px 20px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.4);
 --sf-shadow-3:0 18px 44px rgba(0,0,0,.6);
 --sf-focus-color:#93b0e8;--sf-disabled-opacity:.4}
-body .sf-app{color:var(--sf-text)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-boundary){color:var(--sf-text);font-family:var(--sf-family-sans);font-size:var(--sf-font-md);line-height:var(--sf-leading-body)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-boundary) :is(button,input,select,textarea,label,small,summary){font-family:var(--sf-family-sans)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-boundary) :is(button,input,select,textarea){font-size:var(--sf-font-md)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-boundary) small{font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm)}
+body :is(.sf-wizard h2,.sf-wizard h3,.sf-paper-title,.sf-paper-project h2,.sf-paper-project h3,.sf-paper-project h4,.sf-preset-preview h3,.sf-preset-draft h3,.sf-preset-dialog>header strong,.sf-preset-row strong,.sf-preset-sections strong,.sf-preset-subsections li>span,.sf-boundary h3,.sf-chat-empty h3,.sf-settings h2,.sf-settings h3){font-family:var(--sf-family-serif)}
+body .sf-wizard h2{font-size:var(--sf-font-display-1);line-height:var(--sf-leading-display-1);font-weight:600;letter-spacing:-.025em}
+body :is(.sf-wizard h3,.sf-paper-project h2,.sf-paper-project h3,.sf-preset-preview h3,.sf-preset-draft h3,.sf-preset-dialog>header strong,.sf-boundary h3,.sf-settings h2,.sf-settings h3){font-size:var(--sf-font-display-2);line-height:var(--sf-leading-display-2);font-weight:600}
+body :is(.sf-paper-title,.sf-paper-project h4,.sf-preset-row strong,.sf-preset-sections strong,.sf-preset-subsections li>span,.sf-chat-empty h3){font-size:var(--sf-font-title);line-height:var(--sf-leading-title);font-weight:600}
+body .sf-wizard .sf-outline-title{font-family:var(--sf-family-serif);font-size:var(--sf-font-title);line-height:var(--sf-leading-title)}
+body :is(.sf-wizard-eyebrow,.sf-preset-group,.sf-outline-status,.sf-chat-mode){letter-spacing:.04em}
 body .sf-paper-project{background:var(--sf-paper)}
 body :is(.sf-wizard-scroll,.sf-create-scroll,.sf-settings){background:var(--sf-paper)}
 body :is(.sf-wizard,.sf-preset-dialog,.sf-create-card,.sf-settings-card,.sf-wizard .sf-picker-panel){background:var(--sf-surface)}

@@ -7,8 +7,13 @@ import { PaperMaterials, MATERIALS_CSS } from '../../src/client/paper-materials.
 import { ApplicationError, ErrorNotice } from '../../src/client/application-error.tsx'
 import { SurfaceBoundary, SURFACE_BOUNDARY_CSS } from '../../src/client/surface-boundary.tsx'
 import { THEME_CSS } from '../../src/client/theme/tokens.ts'
+import { headingSizes } from '../../src/core/export/layout.ts'
 
 const noop = () => {}
+;(window as any).sfVisualContracts = { headingRatios: [10, 12, 14].map(bodySize => {
+  const sizes = headingSizes(bodySize)
+  return { bodySize, ratios: [1, 2, 3].map(level => sizes[level as 1 | 2 | 3] / bodySize) }
+}) }
 const source = (value: any) => ({ getSnapshot: () => value, subscribe: () => noop })
 const slots = new Map<string, React.ComponentType<any>>()
 const sessionId = 'session_visual_TEST_ONLY'
