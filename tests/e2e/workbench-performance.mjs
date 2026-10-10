@@ -248,6 +248,23 @@ try {
   }
   await page.screenshot({path:join(root,'performance.png')})
   assert.ok(rows.every(row=>row.ok),'See performance journal')
+  if (nativeDesktop) {
+    // Save only this isolated TEST_ONLY manuscript before closing Electron. A dirty
+    // beforeunload dialog racing renderer shutdown otherwise makes cleanup fail.
+    const save = page.locator('.sf-pane-caption').getByRole('button', { name: '保存', exact: true })
+    if (await save.isEnabled()) { await save.click(); await expect(save).toBeDisabled() }
+    await page.evaluate(() => { document.documentElement.style.zoom = '1' })
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    const collapse = page.getByRole('button', { name: '收起输入', exact: true })
+    if (await collapse.isVisible()) await collapse.click()
+    await page.getByRole('button', { name: '分屏', exact: true }).click()
+    for (const preference of ['light', 'dark']) {
+      await rpc('settings/update', { ns: 'ui-theme', patch: { preference } })
+      await page.waitForFunction(dark => document.body.hasAttribute('data-ds-dark-theme') === dark, preference === 'dark')
+      await page.locator('.sf-native-workspace').screenshot({ path: join(root, `native-workspace-${preference}.png`) })
+    }
+    record('native Desktop review surfaces captured after saving TEST_ONLY edits', true, { themes: ['light','dark'] })
+  }
 } catch (error) {
   record('run', false, error.message)
   await page?.screenshot({ path: join(root, 'failure.png') }).catch(() => undefined)

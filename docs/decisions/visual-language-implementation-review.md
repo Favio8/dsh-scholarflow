@@ -1,0 +1,47 @@
+# Visual-language implementation review
+
+Date: 2026-10-11. Authority: [02 visual-language PRD](../../../docs/ui-design-language/02-design-language-prd.md), especially the approved decisions in section 10, implementation sequence in section 11 and conflict priority in section 13. This is an implementation record, not a replacement PRD/SPEC baseline.
+
+The code implements warm paper and ink, content/interface font separation, the seven font roles, shared controls, flatter content surfaces, SVG actions, shared empty/loading/error layouts, restrained motion and the light manuscript page in a dark shell. The last correction reserves space for the drawn select arrow and the full format label; the paper header wraps when its containing pane is narrow (`src/client/theme/tokens.ts:116–119,155`).
+
+| Requirement | Implemented evidence and current result |
+|---|---|
+| SF-121 | Serif selector allowlist and computed-size checks; no serif below 15px. Windows SimSun/YaHei probe differs by 5,175 pixels. |
+| SF-122 | Zero literal font-size declarations; seven font tokens, all observed in rendered surfaces. |
+| SF-123 | Preview heading ratios checked against actual `headingSizes()` for body sizes 10, 12 and 14; within the approved tolerance. |
+| SF-124 | Warm neutrals and brighter card than shell; appearance audit reports zero contrast failures across its registered coverage in both themes. |
+| SF-125 | Ink-blue accent family; former violet wash folded into that family. Semantic marks/washes retain their specified exceptions. |
+| SF-126 | Padding declaration text reduced to 19 kinds. Reading maximum enforced; the narrow-pane minimum remains constrained as recorded below. |
+| SF-127 | Owned content has at most two painted ancestor layers; radius checks use the approved mapping and explicit exemptions. |
+| SF-128 | One primary base definition, four variants and three sizes with state probes; selects use the shared drawn arrow. `!important` occurrences 54 → 42. |
+| SF-129 | Text operation glyph count zero; covered SVGs use 16/20px and stroke 1.6. |
+| SF-130 | Actual empty/loading/error/boundary component seats render. The boundary's existing ordinary-conversation escape remains an explicit interaction exception. |
+| SF-131 | Paper entrance/exit and easing tokens implemented; hover position probes show no movement. Mark reduced-motion pixel change remains zero. |
+| SF-132 | Host alias inventory recorded by surface; owned page content uses ScholarFlow page roles. The AT-132/Q5 wording discrepancy is recorded below. |
+| SF-133 | First separate commit expands the registry and activates the real dark attribute. Final audit has 18 registered surfaces, coverage complete and actual Host theme activation. |
+| SF-134 | Mirror alignment offset zero; wrap/cache invalidation checks pass. Browser typing p95 22.4ms, native Desktop 23.5ms; client growth 0.388%. See the performance ADR. |
+| SF-135 | Split seat checks the themed source and fixed light page roles, warm border colours, flat source and downward page shadow. Both native Desktop themes captured. |
+
+Build and typecheck passed; all 610 existing tests passed. The last render run produced 52 captures with zero reported problems. The last appearance audit reported zero problems. Original markup seats are CSS/measurement rendering evidence; added React seats and installed-Host checks are identified separately in the SF-133 record. These checks do not claim every conditional product state has been exercised.
+
+Latest evidence is archived under `.dsh-tmp/visual-language-baseline/2026-10-11-final/`:
+`render.json`, `appearance.json`, `performance-browser.json`, `performance-desktop.json`,
+`desktop-final-interactions.json`, `native-workspace-light.png` and `native-workspace-dark.png`.
+Render timestamp: 2026-10-10 19:24:27 UTC; appearance timestamp: 2026-10-10 19:32:26 UTC
+(both 2026-10-11 in Asia/Shanghai). The render precedes the final header correction; the
+appearance and native interaction checks include it. Typing measurements precede that
+CSS-only correction; no new typing performance number is claimed for it.
+
+Unresolved or explicitly subordinate items:
+
+- SF-126's 34-character lower reading-width bound cannot hold inside a narrower pane. Per section 13, AT-41's no-overflow requirement wins. Reports expose `constrainedByPane`; the lower bound remains unmet in those cases, without reducing body font size.
+- The error boundary retains retry plus the existing ordinary-conversation escape. Section 13's behavior/safety priority wins over the single-action visual pattern; the gate records total actions separately.
+- AT-132 says page background is unchanged across themes, while section 10 Q5 supplies two near-white values. Implementation uses the sole approved section 10 values; this wording discrepancy awaits user-owned baseline incorporation.
+- U-15 (Host UI primitive reuse) remains open and is not waived by this work.
+
+Human acceptance is pending. Section 9 requires the user to inspect a real DSH session:
+paper warmth next to Host chrome, serif tone, body size, the bright page in dark mode,
+recognizably fillable fields and overall identity. Screenshots do not replace that step.
+No push has been authorized or performed. Parent `ScholarFlow_PRD_*.md` and
+`ScholarFlow_Design_SPEC_*.md` files were not modified; baseline incorporation remains
+the user's decision. No dependencies or webfonts were added.

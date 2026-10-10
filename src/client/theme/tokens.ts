@@ -115,6 +115,8 @@ body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,
 body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt) :is(input:not([type=checkbox]):not([type=radio]),select):not(.sf-source-input):not(.sf-native-tools *){height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));min-height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min))}
 body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt) textarea:not(.sf-source-input){height:auto;min-height:max(var(--sf-control-md),var(--sf-hit-min));padding:var(--sf-space-2) var(--sf-space-3);line-height:var(--sf-leading-body)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt) select:not(.sf-native-tools *){appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--sf-muted) 50%),linear-gradient(135deg,var(--sf-muted) 50%,transparent 50%);background-position:calc(100% - 16px) center,calc(100% - 12px) center;background-size:4px 4px;background-repeat:no-repeat;padding-inline-end:var(--sf-space-6)}
+body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt) select:not(.sf-native-tools *):not(.sf-source-input){padding-inline-end:var(--sf-space-6)}
+body .sf-app.sf-app .sf-paper-header>select:not(.sf-native-tools *){flex-shrink:0;min-width:8.5em}
 body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt,.sf-boundary.sf-boundary) :is(button,input,select,textarea):focus-visible:not(.sf-source-input):not(.sf-native-tools *){outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:2px;border-color:var(--sf-accent)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog) :is(button,input,select)[data-size=sm]{--sf-control-size:var(--sf-control-sm)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog) :is(button,input,select)[data-size=lg],body .sf-wizard-nav{--sf-control-size:var(--sf-control-lg)}
@@ -150,4 +152,5 @@ body .sf-state-details pre,body .sf-boundary pre{background:transparent;border:0
 @keyframes sf-state-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){body .sf-state-icon[data-animated]{animation:none}}
 @media(max-width:520px){body .sf-state{flex-wrap:wrap;align-items:flex-start}body .sf-state>button{margin-left:48px}}
+@container(max-width:420px){body .sf-paper-header{flex-wrap:wrap}body .sf-paper-header .sf-native-tools{margin-left:auto}}
 @media(max-width:720px){:root{--sf-hit-min:44px}body .sf-wizard{padding:var(--sf-space-4)}body .sf-wizard-footer{flex-wrap:wrap;gap:var(--sf-space-2)}body .sf-wizard-footer>span{display:none}body .sf-wizard-footer>button{flex:1 1 auto;white-space:normal}body .sf-wizard .sf-outline-toolbar{gap:var(--sf-space-2)}}`
