@@ -1,7 +1,7 @@
 // Long-document typing, wheel, selection and overlay geometry against the installed Host.
 // TEST_ONLY manuscript and isolated profile; original assignment files are unchanged.
 // Only --live-visual-only starts a real model request, then cancels it to verify native lifecycle.
-// Usage: node tests/e2e/workbench-performance.mjs [--desktop] [--interaction-only | --live-visual-only]
+// Usage: node tests/e2e/workbench-performance.mjs [--desktop] [--interaction-only | --layout-only | --live-visual-only]
 import assert from 'node:assert/strict'
 import { chromium, _electron as electron, expect } from '@playwright/test'
 import { spawn } from 'node:child_process'
@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path'
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
 const root = resolve('.dsh-tmp/workbench-performance', String(Date.now()))
 const nativeDesktop = process.argv.includes('--desktop')
+const layoutOnly = process.argv.includes('--layout-only')
 const profile = join(root, nativeDesktop ? 'profiles/desktop' : 'profiles/scroll-test')
 const workspacePath = join(root, 'Scroll TEST_ONLY')
 await mkdir(join(profile, 'node_modules'), { recursive: true })
@@ -110,6 +111,44 @@ try {
   await dismissOnboarding()
   await page.locator('.sf-middle-column').waitFor()
 
+  if (layoutOnly) {
+    assert.ok(!nativeDesktop, 'Layout viewport checks use the installed Host in Chromium')
+    const closePanel = page.getByRole('button', { name: '收起右侧边栏', exact: true })
+    if (await closePanel.isVisible()) await closePanel.click()
+    await page.getByRole('button', { name: '分屏', exact: true }).click()
+    for (const preference of ['light', 'dark']) {
+      await rpc('settings/update', { ns: 'ui-theme', patch: { preference } })
+      await page.waitForFunction(dark => document.body.hasAttribute('data-ds-dark-theme') === dark, preference === 'dark')
+      for (const width of [320, 420, 720, 1440]) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.waitForTimeout(300)
+        const layout = await page.locator('.sf-paper-header').evaluate(header => {
+          const box = header.getBoundingClientRect(), select = header.querySelector(':scope > select')
+          const style = getComputedStyle(select), selectBox = select.getBoundingClientRect()
+          const label = select.selectedOptions[0].text, canvas = document.createElement('canvas'), context = canvas.getContext('2d')
+          context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+          const formatWidths = [...select.options].map(option => ({ label: option.text, width: context.measureText(option.text).width }))
+          const textWidth = Math.max(...formatWidths.map(option => option.width))
+          const available = selectBox.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+            - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth)
+          const clippedControls = [...document.querySelectorAll('.sf-paper-header,.sf-pane-caption')].flatMap(container => {
+            const parentBox = container.getBoundingClientRect()
+            return [...container.querySelectorAll('button,select')].filter(el => {
+              const r = el.getBoundingClientRect()
+              return r.width > 0 && r.height > 0 && (r.left < parentBox.left - 1 || r.right > parentBox.right + 1)
+            }).map(el => el.getAttribute('aria-label') ?? el.textContent)
+          })
+          return { width: innerWidth, headerWidth: box.width, overflow: document.documentElement.scrollWidth - innerWidth,
+            label, formatWidths, textWidth, available, clippedControls, fontSize: style.fontSize,
+            selectHeight: selectBox.height, wrapped: getComputedStyle(header).flexWrap }
+        })
+        record(`${preference} initialized workbench at ${width}px keeps format text and controls inside header`,
+          layout.overflow <= 1 && layout.clippedControls.length === 0 && layout.available >= layout.textWidth - 1
+          && layout.selectHeight >= (width <= 720 ? 44 : 30), layout)
+        await page.locator('.sf-native-workspace').screenshot({ path: join(root, `initialized-${preference}-${width}.png`) })
+      }
+    }
+  } else {
   await page.getByRole('button',{name:'编辑',exact:true}).click()
   const area=page.locator('.sf-source-input');await area.click();await page.keyboard.press('Control+End')
   if (!process.argv.includes('--interaction-only') && !process.argv.includes('--live-visual-only')) {
@@ -245,6 +284,7 @@ try {
   await togglePanel(); await page.waitForTimeout(300)
   const geometry=await page.evaluate(()=>{const a=document.querySelector('.sf-overlay').getBoundingClientRect(),b=document.querySelector('.sf-middle-column').getBoundingClientRect();return {left:a.left,right:a.right,columnLeft:b.left,columnRight:b.right,bottom:a.bottom,viewport:innerHeight,overflow:document.documentElement.scrollWidth-innerWidth}})
   record('200 percent zoom with reduced motion keeps the local overlay in the middle column',geometry.left>=geometry.columnLeft-1&&geometry.right<=geometry.columnRight+1&&geometry.bottom<=geometry.viewport+1&&geometry.overflow<=1,geometry)
+  }
   }
   await page.screenshot({path:join(root,'performance.png')})
   assert.ok(rows.every(row=>row.ok),'See performance journal')

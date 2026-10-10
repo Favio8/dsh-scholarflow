@@ -25,13 +25,19 @@ selection, native panel open/close and five-second drag, overlay stacking and 20
 with reduced motion. Journals: `1791659195664` (browser) and `1791659638985` (Desktop)
 under `.dsh-tmp/workbench-performance/`.
 
-The final client artifact is 4,215,978 bytes versus the archived pre-UI 4,199,699 bytes:
-growth 0.388%, below the approved 2% budget. A later Desktop interaction-only run
+The final client artifact is 4,216,301 bytes versus the archived pre-UI 4,199,699 bytes:
+growth 0.395%, below the approved 2% budget. A later Desktop interaction-only run
 (`1791660716687`) checks the format-label correction and captures both themes; it does
 not provide another typing measurement. Desktop cleanup saves only the isolated TEST_ONLY
 manuscript before closing, avoiding the dirty-document dialog/shutdown race. Production
 dirty-document protection is unchanged. User visual acceptance in a real DSH session is
 still pending; captures and automated Desktop checks do not substitute for it.
+
+The installed-Host browser layout-only run `1791665518416` additionally verifies the
+initialized split workbench at 320, 420, 720 and 1440px in both themes. All three format
+labels fit, header/caption controls remain within their containers and document overflow
+is zero. This run follows the final format-width and narrow-caption CSS corrections; it
+does not repeat or replace the typing measurement.
 
 No manuscript, permissions, workflow state or export formatting policy changed. Raw
 journals and captures are kept locally under `.dsh-tmp/visual-language-baseline/`.
