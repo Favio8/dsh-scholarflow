@@ -128,7 +128,10 @@ export function adoptBrief(spec: CreationSpec, brief: RequirementBrief, options:
   const next: CreationSpec = { ...spec, brief: adopt.size ? brief : spec.brief }
   const lines: string[] = [spec.requirements, options.summary].filter(text => text?.trim())
   next.requirements = lines.join('\n').slice(0, 12000)
-  if (adopt.has('length') && brief.length.value !== undefined && !brief.length.approximate) next.targetLength = brief.length.value
+  if (adopt.has('length') && brief.length.value !== undefined && !options.overrides?.some(row => row.field === '篇幅')) {
+    next.targetLength = brief.length.value
+    next.targetLengthOrigin = 'requirements'
+  }
   if (adopt.has('format') && brief.format.cover === true) next.cover = { ...(spec.cover ?? { enabled: false, title: '', fields: [], date: '' }), enabled: true, title: spec.title,
     fields: spec.cover?.fields.length ? spec.cover.fields : [{ label: '姓名', value: '' }, { label: '学号', value: '' }] }
   if (adopt.has('typography') && brief.typography && spec.typography === undefined) next.typography = brief.typography
@@ -185,8 +188,6 @@ export function outlineDiff(before: Section[], after: Section[]): OutlineChange[
 export function outlineGaps(sections: Section[], coverage: OutlineCoverage[], input: { coverageRequired: boolean }) {
   const gaps: string[] = []
   if (input.coverageRequired) for (const row of coverage) if (!row.covered) gaps.push(`要求中的「${row.text}」还没有对应章节。`)
-  if (!sections.some(section => /实验|结果|results?|evaluation/i.test(section.title + section.purpose)))
-    gaps.push('没有章节负责分析实验结果；如果任务要求分析原论文的实验部分，需要补上对应章节。')
   return gaps
 }
 

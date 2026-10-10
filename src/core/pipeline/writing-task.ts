@@ -278,7 +278,7 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
           // when measured length stays valid; the actual semantic review still runs again.
           // The target is a body target: front and back matter are excluded, so a paper that
           // met its plan is not sent back for a length repair because of its abstract.
-          const stats = wordStats((await snapshot(io)).document.text, { bodyOnly: true })
+          const stats = wordStats((await snapshot(io)).document.text, { bodyOnly: true, sectionKinds: task.spec.sections })
           const count = task.spec.language === 'en' ? stats.westernWords : stats.chineseCharacters
           if (count < task.spec.targetLength * .9 || count > task.spec.targetLength * 1.1) task.modelReviewComplete = false
         }
@@ -286,13 +286,13 @@ export async function driveWritingTask(io: FileStore, task: WritingTask, service
           const live = await snapshot(io)
           const { cover, ...requirements } = task.spec
           const raw = await model('只返回 JSON {"issues":["具体问题与对应章节"],"sectionRevisions":[{"sectionId":"已给章节id","instruction":"基于已给原文证据的具体修正要求"}],"summary":"简短检查结论"}。逐项检查确认的大纲与老师要求；发现有证据可修正的漏项、篇幅偏差或错误，给出对应章节修正指令；无需修正返回空数组。篇幅使用给定 statistics.chineseCharacters（中文）或 westernWords（英文），不得另行估算；目标约数允许正负10%，不得在合格范围内以“需要凑足目标字数”为由扩写。仅修正真实漏项或错误，不将可选的更详细分析作为未达标要求。按报告任务分析原论文结构和承接关系，不要求学生补做实验。正文不写 brief.coverage、c1/c2 等内部追踪编号或 sectionId；这类残留须按所在章节提出修正。封面由导出器单独生成，不将正文没有封面信息列为缺项。未知项应说明，但不可编造核验结果。引用统一用已登记的 [@citeKey]；原论文的文献编号不可混作本报告引用。',
-            { requirements, manuscript: live.document.text, statistics: wordStats(live.document.text, { bodyOnly: true }), evidence: Object.values(live.ledger.evidence),
+            { requirements, manuscript: live.document.text, statistics: wordStats(live.document.text, { bodyOnly: true, sectionKinds: task.spec.sections }), evidence: Object.values(live.ledger.evidence),
               sources: Object.values(live.ledger.sources), answeredQuestions: task.questions.filter(row => row.kind !== 'budget') }, task.id + '.review.' + task.usedModelCalls)
           const assessment = parseModel(z.object({ issues: z.array(z.string().max(2000)).max(30), summary: z.string().max(2000),
             sectionRevisions: z.array(z.object({ sectionId: z.string(), instruction: z.string().max(4000) })).max(200).default([]) }), raw, 'writingTask.review')
           markHandled(task, { object: 'AI 全文检查', what: assessment.summary, impact: '本轮检查已执行；具体问题单独列出，执行完成不代表内容全部通过。' })
           reconcileReviewIssues(task, '要求检查', assessment.issues)
-          const statistics = wordStats(live.document.text, { bodyOnly: true }), count = task.spec.language === 'en' ? statistics.westernWords : statistics.chineseCharacters
+          const statistics = wordStats(live.document.text, { bodyOnly: true, sectionKinds: task.spec.sections }), count = task.spec.language === 'en' ? statistics.westernWords : statistics.chineseCharacters
           const lengthMismatch = count > task.spec.targetLength * 1.1 || count < task.spec.targetLength * .9
           const lengths = lengthRepairTargets(task.spec.targetLength, count, draftingOrder(task.spec.sections)
             .filter(section => (section.kind ?? 'body') === 'body').map(section => {

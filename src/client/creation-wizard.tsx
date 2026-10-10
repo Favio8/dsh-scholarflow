@@ -1,11 +1,13 @@
 import { useTextPrompt } from './text-prompt.tsx'
 import React, { useEffect, useRef, useState } from 'react'
 import { useConfirmationFocus } from './confirmation-focus.ts'
-import { creationSpec, requirementDraftSpec, presetSections, type CreationSpec } from '../shared/writing-task.ts'
+import { creationSpec, requirementDraftSpec, type CreationSpec } from '../shared/writing-task.ts'
 import { creationErrorMessage } from './creation-errors.ts'
+import { outlineInputKey, moveOutlineSection, validateOutline } from '../core/requirements/outline.ts'
 import { allocate } from '../core/presets/allocation.ts'
 import { sectionsFromPreset, selectionFromPreset } from '../core/presets/apply.ts'
 import { FORMAT_LABELS, TYPE_LABELS } from './paper-workspace.tsx'
+import { StructureEditor } from './structure-editor.tsx'
 import { PresetPicker } from './preset-picker.tsx'
 import { DEFAULT_TYPOGRAPHY } from '../core/export/typography.ts'
 
@@ -73,12 +75,16 @@ function BriefCandidate({ candidate, stale, busy, onAdopt, onDiscard }: any) {
 /** The outline candidate: what changed, which requirement each section carries, and the gaps. */
 function OutlineCandidate({ candidate, stale, busy, onAdopt, onDiscard }: any) {
   return <section className="sf-outline-candidate" aria-label="大纲候选">
-    <h5>大纲候选 · 与当前结构对照</h5>
+    <div className="sf-outline-candidate-head"><span className="sf-outline-status">待你确认</span><h3>按写作要求拟定的大纲</h3></div>
+    {candidate.taskSummary && <p className="sf-outline-summary">{candidate.taskSummary}</p>}
+    {candidate.targetLength && <p className="sf-field-hint">正文规划约 {candidate.targetLength} 字；页数与封面要求另行保留。</p>}
     {!!candidate.changes?.length && <p className="sf-field-hint">变化：{summarizeChanges(candidate.changes)}</p>}
-    <ul className="sf-coverage-list">{candidate.sections.map((section: any) => <li key={section.id}>
-      <b>{section.title}</b>{section.purpose ? ` — ${section.purpose}` : ''}</li>)}</ul>
-    {!!candidate.coverage?.length && <details open><summary>要求覆盖（{candidate.coverage.filter((row: any) => row.covered).length}/{candidate.coverage.length}）</summary>
-      {candidate.coverage.map((row: any) => <p key={row.itemId} className={row.covered ? undefined : 'sf-gap'}>{row.covered ? '✔' : '✖'} {row.text}{!row.covered && ' · 还没有对应章节'}</p>)}</details>}
+    <ol className="sf-outline-preview">{candidate.sections.map((section: any) => <li key={section.id} data-child={!!section.parentId}>
+      <div><strong>{section.title}</strong><span>{section.targetLength} 字{section.kind === 'front' ? ' · 前置' : section.kind === 'back' ? ' · 后置' : ''}</span></div>
+      {section.purpose && <p>{section.purpose}</p>}</li>)}</ol>
+    {!!candidate.coverage?.length && <details className="sf-outline-review"><summary>模型覆盖评估 · {candidate.coverage.filter((row: any) => row.covered).length}/{candidate.coverage.length} 项</summary>
+      {candidate.coverage.map((row: any) => <p key={row.itemId} className={row.covered ? undefined : 'sf-gap'}><strong>{row.covered ? '已覆盖' : row.status === 'partial' ? '部分覆盖' : '待补充'} · {row.text}</strong><br />{row.reason}</p>)}</details>}
+    {!!candidate.materialNotes?.length && <details className="sf-outline-review"><summary>本次资料读取范围</summary>{candidate.materialNotes.map((note: string) => <p key={note}>{note}</p>)}</details>}
     {candidate.gaps?.map((gap: string) => <p className="sf-gap" key={gap}>缺口：{gap}</p>)}
     <div className="sf-brief-actions">
       {stale && <p role="status">要求或结构已改变，请重新生成大纲候选。</p>}
@@ -166,7 +172,7 @@ export function restoreCreationDraft(spec: CreationSpec): CreationSpec {
   }] : [])).map(source => ({ ...source, members: source.members ?? [] }))
   return { ...draft, requirementSources,
     countingPolicy: spec.countingPolicy ?? { scope: 'body', includeAbstract: false, algorithmVersion: 1 },
-    sections: spec.sections.map(section => ({ ...section, allocationMode: section.allocationMode ?? 'manual' })),
+    sections: spec.sections.map(section => ({ ...section, kind: section.kind ?? 'body', allocationMode: section.allocationMode ?? 'manual' })),
     overrides: spec.overrides ?? [],
     typography: spec.typography ?? DEFAULT_TYPOGRAPHY,
     cover: spec.cover ?? { enabled: false, title: spec.title ?? '', fields: [], date: '' },
@@ -179,14 +185,21 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const initial: CreationSpec = { title: '', type: defaults?.defaultProjectType ?? 'course-paper', language: defaults?.language === 'en' ? 'en' : 'zh-CN',
     format: 'docx', requirements: '', requirementSources: [], materials: [], online: false, targetLength: 4000,
     countingPolicy: { scope: 'body', includeAbstract: false, algorithmVersion: 1 }, supplementalParts: [],
-    sections: presetSections(defaults?.defaultProjectType ?? 'course-paper', 4000), manuscriptDir: 'manuscript',
+    sections: [], manuscriptDir: 'manuscript',
     overrides: [], typography: DEFAULT_TYPOGRAPHY,
     cover: { enabled: false, title: '', fields: [], date: '' } }
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem(key) ?? 'null') } catch { return null } })
   const [spec, setSpec] = useState<CreationSpec>(() => saved?.spec ? restoreCreationDraft(saved.spec) : initial), [step, setStep] = useState(saved?.step ?? 0)
+  const [attemptedOutline, setAttemptedOutline] = useState<string>(saved?.attemptedOutline ?? '')
+  const [acceptedOutline, setAcceptedOutline] = useState<string>(saved?.acceptedOutline ?? '')
+  const inputKey = outlineInputKey(spec)
+  const latestSpec = useRef(spec); latestSpec.current = spec
   // The direction the user actually moved in, so going back does not look like going forward.
   const [direction, setDirection] = useState<1 | -1>(1)
-  const goToStep = (next: number) => { setDirection(next >= step ? 1 : -1); setStep(next) }
+  const goToStep = (next: number) => {
+    if (step === 2 && next !== 2) stopOutline()
+    setDirection(next >= step ? 1 : -1); setStep(next)
+  }
   const [files, setFiles] = useState<any[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [conflict, setConflict] = useState(false)
   const [scanning, setScanning] = useState(false), [truncated, setTruncated] = useState(false)
   const [materialQuery, setMaterialQuery] = useState('')
@@ -204,8 +217,9 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   // Per image source: 未识别 / 识别中 / 待确认（candidate）/ 已确认, plus 失败 and 不支持
   // (PRD §3.3). `text` holds the candidate while it is being edited and after it is adopted.
   const [recognition, setRecognition] = useState<Record<string, { state: 'idle' | 'running' | 'candidate' | 'confirmed' | 'failed' | 'unsupported'; text?: string; note?: string; model?: string }>>({})
-  const update = (change: Partial<CreationSpec>) => { setIssues([]); setSpec(previous => ({ ...previous, ...change })) }
-  useEffect(() => { try { localStorage.setItem(key, JSON.stringify({ spec, step })) } catch { setError('创建信息暂未保存，请保留当前页面。') } }, [spec, step, key])
+  const update = (change: Partial<CreationSpec>) => { setIssues([]); setSpec(previous => ({ ...previous,
+    ...(change.requirements !== undefined && change.requirements !== previous.requirements ? { brief: undefined } : {}), ...change })) }
+  useEffect(() => { try { localStorage.setItem(key, JSON.stringify({ spec, step, attemptedOutline, acceptedOutline })) } catch { setError('创建信息暂未保存，请保留当前页面。') } }, [spec, step, key, attemptedOutline, acceptedOutline])
   const loadFiles = async (selectAll: boolean) => {
     setScanning(true)
     try {
@@ -227,18 +241,6 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       const alive = new Set(value.live ?? [])
       update({ requirementSources: spec.requirementSources.map(source => source.origin === 'external' && source.handle && !alive.has(source.handle)
         ? { ...source, state: 'disconnected' as const } : source) })
-    }).catch(() => undefined)
-    return () => { live = false }
-  }, [key])
-  // A fresh wizard opens on the type's default built-in preset (design 02 §6); an
-  // existing draft keeps whatever the user had, and a missing library falls back to the
-  // offline structure without saying anything wrong.
-  useEffect(() => {
-    if (saved) return
-    let live = true
-    api('presets.list', {}).then((value: any) => {
-      const first = (value.byType?.[spec.type] ?? []).find((preset: any) => preset.source === 'builtin' && preset.order !== null)
-      if (live && first) update({ sections: sectionsFromPreset(first, spec.language, spec.targetLength), preset: selectionFromPreset(first) })
     }).catch(() => undefined)
     return () => { live = false }
   }, [key])
@@ -335,7 +337,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     const next = requirementDraftSpec.parse(result.spec)
     // The adopted text stays editable in the requirement field; nothing overwrites the user's own words.
     setSpec(previous => ({ ...previous, requirements: next.requirements, targetLength: next.targetLength,
-      brief: next.brief, typography: next.typography, cover: next.cover, overrides: next.overrides }))
+      brief: next.brief, typography: next.typography, cover: next.cover, overrides: next.overrides, targetLengthOrigin: next.targetLengthOrigin }))
     setBrief(undefined); setOperator('done')
     setIssues(['已采用要求候选；原输入保留在写作要求中，可以继续编辑。'])
   })
@@ -353,35 +355,57 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   // The old single-shot suggest stays available for the chapter-only path in step 3.
   const outlineController = useRef<AbortController | undefined>(undefined)
   const [outlineRunning, setOutlineRunning] = useState(false), [outlineElapsed, setOutlineElapsed] = useState(0)
+  const outlineOp = useRef(0), automaticAttempt = useRef('')
   useEffect(() => () => outlineController.current?.abort(), [])
   const stopOutline = () => {
-    outlineController.current?.abort(); setOutlineRunning(false)
-    setIssues(['已停止生成大纲；原结构保持，重新生成需再次点击。'])
+    outlineOp.current++; outlineController.current?.abort(); setOutlineRunning(false)
   }
   const suggestStructure = () => act(async () => {
     const current = requirementDraftSpec.parse(readySpec())
+    const startedKey = outlineInputKey(latestSpec.current), op = ++outlineOp.current
+    // Persist before dispatch: a refresh while the request is in flight must not replay it.
+    try { localStorage.setItem(key, JSON.stringify({ spec: latestSpec.current, step: 2, attemptedOutline: startedKey, acceptedOutline })) }
+    catch { throw new Error('无法保存本次生成记录，尚未调用模型。请检查浏览器存储后重试。') }
+    setAttemptedOutline(startedKey); setOutline(undefined); setIssues([])
     const controller = new AbortController(); outlineController.current = controller
     const startedAt = Date.now(); setOutlineRunning(true); setOutlineElapsed(0)
     const timer = window.setInterval(() => setOutlineElapsed(Date.now() - startedAt), 400)
     try {
       const result = await api('outline.suggest', { context: context(), spec: current }, controller.signal)
-      if (!controller.signal.aborted) setOutline({ ...result.candidate, inputSpecJson: JSON.stringify(readySpec()) })
+      if (!controller.signal.aborted && op === outlineOp.current
+        && startedKey === outlineInputKey(latestSpec.current)
+        && JSON.stringify(current.sections) === JSON.stringify(requirementDraftSpec.parse({ ...latestSpec.current, title: current.title }).sections))
+        setOutline({ ...result.candidate, inputSpecJson: JSON.stringify(current) })
+    } catch (error) { if (!controller.signal.aborted) throw error
     } finally { window.clearInterval(timer); if (outlineController.current === controller) setOutlineRunning(false) }
   })
   const [outline, setOutline] = useState<any>()
+  useEffect(() => {
+    if (step !== 2 || !spec.requirements.trim() || busy || outlineRunning
+      || acceptedOutline === inputKey || attemptedOutline === inputKey || automaticAttempt.current === inputKey) return
+    const timer = window.setTimeout(() => { automaticAttempt.current = inputKey; void suggestStructure() }, 500)
+    return () => window.clearTimeout(timer)
+  }, [step, inputKey, busy, outlineRunning, attemptedOutline, acceptedOutline])
+  useEffect(() => {
+    return () => { outlineOp.current++; outlineController.current?.abort() }
+  }, [inputKey])
   const adoptOutline = () => act(async () => {
+    const before = JSON.stringify(requirementDraftSpec.parse(readySpec()))
     const result = await api('candidates.adopt', { context: context(), candidateId: outline.candidateId, spec: requirementDraftSpec.parse(readySpec()), all: true })
     const next = requirementDraftSpec.parse(result.spec)
+    if (JSON.stringify(requirementDraftSpec.parse({ ...latestSpec.current, title: latestSpec.current.title.trim() || latestSpec.current.requirements.trim().split('\n')[0].slice(0, 60) })) !== before)
+      throw new Error('采用期间输入已改变，请重新生成大纲；你的修改已保留。')
     setHistory(rows => [...rows.slice(-9), spec.sections])
-    setSpec(previous => ({ ...previous, sections: outline.sections, preset: previous.preset ? { ...previous.preset, modified: true } : previous.preset }))
+    const accepted = { ...next, title: spec.title }
+    setSpec(accepted); setAcceptedOutline(outlineInputKey(accepted)); setAttemptedOutline(outlineInputKey(accepted))
     setOutline(undefined); setIssues(['已采用大纲候选，可以继续编辑章节。'])
-    void next
   })
   const clearDraft = () => {
     if (!window.confirm('清除本次填写的草稿？论文项目不会被创建，已有项目不受影响。')) return
     try { localStorage.removeItem(key) } catch { /* storage may be unavailable */ }
+    stopOutline(); setAttemptedOutline(''); setAcceptedOutline(''); automaticAttempt.current = ''
     setHistory([]); setIssues([]); setRecognition({}); setStep(0)
-    setSpec({ ...initial, sections: presetSections(spec.type, initial.targetLength) })
+    setSpec({ ...initial, sections: [] })
   }
   const newSourceId = () => `req_${crypto.randomUUID().replaceAll('-', '')}`
   const addSource = (kind: 'file' | 'folder', path: string) => update({ requirementSources: [...spec.requirementSources,
@@ -511,27 +535,27 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const visibleFiles = materialNeedle ? files.filter((file: any) => file.relativePath.toLowerCase().includes(materialNeedle)) : files
   // A subsection moves inside its own chapter: swapping it past the chapter boundary would
   // leave it pointing at a parent that is no longer above it, so the move is refused.
-  const sameParent = (left: CreationSpec['sections'][number], right: CreationSpec['sections'][number]) =>
-    (left.parentId ?? null) === (right.parentId ?? null)
   const moveSection = (index: number, direction: number) => {
-    const sections = [...spec.sections], target = index + direction
-    if (target < 0 || target >= sections.length) return
-    if (!sameParent(sections[index]!, sections[target]!)) return
-    ;[sections[index], sections[target]] = [sections[target], sections[index]]; editSections(sections)
+    const next = moveOutlineSection(spec.sections, spec.sections[index]!.id, direction as -1 | 1)
+    if (next !== spec.sections) editSections(next)
   }
   // Removing a chapter takes its subsections with it; otherwise they would point at a
   // parent that no longer exists.
   const withoutSection = (id: string) => spec.sections.filter(row => row.id !== id && row.parentId !== id)
-  const addSubsection = (parentId: string) => editSections([...spec.sections,
-    { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新子节', purpose: '', targetLength: 500,
-      allocationMode: 'auto', parentId, kind: 'body' }])
+  const addSubsection = (parentId: string) => {
+    const end = spec.sections.findLastIndex(row => row.id === parentId || row.parentId === parentId) + 1
+    editSections([...spec.sections.slice(0, end),
+      { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新子节', purpose: '', targetLength: 50,
+        allocationMode: 'auto', parentId, kind: 'body' }, ...spec.sections.slice(end)])
+  }
   // Applying is atomic: the type (when the preset belongs to another one) and the
   // structure change together, after the caller confirmed once (design 02 §7).
   const applyPreset = (preset: any, switching: boolean, kept?: string[]) => {
     const supplementalParts = (preset.supplementalParts ?? []).filter((part: any) => !kept || kept.includes(part.kind))
-    update({ ...(switching ? { type: preset.paperType } : {}), supplementalParts,
+    const next = { ...spec, ...(switching ? { type: preset.paperType } : {}), supplementalParts,
       sections: sectionsFromPreset(preset, spec.language, spec.targetLength, { supplementalKinds: kept }),
-      preset: selectionFromPreset(preset) })
+      preset: selectionFromPreset(preset), structureOrigin: 'preset' as const }
+    setSpec(next); setAcceptedOutline(''); setAttemptedOutline(outlineInputKey(next))
     setPresetOpen(false)
   }
   const sectionKey = (id: string) => ('k-' + id.toLowerCase().replace(/[^a-z0-9-]/g, '-')).slice(0, 64)
@@ -544,19 +568,20 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       ...(section.parentId ? { parentKey: sectionKey(section.parentId) } : {}) })),
     supplementalParts: spec.supplementalParts,
     ...(spec.preset?.source === 'builtin' ? { derivedFrom: spec.preset.id } : {}) })
-  const allocationPlan = allocate(spec.sections.map(section => ({ id: section.id, targetLength: section.targetLength,
+  const allocationPlan = allocate(spec.sections.filter(section => !section.kind || section.kind === 'body').map(section => ({ id: section.id, targetLength: section.targetLength,
     allocationMode: section.allocationMode ?? 'manual', ...(section.allocationWeight === undefined ? {} : { allocationWeight: section.allocationWeight }) })),
-    spec.targetLength, { abstractLength: 200, includeAbstract: spec.countingPolicy.includeAbstract })
-  const reallocate = () => update({ sections: allocationPlan.sections.map(row => ({ ...spec.sections.find(section => section.id === row.id)!, targetLength: row.targetLength })) })
+    spec.targetLength, { abstractLength: 0, includeAbstract: false })
+  const reallocate = () => editSections(spec.sections.map(row => ({ ...row, targetLength: allocationPlan.sections.find(item => item.id === row.id)?.targetLength ?? row.targetLength })))
   // Editing a chapter is a structural edit: it marks the paper as derived from the preset
   // rather than equal to it, and keeps a short history so undo costs no model call.
   const [history, setHistory] = useState<CreationSpec['sections'][]>([])
   const editSections = (next: CreationSpec['sections']) => {
     setHistory(rows => [...rows.slice(-9), spec.sections])
-    update({ sections: next, ...(spec.preset ? { preset: { ...spec.preset, modified: true } } : {}) })
+    setAcceptedOutline(''); setAttemptedOutline(inputKey)
+    update({ sections: next, structureOrigin: 'manual', ...(spec.preset ? { preset: { ...spec.preset, modified: true } } : {}) })
   }
   const undoStructure = () => { const previous = history.at(-1); if (!previous) return
-    setHistory(rows => rows.slice(0, -1)); update({ sections: previous }) }
+    setHistory(rows => rows.slice(0, -1)); setAcceptedOutline(''); setAttemptedOutline(inputKey); update({ sections: previous, structureOrigin: 'manual' }) }
   // What this run may actually read, shown in full before creation (design 02 §8).
   const approvedPaths = [...new Set([...spec.materials, ...spec.requirementSources.flatMap(source =>
     source.kind === 'folder' ? source.members.map(member => member.name) : source.path ? [source.path] : [])])]
@@ -568,11 +593,11 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     ...(spec.requirementSources.some(source => source.origin === 'external' && source.state !== 'connected') ? ['外部来源需要重新连接后才能再次读取'] : []),
   ]
   return <>{textPrompt.dialog}<div className="sf-wizard-scroll"><section ref={root} className="sf-wizard" aria-label="创建论文向导">
-    <header><span className="sf-wizard-eyebrow">{workspaceTitle}</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p>
+    <header className={step === 2 ? 'sf-wizard-header-compact' : undefined}><span className="sf-wizard-eyebrow">{workspaceTitle}</span><h2>开始一篇论文</h2><p>确定要求与资料，我们一起完成初稿。</p>
       <button className="sf-wizard-clear" disabled={busy} onClick={clearDraft}>清除草稿</button></header>
     <p className="sf-wizard-step-compact" aria-current="step">第 {step + 1} 步 / 共 3 步 · {["写作要求", "资料范围", "行文结构"][step]}</p>
-    <nav className="sf-wizard-steps" aria-label="创建步骤">{['写作要求', '资料范围', '行文结构'].map((title, index) => <button key={title} disabled={busy || index > step} data-done={index < step ? 'true' : undefined} aria-current={step === index ? 'step' : undefined}
-      onClick={() => goToStep(index)}><span>{index + 1}</span>{title}</button>)}</nav>
+    <nav className="sf-wizard-steps" aria-label="创建步骤">{['写作要求', '资料范围', '行文结构'].map((title, index) => <button key={title} disabled={(busy && !outlineRunning) || index > step} data-done={index < step ? 'true' : undefined} aria-current={step === index ? 'step' : undefined}
+      onClick={() => goToStep(index)}><span aria-hidden="true">{index < step ? '✓' : index + 1}</span>{title}</button>)}</nav>
     <div className="sf-wizard-page" key={step} data-direction={direction === 1 ? 'forward' : 'back'}>
       {step === 0 && <>
         <label>论文标题<input id="sf-field-title" placeholder="可以先留空，由写作要求生成" value={spec.title} maxLength={300} onChange={e => update({ title: e.target.value })} /></label>
@@ -581,9 +606,9 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           // Switching the type replaces the structure, so an edited one asks first and can
           // still be undone (design 02 §3). The old preset reference no longer applies.
           const edited = history.length > 0 || spec.preset?.modified === true
-          if (edited && !window.confirm(`切换为「${TYPE_LABELS[type]}」会按该类型的预设替换当前 ${spec.sections.length} 章结构，可用「撤销结构编辑」还原。继续？`)) return
+          if (edited && !window.confirm(`切换为「${TYPE_LABELS[type]}」后会保留已有结构，并在第三步按新任务生成候选。继续？`)) return
           setHistory(rows => [...rows.slice(-9), spec.sections])
-          update({ type, sections: presetSections(type, spec.targetLength), preset: undefined }) }}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          update({ type, preset: undefined }) }}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label>语言<select value={spec.language} onChange={e => update({ language: e.target.value as CreationSpec['language'] })}><option value="zh-CN">中文</option><option value="en">English</option></select></label>
           <label>提交格式<select value={spec.format} onChange={e => update({ format: e.target.value as CreationSpec['format'] })}>{Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
         <div className="sf-field"><span className="sf-field-label">引用样式</span>
@@ -635,44 +660,35 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <label className="sf-online-choice"><input type="checkbox" checked={spec.online} onChange={e => update({ online: e.target.checked })} /><span><strong>联网补充文献</strong><small>检索相关文献，获取公开可读取的全文。</small></span></label>
       </>}
       {step === 2 && <>
-        <div className="sf-structure-caption">
-          <label>目标篇幅<span className="sf-length-input"><input type="number" min={200} max={60000} aria-label="目标篇幅" value={spec.targetLength} onChange={e => update({ targetLength: Number(e.target.value) })} /><span>{spec.language === 'en' ? '词' : '汉字'}</span></span></label>
-          <label className="sf-online-choice" style={{ margin: 0 }}><input type="checkbox" checked={spec.countingPolicy.includeAbstract}
-            onChange={e => update({ countingPolicy: { ...spec.countingPolicy, includeAbstract: e.target.checked } })} /><span><strong>摘要计入</strong><small>默认不计入正文目标</small></span></label>
-          <div className="sf-structure-actions">
-            <button disabled={busy || !spec.preset} onClick={() => setPresetOpen(true)}>更换预设</button>
-            <button disabled={busy || allocationPlan.minimumShortfall} onClick={reallocate}>重新分配</button>
-            {outlineRunning ? <button onClick={stopOutline}>停止生成大纲</button> : <button disabled={busy} onClick={suggestStructure}>AI 完善结构</button>}
-          </div>
+        <div className="sf-outline-heading"><div><span className="sf-wizard-eyebrow">第 3 步 · 确认后开始写作</span><h3>行文结构</h3></div>
+          <span className="sf-outline-status">{acceptedOutline === inputKey ? '结构已确认' : outlineRunning ? '理解要求并检查覆盖…' : '等待确认'}</span></div>
+        <p className="sf-outline-summary">{spec.brief?.task.nature || '根据你确认的写作要求组织章节'}{spec.brief?.task.subject ? ` · ${spec.brief.task.subject}` : ''}</p>
+        <div className="sf-outline-toolbar">
+          <label>正文目标<span className="sf-length-input"><input type="number" min={200} max={60000} aria-label="目标篇幅" value={spec.targetLength}
+            onChange={e => update({ targetLength: Number(e.target.value), targetLengthOrigin: 'user' })} /><span>{spec.language === 'en' ? '词' : '字'}</span></span></label>
+          <div className="sf-outline-facts"><span>{spec.materials.length} 份已选资料</span><span>{spec.cover?.enabled ? '含独立封面' : '无封面'}</span>
+            {spec.brief?.length.pages && <span>要求 {spec.brief.length.pages} 页 · 导出后核验</span>}</div>
+          <div className="sf-outline-tools"><button disabled={busy} onClick={() => setPresetOpen(true)}>参考预设</button>
+            {outlineRunning ? <button onClick={stopOutline}>停止生成</button> : <button disabled={busy} onClick={suggestStructure}>重新按要求生成</button>}</div>
         </div>
+        <p className="sf-field-hint">{spec.preset ? '已选预设仅作参考，具体要求优先。' : '不套固定模板；根据要求与所选资料规划，再由你确认。'}正文与附属部分分开计数。</p>
         {outlineRunning && <div className="sf-long-op" role="status" aria-live="polite"><span className="sf-long-op-dot" aria-hidden="true" />
-          <strong>生成大纲候选</strong><span>已用 {formatElapsed(outlineElapsed)}</span><span>原结构保持，完成后由你确认采用。</span></div>}
-        {outline && <OutlineCandidate candidate={outline} stale={outline.inputSpecJson !== JSON.stringify(readySpec())} busy={busy} onAdopt={adoptOutline}
+          <strong>读取资料、规划章节并检查要求覆盖</strong><span>已用 {formatElapsed(outlineElapsed)}</span><span>原结构保持，完成后由你确认采用。</span></div>}
+        {outline && <OutlineCandidate candidate={outline} stale={outline.inputSpecJson !== JSON.stringify(requirementDraftSpec.safeParse(readySpec()).data)} busy={busy} onAdopt={adoptOutline}
           onDiscard={() => act(async () => { await api('candidates.discard', { context: context(), candidateId: outline.candidateId }); setOutline(undefined) })} />}
-        <p className="sf-field-hint">当前预设：{spec.preset ? `${spec.preset.id}（${spec.preset.source === 'builtin' ? '内置' : '我的'}${spec.preset.modified ? ' · 已修改' : ''}）` : '尚未选择'}
-          ，计划合计 {allocationPlan.total} / {spec.targetLength}。手工章节保持原值，其余按建议比例分配；比例只是起点，任何一项都可以改。</p>
-        {allocationPlan.notes.map(note => <p className="sf-field-hint" key={note} role="status">{note}</p>)}
-        <div className="sf-structure-list">{spec.sections.map((section, index) => <div className="sf-structure-section" key={section.id}
-          style={section.parentId ? { marginLeft: 20, borderLeft: '2px solid var(--sf-accent, #3f68d8)', paddingLeft: 10 } : undefined}>
-          <span className="sf-section-index">{section.parentId ? '·' : index + 1}</span>
-          <div className="sf-section-text">
-            <input id={`sf-section-title-${index}`} className="sf-section-title" aria-label={`第${index + 1}章标题`} placeholder="章节标题" value={section.title} onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, title: e.target.value } : row))} />
-            <input className="sf-section-purpose" aria-label={`第${index + 1}章写作内容`} placeholder="本节写什么（可选）" value={section.purpose} onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, purpose: e.target.value } : row))} />
-          </div>
-          <div className="sf-section-length"><input aria-label={`第${index + 1}章篇幅`} type="number" min={50} value={section.targetLength}
-            onChange={e => editSections(spec.sections.map(row => row.id === section.id ? { ...row, targetLength: Number(e.target.value), allocationMode: 'manual' } : row))} />
-            <span>{spec.language === 'en' ? '词' : '字'} · {section.allocationMode === 'auto' ? '自动' : '手工'}
-              {section.kind !== 'body' ? ` · ${section.kind === 'front' ? '前置' : '后置'}` : ''}</span></div>
-          <div className="sf-section-actions">
-            {!section.parentId && <button aria-label="添加子节" title="添加子节" onClick={() => addSubsection(section.id)}>＋</button>}
-            <button aria-label="上移章节" disabled={index === 0 || !sameParent(section, spec.sections[index - 1]!)} onClick={() => moveSection(index, -1)}>↑</button>
-            <button aria-label="下移章节" disabled={index === spec.sections.length - 1 || !sameParent(section, spec.sections[index + 1]!)} onClick={() => moveSection(index, 1)}>↓</button>
-            <button aria-label="删除章节" disabled={withoutSection(section.id).length === 0} onClick={() => editSections(withoutSection(section.id))}>×</button></div>
-        </div>)}</div>
-        <div className="sf-structure-actions" style={{ marginTop: 14 }}>
+        {!outline && !outlineRunning && !spec.sections.length && <p className="sf-outline-empty">{attemptedOutline === inputKey ? '尚未采用大纲。可以重新生成，或手工添加章节。' : '即将根据已确认要求生成大纲候选。'}</p>}
+        {spec.sections.length > 0 && <details className="sf-outline-current" open={!outline} key={outline ? 'comparison' : 'editor'}><summary>{outline ? '查看原有结构（未改动）' : '当前大纲 · 可直接编辑'}</summary>
+          {acceptedOutline !== inputKey && <p className="sf-field-hint">这份结构尚未按当前要求确认；你可以采用新候选，或检查后保留当前大纲。</p>}
+          <StructureEditor sections={spec.sections} busy={busy} onEdit={editSections} onMove={moveSection} onAdd={addSubsection} />
+          <div className="sf-outline-totals"><span>正文计划 {spec.sections.filter(row => row.kind === 'body').reduce((sum, row) => sum + row.targetLength, 0)} / {spec.targetLength} 字</span>
+            <button disabled={busy || allocationPlan.minimumShortfall} onClick={reallocate}>重新分配正文篇幅</button>
+            {acceptedOutline !== inputKey && <button disabled={busy || !spec.sections.some(row => row.kind === 'body') || spec.sections.some(row => !row.title.trim())} onClick={() => { try { validateOutline(spec.sections); setAcceptedOutline(inputKey); setAttemptedOutline(inputKey); setIssues([]) } catch (error) { setError((error as Error).message) } }}>确认当前大纲</button>}</div>
+          {allocationPlan.notes.map(note => <p className="sf-field-hint" key={note}>{note}</p>)}
+        </details>}
+        <div className="sf-structure-actions sf-outline-secondary-actions">
           <button onClick={() => editSections([...spec.sections, { id: `section_${crypto.randomUUID().replaceAll('-', '')}`, title: '新章节', purpose: '', targetLength: 500, allocationMode: 'auto', kind: 'body' }])}>+ 添加章节</button>
           <button disabled={busy || !history.length} onClick={undoStructure}>撤销结构编辑</button>
-          <button disabled={busy || !spec.sections.every(section => section.title.trim())} onClick={() => act(async () => {
+          <button disabled={busy || !spec.sections.length || !spec.sections.every(section => section.title.trim())} onClick={() => act(async () => {
             const name = await textPrompt.ask('预设名称', spec.title.trim() || '我的结构'); if (!name?.trim()) return
             await api('presets.save', { ...structureForPreset(), title: name.trim() }) })}>保存为我的预设</button>
           {spec.preset?.source === 'user' && <button disabled={busy} onClick={() => act(async () => {
@@ -711,7 +727,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     </div>
     {error && <p className="sf-wizard-error" role="alert">{creationErrorMessage({ message: error })}</p>}
     {issues.length > 0 && <ul className="sf-wizard-issues" role="alert">{issues.map(issue => <li key={issue}>{issue}</li>)}</ul>}
-    <footer className="sf-wizard-footer">{step > 0 && <button className="sf-wizard-nav sf-wizard-back" disabled={busy} onClick={() => goToStep(step - 1)}><WizardIcon name="back" /><span>上一步</span></button>}<span />
+    <footer className="sf-wizard-footer">{step > 0 && <button className="sf-wizard-nav sf-wizard-back" disabled={busy && !outlineRunning} onClick={() => goToStep(step - 1)}><WizardIcon name="back" /><span>上一步</span></button>}<span />
       {step < 2 ? <button className="sf-primary sf-wizard-nav" disabled={busy} onClick={() => {
         // The control stays reachable: a greyed-out button tells the user nothing
         // (design 02 §9). Clicking reports what is missing and focuses the first field.
@@ -723,6 +739,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         : <button className="sf-primary sf-wizard-nav" disabled={busy} onClick={() => {
           const empty = spec.sections.findIndex(section => !section.title.trim() || section.targetLength < 50)
           const blockers = [
+            ...(acceptedOutline === inputKey ? [] : ['请先采用候选或确认当前大纲。']),
+            ...(spec.sections.length ? [] : ['至少需要一个正文章节。']),
             ...(spec.title.trim() ? [] : ['创建前必须填写论文题目（在第一步填写）。']),
             ...(spec.requirements.trim() ? [] : ['请返回第一步，采用整理后的要求或直接填写写作要求。']),
             ...(empty < 0 ? [] : [`第 ${empty + 1} 章还没有标题，或篇幅低于 50。`]),
@@ -748,7 +766,7 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
    preference. Every text token clears WCAG AA on the surface its rule paints; verified by
    scripts/audit-appearance.mjs. */
 .sf-wizard-scroll{overflow:auto;flex:1;background:var(--dsw-alias-bg-layer-1,var(--sf-surface-2));padding:var(--sf-space-6) var(--sf-space-5)}
-.sf-wizard{--sf-control-min-height:var(--sf-space-6);max-width:760px;margin:0 auto;padding:var(--sf-space-6);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-2);font-size:var(--sf-font-lg)}
+.sf-wizard{--sf-control-min-height:var(--sf-space-6);color:var(--sf-text);max-width:760px;margin:0 auto;padding:var(--sf-space-6);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-2);font-size:var(--sf-font-lg)}
 .sf-wizard h2{font-size:var(--sf-font-2xl);margin:var(--sf-space-2) 0}
 .sf-wizard h3{font-size:var(--sf-font-xl);margin:0}
 .sf-wizard p,.sf-muted{color:var(--dsw-alias-label-secondary,var(--sf-muted));line-height:var(--sf-leading-body)}
@@ -764,8 +782,7 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-wizard-steps span{position:relative;display:grid;place-items:center;width:var(--sf-space-6);height:var(--sf-space-6);border-radius:50%;background:var(--sf-fill)}
 .sf-wizard-steps [aria-current=step]{color:var(--sf-accent-text)!important}
 .sf-wizard-steps [aria-current=step] span{background:var(--sf-accent);color:var(--sf-on-accent)}
-.sf-wizard-steps [data-done=true] span{background:var(--sf-ok);color:transparent}
-.sf-wizard-steps [data-done=true] span::after{content:'✓';position:absolute;inset:0;display:grid;place-items:center;color:var(--sf-surface)}
+.sf-wizard-steps [data-done=true] span{background:var(--sf-ok-soft);color:var(--sf-ok)}
 .sf-wizard-page[data-direction=forward]{animation:sf-step-forward var(--sf-dur-base,220ms) var(--sf-ease-out,ease-out)}
 .sf-wizard-page[data-direction=back]{animation:sf-step-back var(--sf-dur-base,220ms) var(--sf-ease-out,ease-out)}
 .sf-wizard-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:var(--sf-space-4)}
@@ -936,6 +953,56 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 @keyframes sf-step-forward{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
 @keyframes sf-step-back{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
 @media(prefers-reduced-motion:reduce){.sf-wizard-page[data-direction]{animation:none}}
+
+.sf-wizard-header-compact{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3)}
+.sf-wizard-header-compact h2,.sf-wizard-header-compact>p{display:none}
+.sf-wizard .sf-wizard-header-compact .sf-wizard-clear{float:none;margin:0}
+.sf-outline-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3)}
+.sf-outline-heading h3{margin-top:var(--sf-space-1)}
+.sf-outline-status{display:inline-flex;align-items:center;flex:none;padding:var(--sf-space-1) var(--sf-space-2);border-radius:var(--sf-radius-md);background:var(--sf-accent-soft);color:var(--sf-accent-text);font-size:var(--sf-font-sm)}
+.sf-wizard .sf-outline-summary{font-size:var(--sf-font-md);margin:var(--sf-space-3) 0;overflow-wrap:anywhere}
+.sf-outline-toolbar{display:flex;align-items:center;gap:var(--sf-space-4);flex-wrap:wrap;padding:var(--sf-space-3) 0;border-bottom:1px solid var(--sf-border)}
+.sf-wizard .sf-outline-toolbar>label{display:flex;flex-direction:row;align-items:center;gap:var(--sf-space-2);margin:0;white-space:nowrap}
+.sf-outline-toolbar .sf-length-input{display:flex;align-items:center;gap:var(--sf-space-1)}
+.sf-wizard .sf-outline-toolbar .sf-length-input input{width:80px;height:var(--sf-space-6);font-size:var(--sf-font-md);text-align:right}
+.sf-outline-facts{display:flex;gap:var(--sf-space-2);flex-wrap:wrap;font-size:var(--sf-font-sm);color:var(--sf-muted)}
+.sf-outline-tools{display:flex;gap:var(--sf-space-2);margin-left:auto;flex-wrap:wrap}
+.sf-wizard .sf-outline-secondary-actions{display:flex;flex-wrap:wrap;gap:var(--sf-space-2);margin:var(--sf-space-3) 0 0}
+.sf-outline-current{margin-top:var(--sf-space-4)}
+.sf-outline-current>summary{cursor:pointer;font-size:var(--sf-font-md);color:var(--sf-muted);padding:var(--sf-space-2) 0}
+.sf-outline-group{margin-top:var(--sf-space-3)}
+.sf-outline-group>header{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-2) 0;border-bottom:1px solid var(--sf-border)}
+.sf-outline-group h4{font-size:var(--sf-font-md);margin:0;font-weight:600}
+.sf-outline-group>header>span{font-size:var(--sf-font-sm);color:var(--sf-muted)}
+.sf-outline-edit-row{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr) auto 32px;align-items:center;column-gap:var(--sf-space-2);padding:var(--sf-space-2) 0;border-bottom:1px solid var(--sf-border-soft)}
+.sf-outline-edit-row[data-child=true]{margin-left:var(--sf-space-5);border-left:2px solid var(--sf-border);padding-left:var(--sf-space-2)}
+.sf-outline-number{font-size:var(--sf-font-sm);color:var(--sf-muted);font-variant-numeric:tabular-nums}
+.sf-wizard .sf-outline-edit-row>.sf-outline-title{border-color:transparent;height:var(--sf-space-6);padding:0 var(--sf-space-1);font-size:var(--sf-font-md);font-weight:500;min-width:0}
+.sf-wizard .sf-outline-title:hover,.sf-wizard .sf-outline-title:focus{border-color:var(--sf-border-strong)}
+.sf-wizard .sf-outline-budget{display:flex;flex-direction:row;align-items:center;gap:var(--sf-space-1);margin:0;font-size:var(--sf-font-xs);color:var(--sf-muted)}
+.sf-wizard .sf-outline-budget input{width:65px;height:var(--sf-space-6);padding:0 var(--sf-space-1);border-color:var(--sf-border);text-align:right;font-size:var(--sf-font-sm)}
+.sf-outline-menu>summary{display:grid;place-items:center;width:32px;min-height:var(--sf-control-min-height);font-size:var(--sf-font-xl);cursor:pointer;list-style:none;border-radius:var(--sf-radius-md);color:var(--sf-muted)}
+.sf-outline-menu>summary:hover{background:var(--sf-fill)}
+.sf-outline-menu>div{position:absolute;right:0;top:var(--sf-space-7);z-index:5;display:flex;gap:var(--sf-space-1);flex-wrap:wrap;max-width:100%;padding:var(--sf-space-2);background:var(--sf-surface);box-shadow:var(--sf-shadow-2);border:1px solid var(--sf-border);border-radius:var(--sf-radius-lg)}
+.sf-outline-purpose{grid-column:2/-1;font-size:var(--sf-font-sm);min-width:0}
+.sf-outline-purpose>summary{padding:var(--sf-space-1);color:var(--sf-muted);cursor:pointer}
+.sf-wizard .sf-outline-purpose textarea{font-size:var(--sf-font-md);line-height:var(--sf-leading-body);width:100%;box-sizing:border-box;min-height:72px;white-space:pre-wrap;overflow-wrap:anywhere;padding:var(--sf-space-2);color:var(--sf-text);background:transparent;border:1px solid var(--sf-border);border-radius:var(--sf-radius-md)}
+.sf-outline-totals{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap;padding:var(--sf-space-3) 0;font-size:var(--sf-font-sm);color:var(--sf-muted)}
+.sf-outline-totals>span{flex:1}
+.sf-outline-empty{padding:var(--sf-space-5) var(--sf-space-3);text-align:center;border:1px dashed var(--sf-border-strong);border-radius:var(--sf-radius-lg);font-size:var(--sf-font-md)}
+.sf-wizard .sf-outline-candidate{padding:var(--sf-space-4);background:var(--sf-surface);border:1px solid var(--sf-accent-border);border-radius:var(--sf-radius-lg)}
+.sf-outline-candidate-head{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap}
+.sf-outline-preview{list-style:none;padding:0;margin:var(--sf-space-3) 0}
+.sf-outline-preview>li{padding:var(--sf-space-2) 0;border-bottom:1px solid var(--sf-border-soft)}
+.sf-outline-preview>li[data-child=true]{margin-left:var(--sf-space-5);padding-left:var(--sf-space-2);border-left:2px solid var(--sf-border)}
+.sf-outline-preview>li>div{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sf-space-2);font-size:var(--sf-font-md)}
+.sf-outline-preview strong{font-weight:500;overflow-wrap:anywhere}
+.sf-outline-preview span{flex:none;font-size:var(--sf-font-sm);color:var(--sf-muted)}
+.sf-wizard .sf-outline-preview p{margin:var(--sf-space-1) 0 0;font-size:var(--sf-font-sm);overflow-wrap:anywhere}
+.sf-outline-review{padding:var(--sf-space-2) 0;font-size:var(--sf-font-sm)}
+.sf-outline-review>summary{cursor:pointer;color:var(--sf-accent-text)}
+.sf-outline-review p{overflow-wrap:anywhere}
+@media(max-width:720px){.sf-outline-heading{align-items:flex-start;flex-direction:column}.sf-outline-tools{margin-left:0}.sf-outline-edit-row{grid-template-columns:24px minmax(0,1fr) 44px}.sf-wizard .sf-outline-budget{grid-column:2;grid-row:2;justify-self:start}.sf-outline-menu{grid-column:3;grid-row:1/3}.sf-outline-purpose{grid-column:2/-1}.sf-outline-edit-row[data-child=true]{margin-left:var(--sf-space-2)}.sf-outline-menu>summary{width:44px}.sf-outline-preview>li>div{flex-wrap:wrap}}
 @media(max-width:720px){.sf-wizard{--sf-control-min-height:44px;padding:var(--sf-space-5)}.sf-wizard-row{grid-template-columns:1fr}.sf-wizard-steps{gap:var(--sf-space-3)}.sf-wizard .sf-structure-caption{flex-wrap:wrap}.sf-wizard .sf-structure-actions{margin-left:0}
 .sf-wizard .sf-material-checklist{max-height:none}
 .sf-wizard .sf-structure-list{max-height:none}

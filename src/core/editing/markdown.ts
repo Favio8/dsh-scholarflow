@@ -184,7 +184,7 @@ export function validateSelection(source: string, selection: SelectionPayload) {
  */
 const NON_BODY_HEADING = /^(?:摘要|abstract|关键词|keywords|致谢|acknowledgements?|附录|appendix|目录|contents|书目信息)$/i
 
-export function wordStats(source: string, options: { bodyOnly?: boolean } = {}) {
+export function wordStats(source: string, options: { bodyOnly?: boolean; sectionKinds?: readonly { title: string; kind?: 'body' | 'front' | 'back' }[] } = {}) {
   const projection = projectMarkdown(source), tree = projection.tree, parts: string[] = []
   let referenceDepth: number | undefined, matterDepth: number | undefined
   for (const node of tree.children ?? []) {
@@ -192,8 +192,10 @@ export function wordStats(source: string, options: { bodyOnly?: boolean } = {}) 
       if (matterDepth !== undefined && node.depth! <= matterDepth) matterDepth = undefined
       if (referenceDepth !== undefined && node.depth! <= referenceDepth) referenceDepth = undefined
       const title = textOf(node).trim()
-      if (/^(?:参考文献|引用文献|references|bibliography)$/i.test(title)) { referenceDepth = node.depth; continue }
-      if (options.bodyOnly && NON_BODY_HEADING.test(title)) { matterDepth = node.depth; continue }
+      const declared = options.sectionKinds?.filter(row => row.title.trim() === title && row.kind !== undefined) ?? []
+      const role = declared.length === 1 ? declared[0].kind : undefined
+      if (role !== 'body' && /^(?:参考文献|引用文献|references|bibliography)$/i.test(title)) { referenceDepth = node.depth; continue }
+      if (options.bodyOnly && (role === 'front' || role === 'back' || role === undefined && NON_BODY_HEADING.test(title))) { matterDepth = node.depth; continue }
     }
     if (referenceDepth !== undefined || matterDepth !== undefined) continue
     const collect = (item: AstNode) => {
@@ -207,5 +209,7 @@ export function wordStats(source: string, options: { bodyOnly?: boolean } = {}) 
   const excluded = options.bodyOnly ? '、摘要、关键词、致谢、附录' : ''
   return { chineseCharacters: [...prose.matchAll(/\p{Script=Han}/gu)].length,
     westernWords: [...prose.matchAll(/[\p{Script=Latin}\p{N}]+(?:['’\-][\p{Script=Latin}\p{N}]+)*/gu)].length,
-    countingPolicyId: 'sf-body-han-western-v1', detail: `正文与标题：汉字逐字符；西文含数字词元，撇号/连字符连接词算一个；排除参考文献${excluded}、代码、公式、原始 HTML、图片、引用 token。` }
+    countingPolicyId: 'sf-body-han-western-v1', detail: options.sectionKinds?.some(row => row.kind !== undefined)
+      ? '汉字逐字符，西文含数字词元；按已确认大纲的正文／附属角色计数，未标注章节沿用标题识别；排除代码、公式、原始 HTML、图片与引用 token。'
+      : `正文与标题：汉字逐字符；西文含数字词元，撇号/连字符连接词算一个；排除参考文献${excluded}、代码、公式、原始 HTML、图片、引用 token。` }
 }

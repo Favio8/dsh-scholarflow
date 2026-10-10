@@ -64,15 +64,18 @@ test('adoption appends a labelled record and never overwrites the user text', ()
   assert.match(adopted.requirements, /【已采用的要求整理】/)
   assert.match(adopted.requirements, /指定科技论文阅读分析报告/)
   assert.equal(adopted.brief?.length.value, 1500)
-  assert.equal(adopted.targetLength, before.targetLength, 'an approximate length never rewrites the numeric target')
+  assert.equal(adopted.targetLength, 1500, 'v1.8: an approximate requirement supplies the planning target')
+  assert.equal(adopted.brief?.length.approximate, true, 'the target is not an exact limit')
   assert.equal(adopted.cover?.enabled, true)
 })
 
-test('an exact length is the only one allowed to change the numeric target, and it is recorded as an override', () => {
+test('adopted lengths set the target unless the user explicitly retains their own target', () => {
   const exact = brief({ length: { value: 1500, unit: 'zh-characters', approximate: false } })
-  const adopted = adoptBrief(spec(), exact, { summary: '', overrides: [{ field: '篇幅', requirementValue: '约 4000 字', chosenValue: '1500 字', at }] })
+  const adopted = adoptBrief(spec(), exact, { summary: '' })
   assert.equal(adopted.targetLength, 1500)
-  assert.deepEqual(adopted.overrides.map(row => row.chosenValue), ['1500 字'])
+  const kept = adoptBrief(spec(), exact, { summary: '', overrides: [{ field: '篇幅', requirementValue: '1500 字', chosenValue: '4000 字', at }] })
+  assert.equal(kept.targetLength, 4000)
+  assert.deepEqual(kept.overrides.map(row => row.chosenValue), ['4000 字'])
 })
 
 test('a candidate is only adoptable while the inputs it was built from still match', () => {
@@ -100,8 +103,9 @@ test('coverage maps each required dimension to a section and names the ones left
 test('a structure keeps its gaps visible instead of hiding them behind generic sections', () => {
   const sections = [section('引言'), section('主题论证'), section('反方观点与回应'), section('结论')]
   const gaps = outlineGaps(sections, coverageOf(sections, brief()), { coverageRequired: true })
-  assert.equal(gaps.length >= 3, true)
-  assert.equal(gaps.some(gap => gap.includes('没有章节负责分析实验结果')), true)
+  assert.equal(gaps.length, 2)
+  assert.equal(gaps.some(gap => gap.includes('实验结果')), true)
+  assert.deepEqual(outlineGaps(sections, [], { coverageRequired: false }), [], 'no task-independent demand for experiments')
 })
 
 test('outline changes name additions, removals, renames and reordering', () => {

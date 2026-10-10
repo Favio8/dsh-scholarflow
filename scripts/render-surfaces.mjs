@@ -15,6 +15,8 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium } from '@playwright/test'
 import { build } from 'esbuild'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -29,10 +31,19 @@ export function extractCss(file, name) {
   return text.slice(from, end)
 }
 
-const row = (index, title, purpose, length, mode) => `<div class="sf-structure-section"><span class="sf-section-index">${index}</span>
-  <div class="sf-section-text"><input class="sf-section-title" value="${title}" readonly /><input class="sf-section-purpose" value="${purpose}" readonly /></div>
-  <div class="sf-section-length"><input value="${length}" readonly /><span>字 · ${mode}</span></div>
-  <div class="sf-section-actions"><button>↑</button><button>↓</button><button>×</button></div></div>`
+// Render the actual structure editor, not a second copy of its markup.
+const editorModule = join(root, '.dsh-tmp/render-structure-editor.mjs')
+mkdirSync(join(root, '.dsh-tmp'), { recursive: true })
+await build({ entryPoints: [join(root, 'src/client/structure-editor.tsx')], outfile: editorModule,
+  bundle: true, platform: 'node', format: 'esm', packages: 'external' })
+const { StructureEditor } = await import(pathToFileURL(editorModule).href)
+const structureMarkup = renderToStaticMarkup(React.createElement(StructureEditor, { busy: false,
+  sections: [
+    { id:'demo_a',title:'问题与材料范围',purpose:'TEST_ONLY 说明本次比较的对象与依据。',targetLength:300,kind:'body',allocationMode:'auto' },
+    { id:'demo_b',title:'案例比较',purpose:'TEST_ONLY 组织不同案例之间的联系与差异。',targetLength:100,kind:'body',allocationMode:'auto' },
+    { id:'demo_b1',parentId:'demo_b',title:'比较维度',purpose:'TEST_ONLY 解释选择这些维度的理由。',targetLength:600,kind:'body',allocationMode:'auto' },
+    { id:'demo_c',title:'比较所得与适用边界',purpose:'TEST_ONLY 回应任务，明确材料能支持到哪里。',targetLength:500,kind:'body',allocationMode:'auto' },
+  ], onEdit(){}, onMove(){}, onAdd(){} }))
 
 const sourceRow = (badge, kind, name, dir, actions) => `<li class="sf-source-row"><span class="sf-source-badge"${kind ? ` data-kind="${kind}"` : ''}>${badge}</span>
   <span class="sf-source-name">${name}<small>${dir}</small></span>${actions}</li>`
@@ -74,28 +85,14 @@ ${material(false, '旧版/存档.pdf', '当前格式暂不支持', true)}
 </div></div>
 <footer class="sf-wizard-footer"><button>← 上一步</button><span></span><button class="sf-primary">下一步 →</button></footer></section>`
 
-const step3 = `<section class="sf-wizard">${head(2)}
-<div class="sf-wizard-page">
-<div class="sf-structure-caption"><label>目标篇幅<span class="sf-length-input"><input value="4000" readonly /><span>汉字</span></span></label>
-<label class="sf-online-choice"><input type="checkbox" /><span><strong>摘要计入</strong><small>默认不计入正文目标</small></span></label>
-<div class="sf-structure-actions"><button>更换预设</button><button>重新分配</button><button>AI 完善结构</button></div></div>
-<p class="sf-field-hint">当前预设：论述/分析型（内置 · 已修改），计划合计 4000 / 4000。手工章节保持原值，其余按建议比例分配；比例只是起点，任何一项都可以改。</p>
-<div class="sf-structure-list">
-${row(1, '引言', '交代议题背景，给出可被辩护的中心观点', 480, '自动')}
-${row(2, '主题论证', '按分论点组织段落，每段先给主题句再给证据', 2600, '手工')}
-${row(3, '反方观点与回应', '选择有代表性的反对意见，公平陈述后回应', 520, '自动')}
-${row(4, '结论', '回到最初的问题，说明证据支持到什么程度', 400, '自动')}
-</div>
-<div class="sf-structure-actions" style="margin-top:14px"><button>+ 添加章节</button><button>撤销结构编辑</button><button>保存为我的预设</button></div>
-<section class="sf-confirm"><h4>创建前确认</h4><dl>
-<div><dt>论文与结构</dt><dd>科技论文大作业 · 课程论文 · 中文 · 4000 汉字（正文不含摘要） · 4 章 · 计划合计 4000 · 预设 论述/分析型（已修改）</dd></div>
-<div><dt>资料</dt><dd>要求来源 3 · 参考材料 3</dd></div>
-<div><dt>输出</dt><dd>将新增 manuscript/ 与 .scholarflow/；已有同名文件时会在提交前提示，不会覆盖。</dd></div>
-<div><dt>外部处理</dt><dd>模型：当前会话在输入框中选择的模型 · 联网：关闭。本地保存不等于本地模型。</dd></div>
-<div><dt>预算</dt><dd>模型调用上限 40（来自插件设置）</dd></div>
-<div><dt>能力缺口</dt><dd>引用样式只支持顺序编号，作者—年份尚未实现；排版要求暂未支持。这些会作为要求保留，不会被当作已满足。</dd></div>
-</dl></section></div>
-<footer class="sf-wizard-footer"><button>← 上一步</button><span></span><button class="sf-primary">创建论文并开始撰写</button></footer></section>`
+const step3 = `<section class="sf-wizard"><header class="sf-wizard-header-compact"><span class="sf-wizard-eyebrow">TEST_ONLY 结构示例</span><button>清除草稿</button></header>
+<div class="sf-wizard-page"><div class="sf-outline-heading"><h3>行文结构</h3><span class="sf-outline-status">结构已确认</span></div>
+<p class="sf-outline-summary">TEST_ONLY 根据本次案例比较任务组织结构。</p>
+<div class="sf-outline-toolbar"><label>正文目标<span class="sf-length-input"><input value="1500" readonly /><span>字</span></span></label>
+<div class="sf-outline-tools"><button>参考预设</button><button>重新按要求生成</button></div></div>
+${structureMarkup}
+<div class="sf-outline-totals"><span>正文计划 1500 / 1500 字</span><button>重新分配正文篇幅</button></div>
+</div><footer class="sf-wizard-footer"><button class="sf-wizard-nav sf-wizard-back">← 上一步</button><span></span><button class="sf-primary sf-wizard-nav">创建论文并开始撰写</button></footer></section>`
 
 const escapeHtml = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 

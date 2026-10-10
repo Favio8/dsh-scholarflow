@@ -25,7 +25,7 @@ export async function reviewInput(io: FileStore) {
     const image = await io.read(path); contextHashes[path] = image ? digest(image.text) : 'missing'
   }
   const { requirements, materials, sources, evidence, claims, outline, claimAnchors } = current.ledger
-  return { current, materialHashes, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v3-cross-section-scope', configHash: current.configHash, documentHash: current.document.contentHash,
+  return { current, materialHashes, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v4-outline-role-counting', configHash: current.configHash, documentHash: current.document.contentHash,
     revisionId: current.document.revisionId, requirements, materials, sources, evidence, claims, outline, claimAnchors,
     materialHashes, contextHashes, reviewProfileHash: profile ? digest(profile.text) : 'missing' })) }
 }
@@ -63,7 +63,7 @@ export function manualEligibleChecks(report: ReviewReport, input: Awaited<Return
 
 export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): ReviewReport {
   const { current, materialHashes, dependencyHash } = input, { ledger, document } = current
-  const reviewId = newId('review'), projection = projectMarkdown(document.text), count = wordStats(document.text, { bodyOnly: true })
+  const reviewId = newId('review'), projection = projectMarkdown(document.text), count = wordStats(document.text, { bodyOnly: true, sectionKinds: ledger.outline.sections })
   const checks: ReviewReport['checks'] = [], issues: Issue[] = []
   const check = (key: string, status: 'pass' | 'fail' | 'unknown', detail: string, category: Issue['category'], severity: Issue['severity'] = 'B1', refs: Partial<Issue> = {}, method: Issue['checkMethod'] = 'deterministic') => {
     checks.push({ id: key, status, method, detail })

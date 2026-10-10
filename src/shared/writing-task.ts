@@ -126,7 +126,16 @@ export const candidateDiff = z.object({ path: z.string().min(1).max(200), label:
   before: z.string().max(4000).optional(), after: z.string().max(4000), kind: z.enum(['added', 'changed', 'conflict']) }).strict()
 export const candidateConflict = z.object({ topic: z.string().min(1).max(200), current: z.string().max(2000), candidate: z.string().max(2000),
   source: z.string().max(400).optional(), preferred: z.enum(['current', 'candidate']) }).strict()
-export const outlineCoverage = z.object({ itemId: id, text: z.string().max(2000), sectionIds: z.array(id).max(40), covered: z.boolean() }).strict()
+export const outlineRequirement = z.object({ id, text: z.string().trim().min(1).max(2000), quote: z.string().max(2000) }).strict()
+export const semanticCoverage = z.object({ itemId: id, sectionIds: z.array(id).max(60),
+  status: z.enum(['covered', 'partial', 'missing']), reason: z.string().trim().min(1).max(2000) }).strict()
+export const outlineReview = z.object({ coverage: z.array(semanticCoverage).max(60),
+  issues: z.array(z.string().max(1000)).max(30).default([]) }).strict()
+export const outlineGeneration = z.object({ taskSummary: z.string().trim().min(1).max(2000),
+  targetLength: z.number().int().min(200).max(60000), sections: z.array(writingSection).min(1).max(60),
+  requirements: z.array(outlineRequirement).min(1).max(60) }).strict()
+export const outlineCoverage = z.object({ itemId: id, text: z.string().max(2000), sectionIds: z.array(id).max(60), covered: z.boolean(),
+  status: z.enum(['covered', 'partial', 'missing']).optional(), reason: z.string().max(2000).optional() }).strict()
 export const outlineChange = z.object({ sectionId: id.optional(), title: z.string().max(160),
   kind: z.enum(['added', 'removed', 'renamed', 'reordered', 'reallocated']), before: z.string().max(400).optional(), after: z.string().max(400).optional() }).strict()
 export const requirementCandidate = z.object({ schemaVersion: z.literal(1), candidateId: id, kind: z.literal('requirements'),
@@ -134,6 +143,9 @@ export const requirementCandidate = z.object({ schemaVersion: z.literal(1), cand
   diff: z.array(candidateDiff).max(200).default([]), conflicts: z.array(candidateConflict).max(40).default([]),
   state: z.enum(['pending', 'adopted', 'discarded', 'stale']), createdAt: z.string(), updatedAt: z.string() }).strict()
 export const outlineCandidate = z.object({ schemaVersion: z.literal(1), candidateId: id, kind: z.literal('outline'),
+  taskSummary: z.string().max(2000).optional(), targetLength: z.number().int().min(200).max(60000).optional(),
+  requirements: z.array(outlineRequirement).max(60).optional(), review: outlineReview.optional(),
+  materialNotes: z.array(z.string().max(1000)).max(500).optional(), materialHashes: z.record(z.string(), hash).optional(),
   projectId: id, sessionId: id, basedOn: candidateBasis, sections: z.array(writingSection).min(1).max(60),
   changes: z.array(outlineChange).max(80).default([]), coverage: z.array(outlineCoverage).max(60).default([]),
   gaps: z.array(z.string().max(1000)).max(40).default([]), conflicts: z.array(candidateConflict).max(40).default([]),
@@ -150,6 +162,7 @@ export const specOverride = z.object({ field: z.string().min(1).max(200), requir
   chosenValue: z.string().max(2000), at: z.string() }).strict()
 
 export const creationSpec = z.object({ title: z.string().trim().min(1).max(300), type: projectType, language: z.enum(['zh-CN', 'en']),
+  structureOrigin: z.enum(['manual', 'preset', 'generated']).optional(), targetLengthOrigin: z.enum(['user', 'requirements']).optional(),
   format: exportFormat, requirements: z.string().trim().min(1).max(12000),
   // Read-only compatibility: a stored project may still carry the single assignment file.
   assignmentPath: relativePath.optional(),
@@ -168,6 +181,7 @@ export type CreationSpec = z.infer<typeof creationSpec>
 /** Reading and adopting requirements happen before the title or requirement text exists.
  * Keep submission strict; a selected file is input to reading, not confirmed requirements. */
 export const requirementDraftSpec = creationSpec.extend({
+  sections: z.array(writingSection).max(60),
   title: z.string().trim().max(300),
   requirements: z.string().trim().max(12000),
 }).superRefine((spec, ctx) => {
