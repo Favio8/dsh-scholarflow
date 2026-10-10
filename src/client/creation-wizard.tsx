@@ -718,6 +718,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         {/* A short summary next to the create button, expandable for the full scope. The large
             pre-creation confirmation block is gone: nothing here is asked twice. */}
         <section className="sf-create-summary" aria-label="创建摘要">
+          <p className="sf-field-hint">开始后按大纲连续生成初稿。所选不同文件分别保留；缺项标待补，整节校验后保存，成稿后由你选文修改。</p>
           <div className="sf-create-line">
             <strong>{FORMAT_LABELS[spec.format]} · {spec.language === 'en' ? `约 ${spec.targetLength} 词` : `约 ${spec.targetLength} 字`}
               {spec.brief?.length?.pages ? ` · A4 共 ${spec.brief.length.pages} 页` : ''}</strong>
@@ -774,7 +775,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           setIssues([])
           void act(async () => {
             const value = creationSpec.parse(readySpec())
-            try { const plan = await api('creation.prepare', { context: context(), spec: value }); await api('creation.start', { context: context(), planId: plan.planId, planHash: plan.planHash }) }
+            try { const plan = await api('creation.prepare', { context: context(), spec: value, mode: 'first-draft' }); await api('creation.start', { context: context(), planId: plan.planId, planHash: plan.planHash }) }
             catch (error) {
               const failure = error as Error & { code?: string; details?: { outputDir?: string; suggestedDir?: string; reason?: string } }
               if (failure.code === 'OUTPUT_PATH_CONFLICT' || failure.message.includes('OUTPUT_PATH_CONFLICT')) {
@@ -785,7 +786,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
             }
             try { localStorage.removeItem(key) } catch {}
             await onCreated()
-          }) }}>{busy ? '正在创建…' : '创建论文并开始撰写'}</button>}
+          }) }}>{busy ? '正在创建…' : '开始生成初稿'}</button>}
     </footer>
     <PresetPicker open={presetOpen} language={spec.language} paperType={spec.type} applied={spec.preset} structure={structureForPreset}
       api={api} run={act} busy={busy} onClose={() => setPresetOpen(false)} onUse={applyPreset} />

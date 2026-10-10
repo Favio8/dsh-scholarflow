@@ -107,6 +107,7 @@ async function consumeStage(ctx: Host, session: Host, selected: { provider: stri
       if (chunk.type === 'text-delta') {
         text += chunk.text
         invariant(Buffer.byteLength(text) <= 2 * 1024 * 1024, 'MODEL_OUTPUT_TOO_LARGE', '模型输出超过阶段限额。')
+        call.onTextDelta?.(chunk.text)
       } else if (chunk.type === 'finish') finish = chunk.reason
       else if (chunk.type === 'usage') usage = chunk.usage
     }

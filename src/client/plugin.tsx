@@ -186,6 +186,7 @@ export function apply(ctx: Host) {
     const [issueLocation, setIssueLocation] = useState<Host>()
     const [view, setView] = useState<PaperView>('split'), [format, setFormat] = useState<ExportFormat>('markdown')
     const [editor, setEditor] = useState<DraftController>(), [exportPrompt, setExportPrompt] = useState(false), [exportTrigger, setExportTrigger] = useState(0)
+    const [generating,setGenerating] = useState(false), [generationMode,setGenerationMode] = useState<string>()
     const bindingKey = `${workspace?.workspaceId ?? ''}:${props.sessionId ?? ''}`
     const liveBinding = useRef(bindingKey), readSequence = useRef(0)
     const latest = useRef({ busy, project })
@@ -216,7 +217,7 @@ export function apply(ctx: Host) {
     const refreshRef = useRef(refresh); refreshRef.current = refresh
     useEffect(() => {
       let live = true
-      setProject(undefined); setError(''); setTab('Draft'); setView('split'); setFormat('markdown'); setExportPrompt(false); setExportTrigger(0); setEditor(undefined); setIssueLocation(undefined)
+      setProject(undefined); setError(''); setTab('Draft'); setView('split'); setFormat('markdown'); setExportPrompt(false); setExportTrigger(0); setEditor(undefined); setIssueLocation(undefined); setGenerating(false); setGenerationMode(undefined)
       if (workspace && props.sessionId) refresh().catch(e => live && setError(e.message))
       return () => { live = false }
     }, [workspace?.workspaceId, props.sessionId])
@@ -269,16 +270,16 @@ export function apply(ctx: Host) {
         {project?.identityConflict && <ProjectIdentity project={project} workspaceTitle={workspace.title} workspaces={workspaces} context={context} api={api} publish={publish} run={act} busy={busy} />}
         {project && !project.initialized && !project.readonly && !project.identityConflict && (project.recovery ? <div className="sf-create-card"><h3>恢复未完成的创建</h3><button disabled={busy} onClick={() => act(async () => publish(await api('project.recover', { context: context(), planId: project.recovery.planId, planHash: project.recovery.planHash })))}>继续已确认的创建</button></div>
           : project.metadataExists ? <p className="sf-error">已有论文目录需要恢复，请查看项目状态。</p>
-          : <CreationWizard key={bindingKey} scope={bindingKey} api={api} context={context} defaults={project.defaults} workspaceTitle={workspace.title} onCreated={refresh} />)}
+          : <CreationWizard key={bindingKey} scope={bindingKey} api={api} context={context} defaults={project.defaults} workspaceTitle={workspace.title} onCreated={async()=>{setGenerationMode('first-draft');setGenerating(true);setView('preview');await refresh()}} />)}
       </div>}
       {ready && <>
         <div className="sf-paper-toolbar"><nav className="sf-paper-views" aria-label="正文视图">
-          {(['edit', 'preview', 'split'] as const).map((name, index) => <button key={name} aria-pressed={tab === 'Draft' && view === name} onClick={() => { setTab('Draft'); setView(name) }}>{['编辑', '预览', '分屏'][index]}</button>)}
+          {(['edit', 'preview', 'split'] as const).map((name, index) => <button key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && view === name} onClick={() => { setTab('Draft'); setView(name) }}>{['编辑', '预览', '分屏'][index]}</button>)}
         </nav><details className="sf-paper-menu"><summary aria-label="更多论文选项">⋯</summary><div className="sf-paper-menu-popover">
           {(['Overview', 'Research', 'History'] as const).map(name => <button key={name} onClick={e => { closeMenu(e.currentTarget); setTab(name) }}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
         </div></details></div>
         {tab !== 'Draft' && <div className="sf-tool-back"><button onClick={() => setTab('Draft')}>← 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
-        <WritingProgress api={api} context={context} refresh={refresh} onManage={setTab} />
+        <WritingProgress api={api} context={context} refresh={refresh} onManage={setTab} onTask={(result:any)=>setGenerationMode(result.task?.mode)} />
         <div className="sf-paper-content">
           <div id="sf-panel-Overview" role="tabpanel" aria-label="概览" hidden={tab !== 'Overview'}><WritingRequirements key={`requirements_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} onFormat={setFormat} /></div>
           <div id="sf-panel-Research" role="tabpanel" aria-label="资料与研究" hidden={tab !== 'Research'}><PaperMaterials key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
@@ -287,6 +288,7 @@ export function apply(ctx: Host) {
           <div id="sf-panel-Draft" role="tabpanel" aria-label={draftTool ? TAB_LABELS[TABS.indexOf(draftTool)] : '正文'} hidden={tab !== 'Draft' && !draftTool}>
             <Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} issueLocation={issueLocation}
               view={view} format={format} tool={draftTool} visible={tab === 'Draft'} onController={setEditor} captureChatInsertion={() => props.inputActions.captureInsertion()}
+              generationMode={generationMode} onGenerationState={active=>{setGenerating(active);if(active)setView('preview')}}
               onAttachSelection={attachSelection} onReview={() => setTab('Review')} onTool={() => setTab('Changes')} onReturnEditor={() => { setView('split'); setTab('Draft') }} />
           </div>
           <div id="sf-panel-Settings" role="tabpanel" aria-label="项目设置" hidden={tab !== 'Settings'}><ProjectSettings key={project.binding.projectId} project={project} diagnostics={() => call('diagnostics')} api={api} context={context} refresh={refresh} run={act} busy={busy} /></div>

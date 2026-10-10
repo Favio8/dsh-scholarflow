@@ -1243,6 +1243,12 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async typographyUpdate(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.preferencesTypography(request, signal)) }
   @Remote('writingTask.inspect')
   async writingTaskInspect(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.inspect(request, signal) }) }
+  @Remote('writingTask.watch')
+  async writingTaskWatch(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.watchDraft(request,this.requireOperator(),signal)) }
+  @Remote('writingTask.stream')
+  async writingTaskStream(request: unknown) { return applicationResult(async () => this.writingController.readDraftStream(request,this.requireOperator())) }
+  @Remote('writingTask.unwatch')
+  async writingTaskUnwatch(request: unknown) { return applicationResult(async () => this.writingController.unwatchDraft(request,this.requireOperator())) }
   @Remote('writingTask.requirements')
   async writingTaskRequirements(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.requirements(request, signal) }) }
   @Remote('document.versions')

@@ -114,7 +114,7 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
   return { ...plan, contentHash: digest(json(plan)) }
 }
 
-export interface ModelCall { system: string; instruction: string; context: Record<string, unknown>; repair?: string; signal: AbortSignal; runId: string; maxTokens?: number }
+export interface ModelCall { system: string; instruction: string; context: Record<string, unknown>; repair?: string; signal: AbortSignal; runId: string; maxTokens?: number; onTextDelta?: (delta: string) => void }
 export interface GenerationControl { pauseRequested: () => boolean; resume?: RunActionPlan; retry?: RunActionPlan; executionSessionId?: string; automaticChild?: import('../../shared/workflow-automatic.ts').AutomaticChildGrant }
 export async function executeGeneration(io: FileStore, plan: GenerationPlan, owner: RunState['owner'], signal: AbortSignal,
   modelCall: (request: ModelCall) => Promise<string>, ownerAlive: (owner: RunState['owner']) => boolean, control?: GenerationControl) {

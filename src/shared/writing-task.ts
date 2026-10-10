@@ -205,11 +205,17 @@ export const writingQuestion = z.object({ id, title: z.string().min(1).max(2000)
 // Only persisted history accepts budget; producers still use writingQuestion above.
 const storedWritingQuestion = writingQuestion.extend({ kind: z.enum(['requirements', 'materials', 'conflict', 'failure', 'budget']) })
 export const pendingQuestion = (row: { kind: string; answered?: string }) => row.kind !== 'budget' && row.answered === undefined
+export const firstDraftApproval = z.object({ sessionId: id, confirmedAt: z.string(), paths: z.array(relativePath).max(500),
+  materialHashes: z.record(z.string(), hash), policy: z.literal('keep-selected-separate') }).strict()
+export const deferredDraftIssue = z.object({ kind: z.enum(['requirements', 'materials', 'generation', 'review']), message: z.string().max(4000), sectionId: id.optional() }).strict()
 /**
  * `usedModelCalls` and `elapsedMs` are telemetry (SPEC v1.2 §8): they are reported, never
  * enforced. `modelCallAllowance` survives only so a stored v1.1 task still parses.
  */
 export const writingTaskSchema = z.object({ schemaVersion: z.literal(1), id, projectId: id, sessionId: id, spec: creationSpec,
+  mode: z.enum(['guided', 'first-draft']).default('guided'), firstDraftApproval: firstDraftApproval.optional(),
+  deferredIssues: z.array(deferredDraftIssue).max(200).default([]), outcome: z.enum(['draft-ready', 'draft-with-gaps']).optional(),
+  diagnostic: z.object({ code: z.string().max(100), message: z.string().max(2000) }).strict().optional(),
   status: z.enum(['queued', 'running', 'waiting-input', 'paused', 'interrupted', 'cancelled', 'completed', 'failed']),
   stage: z.enum(['materials', 'research', 'evidence', 'outline', 'drafting', 'review', 'completed']),
   revision: z.number().int().nonnegative(), materialIndex: z.number().int().nonnegative(), sectionIndex: z.number().int().nonnegative(),
@@ -238,11 +244,11 @@ export function writingReadPaths(spec: CreationSpec) {
   }
   return [...paths]
 }
-export const creationPrepareRequest = z.object({ context: requestContext, spec: creationSpec }).strict()
+export const creationPrepareRequest = z.object({ context: requestContext, spec: creationSpec, mode: z.enum(['guided', 'first-draft']).default('guided') }).strict()
 export const writingTaskRequest = z.object({ context: requestContext, taskId: id.optional() }).strict()
 export const writingRequirementsRequest = z.object({ context: requestContext }).strict()
 export const writingPreferencesRequest = z.object({ context: requestContext, spec: creationSpec, baseSpecHash: hash.nullable().optional() }).strict()
-export const writingTaskAction = writingTaskRequest.extend({ action: z.enum(['pause', 'resume', 'cancel', 'answer']),
+export const writingTaskAction = writingTaskRequest.extend({ action: z.enum(['pause', 'resume', 'cancel', 'answer', 'start-first-draft']),
   materials: z.array(relativePath).max(500).optional(), questionId: id.optional(), answer: z.string().trim().max(12000).optional(),
   duplicateDecision: z.literal('keep-separate').optional(), sourceConflictHash: hash.optional() }).strict()
 export const cowriteRequest = z.object({ context: requestContext, text: z.string().max(2 * 1024 * 1024), baseDocumentHash: hash,

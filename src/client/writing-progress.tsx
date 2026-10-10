@@ -12,6 +12,7 @@ const STAGES: Record<string, string> = { materials: '读取工作区资料', res
 export function WritingProgress({ api, context, refresh, onTask, taskRevision, onManage }: any) {
   const [task, setTask] = useState<WritingTask>(), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [elapsed, setElapsed] = useState(0)
+  const [command,setCommand] = useState<string>()
   const latest = useRef({ context, refresh, onTask }); latest.current = { context, refresh, onTask }
   const revision = useRef<number | undefined>(undefined)
   useEffect(() => { let live = true
@@ -22,7 +23,8 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
     load(); const timer = window.setInterval(load, 2000)
     return () => { live = false; clearInterval(timer) }
   }, [context().sessionId, taskRevision])
-  const question = task?.questions.find(pendingQuestion)
+  const question = task?.mode === 'first-draft' ? undefined : task?.questions.find(pendingQuestion)
+  useEffect(()=>{if(command && ['pause','cancel'].includes(command) && task && !['running','queued'].includes(task.status))setCommand(undefined)},[task?.status,command])
   // A running task's elapsed time is shown as it grows; it is telemetry, never a deadline.
   useEffect(() => {
     if (task?.status !== 'running') return
@@ -31,10 +33,10 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
     return () => clearInterval(timer)
   }, [task?.status, task?.revision])
   if (!task) return error ? <details className="sf-writing-progress"><summary>历史任务进度暂不可用</summary>{error}</details> : null
-  if (task.status === 'cancelled') return null
-  const action = async (name: string) => { setBusy(true); setError('')
-    try { const result = await api('writingTask.action', { context: context(), taskId: task.id, action: name }); setTask(result.task); await refresh() }
-    catch (error) { setError((error as Error).message) } finally { setBusy(false) }
+  if (task.status === 'cancelled' && task.mode !== 'first-draft') return null
+  const action = async (name: string) => { if(busy || command)return; setBusy(true); setCommand(name); setError('')
+    try { const result = await api('writingTask.action', { context: context(), taskId: task.id, action: name }); setTask(result.task); latest.current.onTask?.(result); await refresh(); if(!result.stopping)setCommand(undefined) }
+    catch (error) { setError((error as Error).message);setCommand(undefined) } finally { setBusy(false) }
   }
   const handleIssue = async (issue: WritingTask['issues'][number], op: string) => {
     if (op === 'view-review') { onManage('Review'); return }
@@ -50,7 +52,10 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
   // A task stored before this field existed still has to render, so absence is an empty list.
   const issues = task.issues?.length ? task.issues : mapLegacyNotes(task.notes ?? [], task.updatedAt)
   const { needsAction, inProgress, handled } = groupIssues(issues)
-  const main = task.status === 'paused' ? '写作已暂停'
+  const main = command==='pause' ? '正在暂停，已请求停止当前生成' : command==='cancel' ? '正在停止，已有正文保留'
+    : task.mode==='first-draft' && task.status==='completed' ? (task.outcome==='draft-with-gaps'?'初稿就绪，有待补或待核对内容':'初稿就绪，可选文修改')
+    : task.mode==='first-draft' && ['paused','interrupted','cancelled'].includes(task.status) ? (task.status==='cancelled'?'已停止，已有正文保留':'已暂停，可编辑已保存正文')
+    : task.status === 'paused' ? '写作已暂停'
     : task.status === 'interrupted' ? '写作进度已保留'
     : task.status === 'waiting-input' && !question ? '进度已保留，可继续'
     : question ? '等待你的决定：已放到中栏底部'
@@ -63,11 +68,14 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
       <span className="sf-muted">{countsOf(task)}</span>
       <span className="sf-muted sf-progress-elapsed">已用 {formatElapsed(elapsed)} · 调用 {task.usedModelCalls} 次</span>
       <div className="sf-writing-controls">
-        {task.status === 'running' || task.status === 'queued' ? <button disabled={busy} onClick={() => action('pause')}>暂停</button>
-          : task.status !== 'completed' && !question && <button disabled={busy} onClick={() => action('resume')}>继续</button>}
-        {task.status !== 'completed' && <button disabled={busy} onClick={() => action('cancel')}>停止</button>}
+        {task.status === 'running' || task.status === 'queued' ? <button disabled={busy || !!command} onClick={() => action('pause')}>暂停</button>
+          : task.status !== 'completed' && !question && <button disabled={busy || !!command} onClick={() => action('resume')}>继续</button>}
+        {task.status !== 'completed' && <button disabled={busy || !!command} onClick={() => action('cancel')}>停止</button>}
+        {task.mode!=='first-draft' && !['running','queued','completed'].includes(task.status) && <><button disabled={busy || !!command} onClick={()=>action('start-first-draft')}>按新方式继续初稿</button><span className="sf-muted">所选文件分别保留，缺项待补继续，成稿后修改。</span></>}
+        {task.mode==='first-draft' && task.diagnostic?.code==='FIRST_DRAFT_APPROVAL_STALE' && <button disabled={busy || !!command} onClick={()=>action('start-first-draft')}>重新确认当前资料并继续</button>}
         {!!issues.length && <details><summary>详情（{needsAction.length} 项待处理）</summary>
           <div className="sf-issue-popover">
+            {!!task.deferredIssues?.length && <details><summary>成稿后处理（{task.deferredIssues.length}）</summary>{task.deferredIssues.map((row,index)=><p key={index}>{row.message}</p>)}</details>}
             <IssueGroup title="需要处理" rows={needsAction} tone="needs" onAction={handleIssue} disabled={busy || task.status === 'running'} />
             <IssueGroup title="继续中" rows={inProgress} tone="working" />
             <IssueGroup title="已处理" rows={handled} tone="done" collapsed />
@@ -75,6 +83,7 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
       </div>
     </div>
     {error && <p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}
+    {task.mode==='first-draft' && task.diagnostic && <p role="alert" className="sf-error">{task.diagnostic.message} <small>{task.diagnostic.code}</small></p>}
   </section>
 }
 

@@ -224,7 +224,7 @@ try {
   await button('采用此大纲').click()
   await expect(page.locator('.sf-outline-edit-row')).toHaveCount(1)
   await expect(page.getByText('结构已确认',{exact:true})).toBeVisible()
-  await expect(button('创建论文并开始撰写')).toBeEnabled()
+  await expect(button('开始生成初稿')).toBeEnabled()
   const positions=await page.evaluate(()=>({cover:document.querySelector('.sf-cover-fields').getBoundingClientRect().top,
     body:document.querySelector('.sf-outline-edit-row').getBoundingClientRect().top}))
   assert(positions.cover<positions.body)

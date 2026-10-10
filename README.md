@@ -1,3 +1,5 @@
+2026-10-10：首稿模式按确认大纲串行生成，正文真实增量预览、整节校验保存；普通问题后置、缺项待补，暂停即时取消，成稿后选文修改。旧任务保持原流程，可明确切换。602项分层测试及隔离安装版模型替身闭环通过，非真实模型内容验收。见[实现与验证](docs/decisions/streaming-first-draft.md)。
+
 # ScholarFlow
 
 DeepSeek Harness 学术项目工作区插件。当前版本 **1.0.0**，实现 PRD/SPEC v1.0 的 35 项 P0。实际支持 Windows DSH Desktop **0.2.0-rc.2**；验收证据见 [最终验证记录](docs/final-runtime-validation.md)。
@@ -155,8 +157,8 @@ node tests/e2e/installed-host-smoke.mjs --live-skills
 
 ## 实现依据与证据
 
-- 产品基线：../docs/ScholarFlow_PRD_v1.9.md（版本链自 v1.0 起，见 ../AGENTS.md 规则三）
-- 实现合同：../docs/ScholarFlow_Design_SPEC_v1.9.md
+- 产品基线：../docs/ScholarFlow_PRD_v1.10.md（版本链自 v1.0 起，见 ../AGENTS.md 规则三）
+- 实现合同：../docs/ScholarFlow_Design_SPEC_v1.10.md
 - 最新真实宿主验证：[G0 installed Host](docs/g0-installed-host-2026-10-04.md)
 - 项目持久化验证：[M1 project store](docs/m1-project-store-2026-10-04.md)
 - 本地证据链验证：[M2 local evidence](docs/m2-local-evidence-2026-10-04.md)

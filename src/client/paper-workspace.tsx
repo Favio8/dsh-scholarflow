@@ -39,6 +39,11 @@ export function ProjectSettings({ project, api, context, refresh, run, busy, dia
 }
 
 export const PAPER_CSS = `
+.sf-stream-status{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-4);font-size:var(--sf-font-sm);color:var(--sf-muted);border-bottom:1px solid var(--sf-border);flex-shrink:0}
+.sf-stream-status span{flex:1;min-width:0}.sf-stream-status button{white-space:nowrap;font-size:var(--sf-font-sm)}
+.sf-stream-anchor{display:block;height:1px;scroll-margin-bottom:40px}
+.sf-unfinished-preview{padding:var(--sf-space-2) var(--sf-space-4);border-top:1px solid var(--sf-border);max-height:220px;overflow:auto;flex-shrink:0;font-size:var(--sf-font-sm)}
+.sf-unfinished-preview pre{white-space:pre-wrap;overflow-wrap:anywhere}
 /* Workbench chrome reads its colours, spacing, type and radii from src/client/theme/tokens.ts.
    The simulated page (.sf-paper-page and its prose) is deliberately outside that system: it stands in
    for the exported document, so it keeps a white sheet with its own print typography in both themes.

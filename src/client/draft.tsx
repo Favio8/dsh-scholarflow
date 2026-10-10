@@ -21,6 +21,7 @@ import { trackRange, rewriteTarget, sourceOffset, paneOffset, type TextRange } f
 import { pendingQuestion } from '../shared/writing-task.ts'
 import { usePaneZoom, ZoomControls } from './pane-zoom.tsx'
 import { ApplicationError } from './application-error.tsx'
+import { useFirstDraftStream } from './first-draft-stream.ts'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any, signal?: AbortSignal) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
@@ -29,10 +30,12 @@ function readLocalBuffer(key: string) {
     return readScratch(window.localStorage, key, 8 * 1024 * 1024)
   } catch { /* Host temporary buffer remains available when browser storage fails. */ }
 }
-export function Draft({ project, context, api, refresh, run, busy, issueLocation, view = 'split', format = 'markdown', tool, visible = true, onController, onTool, onReview, onReturnEditor, onAttachSelection, captureChatInsertion }: Props & {
+export function Draft({ project, context, api, refresh, run, busy, issueLocation, view: preferredView = 'split', format = 'markdown', tool, visible = true, onController, onTool, onReview, onReturnEditor, onAttachSelection, captureChatInsertion, onGenerationState, generationMode }: Props & {
   issueLocation?: any; view?: PaperView; format?: ExportFormat; tool?: 'Changes' | 'History'; visible?: boolean;
   onController?: (value: DraftController) => void; onTool?: () => void; onReview?: () => void; onReturnEditor?: () => void
   onAttachSelection?: (card: SelectionContext, ask: boolean, insertion: any) => void; captureChatInsertion?: () => any
+  onGenerationState?: (active: boolean) => void
+  generationMode?: string
 }) {
   const projectId = project.binding.projectId
   const bufferKey = scratchKey(project.binding, 'paper')
@@ -40,6 +43,15 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   if (cached && !buffers.has(bufferKey)) buffers.set(bufferKey, cached)
   const [text, setText] = useState(cached?.text ?? project.document.text)
   const [baseHash, setBaseHash] = useState(cached?.baseHash ?? project.document.contentHash)
+  const stream = useFirstDraftStream({api,context,project,refresh,mode:generationMode})
+  const activePreview = stream.preview && ['generating','validating','saved'].includes(stream.preview.status)
+    && stream.preview.baseDocumentHash === project.document.contentHash ? stream.preview : undefined
+  const awaitingSave = Boolean(activePreview?.status === 'saved' && activePreview.savedDocumentHash !== project.document.contentHash)
+  const generating = Boolean(stream.generating || awaitingSave || generationMode === 'first-draft' && !stream.task && !stream.error)
+  const view = generating ? 'preview' : preferredView
+  useEffect(()=>{onGenerationState?.(generating)},[generating])
+  const displayedText = activePreview && generating ? project.document.text.slice(0,activePreview.start)
+    + (activePreview.prefix ?? '\n\n') + activePreview.text + '\n\n' + project.document.text.slice(activePreview.end) : text
   const [selection, setSelection] = useState<SelectionPayload>()
   const [selectionAnchor, setSelectionAnchor] = useState<DOMRect>(), [selectionDetail, setSelectionDetail] = useState<SelectionContext>()
   const selecting = useRef(false), selectionRequest = useRef(0)
@@ -144,7 +156,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     const read = async () => {
       try {
         const result = await api('writingTask.inspect', { context: context() })
-        if (live) setQuestion(result.task?.questions?.find((row: any) => pendingQuestion(row) && !answeredQuestions.current.has(row.id)))
+        if (live) setQuestion(result.task?.mode === 'first-draft' ? undefined : result.task?.questions?.find((row: any) => pendingQuestion(row) && !answeredQuestions.current.has(row.id)))
       } catch { /* a project without a task simply has no question */ }
     }
     read()
@@ -184,10 +196,12 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     persistence.current!.enqueue({ text: next, baseHash, state: 'dirty', context: context() }); await persistence.current!.flush()
   } })
   const [saving, setSaving] = useState(false), [cursor, setCursor] = useState(0)
+  const followStream = useRef(true), previousScroll = useRef(0), generationAnchor = useRef<HTMLSpanElement>(null)
+  const [showReturnToStream,setShowReturnToStream] = useState(false)
   const livePreview = useMemo(() => {
-    try { return { projection: projectMarkdown(text), statistics: wordStats(text), error: '' } }
+    try { return { projection: projectMarkdown(displayedText), statistics: wordStats(displayedText), error: '' } }
     catch (error) { return { projection: undefined, statistics: undefined, error: (error as Error).message } }
-  }, [text])
+  }, [displayedText])
   useEffect(() => {
     if (!issueLocation || issueLocation.projectId !== projectId || issueLocation.documentHash !== project.document.contentHash) return
     const block = root.current?.querySelector<HTMLElement>(`[data-sf-block="${CSS.escape(issueLocation.location.blockId)}"]`)
@@ -290,6 +304,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
    * stop control cancels the same call rather than hiding it.
    */
   const submitRewrite = (range?: TextRange) => {
+    if (generating) return
     if (rewriteController.current && !rewriteController.current.signal.aborted) return
     const target = range ?? targetRange()
     if (!target || !rewrite) { setMessage('请先选中一段正文，再选择改写功能。'); return }
@@ -380,8 +395,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     } finally { setSaving(false) }
   }
   useEffect(() => {
-    onController?.({ dirty, canSave: dirty && !busy && !saving && baseHash === project.document.contentHash && !project.document.externalChange, save })
-  }, [text, baseHash, project.document.contentHash, project.ledger.revision, busy, saving])
+    onController?.({ dirty, canSave: dirty && !busy && !saving && !generating && baseHash === project.document.contentHash && !project.document.externalChange, save })
+  }, [text, baseHash, project.document.contentHash, project.ledger.revision, busy, saving, generating])
   const selectionAction = (action: 'add' | 'ask' | 'details') => run(async () => {
     if (!selection) return
     const request = ++selectionRequest.current
@@ -426,6 +441,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
    * the range there would erase the mark the user is about to rewrite (SF-087).
    */
   const liveRange = () => {
+    if (generating) return {origin:'preview' as const,range:undefined}
     const area = sourceArea.current
     if (area && document.activeElement === area) {
       const from = sourceOffset(area.value, area.selectionStart, project.document.lineEnding), to = sourceOffset(area.value, area.selectionEnd, project.document.lineEnding)
@@ -460,6 +476,13 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     onRegenerate={() => submitRewrite({ start: candidate.start, end: candidate.end })} />
   const sourceCandidate = candidate && (view === 'edit' || view === 'split' && candidate.origin !== 'preview')
   const candidateBlock = livePreview.projection?.blocks.filter(block => block.node.type === 'paragraph' && block.start < (candidate?.end ?? 0)).at(-1)
+  const streamEnd = activePreview ? activePreview.start + (activePreview.prefix??'\n\n').length + activePreview.text.length : 0
+  const streamBlock = generating ? livePreview.projection?.blocks.filter(block=>block.start<streamEnd).at(-1) : undefined
+  useEffect(()=>{
+    if(!generating || !followStream.current)return
+    const frame=requestAnimationFrame(()=>generationAnchor.current?.scrollIntoView({block:'nearest',behavior:'instant'}))
+    return()=>cancelAnimationFrame(frame)
+  },[stream.preview?.seq,generating])
   // The textarea's value holds LF while the manuscript may hold CRLF, so the pane's offsets are the
   // normalised ones; the preview works in the projection's source offsets (SF-087).
   const textareaOffset = (offset: number) => paneOffset(text, offset)
@@ -469,9 +492,14 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const sourceMark: MarkRange | undefined = marked && { ...marked, start: textareaOffset(marked.start), end: textareaOffset(marked.end) }
   const previewMark = marked && { start: marked.start, end: marked.end, flowing: marked.state === 'generating' }
   return <section className="sf-draft" aria-label="正文编辑">
+    {stream.error && generationMode==='first-draft' && <p role="alert" className="sf-stream-status">预览连接未完成：{stream.error}<button onClick={stream.reconnect}>重新连接预览</button></p>}
+    {stream.task?.mode==='first-draft' && generating && <div className="sf-stream-status" role="status">
+      <span>{stream.task.stopping?'正在暂停／停止…':activePreview ? `正在写：${activePreview.title} · 已保存 ${stream.task.sectionIndex}/${stream.task.sections.length} 节`:'正在准备正文与证据…'} · 本节完成校验后保存</span>
+      {showReturnToStream && <button onClick={()=>{followStream.current=true;setShowReturnToStream(false);generationAnchor.current?.scrollIntoView({block:'nearest',behavior:'instant'})}}>回到正在生成处</button>}
+    </div>}
     {/* The menu appears next to the selection and calls no model; the chosen function becomes
         an instruction in the bottom overlay (PRD §5.2). */}
-    {(selection || editRange) && selectionAnchor && !tool && visible && <SelectionMenu anchor={selectionAnchor} busy={busy}
+    {(selection || editRange) && selectionAnchor && !tool && visible && !generating && <SelectionMenu anchor={selectionAnchor} busy={busy}
       getAnchor={() => selectionOrigin.current === 'source' ? sourceSelectionRect(sourceArea.current!) : window.getSelection()?.rangeCount ? renderedSelectionRect(window.getSelection()!.getRangeAt(0)) : selectionAnchor}
       onAction={openRewrite} onClose={() => setSelectionAnchor(undefined)} />}
     {selectionDetail && <SelectionDetails card={selectionDetail} onClose={() => setSelectionDetail(undefined)} onTool={onTool} />}
@@ -494,7 +522,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         <div className="sf-source-pane" hidden={view === 'preview'} style={{ '--sf-editor-font': `${13 * editorZoom.zoom}px`, '--sf-editor-line': `${24 * editorZoom.zoom}px` } as React.CSSProperties}><div className="sf-pane-caption"><span>Markdown</span><ZoomControls label="编辑" {...editorZoom} />
           <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>{saving ? '保存中…' : '保存'}</button></div>
           <div className="sf-source-editor" ref={sourceEditor} data-candidate={!!sourceCandidate}><SourceRangeMark area={sourceArea} host={sourceEditor} range={sourceMark} text={text} zoom={editorZoom.zoom} /><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
-            <textarea ref={sourceArea} className="sf-source-input" aria-label="Markdown 手工编辑" spellCheck={false} disabled={busy || saving} value={text}
+            <textarea ref={sourceArea} className="sf-source-input" aria-label="Markdown 手工编辑" spellCheck={false} disabled={busy || saving || generating} value={text}
               onScroll={e => { const area = e.currentTarget; if (area.selectionStart !== area.selectionEnd) setSelectionAnchor(sourceSelectionRect(area)); if (gutter.current) gutter.current.style.transform = `translateY(${-area.scrollTop}px)` }}
               onMouseDown={() => { selecting.current = true; setSelectionAnchor(undefined) }}
               onMouseUp={e => { selecting.current = false; selectSource(e.currentTarget) }}
@@ -527,9 +555,13 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
           </div>
         </div>
         <div className="sf-preview-pane" hidden={view === 'edit'}><div className="sf-pane-caption"><span>预览</span><ZoomControls label="预览" {...previewZoom} /></div>
-          <div className="sf-paper-scroll" ref={previewScroll}><div className="sf-paper-page" style={{ zoom: previewZoom.zoom }} data-format={format} ref={root} onMouseUp={capture} onKeyUp={capture}>
+          <div className="sf-paper-scroll" ref={previewScroll} onScroll={event=>{
+            const node=event.currentTarget
+            if(generating && node.scrollTop < previousScroll.current-8){followStream.current=false;setShowReturnToStream(true)}
+            previousScroll.current=node.scrollTop
+          }}><div className="sf-paper-page" style={{ zoom: previewZoom.zoom }} data-format={format} ref={root} onMouseUp={generating?undefined:capture} onKeyUp={generating?undefined:capture}>
             {livePreview.projection ? <MarkdownView projection={livePreview.projection}
-              afterBlock={(start) => candidate && view !== 'edit' && candidateBlock?.start === start ? candidateView : null}
+              afterBlock={(start) => <>{candidate && view !== 'edit' && candidateBlock?.start === start ? candidateView : null}{streamBlock?.start===start && <span ref={generationAnchor} className="sf-stream-anchor" aria-hidden="true" />}</>}
               markRange={previewMark} annotations={(start, end) => <>{cowrite.annotations(start, end, candidate?.id)}{!dirty && (Object.values(project.ledger.reviewIssues) as any[]).filter(issue => !issue.stale && issue.state !== 'resolved' && issue.documentHash === project.document.contentHash && issue.location?.sourceRange.startUtf16 >= start && issue.location.sourceRange.startUtf16 < end).map(issue => <button className="sf-review-marker" key={issue.id} title={issue.explanation} onClick={onReview}>{issue.severity} · {issue.title}</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
             {!!livePreview.projection?.citationOrder.length && <section className="sf-paper-references"><h3>参考文献</h3><ol>{livePreview.projection.citationOrder.map(key => {
               const source = (Object.values(project.ledger.sources) as any[]).find(row => row.citeKey === key)
@@ -538,13 +570,16 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
           </div></div>
         </div>
       </div>
-      {sourceCandidate && <SourceCandidate area={sourceArea} end={textareaOffset(candidate.end)} identity={candidate.id}>{candidateView}</SourceCandidate>}
+      {!generating && stream.preview?.text && ['paused','stopped','failed'].includes(stream.preview.status) && stream.task?.status!=='completed' && <details className="sf-unfinished-preview">
+        <summary>未完成预览：{stream.preview.title} · 尚未写入主稿</summary><pre>{stream.preview.text}</pre>
+      </details>}
+      {sourceCandidate && !generating && <SourceCandidate area={sourceArea} end={textareaOffset(candidate.end)} identity={candidate.id}>{candidateView}</SourceCandidate>}
       <footer className="sf-draft-status"><span role="status" title={message || bufferMessage}>{saving ? '保存中…' : dirty ? '未保存 · 编辑已在本页保留' : project.document.externalChange ? '外部正文已改变' : <><span className="sf-saved-dot">●</span>已保存</>}{message && ` · ${message}`}</span>
         <span>{statistics ? `${statistics?.chineseCharacters ?? 0} 汉字 · ${statistics?.westernWords ?? 0} 词` : '字数暂不可用'}{currentHeading && ` · ${textOf(currentHeading)}`}</span></footer>
     </div>
     {/* The overlay lives inside the middle column, so it never reaches the left workspace or the
         right pane, and the scroller gains matching room while it is open (SPEC v1.2 §11). */}
-    <OverlayHost open={Boolean(rewrite) || Boolean(candidate && candidate.state !== 'accepted') || Boolean(question)}
+    <OverlayHost open={!generating && (Boolean(rewrite) || Boolean(candidate && candidate.state !== 'accepted') || Boolean(question))}
       tabs={[{ id: 'local', label: '局部改写' }, ...(question ? [{ id: 'task', label: question.sourceConflict ? '资料来源确认' : '当前目标的问题' }] : [])]}
       active={overlayTask && question ? 'task' : 'local'} onTab={id => setOverlayTask(id === 'task')} collapsed={overlayCollapsed}
       onCollapse={() => setOverlayCollapsed(value => !value)} label={overlayTask && question ? question.sourceConflict ? '资料来源确认' : '当前目标的问题' : '局部改写'}>

@@ -225,9 +225,9 @@ try {
   await page.getByRole('button',{name:'采用此大纲',exact:true}).click()
   await page.locator('.sf-outline-edit-row').first().waitFor()
   report.adoptedRows = await page.locator('.sf-outline-edit-row').count()
-  assert.equal(await page.getByRole('button',{name:'创建论文并开始撰写',exact:true}).isEnabled(),true)
+  assert.equal(await page.getByRole('button',{name:'开始生成初稿',exact:true}).isEnabled(),true)
   report.creationEnabled=true
-  await page.getByRole('button',{name:'创建论文并开始撰写',exact:true}).click()
+  await page.getByRole('button',{name:'开始生成初稿',exact:true}).click()
   const errorNotice=page.locator('.sf-wizard-error')
   await errorNotice.waitFor()
   await errorNotice.getByText('查看详情',{exact:true}).click()
@@ -246,7 +246,7 @@ try {
     selectedPlan=body.payload.args.request
     await route.fulfill({json:{type:'server-response',rpcId:body.rpcId,result:{ok:true,value:{ok:false,error:{code:'TEST_ONLY_STOP_BEFORE_MODEL',message:'TEST_ONLY 已准备新目录，停止在付费模型之前。',details:{}}}}}})
   })
-  await page.getByRole('button',{name:'创建论文并开始撰写',exact:true}).click()
+  await page.getByRole('button',{name:'开始生成初稿',exact:true}).click()
   await page.getByText('TEST_ONLY 已准备新目录，停止在付费模型之前。',{exact:true}).waitFor()
   assert(selectedPlan?.planId && selectedPlan.planHash)
   assert.equal(report.outlineRequests,1,'changing only output keeps adopted structure, without regeneration')
