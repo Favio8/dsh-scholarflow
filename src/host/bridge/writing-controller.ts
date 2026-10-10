@@ -748,9 +748,11 @@ export class WritingController {
       signal: controller.signal, pauseRequested: () => active.pause,
       parse: async materialId => (await parseRegisteredMaterial(io, materialId, (await snapshot(io)).ledger.revision, controller.signal,
         (bytes, media) => parseMaterialBytes(bytes, media, controller.signal, undefined, true))).parsed,
-      model: (system, data, runId) => {
+      model: async (system, data, runId) => {
         invariant(Buffer.byteLength(json(data)) + (model.maxOutputTokens ?? 16384) * 4 + 12000 < model.contextWindow * 4, 'CONTEXT_WINDOW_EXCEEDED', '所选资料超过当前模型范围，请缩小资料范围后继续。')
-        return callStageModel(this.ctx, model.session, model.selected, { system, instruction: '执行本次确认的论文规划。', context: data as any, runId, signal: controller.signal, maxTokens: model.maxOutputTokens })
+        const raw = await callStageModel(this.ctx, model.session, model.selected, { system, instruction: '执行本次确认的论文规划。', context: data as any, runId, signal: controller.signal, maxTokens: model.maxOutputTokens })
+        if(task.mode==='first-draft'){try{return JSON.stringify(parseOutlineJson(raw))}catch{/* Complete contract validation still handles unusable output. */}}
+        return raw
       },
       search: query => this.retrieveSources(io, task, query, controller.signal),
       review: async () => {

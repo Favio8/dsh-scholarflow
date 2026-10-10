@@ -30,8 +30,8 @@ test('real controller shows partial body before completion, cancels immediately,
   const ctx={io:f.io,effect(){},workspaceRegistry:{get(id){return id===context.workspaceId?{path:'TEST_ONLY_root',sessionIds:[context.sessionId]}:undefined}},
     stageModel:async call=>{
       const data=call.context
-      if(data.blocks)return JSON.stringify({summary:'TEST_ONLY source',bibliography:{}})
-      if(data.evidence && data.sections)return JSON.stringify({claims:data.sections.map(section=>({sectionId:section.id,text:'TEST_ONLY claim',evidenceIds:data.evidence.map(row=>row.id),rationale:'TEST_ONLY raw excerpts'}))})
+      if(data.blocks)return '```json\n'+JSON.stringify({summary:'TEST_ONLY source',bibliography:{}})+'\n```'
+      if(data.evidence && data.sections)return '```json\n'+JSON.stringify({claims:data.sections.map(section=>({sectionId:section.id,text:'TEST_ONLY claim',evidenceIds:data.evidence.map(row=>row.id),rationale:'TEST_ONLY raw excerpts'}))})+'\n```'
       assert(data.sectionContract)
       generationCalls++
       const key=data.sources[0].citeKey,ids=data.claims.map(row=>row.id),body='第一段 TEST_ONLY evidence [@'+key+'].\n\n第二段 TEST_ONLY analysis [@'+key+'].'
