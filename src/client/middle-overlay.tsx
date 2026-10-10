@@ -95,5 +95,11 @@ export const OVERLAY_CSS = `
 .sf-overlay-row select{width:70px;flex:none;border:0!important;padding:var(--sf-space-2) 0!important;font-size:var(--sf-font-sm)!important;white-space:nowrap}
 .sf-overlay-row button{white-space:nowrap;min-width:var(--sf-space-6);min-height:var(--sf-space-6);padding:var(--sf-space-1) var(--sf-space-2)!important}
 .sf-overlay-row .sf-overlay-close{border:0!important;background:transparent!important;color:inherit!important}
+.sf-source-conflict-list{display:grid;gap:var(--sf-space-2);padding:0;margin:var(--sf-space-3) 0;list-style:none;max-height:140px;overflow:auto}
+.sf-source-conflict-list li{display:grid;gap:var(--sf-space-1);padding:var(--sf-space-2);border:1px solid var(--sf-border);border-radius:var(--sf-radius-md);overflow-wrap:anywhere}
+.sf-source-conflict-list span{font-size:var(--sf-font-sm);color:var(--sf-muted)}
+.sf-overlay-question{overflow-wrap:anywhere}
+.sf-overlay-question .sf-overlay-row{margin-top:var(--sf-space-2)}
+@container (max-width:480px){.sf-overlay-question .sf-overlay-row{flex-wrap:wrap}.sf-overlay-question .sf-overlay-row input{flex-basis:100%}}
 @container (max-width:640px){.sf-overlay{left:var(--sf-space-2);right:var(--sf-space-2);bottom:var(--sf-space-2)}.sf-overlay-mini{left:auto}}
 `

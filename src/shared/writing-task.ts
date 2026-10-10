@@ -195,8 +195,13 @@ export const requirementDraftSpec = creationSpec.extend({
 export type RequirementSource = z.infer<typeof requirementSource>
 export type CountingPolicy = z.infer<typeof countingPolicy>
 export type PresetSelection = z.infer<typeof presetSelection>
+export const writingSourceConflict = z.object({ materialId: id, materialPath: relativePath, materialHash: hash, title: z.string().min(1),
+  configHash: hash, ledgerHash: hash, ledgerRevision: z.number().int().nonnegative(), previewHash: hash,
+  matches: z.array(z.object({ sourceId: id, sourceHash: hash, title: z.string(), citeKey: z.string(),
+    materialPath: relativePath.optional(), contentHash: hash.optional() }).strict()).min(1).max(1000) }).strict()
 export const writingQuestion = z.object({ id, title: z.string().min(1).max(2000), options: z.array(z.string().min(1).max(1000)).max(6),
-  kind: z.enum(['requirements', 'materials', 'conflict', 'failure']), answered: z.string().max(12000).optional() }).strict()
+  kind: z.enum(['requirements', 'materials', 'conflict', 'failure']), answered: z.string().max(12000).optional(),
+  sourceConflict: writingSourceConflict.optional() }).strict()
 // Only persisted history accepts budget; producers still use writingQuestion above.
 const storedWritingQuestion = writingQuestion.extend({ kind: z.enum(['requirements', 'materials', 'conflict', 'failure', 'budget']) })
 export const pendingQuestion = (row: { kind: string; answered?: string }) => row.kind !== 'budget' && row.answered === undefined
@@ -238,7 +243,8 @@ export const writingTaskRequest = z.object({ context: requestContext, taskId: id
 export const writingRequirementsRequest = z.object({ context: requestContext }).strict()
 export const writingPreferencesRequest = z.object({ context: requestContext, spec: creationSpec, baseSpecHash: hash.nullable().optional() }).strict()
 export const writingTaskAction = writingTaskRequest.extend({ action: z.enum(['pause', 'resume', 'cancel', 'answer']),
-  materials: z.array(relativePath).max(500).optional(), questionId: id.optional(), answer: z.string().trim().max(12000).optional() }).strict()
+  materials: z.array(relativePath).max(500).optional(), questionId: id.optional(), answer: z.string().trim().max(12000).optional(),
+  duplicateDecision: z.literal('keep-separate').optional(), sourceConflictHash: hash.optional() }).strict()
 export const cowriteRequest = z.object({ context: requestContext, text: z.string().max(2 * 1024 * 1024), baseDocumentHash: hash,
   start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), instruction: z.string().trim().min(1).max(12000) }).strict()
 /**

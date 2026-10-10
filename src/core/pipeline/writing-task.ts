@@ -17,6 +17,7 @@ import { saveWritingTask, dirtyWritingBuffers, readWritingSpec, noteTask, showPr
 import { classifyNote, mergeIssue } from './task-issues.ts'
 import type { ParsedMaterial } from '../../shared/materials.ts'
 import type { ReviewReport } from '../../shared/review.ts'
+import { evidenceMaterials, prepareWritingSourceConflict } from './source-conflict.ts'
 
 /**
  * Drafting order, which is not document order: the body comes first because a summary can
@@ -49,10 +50,18 @@ export async function askWritingQuestion(io: FileStore, task: WritingTask, title
   task.status = 'waiting-input'; await saveWritingTask(io, task)
 }
 async function locateEvidence(io: FileStore, task: WritingTask, model: WritingServices['model'], signal: AbortSignal, pauseRequested: () => boolean) {
-  const current = await snapshot(io), materials = Object.values(current.ledger.materials).filter(row => current.config.materials.include.includes(row.projectRelativePath) && (task.spec.materials.includes(row.projectRelativePath) || row.projectRelativePath.startsWith('.scholarflow/cache/writing-assets/')) && (row.parseStatus === 'ready' || row.parseStatus === 'partial'))
+  const current = await snapshot(io), materials = evidenceMaterials(current, task)
   for (; task.evidenceMaterialIndex < materials.length; task.evidenceMaterialIndex++, task.evidenceBlockIndex = 0) {
     const material = materials[task.evidenceMaterialIndex]
     let state = await snapshot(io), source = Object.values(state.ledger.sources).find(row => row.materialId === material.id)
+    if (!source) {
+      const sourceConflict = await prepareWritingSourceConflict(io, task)
+      if (sourceConflict) {
+        task.questions.push(writingQuestion.parse({ id: newId('question'), title: '当前资料与已登记来源题名相似，请核对具体文件。',
+          options: [], kind: 'failure', sourceConflict }))
+        task.status = 'waiting-input'; await saveWritingTask(io, task); return false
+      }
+    }
     if (!source) source = (await registerSource(io, { title: material.projectRelativePath.split('/').at(-1)!, kind: material.role === 'paper' ? 'paper' : 'other',
       authors: [], identifiers: {}, materialId: material.id }, state.ledger.revision)).source
     const parsed = await readParsed(io, material.id)
@@ -71,7 +80,7 @@ async function locateEvidence(io: FileStore, task: WritingTask, model: WritingSe
         title: z.string().min(1).optional(), authors: z.array(z.string()).default([]), year: z.number().int().optional(), doi: z.string().optional(), venue: z.string().optional() }).optional() }), raw, 'writingTask.evidence')
       state = await snapshot(io)
       await mutateLedger(io, state.ledger.revision, ledger => {
-        if (start === 0 && result.bibliography) {
+        if (start === 0 && material.role === 'paper' && result.bibliography) {
           const normalize = (value: string) => value.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase()
           const first = normalize(selected.map(block => block.text).join(' ')), metadata = result.bibliography
           // The model selects metadata; exact presence in the parsed source establishes its

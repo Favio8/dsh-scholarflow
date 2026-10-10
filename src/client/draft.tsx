@@ -131,6 +131,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     return () => observer.disconnect()
   }, [])
   const [answer, setAnswer] = useState('')
+  const [answerBusy, setAnswerBusy] = useState(false)
+  const answeredQuestions = useRef(new Set<string>())
   /**
    * The question a task needs answered belongs in the same place as the local instruction, so
    * the reader has one place to look and the two never stack (SPEC v1.2 §11.2). It is polled
@@ -142,7 +144,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     const read = async () => {
       try {
         const result = await api('writingTask.inspect', { context: context() })
-        if (live) setQuestion(result.task?.questions?.find(pendingQuestion))
+        if (live) setQuestion(result.task?.questions?.find((row: any) => pendingQuestion(row) && !answeredQuestions.current.has(row.id)))
       } catch { /* a project without a task simply has no question */ }
     }
     read()
@@ -151,11 +153,16 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   }, [context().sessionId, project.binding.projectId])
   useEffect(() => { if (question) setOverlayTask(true) }, [question?.id])
   const answerQuestion = async (value: string) => {
-    if (!question) return
+    if (!question || answerBusy) return
+    const current = question
+    setAnswerBusy(true)
     try {
-      await api('writingTask.action', { context: context(), taskId: undefined, action: 'answer', questionId: question.id, answer: value })
+      await api('writingTask.action', { context: context(), taskId: undefined, action: 'answer', questionId: current.id, answer: value,
+        ...(current.sourceConflict && { duplicateDecision: 'keep-separate', sourceConflictHash: current.sourceConflict.previewHash }) })
+      answeredQuestions.current.add(current.id)
       setAnswer(''); setQuestion(undefined); setOverlayTask(false); await refresh()
     } catch (error) { setMessage((error as Error).message) }
+    finally { setAnswerBusy(false) }
   }
   const [editRange, setEditRange] = useState<{ start: number; end: number }>(), [rewriteScope, setRewriteScope] = useState('selection'), [rewriteInstruction, setRewriteInstruction] = useState('')
   useEffect(() => {
@@ -538,18 +545,31 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     {/* The overlay lives inside the middle column, so it never reaches the left workspace or the
         right pane, and the scroller gains matching room while it is open (SPEC v1.2 §11). */}
     <OverlayHost open={Boolean(rewrite) || Boolean(candidate && candidate.state !== 'accepted') || Boolean(question)}
-      tabs={[{ id: 'local', label: '局部改写' }, ...(question ? [{ id: 'task', label: '当前目标的问题' }] : [])]}
+      tabs={[{ id: 'local', label: '局部改写' }, ...(question ? [{ id: 'task', label: question.sourceConflict ? '资料来源确认' : '当前目标的问题' }] : [])]}
       active={overlayTask && question ? 'task' : 'local'} onTab={id => setOverlayTask(id === 'task')} collapsed={overlayCollapsed}
-      onCollapse={() => setOverlayCollapsed(value => !value)} label={overlayTask && question ? '当前目标的问题' : '局部改写'}>
+      onCollapse={() => setOverlayCollapsed(value => !value)} label={overlayTask && question ? question.sourceConflict ? '资料来源确认' : '当前目标的问题' : '局部改写'}>
       {overlayTask && question ? <div className="sf-overlay-question">
+        {question.sourceConflict ? <>
+          <p className="sf-overlay-note"><strong>正在读取：{question.sourceConflict.materialPath}</strong></p>
+          <p className="sf-overlay-note">以下已登记记录的题名与当前文件相似。请核对文件；分别保留后，原有引用和证据保持原样。</p>
+          <ul className="sf-source-conflict-list">{question.sourceConflict.matches.map((row: any) => <li key={row.sourceId}>
+            <strong>{row.materialPath ?? '仅有元数据，尚未关联文件'}</strong><span>{row.title}</span>
+          </li>)}</ul>
+          <label className="sf-overlay-note" htmlFor="sf-source-conflict-reason">分别保留的理由</label>
+          <div className="sf-overlay-row">
+            <input id="sf-source-conflict-reason" placeholder="说明当前文件与已有记录的区别" value={answer} onChange={event => setAnswer(event.target.value)} maxLength={4000} disabled={answerBusy} />
+            <button type="button" className="sf-primary" disabled={busy || answerBusy || !answer.trim()} onClick={() => void answerQuestion(answer)}>{answerBusy ? '正在确认…' : '分别保留并继续'}</button>
+          </div>
+        </> : <>
         <p className="sf-overlay-note" style={{ margin: '0 0 8px' }}>{question.title}</p>
         <div className="sf-overlay-row" style={{ flexWrap: 'wrap' }}>
-          {question.options.map((option: string) => <button key={option} type="button" disabled={busy} onClick={() => void answerQuestion(option)}>{option}</button>)}
+          {question.options.map((option: string) => <button key={option} type="button" disabled={busy || answerBusy} onClick={() => void answerQuestion(option)}>{option}</button>)}
         </div>
         <div className="sf-overlay-row">
           <input aria-label="回答问题" placeholder="也可以补充你的要求…" value={answer} onChange={event => setAnswer(event.target.value)} />
-          <button type="button" className="sf-primary" disabled={busy || !answer.trim()} onClick={() => void answerQuestion(answer)}>回答并继续</button>
+          <button type="button" className="sf-primary" disabled={busy || answerBusy || !answer.trim()} onClick={() => void answerQuestion(answer)}>回答并继续</button>
         </div>
+        </>}
         <button aria-label="收起输入" onClick={() => setOverlayCollapsed(true)}>收起</button>
       </div> : <>
         <div className="sf-overlay-row">
