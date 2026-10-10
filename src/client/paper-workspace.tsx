@@ -49,7 +49,8 @@ export const PAPER_CSS = `
 .sf-paper-project{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;font-size:var(--sf-font-md)}
 .sf-paper-header{display:flex;align-items:center;gap:var(--sf-space-2);min-height:48px;padding:0 var(--sf-space-5);border-bottom:1px solid var(--sf-border);flex-shrink:0}
 .sf-paper-title{font-size:var(--sf-font-lg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:50px;max-width:40%}
-.sf-paper-project button:not(.sf-native-tools *),.sf-paper-project select:not(.sf-native-tools *),.sf-paper-export button{font:inherit;color:inherit;background:transparent;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);padding:var(--sf-space-2);cursor:pointer}
+/* The creation wizard owns its controls; this fallback must not override its button variants. */
+.sf-paper-project button:not(.sf-native-tools *):not(:where(.sf-wizard *)),.sf-paper-project select:not(.sf-native-tools *):not(:where(.sf-wizard *)),.sf-paper-export button{font:inherit;color:inherit;background:transparent;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);padding:var(--sf-space-2);cursor:pointer}
 .sf-paper-project button:disabled:not(.sf-native-tools *){cursor:default;opacity:var(--sf-disabled-opacity)}
 .sf-paper-header .sf-type-chip,.sf-paper-header select{font-size:var(--sf-font-sm);padding:var(--sf-space-1) var(--sf-space-2);color:var(--dsw-alias-label-secondary,var(--sf-muted));max-width:160px}
 .sf-paper-header .sf-native-tools{margin-left:auto}

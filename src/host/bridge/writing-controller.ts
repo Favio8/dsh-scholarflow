@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { stringify, parseDocument } from 'yaml'
-import { creationSpec, creationPrepareRequest, writingTaskRequest, writingTaskAction, cowriteProposalRequest, cowriteSuggestion, writingTaskSchema, type WritingTask, type CreationSpec } from '../../shared/writing-task.ts'
+import { creationSpec, requirementDraftSpec, creationPrepareRequest, writingTaskRequest, writingTaskAction, cowriteProposalRequest, cowriteSuggestion, writingTaskSchema, type WritingTask, type CreationSpec } from '../../shared/writing-task.ts'
 import { id, requestContext, hash } from '../../shared/schema.ts'
 import { resolveStore } from './project-api.ts'
 import { prepareInit, initialize, snapshot, mutateLedger, CONFIG_PATH, updatePresentation } from '../../core/project/project.ts'
@@ -145,10 +145,10 @@ export class WritingController {
    * — the wizard holds the adopted text in its own draft.
    */
   async readRequirements(request: unknown, operator: string, signal: AbortSignal) {
-    const input = z.object({ context: requestContext, spec: creationSpec, provider: id.optional() }).parse(request)
+    const input = z.object({ context: requestContext, spec: requirementDraftSpec, provider: id.optional() }).parse(request)
     const { io } = await resolveStore(this.ctx, input.context, signal)
     const sources = readRequirementSources(input.spec)
-    invariant(sources.length > 0, 'REQUIREMENT_SOURCE_REQUIRED', '请先添加要求来源，或直接填写写作要求。')
+    invariant(sources.length > 0 || input.spec.requirements, 'REQUIREMENT_SOURCE_REQUIRED', '请先添加要求来源，或直接填写写作要求。')
     const projectId = input.context.projectId ?? `draft_${input.context.sessionId}`
     const services = this.readServices(io, operator, input.context.sessionId, input.provider)
     const readId = newId('read')
@@ -176,10 +176,11 @@ export class WritingController {
    * candidate, so the diff is computed against the current spec rather than applied.
    */
   async structure(request: unknown, operator: string, signal: AbortSignal) {
-    const input = z.object({ context: requestContext, spec: creationSpec, readId: id, presetLength: z.number().int().optional() }).parse(request)
+    const input = z.object({ context: requestContext, spec: requirementDraftSpec, readId: id, presetLength: z.number().int().optional() }).parse(request)
     const read = await this.reads.result(input.readId, operator)
     invariant(read, 'READ_NOT_FOUND', '这次读取没有结果，请重新整理要求。')
-    invariant(read.state === 'ready' || read.members.some(member => member.state === 'ready'),
+    invariant(read.state !== 'reading' && read.state !== 'stopped'
+      && (input.spec.requirements || read.members.some(member => member.state === 'ready' && member.text?.trim())),
       'READ_EMPTY', '这次没有读到任何要求文字。可以在失败的文件旁粘贴文字、换一个文件，或直接填写写作要求。')
     const { io } = await resolveStore(this.ctx, input.context, signal)
     const projectId = input.context.projectId ?? `draft_${input.context.sessionId}`
@@ -214,7 +215,8 @@ export class WritingController {
    * section carries (PRD §3.4). Gaps are returned rather than smoothed over.
    */
   async suggestOutline(request: unknown, operator: string, signal: AbortSignal) {
-    const input = z.object({ context: requestContext, spec: creationSpec }).parse(request)
+    const input = z.object({ context: requestContext, spec: requirementDraftSpec }).parse(request)
+    invariant(input.spec.requirements, 'REQUIREMENTS_UNCONFIRMED', '请先采用整理后的要求，或直接填写写作要求。')
     const { io } = await resolveStore(this.ctx, input.context, signal)
     const projectId = input.context.projectId ?? `draft_${input.context.sessionId}`
     const model = await selectedModel(this.ctx, input.context.sessionId, signal)
@@ -247,7 +249,7 @@ export class WritingController {
    * user typed disappears behind a summary.
    */
   adoptCandidate(request: unknown, operator: string) {
-    const input = z.object({ context: requestContext, candidateId: id, spec: creationSpec,
+    const input = z.object({ context: requestContext, candidateId: id, spec: requirementDraftSpec,
       groups: z.array(z.enum([...ADOPTABLE_PATHS])).optional(),
       all: z.boolean().default(false), resolveLength: z.enum(['teacher', 'current']).optional() }).parse(request)
     const projectId = input.context.projectId ?? `draft_${input.context.sessionId}`
@@ -398,7 +400,7 @@ export class WritingController {
    * fixing one unreadable scan does not repeat the work already done (PRD §4.3).
    */
   async retryMember(request: unknown, operator: string, signal: AbortSignal) {
-    const input = z.object({ context: requestContext, spec: creationSpec, readId: id, member: z.string().min(1).max(800),
+    const input = z.object({ context: requestContext, spec: requirementDraftSpec, readId: id, member: z.string().min(1).max(800),
       provider: id.optional() }).parse(request)
     const read = this.reads.peek(input.readId, operator)
     invariant(read, 'READ_NOT_FOUND', '这次读取已经结束，请重新整理要求。')

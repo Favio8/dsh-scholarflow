@@ -1,7 +1,8 @@
 import { useTextPrompt } from './text-prompt.tsx'
 import React, { useEffect, useRef, useState } from 'react'
 import { useConfirmationFocus } from './confirmation-focus.ts'
-import { creationSpec, presetSections, type CreationSpec } from '../shared/writing-task.ts'
+import { creationSpec, requirementDraftSpec, presetSections, type CreationSpec } from '../shared/writing-task.ts'
+import { creationErrorMessage } from './creation-errors.ts'
 import { allocate } from '../core/presets/allocation.ts'
 import { sectionsFromPreset, selectionFromPreset } from '../core/presets/apply.ts'
 import { FORMAT_LABELS, TYPE_LABELS } from './paper-workspace.tsx'
@@ -16,6 +17,14 @@ function formatElapsed(ms: number) {
 const splitPath = (path: string) => {
   const cut = path.lastIndexOf('/')
   return cut < 0 ? { name: path, dir: '工作区根目录' } : { name: path.slice(cut + 1), dir: path.slice(0, cut) }
+}
+
+function WizardIcon({ name }: { name: 'folder' | 'file' | 'plus' | 'down' | 'back' | 'next' | 'close' }) {
+  const paths = { folder: 'M3 7V5h6l2 2h10v12H3V7Z', file: 'M6 3h8l4 4v14H6V3Zm8 0v5h4M9 12h6M9 16h6',
+    plus: 'M12 5v14M5 12h14', down: 'm6 9 6 6 6-6', back: 'm12 5-7 7 7 7M5 12h14',
+    next: 'm12 5 7 7-7 7M5 12h14', close: 'm6 6 12 12M6 18 18 6' }
+  return <svg className="sf-wizard-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>
 }
 
 /**
@@ -116,8 +125,7 @@ function RequirementPicker({ files, disabled, scanning, onPick, onRescan, onPick
   const matches = needle ? rows.filter((row: any) => row.path.toLowerCase().includes(needle)) : rows
   return <div className="sf-picker">
     <button type="button" className="sf-picker-toggle" aria-expanded={open} disabled={disabled} onClick={() => setOpen(!open)}>
-      <span className="sf-picker-current"><em>添加要求文件或文件夹</em></span>
-      <span className="sf-picker-caret" aria-hidden="true">⌄</span>
+      <WizardIcon name="plus" /><span>添加要求文件或文件夹</span><WizardIcon name="down" />
     </button>
     {open && <div className="sf-picker-panel">
       <div className="sf-picker-search">
@@ -131,6 +139,7 @@ function RequirementPicker({ files, disabled, scanning, onPick, onRescan, onPick
       <div className="sf-picker-list">
         {matches.map((row: any) => { const shown = splitPath(row.path)
           return <button type="button" key={row.path} className="sf-picker-row" onClick={() => { onPick(mode, row.path); setOpen(false) }}>
+            <WizardIcon name={mode === 'folder' ? 'folder' : 'file'} />
             <span className="sf-picker-name">{shown.name}</span><span className="sf-picker-dir">{shown.dir}</span>
             {mode === 'file' ? <small>{REQUIREMENT_KIND_LABEL[requirementKind(row.path)]} · {Math.max(1, Math.ceil(row.size / 1024))} KB</small>
               : <small>{row.count} 个文件</small>}
@@ -258,46 +267,57 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   }
   const [operator, setOperator] = useState<'idle' | 'reading' | 'structuring' | 'stopped' | 'done'>('idle')
   const organize = () => act(async () => {
-    const current = readySpec()
+    const current = requirementDraftSpec.parse(readySpec())
     const controller = new AbortController(); readController.current = controller
     const opId = `op_${Date.now()}`
     readRef.current = { opId, startedAt: Date.now() }
-    setElapsed(0); setBrief(undefined); setOperator('reading'); setError('')
-    const { readId } = await api('creation.readRequirements', { context: context(), spec: creationSpec.parse(current) }, controller.signal)
-    if (controller.signal.aborted || readRef.current.opId !== opId) { void api('creation.stopRead', { readId }); return }
-    readRef.current.readId = readId
-    const startedAt = readRef.current.startedAt!
-    readRef.current.timer = window.setInterval(async () => {
-      const live = readRef.current
-      if (live.opId !== opId) return
-      setElapsed(Date.now() - startedAt)
-      try {
-        const status = await api('creation.readStatus', { readId })
-        // A late answer from a stopped or superseded action never reaches a field (PRD §4.1).
-        if (readRef.current.opId !== opId) return
-        setRead(status)
-      } catch { /* a finished job reports its final state on the next poll */ }
-    }, 400)
-    // Polling ends when the job settles; the result is the same object the last poll saw.
-    const settled = await waitForRead(readId, opId)
-    window.clearInterval(readRef.current.timer); setElapsed(Date.now() - startedAt)
-    if (readRef.current.opId !== opId) return
-    setRead(settled)
-    if (!settled || !settled.members.some((member: any) => member.state === 'ready')) {
-      // Nothing read is a stated outcome, not a silent success (SPEC v1.2 §5.4).
-      setOperator('done')
-      setIssues([settled?.state === 'stopped' ? '已停止；已读到的成员保留，未读到的成员需要处理后才能成为已确认要求。'
-        : '这次没有读到任何要求文字。可以在失败的文件旁粘贴文字、换一个文件，或直接填写写作要求。'])
-      return
-    }
-    setOperator('structuring')
-    const structureTimer = window.setInterval(() => setElapsed(Date.now() - startedAt), 400)
+    let structureTimer: number | undefined
+    setElapsed(0); setRead(undefined); setBrief(undefined); setIssues([]); setOperator('reading'); setError('')
     try {
-      const result = await api('creation.structure', { context: context(), spec: creationSpec.parse(current), readId, presetLength: spec.targetLength }, controller.signal)
+      const { readId } = await api('creation.readRequirements', { context: context(), spec: current }, controller.signal)
+      if (controller.signal.aborted || readRef.current.opId !== opId) { void api('creation.stopRead', { readId }); return }
+      readRef.current.readId = readId
+      const startedAt = readRef.current.startedAt!
+      readRef.current.timer = window.setInterval(async () => {
+        const live = readRef.current
+        if (live.opId !== opId) return
+        setElapsed(Date.now() - startedAt)
+        try {
+          const status = await api('creation.readStatus', { readId })
+          // A late answer from a stopped or superseded action never reaches a field (PRD §4.1).
+          if (readRef.current.opId !== opId) return
+          setRead(status)
+        } catch { /* a finished job reports its final state on the next poll */ }
+      }, 400)
+      // Polling ends when the job settles; the result is the same object the last poll saw.
+      const settled = await waitForRead(readId, opId)
+      window.clearInterval(readRef.current.timer); setElapsed(Date.now() - startedAt)
       if (readRef.current.opId !== opId) return
-      setBrief({ ...result.candidate, inputSpecJson: JSON.stringify(current) }); setOperator('done')
-    } catch (error) { if (controller.signal.aborted) return; setOperator('done'); throw error }
-    finally { window.clearInterval(structureTimer) }
+      setRead(settled)
+      if (settled?.state === 'reading') {
+        await api('creation.stopRead', { readId })
+        throw new Error('读取要求等待超时，已停止本次读取。请重试，或在文件旁粘贴要求文字。')
+      }
+      if (!settled || settled.state === 'stopped' || (!current.requirements && !settled.members.some((member: any) => member.state === 'ready'))) {
+        // Nothing read is a stated outcome, not a silent success (SPEC v1.2 §5.4).
+        setOperator('done')
+        setIssues([settled?.state === 'stopped' ? '已停止；已读到的成员保留，未读到的成员需要处理后才能成为已确认要求。'
+          : '这次没有读到任何要求文字。可以在失败的文件旁粘贴文字、换一个文件，或直接填写写作要求。'])
+        return
+      }
+      setOperator('structuring')
+      structureTimer = window.setInterval(() => setElapsed(Date.now() - startedAt), 400)
+      const result = await api('creation.structure', { context: context(), spec: current, readId, presetLength: current.targetLength }, controller.signal)
+      if (readRef.current.opId !== opId) return
+      setBrief({ ...result.candidate, inputSpecJson: JSON.stringify(current) })
+    } catch (error) { if (controller.signal.aborted) return; throw error }
+    finally {
+      window.clearInterval(structureTimer)
+      if (readRef.current.opId === opId) {
+        window.clearInterval(readRef.current.timer)
+        setOperator(controller.signal.aborted ? 'stopped' : 'done')
+      }
+    }
   })
   const waitForRead = async (readId: string, opId: string, timeoutMs = 15 * 60 * 1000) => {
     const deadline = Date.now() + timeoutMs
@@ -311,8 +331,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     return last
   }
   const adoptBrief = (mode: { all?: boolean; resolveLength?: 'teacher' | 'current' }) => act(async () => {
-    const result = await api('candidates.adopt', { context: context(), candidateId: brief.candidateId, spec: creationSpec.parse(readySpec()), ...mode })
-    const next = creationSpec.parse(result.spec)
+    const result = await api('candidates.adopt', { context: context(), candidateId: brief.candidateId, spec: requirementDraftSpec.parse(readySpec()), ...mode })
+    const next = requirementDraftSpec.parse(result.spec)
     // The adopted text stays editable in the requirement field; nothing overwrites the user's own words.
     setSpec(previous => ({ ...previous, requirements: next.requirements, targetLength: next.targetLength,
       brief: next.brief, typography: next.typography, cover: next.cover, overrides: next.overrides }))
@@ -327,7 +347,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const retryMember = (member: string) => act(async () => {
     const { readId } = readRef.current
     if (!readId) return
-    const result = await api('creation.retryMember', { context: context(), spec: creationSpec.parse(readySpec()), readId, member })
+    const result = await api('creation.retryMember', { context: context(), spec: requirementDraftSpec.parse(readySpec()), readId, member })
     setRead(result.read)
   })
   // The old single-shot suggest stays available for the chapter-only path in step 3.
@@ -339,7 +359,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     setIssues(['已停止生成大纲；原结构保持，重新生成需再次点击。'])
   }
   const suggestStructure = () => act(async () => {
-    const current = creationSpec.parse(readySpec())
+    const current = requirementDraftSpec.parse(readySpec())
     const controller = new AbortController(); outlineController.current = controller
     const startedAt = Date.now(); setOutlineRunning(true); setOutlineElapsed(0)
     const timer = window.setInterval(() => setOutlineElapsed(Date.now() - startedAt), 400)
@@ -350,8 +370,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   })
   const [outline, setOutline] = useState<any>()
   const adoptOutline = () => act(async () => {
-    const result = await api('candidates.adopt', { context: context(), candidateId: outline.candidateId, spec: creationSpec.parse(readySpec()), all: true })
-    const next = creationSpec.parse(result.spec)
+    const result = await api('candidates.adopt', { context: context(), candidateId: outline.candidateId, spec: requirementDraftSpec.parse(readySpec()), all: true })
+    const next = requirementDraftSpec.parse(result.spec)
     setHistory(rows => [...rows.slice(-9), spec.sections])
     setSpec(previous => ({ ...previous, sections: outline.sections, preset: previous.preset ? { ...previous.preset, modified: true } : previous.preset }))
     setOutline(undefined); setIssues(['已采用大纲候选，可以继续编辑章节。'])
@@ -441,15 +461,28 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
     // Each member reports its own outcome; a folder is never summarised as one file.
     const members = (read?.members ?? []).filter((row: any) => source.origin === 'external' ? true
       : source.kind === 'folder' ? source.members.some((member: any) => member.name === row.name) : row.name === source.path)
+    const fileRows = source.kind === 'folder' ? source.members : []
     return <li key={source.resourceId} className="sf-source-row">
+      <span className="sf-source-icon"><WizardIcon name={source.kind === 'folder' ? 'folder' : 'file'} /></span>
+      <span className="sf-source-name" title={source.path}><strong>{shown.name}</strong><small>{shown.dir}{!external && source.kind === 'folder' ? ` · ${source.members.length} 个文件` : ''}</small></span>
       <span className="sf-source-badge" data-kind={external ? 'external' : kind}>{external ? '外部' : source.kind === 'folder' ? '文件夹' : REQUIREMENT_KIND_LABEL[kind as keyof typeof REQUIREMENT_KIND_LABEL]}</span>
-      <span className="sf-source-name">{shown.name}<small>{shown.dir}</small></span>
       {needsReconnect && <button type="button" className="sf-source-action" disabled={busy} onClick={addExternalSource}>重新连接</button>}
       {!external && kind === 'image' && <button type="button" className="sf-source-action" disabled={busy} onClick={() => identify(source.resourceId)}>
         {status?.state === 'running' ? '识别中…' : status?.state === 'confirmed' || status?.state === 'candidate' ? '重新识别' : '识别文字'}</button>}
-      <button type="button" className="sf-source-action" onClick={() => removeSource(source.resourceId)}>移除</button>
-      {source.kind === 'folder' && <ul className="sf-source-members">{source.members.map(member => <li key={member.name}>
-        <span>{member.name}</span><button type="button" aria-label={`移除 ${member.name}`} onClick={() => removeMember(source.resourceId, member.name)}>×</button></li>)}</ul>}
+      <button type="button" className="sf-source-remove" disabled={busy} aria-label={`移除来源 ${shown.name}`} title="移除来源" onClick={() => removeSource(source.resourceId)}><WizardIcon name="close" /></button>
+      {source.kind === 'folder' && <ul className="sf-source-members">{fileRows.map(member => {
+        const result = members.find((row: any) => row.name === member.name)
+        const display = splitPath(member.name)
+        return <li key={member.name} data-state={result?.state}>
+          <WizardIcon name="file" /><span className="sf-source-member-name" title={member.name}>{display.name}</span>
+          <span className="sf-member-state">{result ? `${MEMBER_STATE[result.state] ?? result.state}${result.chars ? ` · ${result.chars} 字` : ''}` : REQUIREMENT_KIND_LABEL[requirementKind(member.name)]}</span>
+          <button type="button" className="sf-source-remove" disabled={busy} aria-label={`移除 ${member.name}`} title="移除此文件" onClick={() => removeNamedMember(source.resourceId, member.name)}><WizardIcon name="close" /></button>
+          {result?.note && <span className="sf-member-note">{result.note}</span>}
+          {result?.state === 'failed' && <span className="sf-member-actions">
+            <button type="button" className="sf-source-action" disabled={busy} onClick={() => retryMember(member.name)}>重新读取</button>
+            <button type="button" className="sf-source-action" disabled={busy} onClick={() => pasteMemberText(member.name)}>粘贴文字</button>
+          </span>}
+        </li> })}</ul>}
       {needsReconnect && <p className="sf-source-note" role="status">读取授权已过期，需要重新选择这个文件夹；已经确认的要求文字不受影响。</p>}
       {status?.state === 'candidate' && <div className="sf-candidate">
         <span className="sf-field-label">识别候选 · 确认后才成为要求</span>
@@ -461,7 +494,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         </div></div>}
       {status?.state === 'confirmed' && <p className="sf-source-note" role="status">已采用的识别文字已在写作要求中，可以继续编辑；重新识别只替换本次候选。</p>}
       {status?.note && <p className="sf-source-note" role="status">{status.note}</p>}
-      {!!members.length && <ul className="sf-member-reads">{members.map((row: any) => <li key={row.name} data-state={row.state}>
+      {source.kind !== 'folder' && !!members.length && <ul className="sf-member-reads">{members.map((row: any) => <li key={row.name} data-state={row.state}>
         <span className="sf-member-name">{row.name}</span>
         <span className="sf-member-state">{MEMBER_STATE[row.state] ?? row.state}{row.chars ? ` · ${row.chars} 字` : ''}</span>
         {!!row.note && <span className="sf-member-note">{row.note}</span>}
@@ -572,8 +605,8 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
             <span className="sf-long-op-elapsed">已用 {formatElapsed(elapsed)}</span>
             <span className="sf-long-op-hint">{operator === 'reading' ? '等待模型响应期间不显示推算的剩余时间。' : '只使用本次真正读到的文字。'}</span>
           </div>}
-          <p className="sf-field-hint">要求来源规定这篇论文该怎么写；第二步的论文参考材料提供写作所需的资料。两者独立选择，互不要求对方包含自己。文件保持原样，只在整理或写作时读取。</p>
-          {brief && <BriefCandidate candidate={brief} stale={brief.inputSpecJson !== JSON.stringify(readySpec())} busy={busy} onAdopt={adoptBrief} onDiscard={discardBrief} />}
+          <p className="sf-field-hint">添加作业说明、评分标准或截图，再点击「整理要求」。参考文献在下一步选择，原文件不会修改。</p>
+          {brief && <BriefCandidate candidate={brief} stale={brief.inputSpecJson !== JSON.stringify(requirementDraftSpec.safeParse(readySpec()).data)} busy={busy} onAdopt={adoptBrief} onDiscard={discardBrief} />}
           {spec.requirementSources.length
             ? <ul className="sf-source-list">{requirementRows}</ul>
             : <p className="sf-field-hint">还没有添加要求来源。也可以直接填写写作要求后继续。</p>}
@@ -676,21 +709,22 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         {conflict && <label>论文输出目录<input value={spec.manuscriptDir} onChange={e => update({ manuscriptDir: e.target.value })} /><small>此处已有文件，请选择新的输出目录。</small></label>}
       </>}
     </div>
-    {error && <p className="sf-wizard-error" role="alert">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}
+    {error && <p className="sf-wizard-error" role="alert">{creationErrorMessage({ message: error })}</p>}
     {issues.length > 0 && <ul className="sf-wizard-issues" role="alert">{issues.map(issue => <li key={issue}>{issue}</li>)}</ul>}
-    <footer className="sf-wizard-footer">{step > 0 && <button disabled={busy} onClick={() => goToStep(step - 1)}>← 上一步</button>}<span />
-      {step < 2 ? <button className="sf-primary" disabled={busy} onClick={() => {
+    <footer className="sf-wizard-footer">{step > 0 && <button className="sf-wizard-nav sf-wizard-back" disabled={busy} onClick={() => goToStep(step - 1)}><WizardIcon name="back" /><span>上一步</span></button>}<span />
+      {step < 2 ? <button className="sf-primary sf-wizard-nav" disabled={busy} onClick={() => {
         // The control stays reachable: a greyed-out button tells the user nothing
         // (design 02 §9). Clicking reports what is missing and focuses the first field.
-        if (step === 0 && !spec.requirements.trim() && !spec.requirementSources.length) {
-          setIssues(['请填写写作要求，或添加至少一个要求来源。'])
+        if (step === 0 && !spec.requirements.trim()) {
+          setIssues([spec.requirementSources.length ? '要求文件已添加。请先点击「整理要求」并采用候选，或直接填写写作要求。' : '请填写写作要求，或添加要求文件后整理并采用。'])
           document.getElementById('sf-field-requirements')?.focus(); return
         }
-        goToStep(step + 1) }}>下一步 →</button>
-        : <button className="sf-primary" disabled={busy} onClick={() => {
+        goToStep(step + 1) }}><span>下一步</span><WizardIcon name="next" /></button>
+        : <button className="sf-primary sf-wizard-nav" disabled={busy} onClick={() => {
           const empty = spec.sections.findIndex(section => !section.title.trim() || section.targetLength < 50)
           const blockers = [
             ...(spec.title.trim() ? [] : ['创建前必须填写论文题目（在第一步填写）。']),
+            ...(spec.requirements.trim() ? [] : ['请返回第一步，采用整理后的要求或直接填写写作要求。']),
             ...(empty < 0 ? [] : [`第 ${empty + 1} 章还没有标题，或篇幅低于 50。`]),
             ...(allocationPlan.minimumShortfall ? ['自动章节连最低篇幅都达不到，请提高目标篇幅或调整手工篇幅。'] : []),
           ]
@@ -714,13 +748,13 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
    preference. Every text token clears WCAG AA on the surface its rule paints; verified by
    scripts/audit-appearance.mjs. */
 .sf-wizard-scroll{overflow:auto;flex:1;background:var(--dsw-alias-bg-layer-1,var(--sf-surface-2));padding:var(--sf-space-6) var(--sf-space-5)}
-.sf-wizard{max-width:760px;margin:0 auto;padding:var(--sf-space-6);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-2);font-size:var(--sf-font-lg)}
+.sf-wizard{--sf-control-min-height:var(--sf-space-6);max-width:760px;margin:0 auto;padding:var(--sf-space-6);background:var(--dsw-alias-bg-base,var(--sf-surface));border:1px solid var(--sf-border);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-2);font-size:var(--sf-font-lg)}
 .sf-wizard h2{font-size:var(--sf-font-2xl);margin:var(--sf-space-2) 0}
 .sf-wizard h3{font-size:var(--sf-font-xl);margin:0}
 .sf-wizard p,.sf-muted{color:var(--dsw-alias-label-secondary,var(--sf-muted));line-height:var(--sf-leading-body)}
 .sf-wizard-eyebrow{font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
 .sf-wizard label,.sf-wizard .sf-assignment-field{display:flex;flex-direction:column;gap:var(--sf-space-2);font-size:var(--sf-font-md);margin:var(--sf-space-4) 0 0}
-.sf-wizard button{font:inherit;font-size:var(--sf-font-md);height:var(--sf-space-6);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:var(--sf-surface);color:var(--sf-text);cursor:pointer}
+.sf-wizard button{font:inherit;font-size:var(--sf-font-md);height:var(--sf-space-6);min-height:var(--sf-control-min-height);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:var(--sf-surface);color:var(--sf-text);cursor:pointer}
 .sf-wizard input:not([type=checkbox]),.sf-wizard select{box-sizing:border-box;font-family:inherit;height:var(--sf-space-7);width:100%;padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit}
 .sf-wizard textarea{font-family:inherit;font-size:var(--sf-font-lg);line-height:var(--sf-leading-prose)}
 .sf-field-hint{margin:var(--sf-space-2) 0 0;font-size:var(--sf-font-sm);line-height:var(--sf-leading-body);color:var(--dsw-alias-label-secondary,var(--sf-text-faint))}
@@ -735,18 +769,22 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-wizard-page[data-direction=forward]{animation:sf-step-forward var(--sf-dur-base,220ms) var(--sf-ease-out,ease-out)}
 .sf-wizard-page[data-direction=back]{animation:sf-step-back var(--sf-dur-base,220ms) var(--sf-ease-out,ease-out)}
 .sf-wizard-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:var(--sf-space-4)}
-.sf-wizard .sf-assignment-row{display:flex;align-items:flex-end;gap:var(--sf-space-3)}
+.sf-wizard .sf-assignment-row{display:flex;align-items:flex-start;gap:var(--sf-space-2);margin-top:var(--sf-space-2)}
 .sf-wizard .sf-assignment-row>.sf-assignment-field{flex:1 1 auto;min-width:0}
 .sf-wizard .sf-assignment-row>.sf-assignment-extract{flex:none;height:var(--sf-space-7)}
-.sf-wizard .sf-picker{position:relative}
-.sf-wizard .sf-picker-toggle{display:flex;align-items:center;gap:var(--sf-space-2);width:100%;height:var(--sf-space-7);padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;text-align:left;cursor:pointer}
+.sf-wizard .sf-picker{position:relative;min-width:0;flex:1}
+.sf-wizard .sf-picker-toggle{display:inline-flex;align-items:center;justify-content:center;gap:var(--sf-space-2);max-width:100%;height:auto;min-height:max(var(--sf-space-7),var(--sf-control-min-height));padding:var(--sf-space-2) var(--sf-space-3);border:1px solid var(--sf-border);border-radius:var(--sf-radius-lg);background:var(--sf-surface);color:var(--sf-text);text-align:left;cursor:pointer}
+.sf-wizard-icon{flex:none;vertical-align:middle}
+.sf-wizard .sf-picker-toggle>span{min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:var(--sf-leading-body)}
+.sf-wizard .sf-picker-toggle[aria-expanded=true]{border-color:var(--sf-accent);background:var(--sf-accent-soft);color:var(--sf-accent-text)}
+.sf-wizard .sf-assignment-extract{border-color:var(--sf-accent-border);background:var(--sf-accent-soft);color:var(--sf-accent-text);border-radius:var(--sf-radius-lg)}
 .sf-wizard .sf-picker-current{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;line-height:var(--sf-leading-tight)}
 .sf-wizard .sf-picker-current strong{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sf-wizard .sf-picker-current small{font-size:var(--sf-font-xs);color:var(--dsw-alias-label-secondary,var(--sf-text-faint));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sf-wizard .sf-picker-current em{font-style:normal;color:var(--dsw-alias-label-secondary,var(--sf-text-faint))}
 .sf-wizard .sf-picker-caret{flex:none;color:var(--dsw-alias-label-secondary,var(--sf-text-faint))}
-.sf-wizard .sf-picker-panel{margin-top:var(--sf-space-2);border:1px solid var(--sf-border);border-radius:var(--sf-radius-lg);background:var(--dsw-alias-bg-base,var(--sf-surface));box-shadow:var(--sf-shadow-3);overflow:hidden}
-.sf-wizard .sf-picker-search{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2);border-bottom:1px solid var(--sf-border)}
+.sf-wizard .sf-picker-panel{position:relative;margin-top:var(--sf-space-2);border:1px solid var(--sf-border);border-radius:var(--sf-radius-lg);background:var(--dsw-alias-bg-base,var(--sf-surface));box-shadow:var(--sf-shadow-1);overflow:hidden}
+.sf-wizard .sf-picker-search{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sf-space-2);padding:var(--sf-space-3);border-bottom:1px solid var(--sf-border)}
 .sf-wizard .sf-picker .sf-picker-search>input{flex:1 1 auto;min-width:0;width:auto;height:var(--sf-space-6)}
 .sf-wizard .sf-picker-search>button{flex:none;height:var(--sf-space-6)}
 .sf-wizard .sf-picker-list{max-height:230px;overflow:auto}
@@ -789,18 +827,26 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-wizard .sf-field-label{font-size:var(--sf-font-sm);font-weight:500;color:var(--dsw-alias-label-secondary,var(--sf-muted))}
 .sf-wizard .sf-choice-current{margin:0;height:var(--sf-space-7);display:flex;align-items:center;padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:var(--sf-fill);color:inherit;font-size:var(--sf-font-lg)}
 .sf-wizard .sf-source-list{list-style:none;margin:0;padding:0;border:1px solid var(--sf-border);border-radius:var(--sf-radius-lg);overflow:hidden}
-.sf-wizard .sf-source-row{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap;padding:var(--sf-space-2) var(--sf-space-3);border-bottom:1px solid var(--sf-border-soft)}
+.sf-wizard .sf-source-row{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap;padding:var(--sf-space-3);border-bottom:1px solid var(--sf-border-soft)}
+.sf-wizard .sf-source-icon{display:grid;place-items:center;width:var(--sf-space-7);height:var(--sf-space-7);border-radius:var(--sf-radius-lg);color:var(--sf-accent-text);background:var(--sf-accent-soft)}
 .sf-wizard .sf-source-row:last-child{border-bottom:0}
 .sf-wizard .sf-source-badge{flex:none;padding:0 var(--sf-space-2);border-radius:var(--sf-radius-pill);background:var(--sf-fill-strong);font-size:var(--sf-font-xs);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
 .sf-wizard .sf-source-badge[data-kind=image]{background:var(--sf-warn-soft);color:var(--sf-warn-text)}
 .sf-wizard .sf-source-badge[data-kind=unsupported]{background:var(--sf-danger-soft);color:var(--sf-danger)}
 .sf-wizard .sf-source-badge[data-kind=external]{background:var(--sf-accent-soft-strong);color:var(--sf-accent-text)}
-.sf-wizard .sf-source-name{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;font-size:var(--sf-font-md);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-wizard .sf-source-name{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--sf-space-hair);font-size:var(--sf-font-md);color:var(--sf-text);overflow:hidden;white-space:nowrap}
+.sf-wizard .sf-source-name strong{font-weight:500;overflow:hidden;text-overflow:ellipsis}
+.sf-wizard .sf-source-name small{overflow:hidden;text-overflow:ellipsis}
 .sf-wizard .sf-source-name small{font-size:var(--sf-font-xs);color:var(--dsw-alias-label-secondary,var(--sf-text-faint))}
 .sf-wizard .sf-source-action{flex:none;height:var(--sf-space-6);padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit;font:inherit;font-size:var(--sf-font-sm);cursor:pointer}
-.sf-wizard .sf-source-members{flex:1 1 100%;list-style:none;margin:var(--sf-space-hair) 0 0;padding:0 0 0 var(--sf-space-3);font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
-.sf-wizard .sf-source-members li{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-hair) 0}
-.sf-wizard .sf-source-members button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:var(--sf-font-md);line-height:1;padding:0 var(--sf-space-1)}
+.sf-wizard .sf-source-members{flex:1 1 100%;min-width:0;list-style:none;margin:var(--sf-space-1) 0 0;padding:var(--sf-space-1) 0 0;border-top:1px solid var(--sf-border-soft);font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
+.sf-wizard .sf-source-members li{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-1) 0 var(--sf-space-1) var(--sf-space-2)}
+.sf-wizard .sf-source-member-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sf-text)}
+.sf-wizard .sf-source-remove{display:inline-flex;align-items:center;justify-content:center;flex:none;width:var(--sf-space-6);height:var(--sf-space-6);padding:0;border-color:transparent;background:transparent;color:var(--sf-muted);border-radius:var(--sf-radius-md)}
+.sf-wizard .sf-source-remove:hover:not(:disabled){background:var(--sf-danger-soft);color:var(--sf-danger)}
+.sf-wizard .sf-source-members [data-state=ready] .sf-member-state{color:var(--sf-ok);background:var(--sf-ok-soft)}
+.sf-wizard .sf-source-members [data-state=failed] .sf-member-state{color:var(--sf-danger);background:var(--sf-danger-soft)}
+.sf-wizard .sf-source-members [data-state=reading] .sf-member-state{color:var(--sf-accent-text);background:var(--sf-accent-soft)}
 .sf-wizard .sf-source-note{flex:1 1 100%;margin:var(--sf-space-1) 0 0;font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-text-faint))}
 .sf-wizard .sf-candidate{flex:1 1 100%;display:flex;flex-direction:column;gap:var(--sf-space-2);margin-top:var(--sf-space-2);padding:var(--sf-space-3);border:1px solid var(--sf-accent-border);border-radius:var(--sf-radius-lg);background:var(--sf-accent-soft)}
 .sf-wizard .sf-candidate textarea{width:100%;min-height:64px;font-size:var(--sf-font-md);line-height:var(--sf-leading-body)}
@@ -875,19 +921,30 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-wizard .sf-structure-caption .sf-online-choice{height:var(--sf-space-7);box-sizing:border-box;padding:0 var(--sf-space-3);margin-top:0!important}
 .sf-wizard .sf-section-actions>button{width:var(--sf-space-6);padding:0}
 .sf-wizard-summary{padding:var(--sf-space-4);background:var(--sf-fill);border-radius:var(--sf-radius-lg);font-size:var(--sf-font-sm)}
-.sf-wizard-footer{display:flex;align-items:center;gap:var(--sf-space-3);padding-top:var(--sf-space-5)}
+.sf-wizard-footer{display:flex;align-items:center;gap:var(--sf-space-3);margin-top:var(--sf-space-5);padding-top:var(--sf-space-4);border-top:1px solid var(--sf-border)}
 .sf-wizard-footer>span{flex:1}
-.sf-wizard-footer .sf-primary{height:var(--sf-space-7);padding:0 var(--sf-space-5);font-size:var(--sf-font-lg)}
+.sf-wizard .sf-wizard-nav{display:inline-flex;align-items:center;justify-content:center;gap:var(--sf-space-2);height:var(--sf-space-7);padding:0 var(--sf-space-4);border-radius:var(--sf-radius-lg);font-size:var(--sf-font-md);font-weight:500;white-space:nowrap;transition:background var(--sf-dur-fast,120ms),box-shadow var(--sf-dur-fast,120ms)}
+.sf-wizard .sf-wizard-back{border-color:transparent;background:transparent;color:var(--sf-muted)}
+.sf-wizard .sf-wizard-back:hover:not(:disabled){background:var(--sf-fill);color:var(--sf-text)}
+.sf-wizard .sf-wizard-nav.sf-primary{box-shadow:var(--sf-shadow-1)}
+.sf-wizard .sf-wizard-nav.sf-primary:hover:not(:disabled){box-shadow:var(--sf-shadow-2)}
+.sf-wizard button:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:2px}
 .sf-primary{background:var(--sf-accent)!important;border-color:var(--sf-accent)!important;color:var(--sf-on-accent)!important}
-.sf-wizard-error{color:var(--sf-danger)!important}
+.sf-wizard .sf-wizard-error{padding:var(--sf-space-3);border:1px solid var(--sf-danger-border);border-radius:var(--sf-radius-lg);background:var(--sf-danger-soft);color:var(--sf-danger);font-size:var(--sf-font-md)}
 .sf-wizard button{cursor:pointer}
 .sf-wizard button:disabled{opacity:var(--sf-disabled-opacity);cursor:default}
 @keyframes sf-step-forward{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
 @keyframes sf-step-back{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
 @media(prefers-reduced-motion:reduce){.sf-wizard-page[data-direction]{animation:none}}
-@media(max-width:720px){.sf-wizard{padding:var(--sf-space-5)}.sf-wizard-row{grid-template-columns:1fr}.sf-wizard-steps{gap:var(--sf-space-3)}.sf-wizard .sf-structure-caption{flex-wrap:wrap}.sf-wizard .sf-structure-actions{margin-left:0}
+@media(max-width:720px){.sf-wizard{--sf-control-min-height:44px;padding:var(--sf-space-5)}.sf-wizard-row{grid-template-columns:1fr}.sf-wizard-steps{gap:var(--sf-space-3)}.sf-wizard .sf-structure-caption{flex-wrap:wrap}.sf-wizard .sf-structure-actions{margin-left:0}
 .sf-wizard .sf-material-checklist{max-height:none}
 .sf-wizard .sf-structure-list{max-height:none}
+.sf-wizard .sf-assignment-row{flex-wrap:wrap}
+.sf-wizard .sf-assignment-row>.sf-picker{flex-basis:100%}
+.sf-wizard .sf-picker-foot{flex-wrap:wrap}
+.sf-wizard .sf-picker-name{max-width:45%}
+.sf-wizard .sf-picker-dir{display:none}
+.sf-wizard .sf-source-remove{min-width:44px}
 /* At 200% zoom the CSS viewport halves and this is the touch case design 05 §9 sets a 44px
    floor for, so selects and text inputs join the buttons. */
 .sf-wizard button,.sf-wizard select,.sf-wizard input:not([type=checkbox]),.sf-wizard textarea{min-height:44px}

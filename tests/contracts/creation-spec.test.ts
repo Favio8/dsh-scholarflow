@@ -1,6 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { creationSpec, requirementSource, writingSection } from '../../src/shared/writing-task.ts'
+import { creationSpec, requirementDraftSpec, requirementSource, writingSection } from '../../src/shared/writing-task.ts'
+import { creationErrorMessage } from '../../src/client/creation-errors.ts'
+import { adoptBrief, adoptionSummary, ADOPTABLE_PATHS } from '../../src/core/requirements/candidates.ts'
+import { requirementBrief } from '../../src/shared/writing-task.ts'
 import { readRequirementSources, readApproval, folderMembers, countingUnit, usesLegacyAssignment } from '../../src/core/pipeline/spec-compat.ts'
 
 const base = {
@@ -9,6 +12,57 @@ const base = {
   sections: [{ id: 'section_1', title: '引言', purpose: '', targetLength: 1000 }],
 }
 const spec = (overrides: Record<string, unknown> = {}) => creationSpec.parse({ ...base, ...overrides })
+
+test('a source-only draft can be read before its title or requirements exist, without relaxing submission', () => {
+  for (const requirementSources of [
+    [{ resourceId: 'req_file', origin: 'workspace', kind: 'file', path: '要求/说明.md' }],
+    [{ resourceId: 'req_folder', origin: 'workspace', kind: 'folder', path: '作业要求',
+      members: ['1.jpg', '2.jpg', '3.jpg'].map(name => ({ name: `作业要求/${name}` })) }],
+    [{ resourceId: 'req_external', origin: 'external', kind: 'folder', handle: 'TEST_ONLY',
+      members: [{ name: '说明.md' }], state: 'connected' }],
+  ]) {
+    const input = { ...base, title: '', requirements: '  ', requirementSources }
+    const draft = requirementDraftSpec.parse(input)
+    assert.equal(draft.title, '')
+    assert.equal(draft.requirements, '')
+    assert.deepEqual(draft.materials, base.materials)
+    assert.equal(creationSpec.safeParse(draft).success, false)
+    assert.equal(creationSpec.safeParse({ ...draft, title: 'TEST_ONLY' }).success, false)
+  }
+})
+
+test('text-only and legacy-source drafts are accepted, empty input and unsafe sources are refused', () => {
+  assert.equal(requirementDraftSpec.safeParse({ ...base, title: '' }).success, true)
+  assert.equal(requirementDraftSpec.safeParse({ ...base, title: '', requirements: '', assignmentPath: '要求.md' }).success, true)
+  assert.equal(requirementDraftSpec.safeParse({ ...base, requirements: ' ' }).success, false)
+  assert.equal(requirementDraftSpec.safeParse({ ...base, requirements: 'x'.repeat(12001) }).success, false)
+  assert.equal(requirementDraftSpec.safeParse({ ...base, requirementSources: [
+    { resourceId: 'req_bad', origin: 'workspace', kind: 'file', path: '../private.txt' }] }).success, false)
+})
+
+test('adopting a source-only brief fills requirements but never invents a missing title', () => {
+  const draft = requirementDraftSpec.parse({ ...base, title: '', requirements: '', assignmentPath: '要求.md' })
+  const brief = requirementBrief.parse({ schemaVersion: 2, task: { nature: 'TEST_ONLY 阅读报告' },
+    coverage: [], length: {}, format: {}, submission: {}, decisions: [], origins: {}, readIds: [] })
+  const adopted = requirementDraftSpec.parse(adoptBrief(draft, brief, {
+    adopt: [...ADOPTABLE_PATHS], summary: adoptionSummary(brief, [...ADOPTABLE_PATHS]),
+  }))
+  assert.match(adopted.requirements, /TEST_ONLY 阅读报告/)
+  assert.equal(adopted.title, '')
+  assert.equal(creationSpec.safeParse(adopted).success, false)
+  assert.equal(creationSpec.safeParse({ ...adopted, title: '我的报告' }).success, true)
+})
+
+test('local and serialized validation failures become actionable field names, never raw JSON', () => {
+  const result = creationSpec.safeParse({ ...base, requirements: '' })
+  assert.equal(result.success, false)
+  if (result.success) return
+  for (const error of [result.error, new Error(result.error.message), new Error('INVALID_REQUEST: ' + result.error.message)]) {
+    assert.match(creationErrorMessage(error), /请检查写作要求/)
+    assert.doesNotMatch(creationErrorMessage(error), /too_small|minimum|origin|expected/)
+  }
+  assert.equal(creationErrorMessage(new Error('MODEL_NOT_SELECTED: 请先选择模型。')), '请先选择模型。')
+})
 
 test('a stored project from before this change still parses unchanged', () => {
   const old = creationSpec.parse({ ...base, assignmentPath: '要求/作业说明.md' })

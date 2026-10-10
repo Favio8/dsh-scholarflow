@@ -165,6 +165,15 @@ export const creationSpec = z.object({ title: z.string().trim().min(1).max(300),
   manuscriptDir: relativePath.default('manuscript') }).strict()
 
 export type CreationSpec = z.infer<typeof creationSpec>
+/** Reading and adopting requirements happen before the title or requirement text exists.
+ * Keep submission strict; a selected file is input to reading, not confirmed requirements. */
+export const requirementDraftSpec = creationSpec.extend({
+  title: z.string().trim().max(300),
+  requirements: z.string().trim().max(12000),
+}).superRefine((spec, ctx) => {
+  if (!spec.requirements && !spec.requirementSources.length && !spec.assignmentPath)
+    ctx.addIssue({ code: 'custom', path: ['requirements'], message: '请填写写作要求，或添加要求文件／文件夹。' })
+})
 export type RequirementSource = z.infer<typeof requirementSource>
 export type CountingPolicy = z.infer<typeof countingPolicy>
 export type PresetSelection = z.infer<typeof presetSelection>
