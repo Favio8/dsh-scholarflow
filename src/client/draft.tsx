@@ -18,7 +18,7 @@ import { RewriteCandidateView, protectedChanges, type RewriteCandidate } from '.
 import { SourceCandidate } from './source-candidate.tsx'
 import { SourceRangeMark, type MarkRange } from './range-mark.tsx'
 import { trackRange, rewriteTarget, sourceOffset, paneOffset, type TextRange } from './rewrite-range.ts'
-import { pendingQuestion } from '../shared/writing-task.ts'
+import { activeWritingQuestion } from './writing-task-ui.ts'
 import { usePaneZoom, ZoomControls } from './pane-zoom.tsx'
 import { ApplicationError } from './application-error.tsx'
 import { useFirstDraftStream } from './first-draft-stream.ts'
@@ -156,7 +156,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     const read = async () => {
       try {
         const result = await api('writingTask.inspect', { context: context() })
-        if (live) setQuestion(result.task?.mode === 'first-draft' ? undefined : result.task?.questions?.find((row: any) => pendingQuestion(row) && !answeredQuestions.current.has(row.id)))
+        if (live) {
+          setQuestion(activeWritingQuestion(result.task, answeredQuestions.current))
+        }
       } catch { /* a project without a task simply has no question */ }
     }
     read()

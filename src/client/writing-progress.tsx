@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { writingReadPaths, pendingQuestion, type WritingTask } from '../shared/writing-task.ts'
+import { writingReadPaths, type WritingTask } from '../shared/writing-task.ts'
+import { activeWritingQuestion } from './writing-task-ui.ts'
 import { groupIssues, mapLegacyNotes } from '../core/pipeline/task-issues.ts'
 
 const STAGES: Record<string, string> = { materials: '读取工作区资料', research: '检索公开文献', evidence: '整理证据与引用', outline: '规划章节内容', drafting: '撰写正文', review: '检查全文', completed: '初稿已生成' }
@@ -23,7 +24,7 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
     load(); const timer = window.setInterval(load, 2000)
     return () => { live = false; clearInterval(timer) }
   }, [context().sessionId, taskRevision])
-  const question = task?.mode === 'first-draft' ? undefined : task?.questions.find(pendingQuestion)
+  const question = activeWritingQuestion(task)
   useEffect(()=>{if(command && ['pause','cancel'].includes(command) && task && !['running','queued'].includes(task.status))setCommand(undefined)},[task?.status,command])
   // A running task's elapsed time is shown as it grows; it is telemetry, never a deadline.
   useEffect(() => {
@@ -33,7 +34,6 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
     return () => clearInterval(timer)
   }, [task?.status, task?.revision])
   if (!task) return error ? <details className="sf-writing-progress"><summary>历史任务进度暂不可用</summary>{error}</details> : null
-  if (task.status === 'cancelled' && task.mode !== 'first-draft') return null
   const action = async (name: string) => { if(busy || command)return; setBusy(true); setCommand(name); setError('')
     try { const result = await api('writingTask.action', { context: context(), taskId: task.id, action: name }); setTask(result.task); latest.current.onTask?.(result); await refresh(); if(!result.stopping)setCommand(undefined) }
     catch (error) { setError((error as Error).message);setCommand(undefined) } finally { setBusy(false) }
@@ -55,6 +55,7 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
   const main = command==='pause' ? '正在暂停，已请求停止当前生成' : command==='cancel' ? '正在停止，已有正文保留'
     : task.mode==='first-draft' && task.status==='completed' ? (task.outcome==='draft-with-gaps'?'初稿就绪，有待补或待核对内容':'初稿就绪，可选文修改')
     : task.mode==='first-draft' && ['paused','interrupted','cancelled'].includes(task.status) ? (task.status==='cancelled'?'已停止，已有正文保留':'已暂停，可编辑已保存正文')
+    : task.status === 'cancelled' ? '旧版写作已停止，已有内容保留'
     : task.status === 'paused' ? '写作已暂停'
     : task.status === 'interrupted' ? '写作进度已保留'
     : task.status === 'waiting-input' && !question ? '进度已保留，可继续'
@@ -65,12 +66,13 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
     <div className="sf-writing-line">
       <span className={`sf-progress-dot ${task.status === 'running' ? 'sf-progress-working' : ''}`} />
       <strong>{main}</strong>
+      {task.mode !== 'first-draft' && <span className="sf-muted">旧任务 · 引导模式</span>}
       <span className="sf-muted">{countsOf(task)}</span>
       <span className="sf-muted sf-progress-elapsed">已用 {formatElapsed(elapsed)} · 调用 {task.usedModelCalls} 次</span>
       <div className="sf-writing-controls">
         {task.status === 'running' || task.status === 'queued' ? <button disabled={busy || !!command} onClick={() => action('pause')}>暂停</button>
-          : task.status !== 'completed' && !question && <button disabled={busy || !!command} onClick={() => action('resume')}>继续</button>}
-        {task.status !== 'completed' && <button disabled={busy || !!command} onClick={() => action('cancel')}>停止</button>}
+          : task.status !== 'completed' && !(task.status === 'cancelled' && task.mode !== 'first-draft') && !question && <button disabled={busy || !!command} onClick={() => action('resume')}>继续</button>}
+        {!['completed','cancelled','failed'].includes(task.status) && <button disabled={busy || !!command} onClick={() => action('cancel')}>停止</button>}
         {task.mode!=='first-draft' && !['running','queued','completed'].includes(task.status) && <><button disabled={busy || !!command} onClick={()=>action('start-first-draft')}>按新方式继续初稿</button><span className="sf-muted">所选文件分别保留，缺项待补继续，成稿后修改。</span></>}
         {task.mode==='first-draft' && task.diagnostic?.code==='FIRST_DRAFT_APPROVAL_STALE' && <button disabled={busy || !!command} onClick={()=>action('start-first-draft')}>重新确认当前资料并继续</button>}
         {!!issues.length && <details><summary>详情（{needsAction.length} 项待处理）</summary>
@@ -126,7 +128,7 @@ export const PROGRESS_CSS = `.sf-writing-progress{flex:none;border-bottom:1px so
 .sf-progress-working{animation:sf-progress-pulse 1.4s infinite}
 .sf-progress-elapsed{font-variant-numeric:tabular-nums}
 .sf-progress-note{max-width:760px;margin:var(--sf-space-2) auto 0;font-size:var(--sf-font-sm);color:var(--dsw-alias-label-secondary,var(--sf-muted))}
-.sf-writing-controls{margin-left:auto;display:flex;align-items:center;gap:var(--sf-space-2)}
+.sf-writing-controls{margin-left:auto;display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap}
 .sf-writing-controls button{border:0!important;padding:var(--sf-space-1) var(--sf-space-2)!important;font-size:var(--sf-font-sm)}
 .sf-writing-controls details{position:relative}
 .sf-issue-popover{position:absolute;right:0;z-index:40;top:var(--sf-space-5);width:400px;max-height:420px;overflow:auto;background:var(--dsw-alias-bg-base,var(--sf-surface));box-shadow:var(--sf-shadow-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);padding:var(--sf-space-3);text-align:left}
