@@ -83,8 +83,8 @@ function OutlineCandidate({ candidate, stale, busy, onAdopt, onDiscard }: any) {
     <ol className="sf-outline-preview">{candidate.sections.map((section: any) => <li key={section.id} data-child={!!section.parentId}>
       <div><strong>{section.title}</strong><span>{section.targetLength} 字{section.kind === 'front' ? ' · 前置' : section.kind === 'back' ? ' · 后置' : ''}</span></div>
       {section.purpose && <p>{section.purpose}</p>}</li>)}</ol>
-    {!!candidate.coverage?.length && <details className="sf-outline-review"><summary>模型覆盖评估 · {candidate.coverage.filter((row: any) => row.covered).length}/{candidate.coverage.length} 项</summary>
-      {candidate.coverage.map((row: any) => <p key={row.itemId} className={row.covered ? undefined : 'sf-gap'}><strong>{row.covered ? '已覆盖' : row.status === 'partial' ? '部分覆盖' : '待补充'} · {row.text}</strong><br />{row.reason}</p>)}</details>}
+    {!!candidate.coverage?.length && <details className="sf-outline-review"><summary>模型覆盖评估 · 已安排 {candidate.coverage.filter((row: any) => row.covered).length}/{candidate.coverage.length} 项{candidate.coverage.some((row: any) => row.status === 'pending') && ` · ${candidate.coverage.filter((row: any) => row.status === 'pending').length} 项待确认或后续验证`}</summary>
+      {candidate.coverage.map((row: any) => <p key={row.itemId} className={row.status === 'pending' ? 'sf-coverage-pending' : row.covered ? undefined : 'sf-gap'}><strong>{row.covered ? '已安排' : row.status === 'pending' ? row.scope === 'unclassified' ? '范围待确认' : '待后续验证' : row.status === 'partial' ? '部分覆盖' : '待补充'} · {row.text}</strong><br />{row.scope && <span className="sf-coverage-scope">{row.scope === 'document' ? '整篇设置' : row.scope === 'submission' ? '提交要求' : row.scope === 'sections' ? '章节内容' : '适用范围未确认'} · </span>}{row.reason}</p>)}</details>}
     {!!candidate.materialNotes?.length && <details className="sf-outline-review"><summary>本次资料读取范围</summary>{candidate.materialNotes.map((note: string) => <p key={note}>{note}</p>)}</details>}
     {candidate.gaps?.map((gap: string) => <p className="sf-gap" key={gap}>缺口：{gap}</p>)}
     <div className="sf-brief-actions">
@@ -1016,6 +1016,8 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-outline-review{padding:var(--sf-space-2) 0;font-size:var(--sf-font-sm)}
 .sf-outline-review>summary{cursor:pointer;color:var(--sf-accent-text)}
 .sf-outline-review p{overflow-wrap:anywhere}
+.sf-wizard .sf-outline-review .sf-coverage-pending{color:var(--sf-warn-text)}
+.sf-coverage-scope{font-size:var(--sf-font-sm);color:var(--sf-muted)}
 @media(max-width:720px){.sf-outline-heading{align-items:flex-start;flex-direction:column}.sf-outline-tools{margin-left:0}.sf-outline-edit-row{grid-template-columns:24px minmax(0,1fr) 44px}.sf-wizard .sf-outline-budget{grid-column:2;grid-row:2;justify-self:start}.sf-outline-menu{grid-column:3;grid-row:1/3}.sf-outline-purpose{grid-column:2/-1}.sf-outline-edit-row[data-child=true]{margin-left:var(--sf-space-2)}.sf-outline-menu>summary{width:44px}.sf-outline-preview>li>div{flex-wrap:wrap}}
 @media(max-width:720px){.sf-wizard{--sf-control-min-height:44px;padding:var(--sf-space-5)}.sf-wizard-row{grid-template-columns:1fr}.sf-wizard-steps{gap:var(--sf-space-3)}.sf-wizard .sf-structure-caption{flex-wrap:wrap}.sf-wizard .sf-structure-actions{margin-left:0}
 .sf-wizard .sf-material-checklist{max-height:none}

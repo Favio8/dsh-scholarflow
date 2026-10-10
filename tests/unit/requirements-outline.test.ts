@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import { wordStats } from '../../src/core/editing/markdown.ts'
 import assert from 'node:assert/strict'
-import { validateGeneration, assessOutline, validateOutline, moveOutlineSection, outlineInputKey } from '../../src/core/requirements/outline.ts'
+import { validateGeneration, assessOutline, validateOutline, moveOutlineSection, outlineInputKey, outlineDocumentPlan } from '../../src/core/requirements/outline.ts'
 import { requirementDraftSpec, creationSpec, writingSection } from '../../src/shared/writing-task.ts'
 
 const spec = (requirements: string) => requirementDraftSpec.parse({ title: '', type: 'course-paper', language: 'zh-CN',
@@ -38,8 +38,41 @@ test('invented source requirements and unknown, duplicate or omitted review refe
   assert.throws(() => validateGeneration({ ...data, requirements: [{ id: 'r1', text: '补做实验', quote: '请补做实验' }] }, input), /无法回到/)
   const generated = validateGeneration(data, input)
   const valid = { itemId: 'r1', sectionIds: ['s1'], status: 'covered', reason: '解释叙事视角。' }
-  for (const coverage of [[], [valid, valid], [{ ...valid, itemId: 'invented' }], [{ ...valid, sectionIds: ['invented'] }], [{ ...valid, sectionIds: [] }]])
+  for (const coverage of [[], [valid, valid], [{ ...valid, itemId: 'invented' }], [{ ...valid, sectionIds: ['invented'] }], [{ ...valid, scope: 'sections', sectionIds: [] }]])
     assert.throws(() => assessOutline(generated, { coverage }))
+})
+
+test('cover and document requirements can have no chapter while pagination and submission remain pending', () => {
+  const requirements = ['分析叙事视角', '需要封面', '约1200字', '总计7页', '星期五提交']
+  const input = requirementDraftSpec.parse({ ...spec(requirements.join('\n')), cover: { enabled: true, title: '', date: '', fields: [] },
+    brief: { length: { value: 1200, approximate: true, pages: 7, coverPages: 1, bodyPages: 6 }, submission: { when: '星期五' } } })
+  const generated = validateGeneration({ taskSummary: 'TEST_ONLY 叙事分析', targetLength: 1200,
+    sections: [{ ...row('s1', '视角与叙事距离'), targetLength: 1200 }],
+    requirements: requirements.map((text, i) => ({ id: `r${i + 1}`, text, quote: text })) }, input)
+  const review = assessOutline(generated, { coverage: [
+    { itemId: 'r1', scope: 'sections', sectionIds: ['s1'], status: 'covered', reason: '章节分析叙事视角。' },
+    { itemId: 'r2', scope: 'document', documentFields: ['cover'], sectionIds: [], status: 'covered', reason: '真实配置启用封面。' },
+    { itemId: 'r3', scope: 'document', documentFields: ['bodyTarget', 'plannedBodyLength'], sectionIds: [], status: 'covered', reason: '正文规划1200字。' },
+    { itemId: 'r4', scope: 'document', documentFields: ['requestedPages'], sectionIds: [], status: 'covered', reason: '规划保留7页。' },
+    { itemId: 'r5', scope: 'submission', documentFields: ['submission'], sectionIds: [], status: 'covered', reason: '提交时间已保留。' },
+  ] }, outlineDocumentPlan(input, generated))
+  assert.deepEqual(review.coverage.map(row => row.status), ['covered', 'covered', 'covered', 'pending', 'pending'])
+  assert.equal(review.coverage[3].covered, false)
+  assert.equal(review.review.coverage[3].status, 'pending', 'saved review agrees with UI projection')
+  assert.equal(review.gaps.length, 0, 'later delivery checks are not chapter defects')
+})
+
+test('legacy empty coverage and unsupported document claims stay visible without inventing section IDs', () => {
+  const input = spec('需要封面')
+  const generated = validateGeneration({ taskSummary: '任务规划', targetLength: 500, sections: [row('s1', '内容')],
+    requirements: [{ id: 'r1', text: '需要封面', quote: '需要封面' }] }, input)
+  for (const extra of [{}, { scope: 'document', documentFields: [] }, { scope: 'document', documentFields: ['typography'] }]) {
+    const result = assessOutline(generated, { coverage: [{ itemId: 'r1', sectionIds: [], status: 'covered', reason: '模型说有封面', ...extra }] }, { ...outlineDocumentPlan(input, generated), typography: null })
+    assert.equal(result.coverage[0].status, 'pending')
+    assert.equal(result.coverage[0].covered, false)
+    assert.deepEqual(result.coverage[0].sectionIds, [])
+  }
+  assert.throws(() => assessOutline(generated, { coverage: [{ itemId: 'r1', scope: 'document', documentFields: ['invented'], sectionIds: [], status: 'covered', reason: '伪造依据' }] }))
 })
 
 test('all confirmed requirements survive generation, and an explicit target overrides model preference', () => {

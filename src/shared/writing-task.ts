@@ -127,15 +127,19 @@ export const candidateDiff = z.object({ path: z.string().min(1).max(200), label:
 export const candidateConflict = z.object({ topic: z.string().min(1).max(200), current: z.string().max(2000), candidate: z.string().max(2000),
   source: z.string().max(400).optional(), preferred: z.enum(['current', 'candidate']) }).strict()
 export const outlineRequirement = z.object({ id, text: z.string().trim().min(1).max(2000), quote: z.string().max(2000) }).strict()
+export const outlineCoverageScope = z.enum(['sections', 'document', 'submission', 'unclassified'])
+export const outlineDocumentField = z.enum(['cover', 'format', 'bodyTarget', 'plannedBodyLength', 'typography', 'requestedPages', 'submission'])
 export const semanticCoverage = z.object({ itemId: id, sectionIds: z.array(id).max(60),
-  status: z.enum(['covered', 'partial', 'missing']), reason: z.string().trim().min(1).max(2000) }).strict()
+  scope: outlineCoverageScope.optional(), documentFields: z.array(outlineDocumentField).max(7).optional(),
+  status: z.enum(['covered', 'partial', 'missing', 'pending']), reason: z.string().trim().min(1).max(2000) }).strict()
 export const outlineReview = z.object({ coverage: z.array(semanticCoverage).max(60),
   issues: z.array(z.string().max(1000)).max(30).default([]) }).strict()
 export const outlineGeneration = z.object({ taskSummary: z.string().trim().min(1).max(2000),
   targetLength: z.number().int().min(200).max(60000), sections: z.array(writingSection).min(1).max(60),
   requirements: z.array(outlineRequirement).min(1).max(60) }).strict()
 export const outlineCoverage = z.object({ itemId: id, text: z.string().max(2000), sectionIds: z.array(id).max(60), covered: z.boolean(),
-  status: z.enum(['covered', 'partial', 'missing']).optional(), reason: z.string().max(2000).optional() }).strict()
+  scope: outlineCoverageScope.optional(), documentFields: z.array(outlineDocumentField).max(7).optional(),
+  status: z.enum(['covered', 'partial', 'missing', 'pending']).optional(), reason: z.string().max(2000).optional() }).strict()
 export const outlineChange = z.object({ sectionId: id.optional(), title: z.string().max(160),
   kind: z.enum(['added', 'removed', 'renamed', 'reordered', 'reallocated']), before: z.string().max(400).optional(), after: z.string().max(400).optional() }).strict()
 export const requirementCandidate = z.object({ schemaVersion: z.literal(1), candidateId: id, kind: z.literal('requirements'),

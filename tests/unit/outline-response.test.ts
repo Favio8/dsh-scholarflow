@@ -37,3 +37,24 @@ test('semantic/source refusal and cancellation are not repaired away', async () 
   const controller = new AbortController(); controller.abort()
   await assert.rejects(readOutlineResponse('broken', value => value, async () => { controller.signal.throwIfAborted(); return '{}' }, 'generation'), { name: 'AbortError' })
 })
+
+test('a failed coverage contract repair preserves the affected requirement and fields', async () => {
+  let calls = 0
+  const validate = () => { throw new ScholarError('OUTLINE_REVIEW_INVALID', '缺少章节引用', {
+    operation: 'outline.review', category: 'model-contract', repairable: true,
+    itemId: 'r1', requirement: 'TEST_ONLY 分析结构承接关系', fields: ['coverage.r1.sectionIds'],
+  }) }
+  await assert.rejects(readOutlineResponse('{}', validate, async (_previous, issues) => {
+    calls++
+    assert.deepEqual(issues, [{ path: 'coverage.r1.sectionIds', code: 'OUTLINE_REVIEW_INVALID' }])
+    return '{}'
+  }, 'review'), (error: ScholarError) => {
+    assert.equal(error.code, 'OUTLINE_REVIEW_INVALID')
+    assert.equal(error.details.itemId, 'r1')
+    assert.equal(error.details.requirement, 'TEST_ONLY 分析结构承接关系')
+    assert.deepEqual(error.details.fields, ['coverage.r1.sectionIds'])
+    assert.equal(error.details.repairable, false)
+    return true
+  })
+  assert.equal(calls, 1)
+})

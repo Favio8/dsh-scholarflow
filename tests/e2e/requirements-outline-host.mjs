@@ -9,6 +9,9 @@ import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
 import { mkdir, writeFile, symlink } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
+import assert from 'node:assert/strict'
+import { requirementDraftSpec } from '../../src/shared/writing-task.ts'
+import { validateGeneration, assessOutline, outlineDocumentPlan, outlineCandidateKey } from '../../src/core/requirements/outline.ts'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
 const testHome = resolve('.dsh-tmp/outline-host', String(Date.now()))
@@ -166,7 +169,7 @@ try {
 
   const titles = ['论文题名的定位作用','作者与通讯信息','原论文摘要的组织','引言的问题提出','相关工作的承接','方法的组织逻辑','实验结果的呈现','讨论与结论的呼应','原论文参考文献的作用']
   const lengths = [120,80,160,160,170,260,200,210,140]
-  const candidate = { candidateId:'cand_TEST_ONLY',taskSummary:'TEST_ONLY 阅读指定论文，着重分析九个组成部分的组织方式及其承接关系。',targetLength:1500,
+  let candidate = { candidateId:'cand_TEST_ONLY',taskSummary:'TEST_ONLY 阅读指定论文，着重分析九个组成部分的组织方式及其承接关系。',targetLength:1500,
     sections:titles.map((title,i)=>({id:'s'+i,title,targetLength:lengths[i],purpose:'分析本节如何承接前文并支撑后文。',kind:'body',allocationMode:'auto'})),
     changes:[],coverage:[],gaps:[],conflicts:[] }
   report.modelFixture = true
@@ -174,6 +177,19 @@ try {
   await page.route('**/api/scholarflow.v1/outline.suggest',async route=>{
     report.outlineRequests++
     const body=route.request().postDataJSON()
+    const spec=requirementDraftSpec.parse(body.payload.args.request.spec)
+    const requirements=['分析结构与承接关系','封面一页','内容三页','星期五提交','解释材料局限']
+    const generated=validateGeneration({taskSummary:candidate.taskSummary,targetLength:1500,sections:candidate.sections,
+      requirements:requirements.map((text,i)=>({id:'r'+(i+1),text,quote:text}))},spec)
+    const assessed=assessOutline(generated,{coverage:[
+      {itemId:'r1',scope:'sections',sectionIds:['s0'],status:'covered',reason:'TEST_ONLY 章节规划分析结构与关系。'},
+      {itemId:'r2',sectionIds:[],status:'covered',reason:'TEST_ONLY 旧格式没有设置证据。'},
+      {itemId:'r3',scope:'document',documentFields:['requestedPages'],sectionIds:[],status:'covered',reason:'TEST_ONLY 尚未分页。'},
+      {itemId:'r4',scope:'submission',sectionIds:[],status:'covered',reason:'TEST_ONLY 保留提交要求。'},
+      {itemId:'r5',scope:'sections',sectionIds:[],status:'missing',reason:'TEST_ONLY 没有安排局限分析。'},
+    ],issues:[]},outlineDocumentPlan(spec,generated))
+    candidate={...candidate,...assessed,inputSpecJson:outlineCandidateKey(spec)}
+    report.coverage=assessed.coverage.map(row=>({scope:row.scope,status:row.status,sectionIds:row.sectionIds}))
     await route.fulfill({json:{type:'server-response',rpcId:body.rpcId,result:{ok:true,value:{ok:true,data:{candidate}}}}})
   })
   await page.route('**/api/scholarflow.v1/candidates.adopt',async route=>{
@@ -182,14 +198,32 @@ try {
     await route.fulfill({json:{type:'server-response',rpcId:body.rpcId,result:{ok:true,value:{ok:true,data:{spec}}}}})
   })
   await page.locator('#sf-field-title').fill('TEST_ONLY 科技论文阅读报告')
-  await page.locator('#sf-field-requirements').fill('阅读指定科技论文，着重分析论文的结构与承接关系，约1500字，封面一页、内容三页。')
+  await page.locator('#sf-field-requirements').fill('阅读指定科技论文，着重分析结构与承接关系，约1500字，封面一页、内容三页。星期五提交。解释材料局限。')
   await page.getByRole('button',{name:'下一步',exact:true}).click()
   await page.getByRole('button',{name:'下一步',exact:true}).click()
   await page.getByRole('region',{name:'大纲候选'}).waitFor()
+  await page.locator('.sf-outline-review>summary').first().click()
+  assert.equal(await page.locator('.sf-coverage-pending').count(),3)
+  assert.equal(await page.getByText(/缺口：解释材料局限/).count(),1)
+  assert.equal(await page.getByText(/缺口：封面一页|缺口：内容三页|缺口：星期五提交/).count(),0)
+  assert.deepEqual(report.coverage.map(row=>row.status),['covered','pending','pending','pending','missing'])
+  report.candidateViews=[]
+  for(const scheme of ['light','dark']) {
+    await page.emulateMedia({colorScheme:scheme})
+    for(const width of [1440,390]) {
+      await page.setViewportSize({width,height:1050})
+      const audit=await page.evaluate(auditInPage,'[aria-label="创建论文向导"]')
+      const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)
+      report.candidateViews.push({scheme,width,overflow,contrastFailures:audit.contrastFailures})
+      await page.screenshot({path:resolve('.dsh-tmp/scoped-coverage-host-'+scheme+'-'+width+'.png')})
+    }
+  }
   report.noAutomaticTemplate = await page.locator('.sf-outline-edit-row').count() === 0
   await page.getByRole('button',{name:'采用此大纲',exact:true}).click()
   await page.locator('.sf-outline-edit-row').first().waitFor()
   report.adoptedRows = await page.locator('.sf-outline-edit-row').count()
+  assert.equal(await page.getByRole('button',{name:'创建论文并开始撰写',exact:true}).isEnabled(),true)
+  report.creationEnabled=true
   await page.getByRole('button',{name:'上一步',exact:true}).click()
   await page.getByRole('button',{name:'下一步',exact:true}).click()
   await page.waitForTimeout(700)
@@ -217,4 +251,4 @@ try {
 
 await writeFile(resolve('.dsh-tmp/outline-host-report.json'),JSON.stringify(report,null,2))
 console.log(JSON.stringify(report,null,2))
-if(report.error || report.outlineRequests !== 1 || !report.noAutomaticTemplate || report.adoptedRows !== 9 || report.views?.length !== 6 || report.views.some(row=>row.overflow||row.contrastFailures.length)) process.exitCode=1
+if(report.error || report.outlineRequests !== 1 || !report.noAutomaticTemplate || report.adoptedRows !== 9 || !report.creationEnabled || report.candidateViews?.length!==4 || report.candidateViews.some(row=>row.overflow||row.contrastFailures.length) || report.views?.length !== 6 || report.views.some(row=>row.overflow||row.contrastFailures.length)) process.exitCode=1

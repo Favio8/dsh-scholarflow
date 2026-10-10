@@ -101,3 +101,36 @@ test('an explicit stop arriving before setup completes prevents provider calls',
   await assert.rejects(f.controller.suggestOutline({ context, spec: f.spec, operationId: 'op_early' }, 'owner', new AbortController().signal), { name: 'AbortError' })
   assert.equal(f.host.calls.length, 0)
 })
+
+test('mixed chapter, cover, page and submission requirements reach an adoptable candidate through the real controller', async () => {
+  const f = fixture(), texts = ['分析叙事视角', '需要封面', '总计7页', '星期五提交']
+  f.spec = requirementDraftSpec.parse({ ...f.spec, requirements: texts.join('\n'),
+    cover: { enabled: true, title: 'TEST_ONLY', date: '', fields: [] },
+    brief: { length: { value: 1200, pages: 7, coverPages: 1, bodyPages: 6 }, submission: { when: '星期五' } } })
+  f.host.answers[0].requirements = texts.map((text, i) => ({ id: `r${i + 1}`, text, quote: text }))
+  f.host.answers[1] = { coverage: [
+    { itemId: 'r1', scope: 'sections', sectionIds: ['s1'], status: 'covered', reason: '章节承担分析。' },
+    { itemId: 'r2', scope: 'document', documentFields: ['cover'], sectionIds: [], status: 'covered', reason: '配置启用了封面。' },
+    { itemId: 'r3', scope: 'document', documentFields: ['requestedPages'], sectionIds: [], status: 'covered', reason: '计划7页。' },
+    { itemId: 'r4', scope: 'submission', documentFields: ['submission'], sectionIds: [], status: 'covered', reason: '保留提交时间。' },
+  ], issues: [] }
+  const { candidate } = await f.controller.suggestOutline({ context, spec: f.spec }, 'owner', new AbortController().signal)
+  assert.equal(f.host.calls.length, 2)
+  assert.equal(f.host.calls[1].context.documentPlan.cover.enabled, true)
+  assert.equal(f.host.calls[1].context.documentPlan.requestedPages.total, 7)
+  assert.deepEqual(candidate.coverage.map(row => row.status), ['covered', 'covered', 'pending', 'pending'])
+  const adopted = await f.controller.adoptCandidate({ context, spec: f.spec, candidateId: candidate.candidateId }, 'owner')
+  assert.equal(adopted.spec.cover.enabled, true)
+  assert.equal(adopted.spec.sections.length, 1)
+})
+
+test('an explicitly chapter-scoped empty reference gets one review-contract repair without regenerating the outline', async () => {
+  const f = fixture(), validReview = structuredClone(f.host.answers[1])
+  f.host.answers[1].coverage[0].scope = 'sections'; f.host.answers[1].coverage[0].sectionIds = []
+  f.host.answers.push(validReview)
+  const { candidate } = await f.controller.suggestOutline({ context, spec: f.spec }, 'owner', new AbortController().signal)
+  assert.equal(candidate.coverage[0].covered, true)
+  assert.equal(f.host.calls.length, 3)
+  assert.equal(f.host.calls[2].context.formatIssues[0].path, 'coverage.r1.sectionIds')
+  assert.equal(f.host.calls.filter(call => call.system.includes('结构规划助手')).length, 1)
+})

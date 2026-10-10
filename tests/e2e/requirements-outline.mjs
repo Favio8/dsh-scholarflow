@@ -18,6 +18,7 @@ import { CreationWizard, WIZARD_CSS } from './src/client/creation-wizard.tsx'
 import { THEME_CSS } from './src/client/theme/tokens.ts'
 import { PAPER_CSS } from './src/client/paper-workspace.tsx'
 import { requirementDraftSpec, requirementBrief } from './src/shared/writing-task.ts'
+import { validateGeneration, assessOutline, outlineDocumentPlan, outlineCandidateKey } from './src/core/requirements/outline.ts'
 
 const files = []
 const base = { title: 'TEST_ONLY 报告', requirements: '阅读指定科技论文，分析结构及承接关系，约1500字。', type: 'course-paper', language: 'zh-CN', format: 'docx',
@@ -38,6 +39,13 @@ const api = async (name, request) => {
     if (window.fixture.mode === 'late') await new Promise(done => window.fixture.release = done)
     candidate = { candidateId: 'cand_TEST_ONLY', sections: template, targetLength: template.reduce((sum,row)=>sum+row.targetLength,0),
       taskSummary: 'TEST_ONLY 根据本次要求分析对象的结构及其关系，而非套用议论文模板。', changes:[],coverage:[],gaps:[],conflicts:[] }
+    if (window.fixture.review) {
+      const spec = requirementDraftSpec.parse(request.spec)
+      const generated = validateGeneration({ taskSummary: candidate.taskSummary, targetLength: candidate.targetLength,
+        sections: candidate.sections, requirements: window.fixture.requirements }, spec)
+      const checked = assessOutline(generated, window.fixture.review, outlineDocumentPlan(spec, generated))
+      candidate = { ...candidate, ...checked, inputSpecJson: outlineCandidateKey(spec) }
+    }
     return { candidate }
   }
   if (name === 'candidates.adopt') return { spec: { ...request.spec, sections: candidate.sections, targetLength: candidate.targetLength, structureOrigin:'generated', targetLengthOrigin:'requirements' } }
@@ -50,8 +58,10 @@ const mount = scope => root.render(<div className="sf-app" style={{width:'100%'}
 window.resetWizard = (spec = {}, step = 2) => {
   const scope = crypto.randomUUID()
   window.fixture.calls=[]; window.fixture.mode='ready'
+  window.fixture.review=null; window.fixture.requirements=null
   sessionStorage.setItem('active',scope)
-  localStorage.setItem('scholarflow:creation:'+scope,JSON.stringify({spec:{...base,...spec},step}))
+  localStorage.setItem('scholarflow:creation:'+scope,JSON.stringify({spec:{...base,...spec,
+    ...(spec.brief && {brief:requirementBrief.parse(spec.brief)})},step}))
   mount(scope)
 }
 const existing = sessionStorage.getItem('active')
@@ -176,6 +186,50 @@ try {
   assert.equal(await outlineCalls(),1)
   await expect(page.getByRole('region',{name:'大纲候选'})).toHaveCount(0)
   pass('leaving the step cancels late output and the persisted marker prevents replay')
+
+  // Controlled model output, but real schema, coverage assessment, UI and adoption.
+  const mixed = ['分析叙事视角','需要封面','共7页','星期五提交','解释材料的局限']
+  await reset({requirements:mixed.join('\n'), cover:{enabled:true,title:'TEST_ONLY 封面',date:'',fields:[]},
+    brief:{length:{value:1200,pages:7,coverPages:1,bodyPages:6},submission:{when:'星期五'}}})
+  await page.evaluate(mixed => {
+    window.fixture.template=[{id:'s1',title:'视角与叙事距离',purpose:'TEST_ONLY 比较视角的作用。',targetLength:1200,kind:'body',allocationMode:'auto'}]
+    window.fixture.requirements=mixed.map((text,i)=>({id:'r'+(i+1),text,quote:text}))
+    window.fixture.review={coverage:[
+      {itemId:'r1',scope:'sections',sectionIds:['s1'],status:'covered',reason:'TEST_ONLY 章节分析叙事视角。'},
+      {itemId:'r2',scope:'document',documentFields:['cover'],sectionIds:[],status:'covered',reason:'TEST_ONLY 真实设置启用封面。'},
+      {itemId:'r3',scope:'document',documentFields:['requestedPages'],sectionIds:[],status:'covered',reason:'TEST_ONLY 页数要求保留。'},
+      {itemId:'r4',scope:'submission',documentFields:['submission'],sectionIds:[],status:'covered',reason:'TEST_ONLY 提交要求保留。'},
+      {itemId:'r5',scope:'sections',sectionIds:[],status:'missing',reason:'TEST_ONLY 候选未解释材料局限。'},
+    ],issues:[]}
+  },mixed)
+  const candidate = page.getByRole('region',{name:'大纲候选'})
+  await expect(candidate).toBeVisible()
+  await expect(candidate.locator('summary')).toContainText('已安排 2/5 项 · 2 项待确认或后续验证')
+  await candidate.locator('summary').click()
+  await expect(candidate.locator('.sf-coverage-pending')).toHaveCount(2)
+  await expect(candidate.locator('.sf-coverage-pending').first()).toContainText('共7页')
+  await expect(candidate.getByText(/缺口：解释材料的局限/)).toBeVisible()
+  assert.equal(await candidate.getByText(/缺口：共7页|缺口：星期五提交/).count(),0)
+  await expect(page.locator('.sf-outline-edit-row')).toHaveCount(0)
+  for (const dark of [false,true]) {
+    await page.evaluate(dark=>document.body.toggleAttribute('data-ds-dark-theme',dark),dark)
+    for (const width of [1100,390]) {
+      await page.setViewportSize({width,height:1050})
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
+      await page.locator('.sf-wizard').screenshot({path:join(out,'mixed-coverage-'+(dark?'dark':'light')+'-'+width+'.png')})
+    }
+  }
+  pass('mixed scoped coverage renders deferred checks separately while keeping actual chapter gaps')
+  await page.setViewportSize({width:1100,height:1050})
+  await button('采用此大纲').click()
+  await expect(page.locator('.sf-outline-edit-row')).toHaveCount(1)
+  await expect(page.getByText('结构已确认',{exact:true})).toBeVisible()
+  await expect(button('创建论文并开始撰写')).toBeEnabled()
+  const positions=await page.evaluate(()=>({cover:document.querySelector('.sf-cover-fields').getBoundingClientRect().top,
+    body:document.querySelector('.sf-outline-edit-row').getBoundingClientRect().top}))
+  assert(positions.cover<positions.body)
+  await expect(page.getByRole('textbox',{name:'封面标题',exact:true})).toHaveValue('TEST_ONLY 封面')
+  pass('mixed coverage can be adopted and creation enabled with the cover before body')
   assert.deepEqual(errors,[])
   console.log(results.length+' checks passed; evidence: '+out)
 } finally {

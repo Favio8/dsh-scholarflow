@@ -1,5 +1,5 @@
 import { outlineGeneration, outlineReview, type CreationSpec } from '../../shared/writing-task.ts'
-import { invariant } from '../../shared/errors.ts'
+import { invariant, ScholarError } from '../../shared/errors.ts'
 
 type Section = CreationSpec['sections'][number]
 
@@ -37,21 +37,53 @@ export function validateGeneration(value: unknown, spec: CreationSpec) {
   return generated
 }
 
+/** Actual configured facts, not assertions from the model's taskSummary. */
+export function outlineDocumentPlan(spec: CreationSpec, generated: ReturnType<typeof validateGeneration>) {
+  return {
+    cover: { enabled: Boolean(spec.cover?.enabled) }, format: spec.format,
+    bodyTarget: generated.targetLength,
+    plannedBodyLength: generated.sections.filter(row => row.kind === 'body').reduce((sum, row) => sum + row.targetLength, 0),
+    typography: spec.typography ?? null,
+    requestedPages: { total: spec.brief?.length.pages, cover: spec.brief?.length.coverPages, body: spec.brief?.length.bodyPages },
+    submission: spec.brief?.submission ?? null,
+  }
+}
+
 /** Model-assessed coverage is labelled as such; unknown IDs cannot become a pass. */
-export function assessOutline(generated: ReturnType<typeof validateGeneration>, value: unknown) {
+export function assessOutline(generated: ReturnType<typeof validateGeneration>, value: unknown, documentPlan?: ReturnType<typeof outlineDocumentPlan>) {
   const review = outlineReview.parse(value)
   const requirements = new Map(generated.requirements.map(row => [row.id, row]))
   const sections = new Set(generated.sections.map(row => row.id))
   const seen = new Set<string>()
-  for (const row of review.coverage) {
-    invariant(requirements.has(row.itemId) && !seen.has(row.itemId) && row.sectionIds.every(id => sections.has(id)),
-      'OUTLINE_REVIEW_INVALID', '覆盖检查引用了未知或重复的要求／章节，请重新生成。')
-    invariant(row.status === 'missing' || row.sectionIds.length > 0, 'OUTLINE_REVIEW_INVALID', '覆盖检查没有给出对应章节。')
-    seen.add(row.itemId)
+  const contractError = (row: (typeof review.coverage)[number], field: string, message: string): never => {
+    throw new ScholarError('OUTLINE_REVIEW_INVALID', message, { category: 'model-contract', operation: 'outline.review', repairable: true,
+      itemId: row.itemId, requirement: requirements.get(row.itemId)?.text, fields: [`coverage.${row.itemId}.${field}`] })
   }
-  invariant(seen.size === requirements.size, 'OUTLINE_REVIEW_INVALID', '覆盖检查未逐项检查全部要求。')
+  for (const row of review.coverage) {
+    if (!requirements.has(row.itemId) || seen.has(row.itemId) || !row.sectionIds.every(id => sections.has(id)))
+      contractError(row, 'sectionIds', '覆盖检查引用了未知或重复的要求／章节。')
+    seen.add(row.itemId)
+    const scope = row.scope ?? (row.sectionIds.length ? 'sections' : 'unclassified')
+    row.scope = scope
+    if (scope === 'sections' && (row.status === 'covered' || row.status === 'partial') && !row.sectionIds.length)
+      contractError(row, 'sectionIds', '章节内容的覆盖检查没有给出对应章节。')
+    if (scope === 'unclassified' && row.status !== 'missing') {
+      row.status = 'pending'
+      row.reason = `尚未明确本项的适用范围与依据，需确认。模型说明：${row.reason}`.slice(0, 2000)
+    } else if (scope === 'submission' || row.documentFields?.includes('requestedPages') || row.documentFields?.includes('submission')) {
+      if (row.status !== 'missing') row.status = 'pending'
+      row.reason = `大纲阶段只保留要求，实际分页或提交需后续验证。模型说明：${row.reason}`.slice(0, 2000)
+    } else if (scope === 'document' && (row.status === 'covered' || row.status === 'partial')) {
+      if (!row.documentFields?.length || !documentPlan || row.documentFields.some(field => documentPlan[field] == null)) {
+        row.status = 'pending'
+        row.reason = `整篇设置尚未提供可核对的配置依据，需确认。模型说明：${row.reason}`.slice(0, 2000)
+      }
+    }
+  }
+  if (seen.size !== requirements.size) throw new ScholarError('OUTLINE_REVIEW_INVALID', '覆盖检查未逐项检查全部要求。',
+    { category: 'model-contract', operation: 'outline.review', repairable: true, fields: ['coverage'], missingItemIds: [...requirements.keys()].filter(id => !seen.has(id)) })
   const coverage = review.coverage.map(row => ({ ...row, text: requirements.get(row.itemId)!.text, covered: row.status === 'covered' }))
-  const gaps = [...review.issues, ...coverage.filter(row => !row.covered).map(row => `${row.text}：${row.reason}`)]
+  const gaps = [...review.issues, ...coverage.filter(row => row.status === 'partial' || row.status === 'missing').map(row => `${row.text}：${row.reason}`)]
   const total = generated.sections.filter(row => row.kind === 'body').reduce((sum, row) => sum + row.targetLength, 0)
   if (Math.abs(total - generated.targetLength) > generated.targetLength * .1)
     gaps.push(`正文计划合计 ${total}，与规划目标 ${generated.targetLength} 相差超过 10%，请调整后确认。`)
