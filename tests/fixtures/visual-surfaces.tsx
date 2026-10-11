@@ -8,6 +8,7 @@ import { ApplicationError, ErrorNotice } from '../../src/client/application-erro
 import { SurfaceBoundary, SURFACE_BOUNDARY_CSS } from '../../src/client/surface-boundary.tsx'
 import { THEME_CSS } from '../../src/client/theme/tokens.ts'
 import { headingSizes } from '../../src/core/export/layout.ts'
+import { WritingRequirements } from '../../src/client/writing-requirements.tsx'
 
 const noop = () => {}
 ;(window as any).sfVisualContracts = { headingRatios: [10, 12, 14].map(bodySize => {
@@ -66,6 +67,15 @@ const component = (key: string) => {
 }
 function Boom(): React.ReactElement { throw new Error('TEST_ONLY 渲染失败：用于审计真实错误边界') }
 const project = { ledger: { materials: {}, sources: {}, evidence: {}, claims: {}, outline: { researchQuestion: 'TEST_ONLY' } }, config: { research: {} } }
+const requirementSpec = { title: 'TEST_ONLY 写作要求', type: 'course-paper', language: 'zh-CN', format: 'docx',
+  requirements: 'TEST_ONLY 分析论文结构与材料，不调用模型。', targetLength: 1500,
+  sections: [{ id: 'section_TEST_ONLY', title: '分析与讨论', targetLength: 1500 }],
+  cover: { enabled: true, title: 'TEST_ONLY 分析报告', fields: [{ label: '姓名', value: 'TEST_ONLY 作者' }, { label: '学号', value: 'TEST_ONLY' }] } }
+const requirementApi = async (method: string) => {
+  if (method === 'writingTask.requirements') return { spec: requirementSpec, baseSpecHash: null }
+  if (method === 'writingTask.preferences') return { baseSpecHash: 'a'.repeat(64) }
+  throw new Error(`TEST_ONLY unsupported operation: ${method}`)
+}
 const longMaterialName = 'Graph_Convolution-Based_Decoupling_and_Consistency-Driven_Fusion_for_Multimodal_Emotion_Recognition.pdf'
 const materialPaths = ['报告笔记.md', '个人报告笔记.md', longMaterialName, '作业要求/1.jpg', '作业要求/2.jpg', '作业要求/3.jpg']
 const statuses = ['ready', 'ready', 'ready', 'pending', 'partial', 'failed']
@@ -91,6 +101,7 @@ const fixtures: Record<string, React.ReactNode> = {
   empty: <div className="sf-app sf-paper-project"><style>{THEME_CSS + MATERIALS_CSS}</style><PaperMaterials project={project} api={materialApi} context={() => ({ sessionId })} refresh={async () => {}} run={noop} busy={false} /></div>,
   materials: <div className="sf-app sf-paper-project"><style>{THEME_CSS + MATERIALS_CSS}</style><PaperMaterials project={populatedProject} api={materialApi} context={() => ({ sessionId })} refresh={async () => {}} run={(operation: () => Promise<void>) => operation()} busy={false} /></div>,
   materialsBusy: <div className="sf-app sf-paper-project"><style>{THEME_CSS + MATERIALS_CSS}</style><PaperMaterials project={populatedProject} api={materialApi} context={() => ({ sessionId })} refresh={async () => {}} run={noop} busy={true} /></div>,
+  requirements: <div className="sf-app sf-paper-project"><WritingRequirements project={{ binding: { projectId: 'project_TEST_ONLY' } }} api={requirementApi} context={() => ({ sessionId })} refresh={async () => {}} onFormat={noop} /></div>,
   loading: component('scholarflow.project:'),
   error: <div className="sf-app"><ErrorNotice error={new ApplicationError({ code: 'INVALID_REQUEST', message: 'TEST_ONLY 输入有误', details: { operation: 'TEST_ONLY', fields: ['targetLength'] } })} /></div>,
   boundary: <><style>{THEME_CSS + SURFACE_BOUNDARY_CSS}</style><SurfaceBoundary label="TEST_ONLY" onEscape={noop}><Boom /></SurfaceBoundary></>,
@@ -109,7 +120,8 @@ const ready = () => {
   const boundary = document.querySelector('[data-sf-fixture=boundary] .sf-boundary')
   const materials = document.querySelectorAll('[data-sf-fixture=materials] .sf-material-row')
   const disabledMaterials = document.querySelectorAll('[data-sf-fixture=materialsBusy] .sf-material-row:disabled')
-  if (!settings || !boundary || materials.length !== 6 || disabledMaterials.length !== 6) { requestAnimationFrame(ready); return }
+  const requirements = document.querySelector('[data-sf-fixture=requirements] .sf-requirements-save')
+  if (!settings || !boundary || !requirements || materials.length !== 6 || disabledMaterials.length !== 6) { requestAnimationFrame(ready); return }
   ;(window as any).sfVisualFixturesReady = true
 }
 requestAnimationFrame(ready)

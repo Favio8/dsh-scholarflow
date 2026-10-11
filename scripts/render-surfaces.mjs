@@ -216,6 +216,7 @@ export const surfaces = {
   empty: { title: 'TEST_ONLY · 资料为空', body: '<div data-sf-fixture="empty"></div>', width: '830px' },
   materials: { title: 'TEST_ONLY · 六份资料与长文件名', body: '<div data-sf-fixture="materials"></div>', width: '100%' },
   materialsBusy: { title: 'TEST_ONLY · 资料操作期间的禁用状态', body: '<div data-sf-fixture="materialsBusy"></div>', width: '100%' },
+  requirements: { title: 'TEST_ONLY · 写作要求与保存区', body: '<div data-sf-fixture="requirements"></div>', width: '830px' },
   loading: { title: 'TEST_ONLY · 正在读取', body: '<div data-sf-fixture="loading"></div>', width: '830px' },
   error: { title: 'TEST_ONLY · 应用错误', body: '<div data-sf-fixture="error"></div>', width: '830px' },
   boundary: { title: 'TEST_ONLY · 渲染错误边界', body: '<div data-sf-fixture="boundary"></div>', width: '830px' },
@@ -339,6 +340,12 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
       let passWrap
       for (const id of pass.ids) {
         const name = `surface-${id}${pass.suffix}.png`
+        if (id === 'requirements') {
+          const seat = page.locator(`#s${indexPath(id)}>.frame`)
+          await seat.getByRole('button', { name: '保存要求', exact: true }).click()
+          await seat.getByRole('status').filter({ hasText: '已保存写作要求。' }).waitFor()
+          await seat.locator('.sf-requirements-actions').screenshot({ path: join(outDir, `requirements-action${pass.suffix}.png`) })
+        }
         typography.push({ name, ...await page.evaluate(typographyInPage, `#s${indexPath(id)}>.frame`) })
         geometry.push({ name, ...await page.evaluate(geometryInPage, `#s${indexPath(id)}>.frame`) })
         effects.push({ name, ...await page.evaluate(stateAndIconsInPage, `#s${indexPath(id)}>.frame`) })

@@ -18,11 +18,11 @@ The code implements warm paper and ink, content/interface font separation, the s
 | SF-130 | Actual empty/loading/error/boundary component seats render. The boundary's existing ordinary-conversation escape remains an explicit interaction exception. |
 | SF-131 | Paper entrance/exit and easing tokens implemented; hover position probes show no movement. Mark reduced-motion pixel change remains zero. |
 | SF-132 | Host alias inventory recorded by surface; owned page content uses ScholarFlow page roles. The AT-132/Q5 wording discrepancy is recorded below. |
-| SF-133 | First separate commit expands the registry and activates the real dark attribute. Current audit has 20 registered surfaces, coverage complete and actual Host theme activation. Populated and busy material seats close the gap identified by the user's screenshot. |
-| SF-134 | Mirror alignment offset zero; wrap/cache invalidation checks pass. Browser typing p95 22.4ms, native Desktop 23.5ms; current client growth 0.410%. See the performance ADR. |
+| SF-133 | First separate commit expands the registry and activates the real dark attribute. Current audit has 21 registered surfaces, coverage complete and actual Host theme activation. Populated/busy material seats and the writing-requirements form cover the user's follow-up screenshots. |
+| SF-134 | Mirror alignment offset zero; wrap/cache invalidation checks pass. Current native Desktop p95 19.4ms passes; latest headless browser 36.2ms fails and remains recorded. Current client growth 0.445%. See the performance ADR and save-action record. |
 | SF-135 | Split seat checks the themed source and fixed light page roles, warm border colours, flat source and downward page shadow. Both native Desktop themes captured. |
 
-Build and typecheck passed; all 610 existing tests passed. The current render run produced 58 captures with zero reported problems. The current appearance audit reported zero problems. Original markup seats are CSS/measurement rendering evidence; added React seats and installed-Host checks are identified separately in the SF-133 record. These checks do not claim every conditional product state has been exercised.
+Build and typecheck passed; all 610 existing tests passed. The current render run produced 61 captures with zero reported problems. The current appearance audit reported zero problems. Original markup seats are CSS/measurement rendering evidence; added React seats and installed-Host checks are identified separately in the SF-133 record. These checks do not claim every conditional product state has been exercised or every performance backend has passed.
 
 The earlier full review evidence is archived under `.dsh-tmp/visual-language-baseline/2026-10-11-final/`:
 `render.json`, `appearance.json`, `performance-browser.json`, `performance-desktop.json`,
@@ -39,6 +39,11 @@ evidence are archived under `.dsh-tmp/visual-language-baseline/2026-10-11-materi
 See [material-card regression record](./material-card-content-layout.md). The native material
 run uses actual registered/parsed TEST_ONLY files; the React seats also exercise source
 records and all four material parse statuses. It does not replace full-session human acceptance.
+
+The subsequent [save-action refinement](./writing-requirements-save-action.md) is archived
+under `.dsh-tmp/visual-language-baseline/2026-10-11-save-action/`. Its original save callback
+is unchanged. Native Desktop performance passes; the failed headless sample and unresolved
+backend difference are retained alongside it, without changing the approved limit.
 
 Unresolved or explicitly subordinate items:
 

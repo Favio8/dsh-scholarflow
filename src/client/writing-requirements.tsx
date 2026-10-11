@@ -3,6 +3,7 @@ import { presetSections, type CreationSpec } from '../shared/writing-task.ts'
 import { FORMAT_LABELS, TYPE_LABELS } from './paper-workspace.tsx'
 import { requirementsFallback } from '../core/pipeline/requirements-fallback.ts'
 import { ErrorNotice } from './application-error.tsx'
+import { WorkbenchIcon } from './workbench-chrome.tsx'
 
 export function WritingRequirements({ project, api, context, refresh, onFormat }: any) {
   const [spec, setSpec] = useState<ReturnType<typeof requirementsFallback>>(), [busy, setBusy] = useState(false), [message, setMessage] = useState('')
@@ -29,10 +30,10 @@ export function WritingRequirements({ project, api, context, refresh, onFormat }
       {spec.cover.fields.map((field, index) => <label key={index}>{field.label}<input value={field.value} onChange={event => update({ cover: {
         ...spec.cover!, fields: spec.cover!.fields.map((row, at) => at === index ? { ...row, value: event.target.value } : row) } })} /></label>)}
     </fieldset>}
-    <button className="sf-primary" disabled={busy || !spec.title.trim() || !spec.requirements.trim()} onClick={async () => { setBusy(true); setMessage(''); setError(undefined)
+    <div className="sf-requirements-actions"><button className="sf-secondary sf-requirements-save" aria-busy={busy} disabled={busy || !spec.title.trim() || !spec.requirements.trim()} onClick={async () => { setBusy(true); setMessage(''); setError(undefined)
       try { const saved = await api('writingTask.preferences', { context: context(), spec, baseSpecHash }); setBaseSpecHash(saved.baseSpecHash); onFormat(spec.format); await refresh(); setMessage('已保存写作要求。') }
       catch (error) { setError(error as Error) } finally { setBusy(false) }
-    }}>保存要求</button><p role="status">{message}</p><ErrorNotice error={error} />
+    }}><WorkbenchIcon kind="save" />保存要求</button><p className="sf-requirements-save-status" role="status" aria-atomic="true">{message && <WorkbenchIcon kind="check" />}{message}</p></div><ErrorNotice error={error} />
     {error && <button onClick={async () => { try {
       const loaded = await api('writingTask.requirements', { context: context() })
       if (loaded.spec) setSavedVersion(loaded)

@@ -1,9 +1,10 @@
 import React from 'react'
 
-export function WorkbenchIcon({ kind = 'book', size = 16 }: { kind?: 'book' | 'chat' | 'close' | 'plus' | 'panel' | 'up' | 'down' | 'back' | 'next' | 'more' | 'stop' | 'external' | 'warning' | 'loading'; size?: 16 | 20 }) {
+export function WorkbenchIcon({ kind = 'book', size = 16 }: { kind?: 'book' | 'chat' | 'close' | 'plus' | 'panel' | 'up' | 'down' | 'back' | 'next' | 'more' | 'stop' | 'external' | 'warning' | 'loading' | 'save' | 'check'; size?: 16 | 20 }) {
   const paths: Record<string, string> = { up: 'm6 12 6-6 6 6M12 6v14', down: 'm6 9 6 6 6-6', back: 'm12 5-7 7 7 7M5 12h14', next: 'm12 5 7 7-7 7M5 12h14',
     more: 'M5 12h.01M12 12h.01M19 12h.01', stop: 'M6 6h12v12H6Z', external: 'M8 5H4v15h15v-4M11 4h9v9M20 4 9 15',
-    warning: 'm12 3 10 18H2L12 3ZM12 9v5M12 17h.01', loading: 'M20 12a8 8 0 1 1-8-8' }
+    warning: 'm12 3 10 18H2L12 3ZM12 9v5M12 17h.01', loading: 'M20 12a8 8 0 1 1-8-8',
+    save: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2ZM17 21v-8H7v8M7 3v5h8', check: 'm5 12 4 4L19 6' }
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {paths[kind] ? <path d={paths[kind]} /> : <>
     {kind === 'book' ? <><path d="M12 5v15M3 4c4-1 6 0 9 2 3-2 5-3 9-2v14c-4-1-6 0-9 2-3-2-5-3-9-2Z" /></>
