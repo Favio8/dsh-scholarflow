@@ -1,6 +1,7 @@
 // Executable rendering contracts for the approved visual-language PRD, not a new PRD version.
 export const SERIF_SELECTORS = [
   '.sf-paper-page',
+  'body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change-diff',
   '.sf-wizard .sf-outline-edit-row>.sf-outline-title',
   'body .sf-wizard .sf-outline-title',
   'body .sf-state.sf-state h3',

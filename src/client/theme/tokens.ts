@@ -18,6 +18,14 @@
  * `--sf-editor-line`) and the source padding that aligns the gutter are deliberately not here:
  * the wrap gate measures them.
  *
+ * Depth is carried by surface tint, not by borders. `--sf-plane-0/1/2/3` are four background
+ * steps that climb away from the viewer; a rule is only drawn where a boundary would otherwise
+ * be invisible — between the workbench chrome and the canvas, and around anything that floats.
+ * A stacked set of hairline separators reads as stripes rather than as hierarchy: the eye
+ * cannot tell a title bar from a status line when both are one hairline tall, so the workbench
+ * groups its bands by tint and keeps a rule only at the chrome edge. `--sf-border` and its
+ * siblings stay for form controls and floating layers, where an outline is the affordance.
+ *
  * The mark chip's radius is here but off the ladder: the chip is the paper the gradient glyphs sit
  * on, and a corner that cuts into a glyph would put that glyph's pixels on the pane's own background
  * instead of on paper, so it is set by the measurement rather than by the radius scale.
@@ -50,6 +58,10 @@ export const THEME_CSS = `:root{--sf-paper:#fbf9f5;--sf-text:#1f1c17;--sf-muted:
 --sf-ok:#2f7d52;--sf-ok-soft:#eef7f2;--sf-ok-border:#bfe0cd;
 --sf-warn-text:#8a5c15;--sf-warn-soft:#fdf4e3;--sf-warn-border:#eed9ae;
 --sf-surface:#fffdf9;--sf-surface-2:#f5f1e9;--sf-hover:#f2ede3;
+/* Depth steps. 0 is the canvas the panes sit on, 1 the workbench chrome, 2 an inset well,
+   3 a grouped band that must read as a unit without drawing a rule around it. Each step is a
+   tint of the same paper hue, so a band is quieter than a border but still separable. */
+--sf-plane-0:#f7f4ee;--sf-plane-1:#fbf9f5;--sf-plane-2:#f1ece3;--sf-plane-3:#ece6da;
 --sf-page-bg:#fbf9f5;--sf-page-text:#1f1c17;--sf-page-muted:#6b6157;--sf-page-faint:#756b5f;--sf-page-accent:#2d55a8;--sf-page-surface-2:var(--sf-surface-2);--sf-page-border:rgba(31,28,23,.13);--sf-page-border-soft:rgba(31,28,23,.08);--sf-page-border-strong:rgba(31,28,23,.28);
 --sf-scrim:rgba(31,28,23,.35);
 --sf-shadow-1:0 1px 2px rgba(31,28,23,.06),0 1px 3px rgba(31,28,23,.07);
@@ -72,6 +84,9 @@ body[data-ds-dark-theme]{--sf-paper:#1a1917;--sf-text:#f1ede6;--sf-muted:#a8a196
 --sf-ok:#7bc9a0;--sf-ok-soft:rgba(60,163,111,.16);--sf-ok-border:rgba(123,201,160,.30);
 --sf-warn-text:#f0b860;--sf-warn-soft:rgba(240,184,96,.14);--sf-warn-border:rgba(240,184,96,.30);
 --sf-surface:#21201d;--sf-surface-2:#292722;--sf-hover:#302c26;--sf-page-bg:#fdfbf7;
+/* Dark inverts the climb: chrome sits above the canvas, so plane 1 is lighter than plane 0.
+   Same order of separation, opposite direction. */
+--sf-plane-0:#1e1d1b;--sf-plane-1:#252422;--sf-plane-2:#2b2926;--sf-plane-3:#33302c;
 --sf-scrim:rgba(0,0,0,.55);
 --sf-shadow-1:0 1px 2px rgba(0,0,0,.5),0 1px 3px rgba(0,0,0,.4);
 --sf-shadow-2:0 6px 20px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.4);
@@ -87,11 +102,15 @@ body :is(.sf-wizard h3,.sf-paper-project h2,.sf-paper-project h3,.sf-preset-prev
 body :is(.sf-paper-title,.sf-paper-project h4,.sf-preset-row strong,.sf-preset-sections strong,.sf-preset-subsections li>span,.sf-chat-empty h3){font-size:var(--sf-font-title);line-height:var(--sf-leading-title);font-weight:600}
 body .sf-wizard .sf-outline-title{font-family:var(--sf-family-serif);font-size:var(--sf-font-title);line-height:var(--sf-leading-title)}
 body :is(.sf-wizard-eyebrow,.sf-preset-group,.sf-outline-status,.sf-chat-mode){letter-spacing:.04em}
-body .sf-paper-project{background:var(--sf-paper)}
-body :is(.sf-wizard-scroll,.sf-create-scroll,.sf-settings){background:var(--sf-paper)}
+body .sf-paper-project{background:var(--sf-plane-1)}
+body :is(.sf-wizard-scroll,.sf-create-scroll,.sf-settings){background:var(--sf-plane-0)}
 body :is(.sf-wizard-scroll,.sf-create-scroll){background:transparent}
-body :is(.sf-wizard,.sf-preset-dialog,.sf-create-card,.sf-settings-card,.sf-wizard .sf-picker-panel){background:var(--sf-surface)}
+body .sf-create-card,body .sf-settings-card{background:var(--sf-surface)}
+body :is(.sf-wizard,.sf-preset-dialog){background:var(--sf-surface)}
 body .sf-source-pane{background:var(--sf-surface)}
+/* The pane stays unpainted: the canvas tint belongs to .sf-paper-project, and a second tinted
+   layer here would sit between the app and the paper, costing the prose an extra painted ancestor
+   under AT-127. Transparent also lets the paper's edge read against the darker root step. */
 body .sf-preview-pane{background:transparent}
 body .sf-muted{color:var(--sf-muted)}
 body .sf-wizard p:not(:where(.sf-wizard-error p,.sf-wizard-issues p,.sf-brief-conflict p)){color:var(--sf-muted)}
@@ -160,4 +179,60 @@ body .sf-state-details pre,body .sf-boundary pre{background:transparent;border:0
 @media(prefers-reduced-motion:reduce){body .sf-state-icon[data-animated]{animation:none}}
 @media(max-width:520px){body .sf-state{flex-wrap:wrap;align-items:flex-start}body .sf-state>button{margin-left:48px}}
 @container(max-width:420px){body .sf-paper-header{flex-wrap:wrap}body .sf-paper-header .sf-native-tools{margin-left:auto}body .sf-pane-caption{flex-wrap:wrap;gap:var(--sf-space-1)}body .sf-pane-caption>span:first-child{flex:1}body .sf-pane-caption>button{flex-shrink:0;white-space:nowrap}body .sf-pane-caption .sf-pane-zoom{order:2;flex-basis:100%;justify-content:space-between}}
-@media(max-width:720px){:root{--sf-hit-min:44px}body .sf-wizard{padding:var(--sf-space-4)}body .sf-wizard-footer{flex-wrap:wrap;gap:var(--sf-space-2)}body .sf-wizard-footer>span{display:none}body .sf-wizard-footer>button{flex:1 1 auto;white-space:normal}body .sf-wizard .sf-outline-toolbar{gap:var(--sf-space-2)}}`
+@media(max-width:720px){:root{--sf-hit-min:44px}body .sf-wizard{padding:var(--sf-space-4)}body .sf-wizard-footer{flex-wrap:wrap;gap:var(--sf-space-2)}body .sf-wizard-footer>span{display:none}body .sf-wizard-footer>button{flex:1 1 auto;white-space:normal}body .sf-wizard .sf-outline-toolbar{gap:var(--sf-space-2)}}
+/* Layout primitives (SF-136..139). One definition each — a field row, a section band, a
+   disclosure — living here rather than in a component constant, because the screens had grown
+   three different field-markup idioms and a second implementation would reintroduce the drift.
+   .sf-form is the grid, .sf-field is display:contents so its three children become grid items:
+   that is what puts every control in a group on one left edge. Because .sf-field has no box it
+   must not carry padding, border or background, and must not carry role/aria/id — display:contents
+   removes it from the accessibility tree, so those belong on the input. */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form{display:grid;grid-template-columns:max-content minmax(0,1fr);align-items:center;column-gap:var(--sf-space-4);row-gap:var(--sf-space-3);max-width:100%}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field{display:contents}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-label{font-size:var(--sf-font-sm);font-weight:500;line-height:var(--sf-leading-sm);color:var(--sf-muted);min-width:0;overflow-wrap:anywhere}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-control{display:flex;align-items:center;gap:var(--sf-space-2);min-width:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-control>:is(input,select,textarea){flex:1 1 auto;min-width:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-control>button{flex:0 0 auto}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-hint{grid-column:2;margin:0;font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm);color:var(--sf-text-faint)}
+/* Section band. A band draws its boundary with a rule and never with a box; a band that also had
+   a background would be a card, and cards inside cards are what made these pages read as tables.
+   [data-surface=card] is the opt-in for the rare case that really is a card. */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group{display:flex;flex-direction:column;gap:var(--sf-space-4);padding:var(--sf-space-4) 0;border-top:1px solid var(--sf-border-soft)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group:first-child{border-top:0;padding-top:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group>header{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3);min-height:var(--sf-control-sm)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group>header>:is(h2,h3){margin:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group-body{display:flex;flex-direction:column;gap:var(--sf-space-4);min-width:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group[data-surface=card]{padding:var(--sf-space-4);border-top:0;background:var(--sf-surface);border-radius:var(--sf-radius-surface)}
+/* Disclosure (SF-138). Static prose longer than a field hint collapses to one line, so a screen
+   of explanation reads as a screen of fields. <details> carries the semantics, keyboard access
+   and aria-expanded without JS. The marker is a border triangle, not a text character (SF-129). */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail{border:0;padding:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary{display:flex;align-items:baseline;gap:var(--sf-space-2);cursor:pointer;list-style:none;font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm);color:var(--sf-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary::-webkit-details-marker{display:none}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary::before{content:'';flex:none;width:0;height:0;margin-top:.35em;border-left:4px solid currentColor;border-top:3px solid transparent;border-bottom:3px solid transparent;transition:transform var(--sf-dur-quick)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail[open]>summary{white-space:normal;text-overflow:clip}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail[open]>summary::before{transform:rotate(90deg)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>p{margin:var(--sf-space-2) 0 0;padding-left:calc(4px + var(--sf-space-2));font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm);color:var(--sf-muted)}
+/* File inputs were the one control the contract missed (SF-139), so the browser's own button sat
+   beside the styled ones on the settings screen. It takes the secondary variant's geometry now. */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *){border:0;background:transparent;padding:0;height:auto;min-height:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *)::file-selector-button{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));padding:0 var(--sf-space-3);margin-inline-end:var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-control);background:var(--sf-surface);color:var(--sf-text);font-family:var(--sf-family-sans);font-size:var(--sf-font-md);cursor:pointer;transition:background var(--sf-dur-quick),border-color var(--sf-dur-quick)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *)::file-selector-button:hover{background:var(--sf-hover);border-color:var(--sf-border-strong)}
+/* AI change card (SF-142): what changed and why, not two bare buttons. */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change{display:flex;flex-direction:column;gap:var(--sf-space-3);padding:var(--sf-space-3) 0;border-top:1px solid var(--sf-border-soft)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change:first-child{border-top:0;padding-top:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change-diff{font-family:var(--sf-family-serif);font-size:var(--sf-font-prose);line-height:var(--sf-leading-prose);overflow-wrap:anywhere}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change-diff>del{color:var(--sf-muted);text-decoration:line-through}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change-diff>ins{background:var(--sf-accent-soft);color:var(--sf-accent-text);text-decoration:none}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change-why{margin:0;font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm);color:var(--sf-muted)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change-actions{display:flex;flex-wrap:wrap;gap:var(--sf-space-2)}
+/* AI provenance tick (SF-143). A 2px rule outside the glyph box, so a range can be marked
+   without touching its text contrast; the rainbow mark keeps its own separate channel. */
+body .sf-origin-ai{position:relative}
+body .sf-origin-ai::after{content:'';position:absolute;left:-2px;top:.15em;bottom:.15em;width:2px;background:var(--sf-accent-border);border-radius:1px}
+/* Stack the field grid on a narrow pane. @media, not @container: the only container-type in this
+   client is .sf-paper-project, so an @container rule inside .sf-wizard or .sf-settings would never
+   fire. Adding container-type to those roots would also make them the containing block for the
+   fixed-position overlays they host, which this pass cannot verify. Known limit: a narrow pane in
+   a wide viewport keeps the two-column grid. */
+@media(max-width:640px){body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form{grid-template-columns:minmax(0,1fr);row-gap:var(--sf-space-1)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-label{margin-top:var(--sf-space-2)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-hint{grid-column:1}}`

@@ -122,7 +122,9 @@ function formatElapsed(ms: number) {
   return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
 }
 
-export const PROGRESS_CSS = `.sf-writing-progress{flex:none;border-bottom:1px solid var(--sf-border);padding:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-sm)}
+export const PROGRESS_CSS = `/* Status band: tint, no rule. A hairline under every running status stacks with the
+   header and toolbar rules into stripes, and the progress line is the least structural of them. */
+.sf-writing-progress{flex:none;padding:var(--sf-space-1) var(--sf-space-4);font-size:var(--sf-font-sm);background:var(--sf-plane-1)}
 .sf-writing-line{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap}
 .sf-progress-dot{width:7px;height:7px;background:var(--sf-ok);border-radius:50%;flex:none}
 .sf-progress-working{animation:sf-progress-pulse 1.4s infinite}
@@ -134,21 +136,27 @@ export const PROGRESS_CSS = `.sf-writing-progress{flex:none;border-bottom:1px so
 .sf-issue-popover{position:absolute;right:0;z-index:40;top:var(--sf-space-5);width:400px;max-height:420px;overflow:auto;background:var(--sf-surface);box-shadow:var(--sf-shadow-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);padding:var(--sf-space-3);text-align:left}
 .sf-issue-group{margin:0 0 var(--sf-space-2)}
 .sf-issue-group>summary{cursor:pointer;font-size:var(--sf-font-sm);color:var(--sf-muted)}
-.sf-issue-row{border:1px solid var(--sf-border);border-radius:var(--sf-radius-lg);padding:var(--sf-space-2);margin:var(--sf-space-2) 0}
-.sf-issue-group[data-tone=needs] .sf-issue-row{border-color:var(--sf-warn-border);background:var(--sf-warn-soft)}
-.sf-issue-group[data-tone=working] .sf-issue-row{border-color:var(--sf-accent-border);background:var(--sf-accent-soft)}
-.sf-issue-group[data-tone=done] .sf-issue-row{opacity:var(--sf-disabled-opacity)}
+/* Groups are separated by space and a weight change on their own heading. With the row borders
+   gone, a rule here would be the only line in the popover, which is what a group boundary wants. */
+.sf-issue-group+.sf-issue-group{border-top:1px solid var(--sf-border-soft);padding-top:var(--sf-space-2)}
+/* An issue is a paragraph, not a card. Each row used to draw its own border inside a bordered
+   popover, so eleven issues read as eleven stacked stickers; the tone tint alone separates a
+   row from the group it sits in. */
+.sf-issue-row{border:0;border-radius:var(--sf-radius-lg);padding:var(--sf-space-2) var(--sf-space-3);margin:var(--sf-space-2) 0}
+.sf-issue-group[data-tone=needs] .sf-issue-row{background:var(--sf-warn-soft)}
+.sf-issue-group[data-tone=working] .sf-issue-row{background:var(--sf-accent-soft)}
+.sf-issue-group[data-tone=done] .sf-issue-row{opacity:var(--sf-disabled-opacity);padding-top:0;padding-bottom:0;margin:0}
 .sf-issue-what{margin:0 0 var(--sf-space-1);font-size:var(--sf-font-sm);line-height:var(--sf-leading-body)}
 .sf-issue-impact{margin:0;font-size:var(--sf-font-sm);line-height:var(--sf-leading-body);color:var(--sf-muted)}
 .sf-issue-actions{display:flex;flex-wrap:wrap;gap:var(--sf-space-2);margin-top:var(--sf-space-2)}
-.sf-issue-actions button{font-size:var(--sf-font-xs);padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong)!important;border-radius:var(--sf-radius-md);color:var(--sf-muted)}
+.sf-issue-actions button{font-size:var(--sf-font-xs);padding:0 var(--sf-space-2);border:0!important;border-radius:var(--sf-radius-md);color:var(--sf-muted);background:var(--sf-fill-strong)}
 .sf-issue-row pre{margin:var(--sf-space-1) 0 0;padding:var(--sf-space-2);background:var(--sf-fill);border-radius:var(--sf-radius-md);font-size:var(--sf-font-xs);overflow:auto;white-space:pre-wrap}
 .sf-cowrite-inline{border:1px solid var(--sf-accent-border);border-radius:var(--sf-radius-lg);margin:var(--sf-space-3);padding:var(--sf-space-3);background:var(--sf-surface);font-size:var(--sf-font-md);max-height:350px;overflow:auto}
 .sf-cowrite-inline header{display:flex;align-items:center;gap:var(--sf-space-2)}.sf-cowrite-inline header strong{flex:1}
 .sf-cowrite-inline pre{font-family:inherit;font-size:var(--sf-font-md);line-height:var(--sf-leading-prose);margin:var(--sf-space-2) 0;padding:var(--sf-space-2);border-radius:var(--sf-radius-sm)}
 .sf-cowrite-before{background:var(--sf-danger-soft);color:var(--sf-danger);white-space:pre-wrap;overflow-wrap:anywhere}
 .sf-cowrite-after{background:var(--sf-ok-soft);white-space:pre-wrap;overflow-wrap:anywhere}
-.sf-cowrite-bar{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-3);border-bottom:1px solid var(--sf-border);font-size:var(--sf-font-sm)}
+.sf-cowrite-bar{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-1) var(--sf-space-4);background:var(--sf-plane-1);font-size:var(--sf-font-sm)}
 .sf-cowrite-hint{flex:1;min-width:0;color:var(--sf-text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sf-pending-list{max-height:320px;overflow:auto}
 .sf-chapter-nav{position:relative}

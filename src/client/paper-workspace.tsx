@@ -39,10 +39,12 @@ export function ProjectSettings({ project, api, context, refresh, run, busy, dia
 }
 
 export const PAPER_CSS = `
-.sf-stream-status{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-2) var(--sf-space-3);font-size:var(--sf-font-sm);color:var(--sf-muted);border-bottom:1px solid var(--sf-border);flex-shrink:0}
+/* Progress read-out, not a band. It carries no rule: the toolbar above it already separates
+   chrome from canvas, and a rule here would stack a third hairline onto the two above. */
+.sf-stream-status{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-1) var(--sf-space-4);font-size:var(--sf-font-sm);color:var(--sf-muted);flex-shrink:0}
 .sf-stream-status span{flex:1;min-width:0}.sf-stream-status button{white-space:nowrap;font-size:var(--sf-font-sm)}
 .sf-stream-anchor{display:block;height:1px;scroll-margin-bottom:40px}
-.sf-unfinished-preview{padding:var(--sf-space-2) var(--sf-space-3);border-top:1px solid var(--sf-border);max-height:220px;overflow:auto;flex-shrink:0;font-size:var(--sf-font-sm)}
+.sf-unfinished-preview{padding:var(--sf-space-2) var(--sf-space-3);background:var(--sf-plane-2);max-height:220px;overflow:auto;flex-shrink:0;font-size:var(--sf-font-sm)}
 .sf-unfinished-preview pre{white-space:pre-wrap;overflow-wrap:anywhere}
 /* Workbench chrome reads its colours, spacing, type and radii from src/client/theme/tokens.ts.
    The simulated page (.sf-paper-page and its prose) is deliberately outside that system: it stands in
@@ -51,8 +53,13 @@ export const PAPER_CSS = `
    variables come from the measurement code, not from taste. */
 .sf-native-workspace{min-height:0;background:var(--dsw-alias-bg-layer-1,var(--sf-surface))}
 .sf-native-workspace>.sf-body{display:flex;padding:0;overflow:hidden;min-height:0}
-.sf-paper-project{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;font-size:var(--sf-font-md)}
-.sf-paper-header{display:flex;align-items:center;gap:var(--sf-space-2);min-height:48px;padding:0 var(--sf-space-4);border-bottom:1px solid var(--sf-border);flex-shrink:0}
+/* The canvas tint lives here, on the root, and the panes above it stay transparent. Two tinted
+   layers would be two painted ancestors between the app and the prose, which AT-127 caps at two;
+   and this also puts the paper on the darker step so its edge reads without a border. */
+.sf-paper-project{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;font-size:var(--sf-font-md);background:var(--sf-plane-0)}
+/* The header is the one boundary worth a rule: it is where the plugin's own chrome meets the
+   host's canvas, and nothing else on screen crosses that edge. */
+.sf-paper-header{display:flex;align-items:center;gap:var(--sf-space-2);min-height:48px;padding:0 var(--sf-space-4);border-bottom:1px solid var(--sf-border);background:var(--sf-plane-1);flex-shrink:0}
 .sf-paper-title{font-size:var(--sf-font-prose);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:50px;max-width:40%}
 /* The creation wizard owns its controls; this fallback must not override its button variants. */
 .sf-paper-project button:not(.sf-native-tools *):not(:where(.sf-wizard *)),.sf-paper-project select:not(.sf-native-tools *):not(:where(.sf-wizard *)),.sf-paper-export button{font:inherit;color:inherit;background:transparent;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);padding:var(--sf-space-2);cursor:pointer}
@@ -67,7 +74,9 @@ export const PAPER_CSS = `
 .sf-paper-menu-popover{position:absolute;right:0;top:100%;z-index:10;min-width:156px;padding:var(--sf-space-1);background:var(--sf-surface);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);box-shadow:var(--sf-shadow-2);display:flex;flex-direction:column;gap:var(--sf-space-hair)}
 .sf-paper-menu-popover button{border:0;text-align:left;border-radius:var(--sf-radius-sm);padding:var(--sf-space-2) var(--sf-space-3);white-space:nowrap}
 .sf-paper-menu-popover button:hover{background:var(--sf-fill)}
-.sf-paper-toolbar{display:flex;align-items:center;gap:var(--sf-space-3);height:38px;padding:0 var(--sf-space-4);border-bottom:1px solid var(--sf-border);flex-shrink:0}
+/* The view switcher and the pane it governs are one control, so they share one band: the
+   toolbar tints, the editor grid below it stays on the canvas. No rule between them. */
+.sf-paper-toolbar{display:flex;align-items:center;gap:var(--sf-space-3);height:38px;padding:0 var(--sf-space-4);background:var(--sf-plane-1);flex-shrink:0}
 .sf-paper-views{display:flex;align-items:center;height:100%;gap:var(--sf-space-1)}
 .sf-paper-views button{height:28px;min-width:48px;border:0;font-size:var(--sf-font-sm);color:var(--sf-muted)}
 .sf-paper-views button[aria-pressed=true]{color:var(--sf-accent-text);background:var(--sf-accent-soft);font-weight:600}
@@ -75,24 +84,31 @@ export const PAPER_CSS = `
 .sf-paper-content{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .sf-paper-content>[role=tabpanel]{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-5);box-sizing:border-box}
 .sf-paper-content>#sf-panel-Draft{display:flex;padding:0;overflow:hidden}
-.sf-tool-back{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-2) var(--sf-space-3);border-bottom:1px solid var(--sf-border);flex-shrink:0}
+.sf-tool-back{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-2) var(--sf-space-3);background:var(--sf-plane-1);flex-shrink:0}
 .sf-tool-back strong{font-size:var(--sf-font-md)}.sf-tool-back button{border:0;padding:0 var(--sf-space-2);color:var(--sf-accent-text)}
 .sf-draft{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden}
 .sf-editor-surface{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
 .sf-editor-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);flex:1;min-height:0;overflow:hidden}
 .sf-editor-grid[data-view=edit],.sf-editor-grid[data-view=preview]{grid-template-columns:minmax(0,1fr)}
 .sf-source-pane,.sf-preview-pane{display:flex;flex-direction:column;min-height:0;min-width:0}
-.sf-pane-caption{display:flex;align-items:center;justify-content:space-between;height:32px;box-sizing:border-box;padding:0 var(--sf-space-3);color:var(--sf-text-faint);font-size:var(--sf-font-xs);border-bottom:1px solid var(--sf-border-soft);flex-shrink:0}
+/* A pane caption labels the pane; it is part of the pane's own surface, so it takes the pane's
+   tint instead of a rule. Sitting directly on the pane background, it needs none of its own. */
+.sf-pane-caption{display:flex;align-items:center;justify-content:space-between;height:32px;box-sizing:border-box;padding:0 var(--sf-space-3);color:var(--sf-text-faint);font-size:var(--sf-font-xs);background:var(--sf-plane-2);flex-shrink:0}
 .sf-pane-caption button{font-size:var(--sf-font-xs);border:0;padding:0 var(--sf-space-2)}
-.sf-source-pane{border-right:1px solid var(--sf-border);background:var(--sf-surface)}
+/* The split is two panes, not two cards. A rule would frame each pane like a panel; the
+   canvas tint on the preview side is enough to say "the editor ends here". */
+.sf-source-pane{background:var(--sf-surface)}
 .sf-source-editor{display:flex;flex:1;min-height:0;overflow:hidden;position:relative}
 .sf-line-gutter{width:48px;flex-shrink:0;box-sizing:border-box;overflow:hidden;padding:20px 10px 20px 0;text-align:right;user-select:none;color:var(--sf-text-faint);background:var(--sf-fill-sunken)}
 .sf-line-gutter>div{will-change:transform}
 .sf-line-gutter,.sf-app textarea.sf-source-input{font:var(--sf-editor-font,13px)/var(--sf-editor-line,24px) Consolas,'SFMono-Regular',monospace!important;tab-size:2}
 .sf-app textarea.sf-source-input{flex:1;width:0;min-width:0;height:100%;resize:none!important;border:0!important;border-radius:0;padding:20px 18px;white-space:pre-wrap;overflow-wrap:break-word;overflow-x:hidden;overflow-y:auto;outline:none!important;background:transparent;position:relative;z-index:1}
-.sf-preview-pane{background:var(--sf-surface-2)}
+.sf-preview-pane{background:transparent}
 .sf-paper-scroll{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-6)}
-.sf-paper-page{box-sizing:border-box;width:100%;max-width:var(--sf-measure);min-height:900px;margin:auto;padding:var(--sf-space-5) var(--sf-space-6);background:var(--sf-page-bg);color:var(--sf-page-text);box-shadow:var(--sf-shadow-1);border:1px solid var(--sf-page-border)}
+/* Paper floats on the canvas by tint and lift, not by outline. A border here draws a hard
+   rectangle around a sheet of paper, which reads as a card pasted onto the page; the wide,
+   very soft shadow says "this is above that" without drawing a line. */
+.sf-paper-page{box-sizing:border-box;width:100%;max-width:var(--sf-measure);min-height:900px;margin:auto;padding:var(--sf-space-5) var(--sf-space-6);background:var(--sf-page-bg);color:var(--sf-page-text);border:0;border-radius:2px;box-shadow:0 1px 2px rgba(31,28,23,.05),0 8px 28px rgba(31,28,23,.07)}
 .sf-paper-page{font-family:var(--sf-family-serif);font-size:var(--sf-font-prose)}
 .sf-paper-page .sf-prose{font-size:var(--sf-font-prose);line-height:var(--sf-leading-prose);overflow-wrap:anywhere}
 .sf-paper-page .sf-prose h1{font-size:var(--sf-font-display-2);line-height:var(--sf-leading-display-2);text-align:center;margin:0 0 28px}
@@ -101,8 +117,11 @@ export const PAPER_CSS = `
 .sf-paper-page .sf-prose p{margin:.9em 0}.sf-paper-page .sf-prose pre{padding:var(--sf-space-2);background:var(--sf-surface-2)}
 .sf-paper-page .sf-prose table{border-collapse:collapse;width:100%}.sf-paper-page .sf-prose td{padding:var(--sf-space-2);border:1px solid var(--sf-border)}
 .sf-paper-page .katex-display{overflow-x:auto;overflow-y:hidden;padding:var(--sf-space-2) 0}
-.sf-paper-references{border-top:1px solid #e5e7eb;margin-top:30px;font-size:var(--sf-font-sm);line-height:1.8}
-.sf-draft-status{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3);min-height:28px;padding:0 var(--sf-space-4);border-top:1px solid var(--sf-border);flex-shrink:0;font-size:var(--sf-font-xs);color:var(--sf-muted)}
+/* References belong to the sheet above them, so the rule is the sheet's own ink, one step
+   lighter — not a border token, which would put a UI line inside the printed page. */
+.sf-paper-references{border-top:1px solid var(--sf-page-border-soft);margin-top:30px;font-size:var(--sf-font-sm);line-height:1.8}
+/* Save state and word count are status, not a panel: tint, no rule. */
+.sf-draft-status{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3);min-height:28px;padding:0 var(--sf-space-4);background:var(--sf-plane-1);flex-shrink:0;font-size:var(--sf-font-xs);color:var(--sf-muted)}
 .sf-draft-status>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sf-saved-dot{color:var(--sf-ok);margin-right:var(--sf-space-1)}
 .sf-editor-notice{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap;padding:var(--sf-space-2) var(--sf-space-3);background:var(--sf-accent-soft);border-bottom:1px solid var(--sf-border);font-size:var(--sf-font-sm);flex-shrink:0}
 .sf-editor-notice button{padding:0 var(--sf-space-2);font-size:var(--sf-font-sm)}
