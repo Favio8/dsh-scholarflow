@@ -66,13 +66,31 @@ const component = (key: string) => {
 }
 function Boom(): React.ReactElement { throw new Error('TEST_ONLY 渲染失败：用于审计真实错误边界') }
 const project = { ledger: { materials: {}, sources: {}, evidence: {}, claims: {}, outline: { researchQuestion: 'TEST_ONLY' } }, config: { research: {} } }
-const materialApi = async (method: string) => {
+const longMaterialName = 'Graph_Convolution-Based_Decoupling_and_Consistency-Driven_Fusion_for_Multimodal_Emotion_Recognition.pdf'
+const materialPaths = ['报告笔记.md', '个人报告笔记.md', longMaterialName, '作业要求/1.jpg', '作业要求/2.jpg', '作业要求/3.jpg']
+const statuses = ['ready', 'ready', 'ready', 'pending', 'partial', 'failed']
+const populatedProject = { ...project, ledger: { ...project.ledger,
+  materials: Object.fromEntries(materialPaths.map((projectRelativePath, index) => [`material_TEST_ONLY_${index}`,
+    { id: `material_TEST_ONLY_${index}`, projectRelativePath, parseStatus: statuses[index] }])),
+  sources: Object.fromEntries([1, 2, 3].map(index => [`source_TEST_ONLY_${index}`, {
+    id: `source_TEST_ONLY_${index}`, title: 'TEST_ONLY Graph Convolution-Based Decoupling and Consistency-Driven Fusion for Multimodal Emotion Recognition',
+    authors: [{ literal: 'TEST_ONLY Author' }], year: 2025, textAccess: 'fulltext', citeKey: `sf_TEST_ONLY_${index}`, identifiers: {}, identity: { status: 'unverified' },
+  }])),
+} }
+;(window as any).sfMaterialReads = []
+const materialApi = async (method: string, args?: any) => {
   if (method === 'research.list') return []
   if (method === 'research.batchList') return { runs: [], diagnostics: [] }
+  if (method === 'materials.read') {
+    ;(window as any).sfMaterialReads.push(args.materialId)
+    return { blocks: [{ text: 'TEST_ONLY 资料原文；不读取用户文件。', locator: { kind: 'text', lineStart: 1, lineEnd: 2 } }] }
+  }
   throw new Error(`TEST_ONLY unsupported operation: ${method}`)
 }
 const fixtures: Record<string, React.ReactNode> = {
   empty: <div className="sf-app sf-paper-project"><style>{THEME_CSS + MATERIALS_CSS}</style><PaperMaterials project={project} api={materialApi} context={() => ({ sessionId })} refresh={async () => {}} run={noop} busy={false} /></div>,
+  materials: <div className="sf-app sf-paper-project"><style>{THEME_CSS + MATERIALS_CSS}</style><PaperMaterials project={populatedProject} api={materialApi} context={() => ({ sessionId })} refresh={async () => {}} run={(operation: () => Promise<void>) => operation()} busy={false} /></div>,
+  materialsBusy: <div className="sf-app sf-paper-project"><style>{THEME_CSS + MATERIALS_CSS}</style><PaperMaterials project={populatedProject} api={materialApi} context={() => ({ sessionId })} refresh={async () => {}} run={noop} busy={true} /></div>,
   loading: component('scholarflow.project:'),
   error: <div className="sf-app"><ErrorNotice error={new ApplicationError({ code: 'INVALID_REQUEST', message: 'TEST_ONLY 输入有误', details: { operation: 'TEST_ONLY', fields: ['targetLength'] } })} /></div>,
   boundary: <><style>{THEME_CSS + SURFACE_BOUNDARY_CSS}</style><SurfaceBoundary label="TEST_ONLY" onEscape={noop}><Boom /></SurfaceBoundary></>,
@@ -89,7 +107,9 @@ for (const [name, view] of Object.entries(fixtures)) {
 const ready = () => {
   const settings = document.querySelector('[data-sf-fixture=settings] select[aria-label="新项目默认类型"]')
   const boundary = document.querySelector('[data-sf-fixture=boundary] .sf-boundary')
-  if (!settings || !boundary) { requestAnimationFrame(ready); return }
+  const materials = document.querySelectorAll('[data-sf-fixture=materials] .sf-material-row')
+  const disabledMaterials = document.querySelectorAll('[data-sf-fixture=materialsBusy] .sf-material-row:disabled')
+  if (!settings || !boundary || materials.length !== 6 || disabledMaterials.length !== 6) { requestAnimationFrame(ready); return }
   ;(window as any).sfVisualFixturesReady = true
 }
 requestAnimationFrame(ready)

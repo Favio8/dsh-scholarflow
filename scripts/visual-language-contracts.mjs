@@ -44,7 +44,29 @@ export function geometryInPage(selector) {
     return { width, font, characters: width / font, availableCharacters: available / font,
       constrainedByPane: available / font < 34, background: style.backgroundColor, border: style.borderColor, shadow: style.boxShadow }
   })
-  return { depths, radiusFailures, selects, pages }
+  const materialPanel = root.querySelector('.sf-materials-panel')
+  const materialGrid = materialPanel?.querySelector('.sf-materials-grid')
+  const materialCards = [...(materialGrid?.querySelectorAll('.sf-material-row') ?? [])].map(card => {
+    const box = card.getBoundingClientRect(), style = getComputedStyle(card)
+    const title = card.querySelector('strong'), status = card.querySelector('small')
+    const fragments = [title, status].flatMap(el => {
+      const range = document.createRange(); range.selectNodeContents(el)
+      return [...range.getClientRects()]
+    })
+    return { title: title.textContent, status: status.textContent, height: box.height,
+      top: box.top, bottom: box.bottom, disabled: card.disabled, textAlign: style.textAlign,
+      contentContained: fragments.every(rect => rect.left >= box.left + parseFloat(style.paddingLeft) - 1
+        && rect.right <= box.right - parseFloat(style.paddingRight) + 1
+        && rect.top >= box.top + parseFloat(style.paddingTop) - 1
+        && rect.bottom <= box.bottom - parseFloat(style.paddingBottom) + 1),
+      separateStatus: title.getBoundingClientRect().bottom <= status.getBoundingClientRect().top + 1 }
+  })
+  const materialHeading = materialPanel?.querySelector(':scope > h3')
+  const materials = materialCards.length ? { cards: materialCards,
+    overflow: materialPanel.scrollWidth - materialPanel.clientWidth,
+    referenceGap: materialHeading.getBoundingClientRect().top - materialGrid.getBoundingClientRect().bottom,
+  } : null
+  return { depths, radiusFailures, selects, pages, materials }
 }
 
 export function typographyInPage(selector) {

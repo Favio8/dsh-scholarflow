@@ -214,6 +214,8 @@ export const surfaces = {
   draftPreview: { title: '正文预览 · 改写范围标注', body: draftPreviewBody(), width: '680px' },
   split: { title: 'TEST_ONLY · 编辑与预览并置', body: splitBody(), width: '100%' },
   empty: { title: 'TEST_ONLY · 资料为空', body: '<div data-sf-fixture="empty"></div>', width: '830px' },
+  materials: { title: 'TEST_ONLY · 六份资料与长文件名', body: '<div data-sf-fixture="materials"></div>', width: '100%' },
+  materialsBusy: { title: 'TEST_ONLY · 资料操作期间的禁用状态', body: '<div data-sf-fixture="materialsBusy"></div>', width: '100%' },
   loading: { title: 'TEST_ONLY · 正在读取', body: '<div data-sf-fixture="loading"></div>', width: '830px' },
   error: { title: 'TEST_ONLY · 应用错误', body: '<div data-sf-fixture="error"></div>', width: '830px' },
   boundary: { title: 'TEST_ONLY · 渲染错误边界', body: '<div data-sf-fixture="boundary"></div>', width: '830px' },
@@ -317,7 +319,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
   writeFileSync(join(outDir, 'wizard-dark.html'), pageHtml(theme, wizard, picker, paper + marks, motion, true))
 
   const browser = await chromium.launch({ executablePath: chromePath(), headless: true })
-  const results = [], wrap = [], mark = [], preview = [], typography = [], geometry = [], controls = [], palettes = [], effects = []
+  const results = [], wrap = [], mark = [], preview = [], typography = [], geometry = [], controls = [], palettes = [], effects = [], materialActions = []
   let systemSerif
   try {
     for (const pass of passes) {
@@ -431,6 +433,19 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
               { selector: `#s${indexPath(id)}>.frame .sf-mark-inline`, on }))
           preview.push({ name, report: previewReport, problems: auditPreview(name, previewReport) })
         }
+        if (id === 'materials') {
+          const seat = page.locator(`#s${indexPath(id)}>.frame`)
+          const card = seat.locator('.sf-material-row').nth(2)
+          await card.focus()
+          await page.keyboard.press('Enter')
+          await seat.locator('.sf-material-excerpt pre').waitFor()
+          const opened = await seat.locator('.sf-material-excerpt pre').textContent()
+          const requested = await page.evaluate(() => window.sfMaterialReads.at(-1))
+          await seat.locator('.sf-material-excerpt').getByRole('button', { name: '关闭', exact: true }).click()
+          await seat.locator('.sf-material-excerpt').waitFor({ state: 'detached' })
+          const closed = await seat.locator('.sf-material-excerpt').count() === 0
+          materialActions.push({ name, opened, requested, closed })
+        }
       }
       await page.close()
     }
@@ -467,7 +482,17 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
     if (row.selects.some(select => select.appearance !== 'none')) geometryProblems.push(`AT-128 ${row.name}: native select appearance remains`)
     for (const page of row.pages) if (page.characters > 42 || !page.constrainedByPane && page.characters < 34)
       geometryProblems.push(`AT-126 ${row.name}: reading measure ${page.characters.toFixed(1)} characters`)
+    if (row.materials) {
+      if (row.materials.cards.length !== 6 || row.materials.cards.some(card => !card.contentContained || !card.separateStatus || card.textAlign !== 'left'))
+        geometryProblems.push(`${row.name}: material filename/status escapes or overlaps its card`)
+      if (row.materials.overflow > 1 || row.materials.referenceGap < 16)
+        geometryProblems.push(`${row.name}: materials overflow or overlap the reference heading`)
+      const disabled = row.name.includes('materialsBusy')
+      if (row.materials.cards.some(card => card.disabled !== disabled)) geometryProblems.push(`${row.name}: material busy state changed`)
+    }
   }
+  for (const row of materialActions) if (row.requested !== 'material_TEST_ONLY_2' || !row.opened?.includes('TEST_ONLY 资料原文') || !row.closed)
+    geometryProblems.push(`${row.name}: keyboard material opening/closing failed`)
   if (sourceMetrics.fontSizeLiterals.length) typographyProblems.push(`AT-122: ${sourceMetrics.fontSizeLiterals.length} literal font sizes`)
   if (sourceMetrics.fontTokenKinds.length > 7) typographyProblems.push(`AT-122: ${sourceMetrics.fontTokenKinds.length} font token kinds`)
   for (const row of sourceMetrics.serifDeclarations.filter(row => !row.allowed)) typographyProblems.push(`AT-121: serif outside the whitelist — ${row.selectors}`)
@@ -484,7 +509,7 @@ export async function renderSurfaces(outDir = join(root, '.dsh-tmp/ui-review')) 
     const value = Number(cssText.match(new RegExp(`${token}:([0-9]+)px`))?.[1])
     if (!value || !usedSizes.has(value)) typographyProblems.push(`AT-122: ${token} is unused by real rendering seats`)
   }
-  const report = { outDir, results, wrap, mark, preview, typography, geometry, controls, palettes, effects, systemSerif, sourceMetrics,
+  const report = { outDir, results, wrap, mark, preview, typography, geometry, controls, palettes, effects, materialActions, systemSerif, sourceMetrics,
     problems: [...audit(results), ...wrap.flatMap(row => row.problems), ...mark.flatMap(row => row.problems), ...preview.flatMap(row => row.problems), ...typographyProblems, ...geometryProblems] }
   writeFileSync(join(outDir, 'report.json'), JSON.stringify({ at: new Date().toISOString(), ...report }, null, 2))
   return report

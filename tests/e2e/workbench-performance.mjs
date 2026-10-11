@@ -1,17 +1,22 @@
 // Long-document typing, wheel, selection and overlay geometry against the installed Host.
 // TEST_ONLY manuscript and isolated profile; original assignment files are unchanged.
 // Only --live-visual-only starts a real model request, then cancels it to verify native lifecycle.
-// Usage: node tests/e2e/workbench-performance.mjs [--desktop] [--interaction-only | --layout-only | --live-visual-only]
+// Usage: node tests/e2e/workbench-performance.mjs [--desktop] [--interaction-only | --layout-only | --materials-only | --live-visual-only]
 import assert from 'node:assert/strict'
 import { chromium, _electron as electron, expect } from '@playwright/test'
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile, symlink, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { geometryInPage } from '../../scripts/visual-language-contracts.mjs'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
 const root = resolve('.dsh-tmp/workbench-performance', String(Date.now()))
 const nativeDesktop = process.argv.includes('--desktop')
 const layoutOnly = process.argv.includes('--layout-only')
+const materialsOnly = process.argv.includes('--materials-only')
+const materialNames = ['TEST_ONLY 报告笔记.md', 'TEST_ONLY 个人报告笔记.md',
+  'TEST_ONLY_Graph_Convolution-Based_Decoupling_and_Consistency-Driven_Fusion_for_Multimodal_Emotion_Recognition.md',
+  'TEST_ONLY 作业要求1.md', 'TEST_ONLY 作业要求2.md', 'TEST_ONLY 作业要求3.md']
 const profile = join(root, nativeDesktop ? 'profiles/desktop' : 'profiles/scroll-test')
 const workspacePath = join(root, 'Scroll TEST_ONLY')
 await mkdir(join(profile, 'node_modules'), { recursive: true })
@@ -100,9 +105,18 @@ try {
   assert.equal(await page.locator('.sf-project').getAttribute('data-sf-session-id'), sessionId)
   console.log('Setup: ScholarFlow fixture session is open')
   const context = { requestId: 'req_scroll_TEST_ONLY', workspaceId, sessionId }
+  if (materialsOnly) for (const name of materialNames) await writeFile(join(workspacePath, name), `# ${name}\n\nTEST_ONLY 本地资料；不读取用户文件，不调用模型。\n`)
   const plan = await rpc('scholarflow.v1/project.prepareInit', { request: { context, input: { title: 'Scroll TEST_ONLY', type: 'course-paper' } } })
   await rpc('scholarflow.v1/project.initialize', { request: { context, planId: plan.planId, planHash: plan.planHash } })
-  const project = await rpc('scholarflow.v1/project.inspect', { request: { context } })
+  let project = await rpc('scholarflow.v1/project.inspect', { request: { context } })
+  if (materialsOnly) for (const relativePath of materialNames) {
+    await rpc('scholarflow.v1/materials.register', { request: { context: { ...context, projectId: project.binding.projectId, expectedLedgerRevision: project.ledger.revision }, relativePath, role: 'notes' } })
+    project = await rpc('scholarflow.v1/project.inspect', { request: { context } })
+  }
+  if (materialsOnly) for (const material of Object.values(project.ledger.materials).slice(0, 2)) {
+    await rpc('scholarflow.v1/materials.parse', { request: { context: { ...context, projectId: project.binding.projectId, expectedLedgerRevision: project.ledger.revision }, materialId: material.id } })
+    project = await rpc('scholarflow.v1/project.inspect', { request: { context } })
+  }
   const manuscript = '# Scroll TEST_ONLY\n\n' + Array.from({ length: 450 }, (_, i) =>
     `第 ${i + 1} 段：这是用于验证滚轮的测试正文。保留真实编辑器与预览布局，不调用模型。\n\n`).join('')
   await rpc('scholarflow.v1/document.saveManual', { request: { context: { ...context, projectId: project.binding.projectId, expectedLedgerRevision: project.ledger.revision },
@@ -111,7 +125,38 @@ try {
   await dismissOnboarding()
   await page.locator('.sf-middle-column').waitFor()
 
-  if (layoutOnly) {
+  if (materialsOnly) {
+    const closePanel = page.getByRole('button', { name: '收起右侧边栏', exact: true })
+    if (await closePanel.isVisible()) await closePanel.click()
+    await page.getByLabel('更多论文选项', { exact: true }).click()
+    await page.locator('.sf-paper-toolbar .sf-paper-menu-popover').getByRole('button', { name: '资料与引用', exact: true }).click()
+    const panel = page.locator('#sf-panel-Research')
+    await expect(panel.locator('.sf-material-row')).toHaveCount(6)
+    for (const preference of ['light', 'dark']) {
+      await rpc('settings/update', { ns: 'ui-theme', patch: { preference } })
+      await page.waitForFunction(dark => document.body.hasAttribute('data-ds-dark-theme') === dark, preference === 'dark')
+      const geometry = await page.evaluate(geometryInPage, '#sf-panel-Research')
+      const cards = geometry.materials
+      record(`${preference} installed Host material filenames and statuses remain inside all six cards`,
+        cards.cards.length === 6 && cards.cards.every(card => card.contentContained && card.separateStatus && card.textAlign === 'left')
+        && cards.overflow <= 1 && cards.referenceGap >= 16, cards)
+      await page.locator('.sf-native-workspace').screenshot({ path: join(root, `native-materials-${preference}.png`) })
+    }
+    const firstReady = panel.locator('.sf-material-row').filter({ hasText: '已读取' }).first()
+    const firstReadyTitle = await firstReady.locator('strong').textContent()
+    const readyMaterial = Object.values(project.ledger.materials).find(material => material.projectRelativePath === firstReadyTitle)
+    const expectedParsed = await rpc('scholarflow.v1/materials.read', { request: { context: { ...context, projectId: project.binding.projectId }, materialId: readyMaterial.id } })
+    await firstReady.focus(); await page.keyboard.press('Enter')
+    await expect(panel.locator('.sf-material-excerpt pre')).toHaveText(expectedParsed.blocks[0].text)
+    if (expectedParsed.blocks.length > 1) {
+      await panel.locator('.sf-material-excerpt').getByRole('button', { name: '下一段', exact: true }).click()
+      await expect(panel.locator('.sf-material-excerpt pre')).toHaveText(expectedParsed.blocks[1].text)
+    }
+    await panel.locator('.sf-material-excerpt').getByRole('button', { name: '关闭', exact: true }).click()
+    await expect(panel.locator('.sf-material-excerpt')).toHaveCount(0)
+    record('keyboard opens the real parsed TEST_ONLY material and closes the excerpt', true, { errors })
+    assert.equal(errors.length, 0, 'No client error while opening populated materials')
+  } else if (layoutOnly) {
     assert.ok(!nativeDesktop, 'Layout viewport checks use the installed Host in Chromium')
     const closePanel = page.getByRole('button', { name: '收起右侧边栏', exact: true })
     if (await closePanel.isVisible()) await closePanel.click()
@@ -288,7 +333,7 @@ try {
   }
   await page.screenshot({path:join(root,'performance.png')})
   assert.ok(rows.every(row=>row.ok),'See performance journal')
-  if (nativeDesktop) {
+  if (nativeDesktop && !materialsOnly) {
     // Save only this isolated TEST_ONLY manuscript before closing Electron. A dirty
     // beforeunload dialog racing renderer shutdown otherwise makes cleanup fail.
     const save = page.locator('.sf-pane-caption').getByRole('button', { name: '保存', exact: true })

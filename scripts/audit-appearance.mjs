@@ -150,6 +150,8 @@ try {
           report.renderSurfaces[scheme][`${id}@${width}`] = {
             evidence: 'client-render-fixture', ...measurement,
             overflow: await fixturePage.locator(selector).evaluate(el => el.scrollWidth - el.clientWidth),
+            materialCards: id === 'materials' || id === 'materialsBusy'
+              ? (await fixturePage.evaluate(geometryInPage, selector)).materials : null,
           }
         }
       }
@@ -281,6 +283,9 @@ for (const scheme of ['light', 'dark']) {
     for (const row of view.contrastFailures) problems.push(`${scheme} ${key}: contrast ${row.ratio} < ${row.required} — ${row.text}`)
     if (view.overflow > 1) problems.push(`${scheme} ${key}: overflow ${view.overflow}px`)
     if (view.tinyText.length) problems.push(`${scheme} ${key}: ${view.tinyText.length} font sizes below 11px`)
+    if (view.materialCards && (view.materialCards.overflow > 1 || view.materialCards.referenceGap < 16
+      || view.materialCards.cards.some(card => !card.contentContained || !card.separateStatus)))
+      problems.push(`${scheme} ${key}: material content escapes its card or overlaps the reference heading`)
   }
 }
 for (const scheme of ['light', 'dark']) {
