@@ -216,4 +216,3 @@ try {
   assert.deepEqual(errors,[]);record('no client runtime errors across complete feature chains',true,{})
 }catch(error){record('run',false,error.message);await page?.screenshot({path:join(root,'failure.png')}).catch(()=>{});throw error}
 finally{await writeFile(join(root,'journal.json'),JSON.stringify(rows,null,2));console.log('Journal:',join(root,'journal.json'));host?.kill();await browser?.close();await desktopApp?.close()}
-

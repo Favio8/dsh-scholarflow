@@ -1,6 +1,6 @@
 # v1.14 产品链路修复与验证
 
-日期：2026-10-11。对应上一级 `docs/ScholarFlow_PRD_v1.14.md` 与 `docs/ScholarFlow_Design_SPEC_v1.14.md`，继承此前完整版本链。用户明确授权完成 PA-01–17 的修复与新增能力。代码在 `style/paper-composition`；本轮没有发布或推送。
+日期：2026-10-11。对应上一级 `docs/ScholarFlow_PRD_v1.14.md` 与 `docs/ScholarFlow_Design_SPEC_v1.14.md`，继承此前完整版本链。用户明确授权完成 PA-01–17 的修复与新增能力。实现提交 `b87d278`（`✨ feat: complete ScholarFlow writing and delivery workflows`），代码在 `style/paper-composition`；本轮没有发布或推送。
 
 ## 实现
 
