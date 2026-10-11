@@ -8,7 +8,7 @@ import { ProposalRevision } from './proposal-revision.tsx'
 import { DraftSequence } from './draft-sequence.tsx'
 import { ManuscriptImport } from './manuscript-import.tsx'
 import { scratchKey, readScratch, writeScratch, ScratchQueue } from './scratch-backup.ts'
-import type { DraftController, PaperView } from './paper-workspace.tsx'
+import {DISCLOSURE_CSS,type DraftController,type PaperView} from './paper-workspace.tsx'
 import type { ExportFormat } from '../shared/presentation.ts'
 import { SelectionDetails, type SelectionContext } from './selection-card.tsx'
 import { useCowrite } from './cowrite.tsx'
@@ -23,6 +23,11 @@ import { activeWritingQuestion } from './writing-task-ui.ts'
 import { usePaneZoom, ZoomControls } from './pane-zoom.tsx'
 import { ApplicationError } from './application-error.tsx'
 import { useFirstDraftStream } from './first-draft-stream.ts'
+import {FormatToolbar,FORMAT_TOOLBAR_CSS} from './format-toolbar.tsx'
+import {emptyFormatting,rebaseFormatting} from '../core/editing/formatting.ts'
+import {documentFormatting,type DocumentFormatting,type CharacterFormat,type ParagraphFormat} from '../shared/formatting.ts'
+import {DEFAULT_TYPOGRAPHY} from '../core/export/typography.ts'
+import {scanDocument} from '../core/export/scan.ts'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any, signal?: AbortSignal) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
@@ -31,7 +36,7 @@ function readLocalBuffer(key: string) {
     return readScratch(window.localStorage, key, 8 * 1024 * 1024)
   } catch { /* Host temporary buffer remains available when browser storage fails. */ }
 }
-export function Draft({ project, context, api, refresh, run, busy, issueLocation, view: preferredView = 'split', format = 'markdown', tool, visible = true, onController, onTool, onReview, onReturnEditor, onAttachSelection, captureChatInsertion, onGenerationState, generationMode }: Props & {
+export function Draft({ project, context, api, refresh, run, busy, issueLocation, view: preferredView = 'preview', format = 'markdown', tool, visible = true, onController, onTool, onReview, onReturnEditor, onAttachSelection, captureChatInsertion, onGenerationState, generationMode }: Props & {
   issueLocation?: any; view?: PaperView; format?: ExportFormat; tool?: 'Changes' | 'History'; visible?: boolean;
   onController?: (value: DraftController) => void; onTool?: () => void; onReview?: () => void; onReturnEditor?: () => void
   onAttachSelection?: (card: SelectionContext, ask: boolean, insertion: any) => void; captureChatInsertion?: () => any
@@ -42,8 +47,14 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const bufferKey = scratchKey(project.binding, 'paper')
   const cached = buffers.get(bufferKey) ?? readLocalBuffer(bufferKey)
   if (cached && !buffers.has(bufferKey)) buffers.set(bufferKey, cached)
-  const [text, setText] = useState(cached?.text ?? project.document.text)
+  const [text, setTextRaw] = useState(cached?.text ?? project.document.text)
   const [baseHash, setBaseHash] = useState(cached?.baseHash ?? project.document.contentHash)
+  const formattingKey=`${bufferKey}:formatting`
+  const initialFormatting=()=>{try{const row=JSON.parse(localStorage.getItem(formattingKey)??'null');if(row?.baseHash===(cached?.baseHash??project.document.contentHash))return documentFormatting.parse(row.formatting)}catch{/* Saved project formatting remains available. */}return project.document.externalChange?emptyFormatting():project.document.formatting??emptyFormatting()}
+  const [formatting,setFormatting]=useState<DocumentFormatting>(initialFormatting),[formatDirty,setFormatDirty]=useState(()=>localStorage.getItem(formattingKey)!==null)
+  const [typographyOverride,setTypographyOverride]=useState<any>()
+  const setText=(next:string)=>{setFormatting(previous=>rebaseFormatting(previous,text,next));setTextRaw(next);if(formatting.characters.length||formatting.paragraphs.length)setFormatDirty(true)}
+  useEffect(()=>{if(formatDirty)localStorage.setItem(formattingKey,JSON.stringify({baseHash,formatting}));else localStorage.removeItem(formattingKey)},[formatting,formatDirty,baseHash])
   const stream = useFirstDraftStream({api,context,project,refresh,mode:generationMode})
   const activePreview = stream.preview && ['generating','validating','saved'].includes(stream.preview.status)
     && stream.preview.baseDocumentHash === project.document.contentHash ? stream.preview : undefined
@@ -100,7 +111,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       const raw = window.localStorage.getItem(`${bufferKey}:rewrite`)
       if (raw) {
         const stored = JSON.parse(raw)
-        setRewrite(stored.rewrite); setEditRange(stored.editRange); setUndoSnapshot(stored.undoSnapshot)
+        setRewrite(stored.rewrite); setUndoSnapshot(stored.undoSnapshot)
         const row: RewriteCandidate | undefined = stored.candidate
         if (row) {
           const expected = row.state === 'accepted' ? row.after : row.before
@@ -218,8 +229,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     api('runs.list', { context: context() }).then(result => live && setHistory(result)).catch(error => live && setMessage(error.message))
     return () => { live = false }
   }, [project.ledger.revision, historySequence])
-  const dirty = text !== project.document.text || baseHash !== project.document.contentHash
-  useEffect(() => { setSelectionAnchor(undefined); setSelectionDetail(undefined); selectionRequest.current++ }, [view, tool, visible, project.document.contentHash])
+  const dirty = text !== project.document.text || baseHash !== project.document.contentHash || formatDirty
+  useEffect(() => { setSelectionAnchor(undefined); setSelectionDetail(undefined); setSelection(undefined);setEditRange(undefined);selectionRequest.current++;window.getSelection()?.removeAllRanges() }, [view, tool, visible, project.document.contentHash])
   useEffect(() => () => { selectionRequest.current++ }, [])
   const projection = useMemo(() => projectMarkdown(project.document.text), [project.document.contentHash])
   useEffect(() => {
@@ -233,7 +244,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     return () => { live = false }
   }, [project.ledger.revision])
   useEffect(() => {
-    if (!buffers.has(bufferKey)) { setText(project.document.text); setBaseHash(project.document.contentHash) }
+    if (!buffers.has(bufferKey)) { setTextRaw(project.document.text); setBaseHash(project.document.contentHash);if(!formatDirty)setFormatting(project.document.externalChange?emptyFormatting():project.document.formatting??emptyFormatting()) }
     setSelection(undefined); setPlan(undefined)
   }, [project.document.contentHash])
   useEffect(() => {
@@ -278,7 +289,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     // the buffer hash, so accepting it writes the buffer and the saved manuscript stays the
     // reference the range is validated against.
     try {
-      if (!window.getSelection()?.toString()) { setSelectionAnchor(undefined); return }
+      if (!window.getSelection()?.toString()) { setSelectionAnchor(undefined);setSelection(undefined);if(!rewrite&&!candidate)setEditRange(undefined); return }
       const selected = window.getSelection()!.getRangeAt(0)
       if (selected.startContainer.parentElement?.closest('.sf-rewrite') || selected.endContainer.parentElement?.closest('.sf-rewrite')) return
       const payload = captureSelection(root.current!, livePreview.projection!, project.document, projectId, true)
@@ -286,7 +297,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         anchor.documentHash === project.document.contentHash && payload.blockIds.includes(anchor.blockId)).flatMap(anchor => anchor.claimIds))] as string[]
       setAnchorClaimIds(payload.claimIds); setAnchorId('')
       selectionOrigin.current = 'preview'
-      setSelection(dirty || payload.blockIds.length > 1 ? undefined : payload); setEditRange({ start: payload.sourceRange.startUtf16, end: payload.sourceRange.endUtf16 })
+      setSelection(dirty || payload.blockIds.length > 1 ? undefined : payload);setCursor(payload.sourceRange.startUtf16); setEditRange({ start: payload.sourceRange.startUtf16, end: payload.sourceRange.endUtf16 })
       const range = window.getSelection()!.getRangeAt(0)
       setSelectionAnchor(renderedSelectionRect(range))
     } catch (error) { setSelection(undefined); setSelectionAnchor(undefined); setMessage((error as Error).message) }
@@ -408,13 +419,33 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     setSaving(true)
     try {
       await persistence.current!.flush()
-      const result = await api('document.saveManual', { context: context(), text, baseHash })
-      remember(); setBaseHash(result.documentHash); setMessage('正文已保存。'); await refresh()
+      const result = await api('document.saveManual', { context: context(), text, baseHash,formatting })
+      remember(); setFormatDirty(false);setBaseHash(result.documentHash); setMessage('正文与排版已保存。'); await refresh()
     } finally { setSaving(false) }
   }
   useEffect(() => {
     onController?.({ dirty, canSave: dirty && !busy && !saving && !generating && baseHash === project.document.contentHash && !project.document.externalChange, save })
-  }, [text, baseHash, project.document.contentHash, project.ledger.revision, busy, saving, generating])
+  }, [text,formatting,formatDirty, baseHash, project.document.contentHash, project.ledger.revision, busy, saving, generating])
+  const formatRange=editRange??{start:cursor,end:cursor}
+  const applyFormat=(kind:'characters'|'paragraphs',values:Partial<CharacterFormat>|Partial<ParagraphFormat>)=>{
+    const blocks=livePreview.projection?.tree.children?.filter(node=>['paragraph','heading'].includes(node.type)&&node.position!.start.offset!<(formatRange.end||formatRange.start+1)&&node.position!.end.offset!>formatRange.start).map(node=>({start:node.position!.start.offset!,end:node.position!.end.offset!}))??[]
+    const ranges=kind==='characters'?[formatRange]:blocks.map(block=>({start:block.start,end:block.end}))
+    setFormatting(previous=>({...previous,[kind]:ranges.reduce((rows:any[],range)=>{const found=rows.findIndex(row=>row.start===range.start&&row.end===range.end);const row={...(found>=0?rows[found]:{}),...range,...values};return found>=0?rows.map((value,index)=>index===found?row:value):[...rows,row]},previous[kind])}));setFormatDirty(true);remember({text,baseHash});setMessage('')
+  }
+  const formatMarkdown=(kind:string)=>{
+    let next=text
+    if(kind==='bold'||kind==='italic'){const token=kind==='bold'?'**':'*',from=formatRange.start,to=formatRange.end
+      if(from===to)return
+      next=text.slice(Math.max(0,from-token.length),from)===token&&text.slice(to,to+token.length)===token?text.slice(0,from-token.length)+text.slice(from,to)+text.slice(to+token.length):text.slice(0,from)+token+text.slice(from,to)+token+text.slice(to)
+    }else{
+      const documentPlan=livePreview.projection&&scanDocument(livePreview.projection),baseDepth=documentPlan?.title?Math.min(2,...documentPlan.headings.map(row=>row.depth)):1
+      const nodes=livePreview.projection?.tree.children?.filter(node=>['paragraph','heading'].includes(node.type)&&node.position!.start.offset!<(formatRange.end||formatRange.start+1)&&node.position!.end.offset!>formatRange.start)??[]
+      for(const node of [...nodes].reverse()){const start=node.position!.start.offset!,end=node.position!.end.offset!;let body=text.slice(start,end)
+        if(node.type==='heading')body=body.replace(/^#{1,6}\s+/u,'').replace(/\r?\n[=-]+\s*$/u,'')
+        next=next.slice(0,start)+(kind==='body'?'':'#'.repeat(Math.min(6,baseDepth+Number(kind.slice(1))-1))+' ')+body+next.slice(end)}
+    }
+    setText(next);remember({text:next,baseHash});setSelection(undefined);setEditRange(undefined);setSelectionAnchor(undefined);window.getSelection()?.removeAllRanges()
+  }
   const selectionAction = (action: 'add' | 'ask' | 'details') => run(async () => {
     if (!selection) return
     const request = ++selectionRequest.current
@@ -455,8 +486,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
    * The range the mark follows while the pointer is still down. `select` fires only when the gesture
    * ends (measured: zero `select` events during a drag, six to eight `selectionchange`), so a mark
    * built from `select` alone appears one gesture late. This keeps the range current and never
-   * clears it: a collapsed selection is what focusing the instruction box looks like, and dropping
-   * the range there would erase the mark the user is about to rewrite (SF-087).
+   * preserves it while the instruction box is focused. Native text selection stays in the browser;
+   * only a submitted candidate receives a persistent rewrite mark (SF-163).
    */
   const liveRange = () => {
     if (generating) return {origin:'preview' as const,range:undefined}
@@ -504,12 +535,13 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   // The textarea's value holds LF while the manuscript may hold CRLF, so the pane's offsets are the
   // normalised ones; the preview works in the projection's source offsets (SF-087).
   const textareaOffset = (offset: number) => paneOffset(text, offset)
-  // A mark shows the range a rewrite applies to: the open candidate, or — before one exists — the
-  // selection itself, so the user sees what they picked rather than only what is being generated.
-  const marked = rewriteTarget(candidate, editRange)
+  // Only a submitted rewrite is marked. Native selections stay local to their visible pane.
+  const typography=typographyOverride??citations?.typography??DEFAULT_TYPOGRAPHY
+  const paperStyle={'--sf-body-en':`"${typography.bodyFontEn}"`,'--sf-body-zh':`"${typography.bodyFontZh}"`,'--sf-heading-zh':`"${typography.headingFontZh}"`,'--sf-body-size':`${typography.bodySizePt}pt`,'--sf-body-line':typography.lineSpacing,'--sf-title-size':`${typography.titleSizePt??20}pt`,'--sf-h1-size':`${typography.heading1SizePt??16}pt`,'--sf-h2-size':`${typography.heading2SizePt??14}pt`,'--sf-h3-size':`${typography.heading3SizePt??12}pt`,'--sf-indent':`${typography.firstLineIndentChars}em`,'--sf-paragraph-before':`${typography.paragraphBeforePt??0}pt`,'--sf-paragraph-after':`${typography.paragraphAfterPt??0}pt`} as React.CSSProperties
+  const marked = rewriteTarget(candidate)
   const sourceMark: MarkRange | undefined = marked && { ...marked, start: textareaOffset(marked.start), end: textareaOffset(marked.end) }
   const previewMark = marked && { start: marked.start, end: marked.end, flowing: marked.state === 'generating' }
-  return <section className="sf-draft" aria-label="正文编辑">
+  return <section className="sf-draft" aria-label="正文编辑"><style>{FORMAT_TOOLBAR_CSS+DISCLOSURE_CSS}</style>
     {stream.error && generationMode==='first-draft' && <p role="alert" className="sf-stream-status">预览连接未完成：{stream.error}<button onClick={stream.reconnect}>重新连接预览</button></p>}
     {stream.task?.mode==='first-draft' && generating && <div className="sf-stream-status" role="status">
       <span>{stream.task.stopping?'正在暂停／停止…':activePreview ? `正在写：${activePreview.title} · 已保存 ${stream.task.sectionIndex}/${stream.task.sections.length} 节`:'正在准备正文与证据…'} · 本节完成校验后保存</span>
@@ -525,8 +557,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     <div className="sf-editor-surface sf-editor-scroll" hidden={!!tool}>
       {cowrite.briefsView}{cowrite.generatedView}
       {/* Chapter navigation is its own entry; the fixed 选区／要求／AI 修改 bar is gone. */}
+    {!generating&&<FormatToolbar range={formatRange} formatting={formatting} typography={typography} disabled={busy||saving||generating} onMarkdown={formatMarkdown} onCharacters={(style:any)=>applyFormat('characters',style)} onParagraph={(style:any)=>applyFormat('paragraphs',style)} dirty={dirty} onSave={()=>run(save)} api={api} context={context} refresh={refresh} onTypography={setTypographyOverride} />}
     <div className="sf-cowrite-bar">
-      <details className="sf-chapter-nav"><summary>目录</summary><div>{headings.map(node => <button key={node.position!.start.offset} onClick={e => {
+      <details className="sf-chapter-nav"><summary><WorkbenchIcon kind="down" />目录</summary><div>{headings.map(node => <button key={node.position!.start.offset} onClick={e => {
         const offset = node.position!.start.offset!; setCursor(offset); e.currentTarget.closest('details')?.removeAttribute('open')
         if (view === 'preview') root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${offset}"]`)?.scrollIntoView({ block: 'start' })
         else { const area = sourceArea.current!; area.focus(); area.setSelectionRange(offset, offset); revealSourceOffset(area, offset, 40) }
@@ -578,15 +611,12 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
             const node=event.currentTarget
             if(generating && node.scrollTop < previousScroll.current-8){followStream.current=false;setShowReturnToStream(true)}
             previousScroll.current=node.scrollTop
-          }}><div className="sf-paper-page" style={{ zoom: previewZoom.zoom }} data-format={format} ref={root} onMouseUp={generating?undefined:capture} onKeyUp={generating?undefined:capture}><div className="sf-paper-sheet"><div className="sf-paper-running-head" data-sf-protected="true">{project.config.project.title}</div>
-            {livePreview.projection ? <MarkdownView projection={livePreview.projection} origins={citations?.origins}
+          }}><div className="sf-paper-page" style={{ ...paperStyle,maxWidth:'210mm',zoom: previewZoom.zoom }} data-format={format} ref={root} onMouseUp={generating?undefined:capture} onKeyUp={generating?undefined:capture}><div className="sf-paper-sheet" style={{padding:`min(${typography.marginsMm}mm,12cqw)`}}><div className="sf-paper-running-head" data-sf-protected="true">{typography.headerText||project.config.project.title}</div>
+            {livePreview.projection ? <MarkdownView projection={livePreview.projection} origins={citations?.origins} formatting={formatting} typography={typography} interactiveSelection
               afterBlock={(start) => <>{candidate && view !== 'edit' && candidateBlock?.start === start ? candidateView : null}{streamBlock?.start===start && <span ref={generationAnchor} className="sf-stream-anchor" aria-hidden="true" />}</>}
               markRange={previewMark} annotations={(start, end) => <>{cowrite.annotations(start, end, candidate?.id)}{!dirty && (Object.values(project.ledger.reviewIssues) as any[]).filter(issue => !issue.stale && issue.state !== 'resolved' && issue.documentHash === project.document.contentHash && issue.location?.sourceRange.startUtf16 >= start && issue.location.sourceRange.startUtf16 < end).map(issue => <button className="sf-review-marker" key={issue.id} title={issue.explanation} onClick={onReview}>{issue.severity} · {issue.title}</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
-            {!!livePreview.projection?.citationOrder.length && <section className="sf-paper-references"><h3>参考文献</h3>{citations?.style==='apa7'?<div>{citations.references.map(([key,entry]:[string,string])=><p key={key}>{entry}</p>)}</div>:<ol>{livePreview.projection.citationOrder.map(key => {
-              const source = (Object.values(project.ledger.sources) as any[]).find(row => row.citeKey === key)
-              return <li key={key}>{source ? [source.authors.map((author: any) => author.literal ?? [author.given, author.family].filter(Boolean).join(' ')).join(', '), source.title, source.year, source.venue].filter(Boolean).join('. ') : `待登记引用：${key}`}</li>
-            })}</ol>}</section>}
-          <div className="sf-paper-foot" aria-hidden="true" /></div></div></div>
+            {!!citations?.references?.length && <section className="sf-paper-references"><h3>参考文献</h3>{citations.references.map(([key,entry]:[string,string])=><p key={key}>{entry}</p>)}</section>}
+           <div className="sf-paper-foot" aria-hidden="true">{typography.footerText}</div></div></div></div>
         </div>
       </div>
       {!generating && stream.preview?.text && ['paused','stopped','failed'].includes(stream.preview.status) && stream.task?.status!=='completed' && <details className="sf-unfinished-preview">

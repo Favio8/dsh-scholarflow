@@ -57,7 +57,12 @@ export const typographySpec = z.object({ bodyFontZh: z.string().trim().min(1).ma
   tableStyle: z.enum(['three-line', 'grid']).default('three-line'),
   referenceStyle: z.enum(['gbt7714', 'plain', 'apa7']).default('gbt7714'),
   referenceStyleExplicit:z.boolean().optional(),
-  tableOfContents: z.enum(['none', 'field', 'auto']).default('auto') }).prefault({})
+  tableOfContents: z.enum(['none', 'field', 'auto']).default('auto'),
+  titleSizePt:z.coerce.number().min(6).max(48).default(20), heading1SizePt:z.coerce.number().min(6).max(36).default(16),
+  heading2SizePt:z.coerce.number().min(6).max(36).default(14),heading3SizePt:z.coerce.number().min(6).max(36).default(12),
+  bodyAlignment:z.enum(['left','center','right','justify']).default('justify'),paragraphBeforePt:z.coerce.number().min(0).max(72).default(0),
+  paragraphAfterPt:z.coerce.number().min(0).max(72).default(0),headerText:z.string().max(300).default(''),footerText:z.string().max(300).default(''),
+  showPageNumbers:z.boolean().default(true),referencePageBreak:z.boolean().default(false) }).prefault({})
 export type TypographySpec = z.infer<typeof typographySpec>
 
 /** Cover fields start empty: no reference document may leak a name or a date in (SPEC §18). */

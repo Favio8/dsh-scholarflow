@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { applicationResult, inspectProject, inspectRequest, prepareInitRequest, initializeRequest, resolveStore, type StoredInitPlan } from './bridge/project-api.ts'
-import { prepareInit, initialize, snapshot, updateProjectText, updatePresentation } from '../core/project/project.ts'
+import { prepareInit, initialize, snapshot, updateProjectText, updatePresentation,mutateLedger } from '../core/project/project.ts'
 import { exportPreflightRequest, projectPresentationRequest } from '../shared/presentation.ts'
 import { verifiedMemoryProjection, memoryHistory } from '../core/project/memory-entries.ts'
 import { prepareProjectCopy, applyProjectCopy, copyPlanTransition, pendingCopyTransition, verifiedIdentityLineage, type ProjectCopyPlan } from '../core/project/identity.ts'
@@ -25,6 +25,9 @@ import { inspectManuscriptSource, prepareManuscriptAdoption, applyManuscriptAdop
 import { wordStats } from '../core/editing/markdown.ts'
 import {citationKeys} from '../core/editing/markdown.ts'
 import {apaLabels,apaReferences} from '../core/export/apa.ts'
+import {citationPresentation} from '../core/export/citation-groups.ts'
+import {layoutOf} from '../core/export/layout.ts'
+import {DEFAULT_TYPOGRAPHY} from '../core/export/typography.ts'
 import {readWritingSpec} from '../core/pipeline/writing-task-store.ts'
 import {aiProvenance} from '../core/editing/provenance.ts'
 import { generationRequest, runStartRequest, runControlRequest, runStateSchema } from '../shared/runs.ts'
@@ -1290,7 +1293,23 @@ export class ScholarFlowRemote extends TypertRemoteService {
     const {io}=await resolveStore(this.ctx,input.context,signal),current=await snapshot(io),spec=await readWritingSpec(io)
     const keys=citationKeys(input.text),sources=Object.values(current.ledger.sources).filter(source=>keys.includes(source.citeKey))
     const origins=await aiProvenance(io,input.text,input.context.sessionId)
-    return spec?.typography?.referenceStyle==='apa7'?{style:'apa7',labels:apaLabels(input.text,sources),references:apaReferences(sources),origins}:{style:spec?.typography?.referenceStyle??'gbt7714',origins}
+    const style=layoutOf(spec?.typography??DEFAULT_TYPOGRAPHY,current.config.project.language).referenceStyle
+    const presentation=citationPresentation(input.text,current.ledger,style)
+    return {style,...presentation,origins,typography:spec?.typography}
+  })}
+  @Remote('sources.linkBibliography')
+  async sourcesLinkBibliography(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
+    this.requireOperator();const input=z.object({context:requestContext,primaryId:id,sourceIds:z.array(id).min(2).max(200)}).strict().parse(request)
+    const {io}=await resolveStore(this.ctx,input.context,signal),current=await snapshot(io)
+    invariant(input.sourceIds.includes(input.primaryId)&&input.sourceIds.every(id=>current.ledger.sources[id]),'SOURCE_NOT_FOUND','请选择当前项目内需要关联的文献记录。')
+    const root=input.primaryId
+    const result=await mutateLedger(io,mutationRevision(input.context),ledger=>{
+      for(const source of Object.values(ledger.sources))if(input.sourceIds.includes(source.id)||source.bibliographySourceId&&input.sourceIds.includes(source.bibliographySourceId)){
+        if(source.id===root)delete source.bibliographySourceId;else source.bibliographySourceId=root
+      }
+      for(const issue of Object.values(ledger.reviewIssues))if(['citation','requirement'].includes(issue.category))issue.stale=true
+      return [{path:`.scholarflow/research/bibliography-links/${newId('decision')}.json`,before:undefined,after:json({projectId:ledger.projectId,primaryId:root,sourceIds:input.sourceIds,sessionId:input.context.sessionId,at:new Date().toISOString(),decision:'用户确认同一文献的书目关联；原来源、引用键、证据和文本保持。'})}]
+    });return {revision:result.revision,primaryId:root}
   })}
   @Remote('writingTask.action')
   async writingTaskAction(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.action(request, signal) }) }
@@ -1641,7 +1660,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async documentSaveManual(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const input = saveDocumentRequest.parse(request)
       const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
-      return saveManual(io, input.text, input.baseHash, revision) })
+      return saveManual(io, input.text, input.baseHash, revision, undefined, input.formatting) })
   }
 
   @Remote('editor.bufferRead')

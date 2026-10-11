@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { requestContext, hash, id } from './schema.ts'
 import { paragraphClaimSchema } from './editing.ts'
-export const saveDocumentRequest = z.object({ context: requestContext, text: z.string().max(2 * 1024 * 1024), baseHash: hash }).strict()
+import { documentFormatting } from './formatting.ts'
+export const saveDocumentRequest = z.object({ context: requestContext, text: z.string().max(2 * 1024 * 1024), baseHash: hash, formatting: documentFormatting.optional() }).strict()
 export const proposalRequest = z.object({ context: requestContext, proposalId: id }).strict()
 export const applyProposalRequest = proposalRequest.extend({ proposalHash: hash })
 export const undoDocumentRequest = z.object({ context: requestContext, revisionId: id, baseHash: hash }).strict()

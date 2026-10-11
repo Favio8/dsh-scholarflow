@@ -32,6 +32,7 @@ export async function exportImages(io:FileStore,text:string,mainDocument:string)
     const hash=digest(bytes);images.push({url,relativePath:`assets/${hash.slice(7)}.${size.type}`,hash,bytes,...size})
   }
   let packaged=text
-  for(const row of markdownDestinations(text).reverse()){const image=images.find(image=>image.url===row.url);if(image)packaged=packaged.slice(0,row.startUtf16)+image.relativePath+packaged.slice(row.endUtf16)}
-  return {text:packaged,images,hash:digest(JSON.stringify(images.map(({url,hash,relativePath})=>({url,hash,relativePath}))))}
+  const edits:Array<{startUtf16:number;endUtf16:number;replacementText:string}>=[]
+  for(const row of markdownDestinations(text).reverse()){const image=images.find(image=>image.url===row.url);if(image){edits.push({startUtf16:row.startUtf16,endUtf16:row.endUtf16,replacementText:image.relativePath});packaged=packaged.slice(0,row.startUtf16)+image.relativePath+packaged.slice(row.endUtf16)}}
+  return {text:packaged,images,edits,hash:digest(JSON.stringify(images.map(({url,hash,relativePath})=>({url,hash,relativePath}))))}
 }

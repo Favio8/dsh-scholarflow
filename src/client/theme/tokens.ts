@@ -53,7 +53,7 @@
 export const THEME_CSS = `:root{--sf-paper:#fbf9f5;--sf-text:#1f1c17;--sf-muted:#6b6157;--sf-text-faint:#756b5f;
 --sf-border:rgba(31,28,23,.13);--sf-border-soft:rgba(31,28,23,.08);--sf-border-strong:rgba(31,28,23,.28);--sf-fill:rgba(31,28,23,.04);--sf-fill-strong:rgba(31,28,23,.08);--sf-fill-sunken:rgba(31,28,23,.03);
 --sf-accent:#2d55a8;--sf-accent-text:#2d55a8;--sf-accent-soft:#edf1f9;--sf-accent-soft-strong:#dfe7f5;--sf-accent-border:#c2cfea;--sf-on-accent:#fffdf9;
---sf-selection-tint:rgba(45,85,168,.1);--sf-wash-accent:rgba(45,85,168,.18);--sf-wash-accent-faint:rgba(45,85,168,.05);--sf-wash-accent-strong:rgba(45,85,168,.26);--sf-wash-ok:rgba(60,163,111,.18);
+--sf-selection-bg:#2d55a8;--sf-selection-text:#fff;--sf-selection-tint:rgba(45,85,168,.1);--sf-wash-accent:rgba(45,85,168,.18);--sf-wash-accent-faint:rgba(45,85,168,.05);--sf-wash-accent-strong:rgba(45,85,168,.26);--sf-wash-ok:rgba(60,163,111,.18);
 --sf-danger:#b04a4a;--sf-danger-soft:#fdeeee;--sf-danger-border:#f0cccc;
 --sf-ok:#2f7d52;--sf-ok-soft:#eef7f2;--sf-ok-border:#bfe0cd;
 --sf-warn-text:#8a5c15;--sf-warn-soft:#fdf4e3;--sf-warn-border:#eed9ae;
@@ -79,7 +79,7 @@ export const THEME_CSS = `:root{--sf-paper:#fbf9f5;--sf-text:#1f1c17;--sf-muted:
 body[data-ds-dark-theme]{--sf-paper:#1a1917;--sf-text:#f1ede6;--sf-muted:#a8a196;--sf-text-faint:#a8a196;
 --sf-border:rgba(241,237,230,.16);--sf-border-soft:rgba(241,237,230,.09);--sf-border-strong:rgba(241,237,230,.30);--sf-fill:rgba(241,237,230,.05);--sf-fill-strong:rgba(241,237,230,.10);--sf-fill-sunken:rgba(241,237,230,.03);
 --sf-accent:#93b0e8;--sf-accent-text:#93b0e8;--sf-accent-soft:rgba(147,176,232,.14);--sf-accent-soft-strong:rgba(147,176,232,.22);--sf-accent-border:rgba(147,176,232,.32);--sf-on-accent:#1a1917;
---sf-selection-tint:rgba(147,176,232,.12);--sf-wash-accent:rgba(147,176,232,.16);--sf-wash-accent-faint:rgba(147,176,232,.06);--sf-wash-accent-strong:rgba(147,176,232,.22);--sf-wash-ok:rgba(123,201,160,.16);
+--sf-selection-bg:#2d55a8;--sf-selection-text:#fff;--sf-selection-tint:rgba(147,176,232,.12);--sf-wash-accent:rgba(147,176,232,.16);--sf-wash-accent-faint:rgba(147,176,232,.06);--sf-wash-accent-strong:rgba(147,176,232,.22);--sf-wash-ok:rgba(123,201,160,.16);
 --sf-danger:#f0a0a0;--sf-danger-soft:rgba(240,160,160,.14);--sf-danger-border:rgba(240,160,160,.30);
 --sf-ok:#7bc9a0;--sf-ok-soft:rgba(60,163,111,.16);--sf-ok-border:rgba(123,201,160,.30);
 --sf-warn-text:#f0b860;--sf-warn-soft:rgba(240,184,96,.14);--sf-warn-border:rgba(240,184,96,.30);
@@ -249,9 +249,9 @@ body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary{display:flex;align-items:baseline;gap:var(--sf-space-2);cursor:pointer;list-style:none;font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm);color:var(--sf-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary::-webkit-details-marker{display:none}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:2px}
-body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary::before{content:'';flex:none;width:0;height:0;margin-top:.35em;border-left:4px solid currentColor;border-top:3px solid transparent;border-bottom:3px solid transparent;transition:transform var(--sf-dur-quick)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary::before{content:'';flex:none;width:0;height:0;margin-top:.35em;width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform var(--sf-dur-quick)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail[open]>summary{white-space:normal;text-overflow:clip}
-body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail[open]>summary::before{transform:rotate(90deg)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail[open]>summary::before{transform:rotate(45deg)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>p{margin:var(--sf-space-2) 0 0;padding-left:calc(4px + var(--sf-space-2));font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm);color:var(--sf-muted)}
 /* File inputs were the one control the contract missed (SF-139), so the browser's own button sat
    beside the styled ones on the settings screen. It takes the secondary variant's geometry now. */

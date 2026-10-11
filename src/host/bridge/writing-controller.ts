@@ -338,7 +338,8 @@ export class WritingController {
     const input = z.object({ context: requestContext, spec: creationSpec }).parse(request)
     const { io } = await resolveStore(this.ctx, input.context, signal)
     invariant(input.spec.manuscriptDir === (await snapshot(io)).config.paths.manuscriptDir, 'OUTPUT_PATH_CONFLICT', '设置不能迁移已创建的主稿目录。')
-    await saveWritingSpec(io, input.spec, (await snapshot(io)).ledger.revision)
+    const latest=await readWritingSpec(io)
+    await saveWritingSpec(io, {...(latest??input.spec),typography:input.spec.typography,cover:input.spec.cover}, (await snapshot(io)).ledger.revision)
     return { typography: input.spec.typography ?? DEFAULT_TYPOGRAPHY, cover: input.spec.cover }
   }
   /**

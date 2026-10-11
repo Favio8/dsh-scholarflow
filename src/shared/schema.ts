@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { documentFormatting } from './formatting.ts'
 
 export const id = z.string().min(1).max(200).regex(/^[\w.-]+$/)
 export const hash = z.string().regex(/^sha256:[0-9a-f]{64}$/)
@@ -68,7 +69,7 @@ export const materialSchema = z.object({ id, projectRelativePath: relativePath, 
 }).strict()
 export const bibliographyMetadata=z.object({volume:z.string().max(100).optional(),issue:z.string().max(100).optional(),pages:z.string().max(200).optional(),publisher:z.string().max(1000).optional(),publisherPlace:z.string().max(1000).optional(),edition:z.string().max(100).optional()}).strict()
 export const sourceSchema = z.object({ id, kind: z.enum(['paper', 'dataset', 'web', 'book', 'user-result', 'other']), title: z.string().min(1), authors: z.array(z.object({ literal: z.string(), family: z.string().optional(), given: z.string().optional() }).strict()),bibliography:bibliographyMetadata.optional(),
-  year: z.number().int().min(1).max(9999).optional(), venue: z.string().optional(),
+  year: z.number().int().min(1).max(9999).optional(), venue: z.string().optional(), bibliographySourceId: id.optional(),
   identifiers: z.object({ doi: z.string().optional(), arxiv: z.string().optional(), url: z.string().optional(), other: z.array(z.string()).optional() }).strict(),
   citeKey: z.string().regex(/^sf_[a-zA-Z0-9_]+$/), provenance: z.array(z.object({ provider: z.string(), retrievedAt: z.string(), recordId: z.string().optional() }).strict()),
   identity: z.object({ status: z.enum(['unverified', 'matched', 'mismatch', 'unavailable']), method: z.enum(['identifier-lookup', 'metadata-match', 'user-confirmed', 'none']), checkedAt: z.string().optional(), reason: z.string().optional() }).strict(),
@@ -89,7 +90,7 @@ export const outlineSchema = z.object({ version: z.number().int().min(0), title:
     // field existed says.
     kind: z.enum(['body', 'front', 'back']).optional() }).strict()),
 }).strict()
-export const documentSchema = z.object({ id, relativePath, format: z.literal('markdown'), currentHash: hash, revisionId: id, encoding: z.literal('utf-8'), lineEnding: z.enum(['lf', 'crlf', 'mixed']), initialPlaceholder: z.boolean() }).strict()
+export const documentSchema = z.object({ id, relativePath, format: z.literal('markdown'), currentHash: hash, revisionId: id, encoding: z.literal('utf-8'), lineEnding: z.enum(['lf', 'crlf', 'mixed']), initialPlaceholder: z.boolean(), formatting: documentFormatting.optional() }).strict()
 export const anchorSchema = z.object({ id, documentId: id, documentHash: hash, blockId: id, blockTextHash: hash, claimIds: z.array(id), status: z.enum(['current', 'needs-remap', 'stale']) }).strict()
 export const proposalStateSchema = z.object({ proposalId: id, state: z.enum(['pending', 'accepted', 'rejected', 'stale']), acceptedRevisionId: id.optional(), updatedAt: z.string() }).strict()
 export const issueSchema = z.object({ id, reviewId: id, category: z.enum(['citation', 'evidence', 'logic', 'structure', 'requirement', 'style', 'integrity']), severity: z.enum(['B0', 'B1', 'B2']), title: z.string(), explanation: z.string(), documentId: id.optional(), documentHash: hash.optional(), anchorId: id.optional(), claimIds: z.array(id), evidenceIds: z.array(id), requirementIds: z.array(id), checkMethod: z.enum(['deterministic', 'model-assisted', 'manual']), state: z.enum(['open', 'proposed-fix', 'resolved', 'accepted-risk', 'dismissed']), suggestedFix: z.string().optional(), resolutionReason: z.string().optional(), stale: z.boolean(),

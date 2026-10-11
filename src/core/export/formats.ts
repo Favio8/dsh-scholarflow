@@ -8,6 +8,7 @@ import { projectMarkdown, type AstNode } from '../editing/markdown.ts'
 import { buildWord } from './word.ts'
 import {apaLabels,apaReferences} from './apa.ts'
 import type {ExportImage} from './images.ts'
+import {citationPresentation} from './citation-groups.ts'
 
 const texEscapes: Record<string, string> = {
   '\\': '\\textbackslash{}', '{': '\\{', '}': '\\}', '$': '\\$', '&': '\\&', '#': '\\#', '%': '\\%',
@@ -29,16 +30,14 @@ export function latexDocument(text: string, config: ProjectConfig, ledger?: Ledg
   const layout = layoutOf(typography ?? DEFAULT_TYPOGRAPHY, config.project.language)
   const captionOf = new Map(plan.blocks.map(block => [block.node, block]))
   const firstTitle = projection.tree.children?.find(node => node.type === 'heading' && node.depth === 1)
-  const sources: Source[] = projection.citationOrder
-    .map(key => Object.values(ledger?.sources ?? {}).find(row => row.citeKey === key))
-    .filter((source): source is Source => !!source)
-  const apa=layout.referenceStyle==='apa7',labels=apa?apaLabels(text,sources):undefined
+  const presentation=citationPresentation(text,ledger??{sources:{}},layout.referenceStyle)
+  const sources=presentation.sources,apa=layout.referenceStyle==='apa7',labels=presentation.labels
   const render = (node: AstNode): string => {
     const children = () => (node.children ?? []).map(render).join('')
     switch (node.type) {
       case 'root': return children()
       case 'text': return node.leafIds?.map(id => { const leaf = leaves.get(id)!; return leaf.citationKeys
-        ? apa?texEscape(labels?.[leaf.citationKeys.join(';')]??leaf.text):`\\cite{${leaf.citationKeys.join(',')}}` : texEscape(leaf.text) }).join('') ?? texEscape(node.value ?? '')
+        ? apa?texEscape(labels?.[leaf.citationKeys.join(';')]??leaf.text):`\\cite{${[...new Set(leaf.citationKeys.map(key=>presentation.keyMap[key]??key))].join(',')}}` : texEscape(leaf.text) }).join('') ?? texEscape(node.value ?? '')
       case 'image': return `\\includegraphics[width=\\linewidth,height=.8\\textheight,keepaspectratio]{${texEscape(node.url??'')}}`
       case 'imageReference': {const definition=projection.tree.children?.find(row=>row.type==='definition'&&row.identifier===node.identifier);return definition?`\\includegraphics[width=\\linewidth,height=.8\\textheight,keepaspectratio]{${texEscape(definition.url??'')}}`:''}
       case 'paragraph': return children() + '\n\n'
@@ -84,7 +83,7 @@ export function latexDocument(text: string, config: ProjectConfig, ledger?: Ledg
     : projection.citationOrder.length ? ['\\bibliographystyle{unsrt}', '\\bibliography{references}'] : []
   return [
     chinese ? '\\documentclass[UTF8,a4paper,12pt]{ctexart}' : '\\documentclass[a4paper,12pt]{article}',
-    '\\usepackage[margin=25mm]{geometry}', '\\usepackage{amsmath,amssymb}', '\\usepackage[normalem]{ulem}',
+    `\\usepackage[margin=${typography?.marginsMm??25}mm]{geometry}`, '\\usepackage{amsmath,amssymb}', '\\usepackage[normalem]{ulem}',
     '\\usepackage{booktabs}', '\\usepackage{caption}', '\\usepackage{fancyhdr}', '\\usepackage{titlesec}',
     '\\usepackage{longtable}',...(images.length?['\\usepackage{graphicx}']:[]),
     ...(chinese ? ['\\pagestyle{fancy}\\fancyhf{}\\fancyfoot[C]{\\thepage}'] : []),

@@ -1,7 +1,11 @@
-import React from 'react'
+import React, { useLayoutEffect, useRef } from 'react'
 import katex from 'katex'
 import { type AstNode, type Projection, type Leaf, type TextUnit, mapLeafPoint, validateRange, validateProseRange,projectMarkdown } from '../core/editing/markdown.ts'
 import type { SelectionPayload } from '../shared/editing.ts'
+import type {DocumentFormatting} from '../shared/formatting.ts'
+import {paragraphStyle,formattedLeaf} from '../core/editing/formatting.ts'
+import type {TypographySpec} from '../shared/writing-task.ts'
+import {scanDocument,headingPresentation} from '../core/export/scan.ts'
 
 /**
  * The rendered slice of a leaf that a source range covers, or nothing when it cannot be placed
@@ -21,26 +25,67 @@ export function markedSlice(leaf: Leaf, range: { start: number; end: number }) {
   return { start: first.renderedStart, end: last.renderedEnd }
 }
 
-export function MarkdownView({ projection, annotations, afterBlock, markRange,origins }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode;
-  afterBlock?: (start: number, end: number) => React.ReactNode; markRange?: { start: number; end: number; flowing: boolean };origins?:Array<{start:number;end:number;proposalId:string}> }) {
+export function MarkdownView({ projection, annotations, afterBlock, markRange,origins,formatting,typography,interactiveSelection=false }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode;
+  afterBlock?: (start: number, end: number) => React.ReactNode; markRange?: { start: number; end: number; flowing: boolean };origins?:Array<{start:number;end:number;proposalId:string}>;formatting?:DocumentFormatting;typography?:TypographySpec;interactiveSelection?:boolean }) {
+  const article=useRef<HTMLElement>(null)
+  useLayoutEffect(()=>{
+    if(!interactiveSelection||!article.current)return
+    const root=article.current
+    let anchor:{offsetNode:Node;offset:number}|undefined
+    const caret=(event:MouseEvent)=>(document as any).caretPositionFromPoint(event.clientX,event.clientY) as {offsetNode:Node;offset:number}|null
+    const down=(event:MouseEvent)=>{
+      if(event.button!==0||event.detail!==1||event.shiftKey||(event.target as HTMLElement).closest('a,button,code,table,[data-sf-protected],.sf-rewrite'))return
+      const point=caret(event);if(!point||!root.contains(point.offsetNode))return
+      anchor=point;event.preventDefault();window.getSelection()?.setBaseAndExtent(point.offsetNode,point.offset,point.offsetNode,point.offset)
+    }
+    // Hold the actual first caret while dragging. Chromium's justified text can otherwise
+    // collapse both ends to each new hit point; the same native Range works at every zoom.
+    const move=(event:MouseEvent)=>{if(!anchor||!(event.buttons&1))return;const point=caret(event);if(!point||!root.contains(point.offsetNode))return
+      event.preventDefault();window.getSelection()?.setBaseAndExtent(anchor.offsetNode,anchor.offset,point.offsetNode,point.offset)
+    }
+    const up=()=>{anchor=undefined}
+    root.addEventListener('mousedown',down);root.addEventListener('mousemove',move)
+    document.addEventListener('mouseup',up)
+    return()=>{root.removeEventListener('mousedown',down);root.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up)}
+  },[interactiveSelection])
+  const ownsHighlight=useRef(false)
+  useLayoutEffect(()=>{
+    if(!article.current || !('highlights' in CSS))return
+    const registry=(CSS as any).highlights
+    if(!markRange){if(ownsHighlight.current)registry.delete('sf-rewrite');ownsHighlight.current=false;return}
+    ownsHighlight.current=true;registry.delete('sf-rewrite')
+    const ranges:Range[]=[]
+    for(const leaf of projection.leaves){const slice=markedSlice(leaf,markRange);if(!slice)continue
+      const node=article.current.querySelector(`[data-sf-leaf="${leaf.id}"]`);if(!node)continue
+      const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let offset=0
+      for(let child=walker.nextNode();child;child=walker.nextNode()){const length=child.textContent?.length??0,from=Math.max(0,slice.start-offset),to=Math.min(length,slice.end-offset)
+        if(to>from){const range=new Range();range.setStart(child,from);range.setEnd(child,to);ranges.push(range)}offset+=length}
+    }
+    registry.set('sf-rewrite',new (window as any).Highlight(...ranges))
+    return()=>registry.delete('sf-rewrite')
+  },[projection,markRange?.start,markRange?.end])
   const leaves = new Map(projection.leaves.map(leaf => [leaf.id, leaf]))
+  const headings=headingPresentation(scanDocument(projection),typography?.headingNumbering)
   const noIndent=new Set<string>();let special=false
   for(const node of projection.tree.children??[]){if(node.type==='heading')special=/^(?:摘要|abstract|关键词|keywords|参考文献|references|bibliography)$/iu.test((node.children??[]).map(child=>child.value??'').join('').trim());if(special&&node.blockId)noIndent.add(node.blockId)}
   const render = (node: AstNode, key: string): React.ReactNode => {
     const children = node.children?.map((child, index) => render(child, `${key}_${index}`))
     if (node.type === 'text') return <React.Fragment key={key}>{node.leafIds?.map(id => {
-      const leaf = leaves.get(id)!, slice = markRange && markedSlice(leaf, markRange)
+      const leaf = leaves.get(id)!
       const title = leaf.citationKeys ? leaf.citationKeys.map(key => `[@${key}]`).join('; ') : undefined
-      if (!slice) return <span key={id} data-sf-leaf={id} title={title}>{leaf.text}</span>
-      return <span key={id} data-sf-leaf={id} title={title}>{leaf.text.slice(0, slice.start)}<span className="sf-mark-inline"
-        data-sf-marked="true" data-flow={markRange!.flowing ? 'on' : 'off'}>{leaf.text.slice(slice.start, slice.end)}</span>{leaf.text.slice(slice.end)}</span>
+      const rows=formatting?.characters.filter(row=>row.start<leaf.end&&row.end>leaf.start)??[]
+      const content=formattedLeaf(leaf,formatting).map(({from,text,style})=><span key={from} style={{...(style.sizePt&&{fontSize:`${style.sizePt}pt`}),...(style.fontZh||style.fontEn?{fontFamily:`"${style.fontEn??typography?.bodyFontEn??'Times New Roman'}", "${style.fontZh??typography?.bodyFontZh??'宋体'}", serif`}:{})}}>{text}</span>)
+      return <span key={id} data-sf-leaf={id} title={title}>{rows.length?content:leaf.text}</span>
     })}</React.Fragment>
     if (node.type === 'root') return <React.Fragment key={key}>{node.children?.map((child, index) => <React.Fragment key={index}>
       {annotations?.(child.position?.start.offset ?? 0, node.children?.[index + 1]?.position?.start.offset ?? projection.source.length + 1)}
       {render(child, `${key}_${index}`)}</React.Fragment>)}</React.Fragment>
-    if (node.type === 'paragraph') return <React.Fragment key={key}><p data-sf-block={node.blockId} data-no-indent={noIndent.has(node.blockId??'')||undefined} className={origins?.some(range=>range.start<node.position!.end.offset!&&range.end>node.position!.start.offset!)?'sf-origin-ai':undefined} title={origins?.filter(range=>range.start<node.position!.end.offset!&&range.end>node.position!.start.offset!).map(range=>`包含已采用 AI 修改：${range.proposalId}`).join('；')||undefined} tabIndex={-1} style={{ whiteSpace: 'pre-wrap' }}>{children}</p>
+    if (node.type === 'paragraph') {const style=paragraphStyle(formatting,node.position!.start.offset!,node.position!.end.offset!);return <React.Fragment key={key}><p data-sf-block={node.blockId} data-no-indent={noIndent.has(node.blockId??'')||undefined} className={origins?.some(range=>range.start<node.position!.end.offset!&&range.end>node.position!.start.offset!)?'sf-origin-ai':undefined} title={origins?.filter(range=>range.start<node.position!.end.offset!&&range.end>node.position!.start.offset!).map(range=>`包含已采用 AI 修改：${range.proposalId}`).join('；')||undefined} tabIndex={-1} style={{ whiteSpace: 'pre-wrap',textAlign:style.alignment??typography?.bodyAlignment,
+      ...(style.firstLineIndentChars!==undefined&&{textIndent:`${style.firstLineIndentChars}em`}),...(style.beforePt!==undefined&&{marginTop:`${style.beforePt}pt`}),...(style.afterPt!==undefined&&{marginBottom:`${style.afterPt}pt`}),...(style.lineSpacing&&{lineHeight:style.lineSpacing}) }}>{children}</p>
       {afterBlock?.(node.position!.start.offset!, node.position!.end.offset!)}</React.Fragment>
-    if (node.type === 'heading') return React.createElement(`h${node.depth ?? 2}`, { key, 'data-sf-heading-offset': node.position?.start.offset, tabIndex: -1 }, children)
+    }
+    if (node.type === 'heading') {const heading=headings.get(node),local=paragraphStyle(formatting,node.position!.start.offset!,node.position!.end.offset!);return React.createElement(`h${node.depth ?? 2}`, { key, 'data-sf-heading-offset': node.position?.start.offset,'data-heading-level':heading?.title?'title':heading?.depth, tabIndex: -1,
+      style:{fontSize:typography?`${heading?.title?typography.titleSizePt:[typography.heading1SizePt,typography.heading2SizePt,typography.heading3SizePt][Math.min(2,(heading?.depth??1)-1)]}pt`:undefined,textAlign:local.alignment??(heading?.title||heading?.depth===1?'center':'left')} }, heading?.label&&<span aria-hidden="true" data-sf-protected="true">{heading.label} </span>,children)}
     if (node.type === 'strong') return <strong key={key}>{children}</strong>
     if (node.type === 'emphasis') return <em key={key}>{children}</em>
     if (node.type === 'delete') return <del key={key}>{children}</del>
@@ -63,7 +108,7 @@ export function MarkdownView({ projection, annotations, afterBlock, markRange,or
     if (node.type === 'tableCell') return <td key={key}>{children}</td>
     return <span key={key}>{children ?? node.value}</span>
   }
-  return <article className="sf-prose" aria-label="渲染正文">{render(projection.tree, 'root')}</article>
+  return <article ref={article} className="sf-prose" aria-label="渲染正文">{render(projection.tree, 'root')}</article>
 }
 
 function point(root: HTMLElement, node: Node, offset: number, edge: 'start' | 'end') {
@@ -78,8 +123,10 @@ function point(root: HTMLElement, node: Node, offset: number, edge: 'start' | 'e
     offset = edge === 'start' ? 0 : node.textContent!.length
   }
   const element = node.parentElement?.closest<HTMLElement>('[data-sf-leaf]')
-  if (!element || !root.contains(element) || element.childNodes.length !== 1 || element.firstChild !== node) throw new Error('选区涉及不可安全映射的节点，请明确选择普通段落。')
-  return { leafId: element.dataset.sfLeaf!, offset }
+  if (!element || !root.contains(element)) throw new Error('请从正文文字开始选择。')
+  const walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);let prefix=0
+  for(let child=walker.nextNode();child;child=walker.nextNode()){if(child===node)return {leafId:element.dataset.sfLeaf!,offset:prefix+offset};prefix+=child.textContent?.length??0}
+  throw new Error('这处内容不属于正文文字，请重新选择。')
 }
 export function captureSelection(root: HTMLElement, projection: Projection, documentSnapshot: any, projectId: string, local = false): SelectionPayload {
   const selection = window.getSelection()

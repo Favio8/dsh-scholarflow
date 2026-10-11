@@ -6,6 +6,7 @@ import { SfState } from './sf-state.tsx'
 export function PaperMaterials(props: any) {
   const { project, api, context, run, busy,refresh } = props
   const [parsed, setParsed] = useState<any>(), [index, setIndex] = useState(0)
+  const [selectedSources,setSelectedSources]=useState<string[]>([]),[primaryId,setPrimaryId]=useState('')
   const maintenance = useRef<HTMLDetailsElement>(null)
   const materials = Object.values(project.ledger.materials) as any[], sources = Object.values(project.ledger.sources) as any[]
   const block = parsed?.blocks[index]
@@ -25,7 +26,10 @@ export function PaperMaterials(props: any) {
       {!parsed.blocks.length&&<p role="status">没有可读取的文本。{parsed.warnings?.join(' ')}</p>}
       {block && <><small>{block.locator.kind === 'pdf' ? `第 ${block.locator.pageNumber} 页` : block.locator.kind === 'text' ? `第 ${block.locator.lineStart}–${block.locator.lineEnd} 行` : `第 ${index + 1} 个内容单元`}</small><pre>{block.text}</pre></>}
       <button disabled={!index} onClick={() => setIndex(index - 1)}>上一段</button><span> {parsed.blocks.length?index + 1:0} / {parsed.blocks.length} </span><button disabled={index + 1 >= parsed.blocks.length} onClick={() => setIndex(index + 1)}>下一段</button></section>}
-    <h3>参考来源</h3>{sources.map(source => <div className="sf-reference-row" key={source.id}><strong>{source.title}</strong><p className="sf-muted">{source.authors.map((author: any) => author.literal ?? author.family).join(', ')}{source.year && ` · ${source.year}`} · {source.textAccess === 'fulltext' ? '全文已读取' : source.textAccess === 'excerpt' ? '已读取摘录' : '仅元数据'}</p>
+    <h3>参考来源</h3>
+    {sources.length>1&&<div className="sf-bibliography-link"><span className="sf-muted">同一篇文献有多份记录时，勾选后关联书目。</span>{selectedSources.length>=2&&<><select aria-label="关联后的主书目" value={selectedSources.includes(primaryId)?primaryId:selectedSources[0]} onChange={e=>setPrimaryId(e.target.value)}>{sources.filter(row=>selectedSources.includes(row.id)).map(row=><option key={row.id} value={row.id}>{row.title} · {row.venue??'刊名未记录'}{row.identifiers.doi?' · DOI已记录':''}</option>)}</select><button disabled={busy} onClick={()=>run(async()=>{await api('sources.linkBibliography',{context:context(),primaryId:selectedSources.includes(primaryId)?primaryId:selectedSources[0],sourceIds:selectedSources});setSelectedSources([]);await refresh()})}>确认同一文献</button></>}</div>}
+    {sources.map(source => <div className="sf-reference-row" data-sf-source-id={source.id} key={source.id}><label className="sf-check"><input type="checkbox" checked={selectedSources.includes(source.id)} onChange={e=>setSelectedSources(e.target.checked?[...selectedSources,source.id]:selectedSources.filter(id=>id!==source.id))} /><strong>{source.title}</strong></label><p className="sf-muted">{source.authors.map((author: any) => author.literal ?? author.family).join(', ')}{source.year && ` · ${source.year}`} · {source.textAccess === 'fulltext' ? '全文已读取' : source.textAccess === 'excerpt' ? '已读取摘录' : '仅元数据'}</p>
+      {source.bibliographySourceId&&<p className="sf-muted">与「{sources.find(row=>row.id===source.bibliographySourceId)?.title}」共用书目条目</p>}
       <code>[@{source.citeKey}]</code>{source.identifiers.url && <a href={source.identifiers.url} target="_blank" rel="noopener noreferrer"> 查看来源 <WorkbenchIcon kind="external" /></a>}</div>)}
     <details ref={maintenance} className="sf-material-maintenance"><summary>补充资料与维护引用</summary><Research {...props} /></details>
   </section>

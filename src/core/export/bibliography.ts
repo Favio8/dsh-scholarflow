@@ -2,6 +2,7 @@ import type { Ledger } from '../../shared/schema.ts'
 import { projectMarkdown, citationMarkers } from '../editing/markdown.ts'
 import { invariant } from '../../shared/errors.ts'
 import { normalizeArxiv } from '../research/source-matching.ts'
+import {citationGroups} from './citation-groups.ts'
 
 // The BibTeX entry is written here rather than through a formatter: the one previously
 // used dropped every non-ASCII character, so a Chinese title arrived as its Latin
@@ -31,11 +32,12 @@ function bibtex(records: { key: string; type: string; title: string; authors: Le
   }).join('')
 }
 
-export function bibliography(document: string, ledger: Ledger) {
+export function bibliography(document: string, ledger: Ledger,canonical=false) {
   const projection = projectMarkdown(document), known = new Set(Object.values(ledger.sources).map(source => source.citeKey))
   for (const key of citationMarkers(document, projection.tree).flatMap(marker => marker.keys).filter(key => key.startsWith('sf_')))
     invariant(known.has(key), 'CITATION_KEY_UNKNOWN', `引用 ${key} 没有项目来源记录。`)
-  const records = projection.citationOrder.map(key => {
+  const keys=canonical?citationGroups(document,ledger).sources.map(source=>source.citeKey):projection.citationOrder
+  const records = keys.map(key => {
     const source = Object.values(ledger.sources).find(source => source.citeKey === key)
     invariant(source, 'CITATION_KEY_UNKNOWN', `引用 ${key} 没有项目来源记录。`)
     return { key, type: source.kind, title: source.title, authors: source.authors,bibliography:source.bibliography, ...(source.year && { year: source.year }),

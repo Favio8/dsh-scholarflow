@@ -127,3 +127,18 @@ export function scanDocument(projection: Projection): DocumentPlan {
 
 /** True when a heading names front or back matter, which never counts toward the body. */
 export function isMatterHeading(text: string): boolean { return MATTER_HEADING.test(text.trim()) }
+
+/** Document titles do not consume chapter levels or numbering. */
+export function headingPresentation(plan:DocumentPlan,numbering:'none'|'decimal'|'chinese'='none'){
+  const numbered=(text:string)=>!MATTER_HEADING.test(text)&&!REFERENCE_HEADING.test(text)
+  const minimum=Math.min(...plan.headings.filter(row=>numbered(row.text)).map(row=>row.depth),1e3)
+  const counters=[0,0,0,0,0,0],rows=new Map<AstNode,{title:boolean;depth:number;label:string}>()
+  const chinese=(value:number):string=>value<10?'零一二三四五六七八九'[value]:value<100?(value<20?'十':chinese(Math.floor(value/10))+'十')+(value%10?chinese(value%10):''):chinese(Math.floor(value/100))+'百'+(value%100?(value%100<10?'零':'')+chinese(value%100):'')
+  for(const block of plan.blocks){if(!['title','heading'].includes(block.role))continue
+    const text=textOf(block.node).trim(),title=block.role==='title',depth=Math.max(1,Math.min(6,(block.depth??1)-(minimum===1e3?1:minimum)+1))
+    let label=''
+    if(!title&&numbered(text)&&numbering!=='none'&&depth<=3){counters[depth-1]++;for(let index=depth;index<6;index++)counters[index]=0;label=depth===1&&numbering==='chinese'?chinese(counters[0]):counters.slice(0,depth).join('.')}
+    rows.set(block.node,{title,depth:numbered(text)?depth:1,label})
+  }
+  return rows
+}

@@ -26,13 +26,12 @@ const render = (source: string, range: { start: number; end: number }, flowing =
 const marks = (html: string) => [...html.matchAll(/<span class="sf-mark-inline" data-sf-marked="true"[^>]*>([\s\S]*?)<\/span>/g)].map(match => match[1])
 const rangeOf = (source: string, text: string) => ({ start: source.indexOf(text), end: source.indexOf(text) + text.length })
 
-test('the selected characters are the only ones coloured', () => {
-  const source = '# 标题\n\n第一句。第二句。\n'
-  const html = render(source, rangeOf(source, '第二句'))
-  assert.deepEqual(marks(html), ['第二句'])
-  // The rest of the paragraph stays unmarked and keeps its own text.
-  assert.ok(html.includes('第一句。'))
-  assert.ok(!html.slice(0, html.indexOf('data-sf-marked')).includes('第二句'))
+test('SF-163: selecting and generating keep the text DOM unchanged', () => {
+  const source = '# 标题\n\n第一句。**第二句**。\n',range=rangeOf(source,'第二句')
+  const ordinary=renderToStaticMarkup(React.createElement(MarkdownView,{projection:projectMarkdown(source)}))
+  assert.equal(render(source,range),ordinary)
+  assert.equal(render(source,range,true),ordinary)
+  assert.deepEqual(marks(ordinary),[])
 })
 
 test('a range that covers nothing marked renders no mark at all', () => {
@@ -44,17 +43,17 @@ test('a range that covers nothing marked renders no mark at all', () => {
 test('protected content is never wrapped: formulas and inline code keep rendering as themselves', () => {
   const source = '# 标题\n\n前 $x^2$ 中 `code` 后\n'
   const html = render(source, { start: source.indexOf('前'), end: source.indexOf('后') + 1 })
-  // Three text leaves sit inside the range; the formula and the code are not text leaves.
-  assert.deepEqual(marks(html), ['前 ', ' 中 ', ' 后'])
+  assert.deepEqual(marks(html), [])
   for (const inner of marks(html)) assert.equal(inner.includes('<'), false, 'a marked span carries text only')
   assert.ok(html.includes('katex'), 'the formula still renders as a formula')
   assert.ok(html.includes('<code data-sf-protected="true">code</code>'), 'the inline code still renders as code')
 })
 
-test('the flowing state rides the mark so it can stop once the candidate is ready', () => {
-  const source = '# 标题\n\n一句。\n'
-  assert.match(render(source, rangeOf(source, '一句'), true), /data-flow="on"/)
-  assert.match(render(source, rangeOf(source, '一句'), false), /data-flow="off"/)
+test('SF-163: candidate motion does not recolour or split the source glyphs', () => {
+  const source='# 标题\n\n一句。\n'
+  const html=render(source,rangeOf(source,'一句'),true)
+  assert.equal(marks(html).length,0)
+  assert.equal(html.includes('data-flow'),false)
 })
 
 test('a decoded entity is marked as a whole unit rather than by a character guess', () => {
@@ -70,25 +69,12 @@ test('a decoded entity is marked as a whole unit rather than by a character gues
   assert.equal(markedSlice({ ...leaf, mappable: false }, { start: 0, end: 7 }), undefined)
 })
 
-test('the mark reads its colours, period and wrap behaviour out of the token layer', () => {
-  // SF-089(d) with SF-088: the stops and the period are decided once, in theme/tokens.ts, and the
-  // component only references them. A hex value reappearing in the mark CSS is a second source of
-  // truth, which is how the two panes used to drift apart.
-  const source = readFileSync(resolve('src/client/range-mark.tsx'), 'utf8')
-  const from = source.indexOf('export const RANGE_MARK_CSS = `') + 'export const RANGE_MARK_CSS = `'.length
-  const css = source.slice(from, source.indexOf('`', from))
-  assert.equal(/#[0-9a-fA-F]{3,8}/.test(css), false, 'the mark CSS carries a literal colour')
-  assert.match(css, /background-image:var\(--sf-mark-gradient\)/)
-  assert.match(css, /background-size:var\(--sf-mark-period\) 100%;background-repeat:repeat-x/)
-  // One period per loop, as a real length: a percentage of a box that already equals the image
-  // displaces nothing at all, which is how the flow used to never happen.
-  assert.match(css, /@keyframes sf-range-flow\{from\{background-position:0 0\}to\{background-position:calc\(-1 \* var\(--sf-mark-period\)\) 0\}\}/)
-  assert.equal(/background-position:100%/.test(css), false, 'a percentage displacement cannot move a full-width image')
-  // slice continues one span's background across its line breaks; clone restarts the gradient on
-  // every wrapped fragment, which is what made a marked paragraph read as a row of colour blocks.
-  assert.match(css, /box-decoration-break:slice/)
-  assert.equal(/box-decoration-break:clone/.test(css), false)
-  const tokens = readFileSync(resolve('src/client/theme/tokens.ts'), 'utf8')
-  assert.match(tokens, /--sf-mark-gradient:linear-gradient/)
-  assert.match(tokens, /--sf-mark-period:\d+px/)
+test('SF-163: selection and rewrite backgrounds use theme tokens and leave glyphs opaque', () => {
+  const source=readFileSync(resolve('src/client/range-mark.tsx'),'utf8')
+  const from=source.indexOf('export const RANGE_MARK_CSS = `')+'export const RANGE_MARK_CSS = `'.length
+  const css=source.slice(from,source.indexOf('`',from))
+  assert.equal(/#[0-9a-fA-F]{3,8}/.test(css),false)
+  assert.match(css,/::highlight\(sf-rewrite\)/)
+  assert.match(css,/background:var\(--sf-selection-bg\);color:var\(--sf-selection-text\)/)
+  assert.equal(css.includes('color:transparent'),false)
 })

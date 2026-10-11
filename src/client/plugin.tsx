@@ -190,7 +190,7 @@ export function apply(ctx: Host) {
     const [registering, setRegistering] = useState(false)
     const registrationSequence = useRef(0)
     const [issueLocation, setIssueLocation] = useState<Host>()
-    const [view, setView] = useState<PaperView>('split'), [format, setFormat] = useState<ExportFormat>('markdown')
+    const [view, setView] = useState<PaperView>('preview'), [format, setFormat] = useState<ExportFormat>('markdown')
     const [editor, setEditor] = useState<DraftController>(), [exportPrompt, setExportPrompt] = useState(false), [exportTrigger, setExportTrigger] = useState(0)
     const [generating,setGenerating] = useState(false), [generationMode,setGenerationMode] = useState<string>()
     const bindingKey = `${workspace?.workspaceId ?? ''}:${props.sessionId ?? ''}`
@@ -223,7 +223,7 @@ export function apply(ctx: Host) {
     const refreshRef = useRef(refresh); refreshRef.current = refresh
     useEffect(() => {
       let live = true
-      setProject(undefined); setError(''); setTab('Draft');setOverviewPage('writing');setHistoryView('versions'); setView('split'); setFormat('markdown'); setExportPrompt(false); setExportTrigger(0); setEditor(undefined); setIssueLocation(undefined); setGenerating(false); setGenerationMode(undefined)
+      setProject(undefined); setError(''); setTab('Draft');setOverviewPage('writing');setHistoryView('versions'); setView('preview'); setFormat('markdown'); setExportPrompt(false); setExportTrigger(0); setEditor(undefined); setIssueLocation(undefined); setGenerating(false); setGenerationMode(undefined)
       if (workspace && props.sessionId) refresh().catch(e => live && setError(e.message))
       return () => { live = false }
     }, [workspace?.workspaceId, props.sessionId])
@@ -297,14 +297,15 @@ export function apply(ctx: Host) {
       </div>}
       {ready && <>
         <div className="sf-paper-toolbar"><nav className="sf-paper-views" aria-label="正文视图">
-          {(['edit', 'preview', 'split'] as const).map((name, index) => <button className="sf-ghost" key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && view === name} onClick={() => { setTab('Draft'); setView(name) }}>{['编辑', '预览', '分屏'][index]}</button>)}
+          {(['edit', 'preview'] as const).map((name, index) => <button className="sf-ghost" key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && view === name} onClick={() => { setTab('Draft'); setView(name) }}>{['编辑', '预览'][index]}</button>)}
         </nav><details className="sf-paper-menu"><summary aria-label="更多论文选项"><WorkbenchIcon kind="more" /></summary><div className="sf-paper-menu-popover">
           {(['Overview', 'Research', 'Outline', 'Review', 'Changes', 'Settings', 'History','Export'] as const).map(name => <button key={name} onClick={e => { closeMenu(e.currentTarget); if(name==='Overview')setOverviewPage('writing');if(name==='History')setHistoryView('versions');setTab(name) }}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
+          <button disabled={generating} onClick={e=>{closeMenu(e.currentTarget);setView('split');setTab('Draft')}}>编辑与预览分屏</button>
           <button onClick={e=>{closeMenu(e.currentTarget);setHistoryView('runs');setTab('History')}}>运行记录与恢复</button>
           {([['skills','本项目 Skill'],['context','文风与记忆'],['requirements','高级要求'],['workflow','引导流程']] as const).map(([page,label])=><button key={page} onClick={e=>{closeMenu(e.currentTarget);setOverviewPage(page);setTab('Overview')}}>{label}</button>)}
         </div></details></div>
         {tab !== 'Draft' && <div className="sf-tool-back"><button className="sf-ghost" onClick={() => setTab('Draft')}><WorkbenchIcon kind="back" /> 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
-        <WritingProgress api={api} context={context} refresh={refresh} onManage={setTab} onTask={(result:any)=>setGenerationMode(result.task?.mode)} />
+        <WritingProgress project={project} api={api} context={context} refresh={refresh} onManage={setTab} onRecords={()=>{setHistoryView('runs');setTab('History')}} onCheck={(row:any)=>{setTab(row.page);if(row.page==='Overview')setOverviewPage('writing');if(row.page==='Draft')setView('preview');requestAnimationFrame(()=>{const selector=row.page==='Draft'?`[data-sf-block="${window.CSS.escape(row.key)}"]`:row.page==='Review'?`[aria-label="审查问题 ${window.CSS.escape(row.key)}"]`:undefined;if(selector)confirmationRoot.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({block:'center'})})}} onTask={(result:any)=>setGenerationMode(result.task?.mode)} />
         <div className="sf-paper-content">
           <div id="sf-panel-Overview" role="tabpanel" aria-label="概览" hidden={tab !== 'Overview'}><div hidden={overviewPage!=='writing'}><WritingRequirements key={`requirements_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} onFormat={setFormat} /></div>
             <div hidden={overviewPage==='writing'}><Overview project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} section={overviewPage==='writing'?'requirements':overviewPage} navigate={page=>setTab(page as typeof tab)} /></div></div>
@@ -315,11 +316,11 @@ export function apply(ctx: Host) {
             <Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} issueLocation={issueLocation}
               view={view} format={format} tool={draftTool} visible={tab === 'Draft'} onController={setEditor} captureChatInsertion={() => props.inputActions.captureInsertion()}
               generationMode={generationMode} onGenerationState={active=>{setGenerating(active);if(active)setView('preview')}}
-              onAttachSelection={attachSelection} onReview={() => setTab('Review')} onTool={() => setTab('Changes')} onReturnEditor={() => { setView('split'); setTab('Draft') }} />
+              onAttachSelection={attachSelection} onReview={() => setTab('Review')} onTool={() => setTab('Changes')} onReturnEditor={() => { setView('preview'); setTab('Draft') }} />
           </div>
           <div id="sf-panel-Settings" role="tabpanel" aria-label="项目设置" hidden={tab !== 'Settings'}><ProjectSettings key={project.binding.projectId} project={project} diagnostics={() => call('diagnostics')} api={api} context={context} refresh={refresh} run={act} busy={busy} /></div>
           <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} mode={tab} format={format} exportTrigger={exportTrigger}
-            onLocate={location => { setIssueLocation({ ...location, request: crypto.randomUUID() }); setView('split'); setTab('Draft') }} />
+            onLocate={location => { setIssueLocation({ ...location, request: crypto.randomUUID() }); setView('preview'); setTab('Draft') }} />
         </div>
       </>}
       {ready && exportPrompt && <div className="sf-export-choice"><section role="dialog" aria-modal="true" aria-label="选择导出正文版本"><h3>正文还有未保存的编辑</h3><p>选择本次 {FORMAT_LABELS[format]} 导出使用的版本。</p>

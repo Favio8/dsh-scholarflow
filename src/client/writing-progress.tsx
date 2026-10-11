@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from 'react'
 import { writingReadPaths, type WritingTask } from '../shared/writing-task.ts'
 import { activeWritingQuestion } from './writing-task-ui.ts'
 import { groupIssues, mapLegacyNotes } from '../core/pipeline/task-issues.ts'
+import {draftChecklist} from './draft-checklist.ts'
+import {WorkbenchIcon} from './workbench-chrome.tsx'
 
 const STAGES: Record<string, string> = { materials: '读取工作区资料', research: '检索公开文献', evidence: '整理证据与引用', outline: '规划章节内容', drafting: '撰写正文', review: '检查全文', completed: '初稿已生成' }
 
@@ -10,7 +12,7 @@ const STAGES: Record<string, string> = { materials: '读取工作区资料', res
  * in the middle column's bottom overlay, so this component never grows a large card that
  * pushes the text down; it reports real counts and keeps technical text one level deeper.
  */
-export function WritingProgress({ api, context, refresh, onTask, taskRevision, onManage }: any) {
+export function WritingProgress({ api, context, refresh, onTask, taskRevision, onManage,project,onRecords,onCheck }: any) {
   const [task, setTask] = useState<WritingTask>(), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [elapsed, setElapsed] = useState(0)
   const [command,setCommand] = useState<string>()
@@ -52,9 +54,30 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
   // A task stored before this field existed still has to render, so absence is an empty list.
   const issues = task.issues?.length ? task.issues : mapLegacyNotes(task.notes ?? [], task.updatedAt)
   const { needsAction, inProgress, handled } = groupIssues(issues)
+  if(task.mode==='first-draft'){
+    const running=['running','queued'].includes(task.status),complete=task.status==='completed',checks=complete?draftChecklist(task,project):[]
+    const section=task.spec.sections[task.sectionIndex]
+    return <section className="sf-writing-progress" aria-label="论文写作进度"><div className="sf-writing-line">
+      <span className={`sf-progress-dot ${running?'sf-progress-working':''}`} />
+      <strong>{command==='pause'?'正在暂停…':command==='cancel'?'正在停止…':complete?'初稿已生成':running?STAGES[task.stage]:task.status==='cancelled'?'写作已停止':'写作已暂停'}</strong>
+      {running&&<span className="sf-muted">{task.stage==='drafting'&&section?`${section.title} · `:''}{countsOf(task)}</span>}
+      {complete&&<span className="sf-muted">{task.sectionIndex} / {task.spec.sections.length} 节</span>}
+      <div className="sf-writing-controls">{running?<><button disabled={busy||!!command} onClick={()=>action('pause')}>暂停</button><button disabled={busy||!!command} onClick={()=>action('cancel')}>停止</button></>
+        :!complete&&<button disabled={busy||!!command} onClick={()=>action(task.diagnostic?.code==='FIRST_DRAFT_APPROVAL_STALE'?'start-first-draft':'resume')}>继续生成</button>}
+        {complete&&<details className="sf-review-checklist"><summary><WorkbenchIcon kind="down" />{checks.length?`核对清单 · ${checks.length} 项`:'核对与修改'}</summary><div className="sf-issue-popover">
+          <header><strong>初稿核对</strong><button onClick={()=>onManage('Review')}>检查全文</button></header>
+          {!checks.length&&<p className="sf-muted">可通读初稿，选中文字让 AI 修改。</p>}
+          {checks.map(row=><article key={row.key} className="sf-checklist-row"><strong>{row.title}</strong><p>{row.detail}</p><button onClick={()=>onCheck?onCheck(row):onManage(row.page)}>查看{row.page==='Research'?'资料与引用':row.page==='Review'?'对应问题':row.page==='Overview'?'写作要求':'正文'}</button></article>)}
+        </div></details>}
+        {!running&&onRecords&&<button className="sf-ghost" onClick={onRecords}>运行记录</button>}
+      </div></div>
+      {!complete&&task.diagnostic&&<p role="alert" className="sf-error">{task.diagnostic.message}</p>}
+      {error&&<p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/,'')}</p>}
+    </section>
+  }
   const main = command==='pause' ? '正在暂停，已请求停止当前生成' : command==='cancel' ? '正在停止，已有正文保留'
-    : task.mode==='first-draft' && task.status==='completed' ? (task.outcome==='draft-with-gaps'?'初稿就绪，有待补或待核对内容':'初稿就绪，可选文修改')
-    : task.mode==='first-draft' && ['paused','interrupted','cancelled'].includes(task.status) ? (task.status==='cancelled'?'已停止，已有正文保留':'已暂停，可编辑已保存正文')
+
+
     : task.status === 'cancelled' ? '旧版写作已停止，已有内容保留'
     : task.status === 'paused' ? '写作已暂停'
     : task.status === 'interrupted' ? '写作进度已保留'
@@ -66,15 +89,14 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
     <div className="sf-writing-line">
       <span className={`sf-progress-dot ${task.status === 'running' ? 'sf-progress-working' : ''}`} />
       <strong>{main}</strong>
-      {task.mode !== 'first-draft' && <span className="sf-muted">旧任务 · 引导模式</span>}
+      <span className="sf-muted">引导模式</span>
       <span className="sf-muted">{countsOf(task)}</span>
       <span className="sf-muted sf-progress-elapsed">已用 {formatElapsed(elapsed)} · 调用 {task.usedModelCalls} 次</span>
       <div className="sf-writing-controls">
         {task.status === 'running' || task.status === 'queued' ? <button disabled={busy || !!command} onClick={() => action('pause')}>暂停</button>
-          : task.status !== 'completed' && !(task.status === 'cancelled' && task.mode !== 'first-draft') && !question && <button disabled={busy || !!command} onClick={() => action('resume')}>继续</button>}
+          : task.status !== 'completed' && task.status !== 'cancelled' && !question && <button disabled={busy || !!command} onClick={() => action('resume')}>继续</button>}
         {!['completed','cancelled','failed'].includes(task.status) && <button disabled={busy || !!command} onClick={() => action('cancel')}>停止</button>}
-        {task.mode!=='first-draft' && !['running','queued','completed'].includes(task.status) && <><button disabled={busy || !!command} onClick={()=>action('start-first-draft')}>按新方式继续初稿</button><span className="sf-muted">所选文件分别保留，缺项待补继续，成稿后修改。</span></>}
-        {task.mode==='first-draft' && task.diagnostic?.code==='FIRST_DRAFT_APPROVAL_STALE' && <button disabled={busy || !!command} onClick={()=>action('start-first-draft')}>重新确认当前资料并继续</button>}
+        {!['running','queued','completed'].includes(task.status) && <><button disabled={busy || !!command} onClick={()=>action('start-first-draft')}>按新方式继续初稿</button><span className="sf-muted">所选文件分别保留，缺项待补继续，成稿后修改。</span></>}
         {!!issues.length && <details><summary>详情（{needsAction.length} 项待处理）</summary>
           <div className="sf-issue-popover">
             {!!task.deferredIssues?.length && <details><summary>成稿后处理（{task.deferredIssues.length}）</summary>{task.deferredIssues.map((row,index)=><p key={index}>{row.message}</p>)}</details>}
@@ -85,7 +107,6 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
       </div>
     </div>
     {error && <p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}
-    {task.mode==='first-draft' && task.diagnostic && <p role="alert" className="sf-error">{task.diagnostic.message} <small>{task.diagnostic.code}</small></p>}
   </section>
 }
 
@@ -133,7 +154,9 @@ export const PROGRESS_CSS = `/* Status band: tint, no rule. A hairline under eve
 .sf-writing-controls{margin-left:auto;display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap}
 .sf-writing-controls button{border:0!important;padding:0 var(--sf-space-2);font-size:var(--sf-font-sm)}
 .sf-writing-controls details{position:relative}
-.sf-issue-popover{position:absolute;right:0;z-index:40;top:var(--sf-space-5);width:400px;max-height:420px;overflow:auto;background:var(--sf-surface);box-shadow:var(--sf-shadow-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);padding:var(--sf-space-3);text-align:left}
+.sf-issue-popover{position:absolute;right:0;z-index:40;top:var(--sf-space-5);width:min(400px,calc(100vw - 48px));max-height:420px;overflow:auto;background:var(--sf-surface);box-shadow:var(--sf-shadow-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);padding:var(--sf-space-3);text-align:left}
+.sf-review-checklist>summary{display:flex;align-items:center;gap:var(--sf-space-1);cursor:pointer;list-style:none;color:var(--sf-accent-text)}.sf-review-checklist>summary::-webkit-details-marker{display:none}.sf-review-checklist[open]>summary>svg{transform:rotate(180deg)}
+.sf-issue-popover>header{display:flex;justify-content:space-between;align-items:center;padding:var(--sf-space-2) 0}.sf-checklist-row{padding:var(--sf-space-3) 0;border-top:1px solid var(--sf-border-soft)}.sf-checklist-row>p{margin:var(--sf-space-1) 0;color:var(--sf-muted);line-height:var(--sf-leading-body)}
 .sf-issue-group{margin:0 0 var(--sf-space-2)}
 .sf-issue-group>summary{cursor:pointer;font-size:var(--sf-font-sm);color:var(--sf-muted)}
 /* Groups are separated by space and a weight change on their own heading. With the row borders

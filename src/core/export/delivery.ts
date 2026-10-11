@@ -12,16 +12,20 @@ import { readWritingSpec } from '../pipeline/writing-task-store.ts'
 import type { ExportFormat } from '../../shared/presentation.ts'
 import {exportImages} from './images.ts'
 import {apaLabels,apaReferences,publicationMarkdown} from './apa.ts'
+import {citationGroups,canonicalCitationText,citationPresentation} from './citation-groups.ts'
+import {rebaseFormatting} from '../editing/formatting.ts'
 
 export async function prepareDelivery(io: FileStore, format: ExportFormat = 'markdown') {
   const current = await snapshot(io), review = await inspectReview(io), input = await reviewInput(io)
   invariant(!current.document.externalChange, 'STALE_DOCUMENT_VERSION', '请先显式采用或保存外部稿件改动，再导出。')
   const projection = projectMarkdown(current.document.text)
-  const sourceIds = projection.citationOrder.map(key => {
+  const citedSourceIds = projection.citationOrder.map(key => {
     const source = Object.values(current.ledger.sources).find(item => item.citeKey === key)
     invariant(source, 'CITATION_KEY_UNKNOWN', `引用 ${key} 缺少来源，导出前必须修复。`)
     return source.id
   })
+  const grouped=citationGroups(current.document.text,current.ledger)
+  const sourceIds=[...new Set([...citedSourceIds,...grouped.sources.map(source=>source.id)])]
   const assets=await exportImages(io,current.document.text,current.config.paths.mainDocument)
   validateManuscriptPublication(assets.text, projectMarkdown(assets.text).tree,assets.images.map(image=>image.relativePath))
   if (format === 'docx') validateArtifactPrivacy(current.config.project.title)
@@ -40,7 +44,7 @@ export async function prepareDelivery(io: FileStore, format: ExportFormat = 'mar
   const plan = { id: newId('preflight'), projectId: current.ledger.projectId, documentHash: current.document.contentHash, revisionId: current.document.revisionId,
     ledgerRevision: current.ledger.revision, ledgerHash: current.ledgerHash, configHash: current.configHash, dependencyHash: input.dependencyHash,
     reviewId: review.report?.id, reviewState, sourceIds, unresolvedIssueIds: issues.filter(issue => issue.state !== 'resolved').map(issue => issue.id),
-    reviewedAllowed: reviewed, limitations: review.report?.limitations ?? ['当前稿件尚未执行审查；只能导出工作草稿。'],
+    reviewedAllowed: reviewed,referenceCount:grouped.sources.length, limitations: review.report?.limitations ?? ['当前稿件尚未执行审查；只能导出工作草稿。'],
     format,imageHash:assets.hash,imageCount:assets.images.length,formats: [...(format === 'markdown' ? [] : [format]), 'markdown', 'bibtex', 'quality-report'],
     // The scan runs here so the delivery states what the layout did and did not do, rather
     // than leaving the reader to find out in Word.
@@ -69,9 +73,9 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
     const current = await snapshot(io), review = await inspectReview(io), deliveryId = newId('delivery')
     const writingSpec = await readWritingSpec(io)
     const assets=await exportImages(io,current.document.text,config.paths.mainDocument)
-    const sources=plan.sourceIds.map(id=>ledger.sources[id]),apa=writingSpec?.typography?.referenceStyle==='apa7'
-    const labels=apa?apaLabels(assets.text,sources):undefined
-    const exportedMarkdown=apa&&sources.length?publicationMarkdown(assets.text,labels)+(scanDocument(projectMarkdown(assets.text)).hasReferencesHeading?'\n\n':'\n\n## '+(config.project.language==='en'?'References':'参考文献')+'\n\n')+apaReferences(sources).map(([,entry])=>entry).join('\n\n')+'\n':assets.text
+    const sources=citationGroups(assets.text,ledger).sources,apa=writingSpec?.typography?.referenceStyle==='apa7'
+    const labels=apa?citationPresentation(assets.text,ledger,'apa7').labels:undefined
+    const exportedMarkdown=apa&&sources.length?publicationMarkdown(assets.text,labels)+(scanDocument(projectMarkdown(assets.text)).hasReferencesHeading?'\n\n':'\n\n## '+(config.project.language==='en'?'References':'参考文献')+'\n\n')+apaReferences(sources).map(([,entry])=>entry).join('\n\n')+'\n':canonicalCitationText(assets.text,citationGroups(assets.text,ledger).keyMap)
     const mixedLength = ledger.requirements.writing_length?.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1'
     const statistics=wordStats(current.document.text,{bodyOnly:true,sectionKinds:ledger.outline.sections}),words=ledger.requirements.writing_length?.constraint?.unit==='words'||!ledger.requirements.writing_length?.constraint?.unit&&(writingSpec?.countingPolicy.unit??writingSpec?.language)==='en'
     const lengthUnit = mixedLength ? '字词合计' : words ? '词' : '汉字'
@@ -82,7 +86,7 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
     const report = [ '# ScholarFlow 质量报告', '', `交付：${deliveryId}`, `项目：${ledger.projectId}`, `稿件修订：${plan.revisionId}`,
       `稿件 SHA-256：${plan.documentHash}`, `数据版本：${plan.ledgerRevision}`, `审查：${plan.reviewId ?? '未执行'}`, `状态：${reviewState}`, '',
       '## 本次检查范围', '', '正文、实际引用的来源记录和已登记的所选资料；不包含完整会话、原始资料副本或模型推理。', '',
-      `统计口径：${statistics.countingPolicyId}；${statistics.chineseCharacters} 汉字，${statistics.westernWords} 西文词元，${plan.sourceIds.length} 个实际引用。`,
+      `统计口径：${statistics.countingPolicyId}；${statistics.chineseCharacters} 汉字，${statistics.westernWords} 西文词元，${plan.referenceCount} 个实际引用。`,
         // The confirmed length sits beside the actual count: a report whose length was asked for
         // has to state the deviation itself rather than leave the reader to measure it.
         ...(writingSpec ? [`篇幅：实际 ${actualLength} ${lengthUnit}／已确认要求 ${writingSpec.targetLength} ${lengthUnit}${writingSpec.brief?.length?.approximate ? '（来源写为「约」）' : ''}；偏差 ${lengthDifference! >= 0 ? '+' : ''}${lengthDifference}。`] : []), '',
@@ -92,7 +96,7 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
       '## 限制与建议下一步', '', ...plan.limitations.map(item => `- ${reportText(item)}`), '- 处理未关闭问题和未知检查，接受修改后按新版本重新审查。',
       '- 本报告不提供课程成绩、接收概率或学术真实性保证。', '' ].join('\n')
     const root = `${config.paths.manuscriptDir}/exports/${deliveryId}`
-    const files: Array<{ relativePath: string; text: string; encoding?: 'base64' }> = [{ relativePath: 'paper.md', text: exportedMarkdown }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger) }, { relativePath: 'quality-report.md', text: report }]
+    const files: Array<{ relativePath: string; text: string; encoding?: 'base64' }> = [{ relativePath: 'paper.md', text: exportedMarkdown }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger,true) }, { relativePath: 'quality-report.md', text: report }]
     for(const image of assets.images)if(!files.some(file=>file.relativePath===image.relativePath))files.push({relativePath:image.relativePath,text:Buffer.from(image.bytes).toString('base64'),encoding:'base64'})
     if (plan.format === 'latex') files.unshift({ relativePath: 'paper.tex',
       text: latexDocument(assets.text, config, current.ledger, writingSpec?.typography,assets.images) })
@@ -100,7 +104,9 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
     // what actually shapes the exported page (SPEC v1.2 §16.1).
     if (plan.format === 'docx') {
       const spec = await readWritingSpec(io)
-      const bytes = await wordDocument(assets.text, config, ledger, { typography: spec?.typography, cover: spec?.cover,images:assets.images })
+      const exportLedger=structuredClone(ledger)
+      if(exportLedger.documents.paper.formatting)exportLedger.documents.paper.formatting=rebaseFormatting(exportLedger.documents.paper.formatting,current.document.text,assets.text,assets.edits)
+      const bytes = await wordDocument(assets.text, config, exportLedger, { typography: spec?.typography, cover: spec?.cover,images:assets.images })
       files.unshift({ relativePath: 'paper.docx', text: Buffer.from(bytes).toString('base64'), encoding: 'base64' })
     }
     for (const file of files) if (!file.encoding) validateArtifactPrivacy(file.text)

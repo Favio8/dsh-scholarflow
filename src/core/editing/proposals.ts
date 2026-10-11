@@ -9,6 +9,8 @@ import { citationKeys, citationMarkers, unicodeBoundary, validateSelection, word
 import { bibliography } from '../export/bibliography.ts'
 import { MAX_MATERIAL_BYTES, sensitivePath } from '../materials/materials.ts'
 import { validateIssueFix } from '../review/issue-fixes.ts'
+import { rebaseFormatting } from './formatting.ts'
+import { documentFormatting, type DocumentFormatting } from '../../shared/formatting.ts'
 
 type Snapshot = Awaited<ReturnType<typeof snapshot>>
 const proposalPath = (proposalId: string) => `.scholarflow/proposals/${id.parse(proposalId)}.json`
@@ -147,7 +149,7 @@ async function documentMutation(io: FileStore, current: Snapshot, ledger: Ledger
   const legacyPlaceholder = current.document.initialPlaceholder && references?.text === '% References are generated from cited project sources.\n'
   invariant(references && (digest(references.text) === expectedReferencesHash || legacyPlaceholder), 'REFERENCE_PROJECTION_CHANGED', '引用文件被外部修改；请先导入来源元数据并明确重新生成引用，未覆盖该文件。')
   const bib = bibliography(text, ledger)
-  ledger.documents.paper = { ...ledger.documents.paper, currentHash: documentHash, revisionId, initialPlaceholder: false,
+  ledger.documents.paper = { ...ledger.documents.paper, ...(current.document.externalChange ? {formatting:undefined} : ledger.documents.paper.formatting && {formatting:rebaseFormatting(ledger.documents.paper.formatting,current.document.text,text,edits)}), currentHash: documentHash, revisionId, initialPlaceholder: false,
     lineEnding: text.includes('\r\n') ? text.replaceAll('\r\n', '').includes('\n') ? 'mixed' : 'crlf' : 'lf' }
   const beforeBlocks = projectMarkdown(current.document.text).blocks, afterBlocks = projectMarkdown(text).blocks
   for (const anchor of Object.values(ledger.claimAnchors)) {
@@ -173,13 +175,14 @@ async function documentMutation(io: FileStore, current: Snapshot, ledger: Ledger
   return { mutations, revisionId, documentHash, statistics }
 }
 export async function saveManual(io: FileStore, text: string, baseHash: string, revision: number,
-  adoption?: { origin: string; verify: (current: Snapshot) => Promise<void>; extra: Mutation[] }) {
+  adoption?: { origin: string; verify: (current: Snapshot) => Promise<void>; extra: Mutation[] }, formatting?: DocumentFormatting) {
   return io.lock(async () => {
     const current = await writable(io)
     invariant(current.ledger.revision === revision, 'STALE_LEDGER_REVISION', '项目记录已更新，请重新读取。')
     invariant(current.document.contentHash === baseHash, 'STALE_DOCUMENT_VERSION', '手工编辑基于旧稿，保留缓冲并重新比较。')
     await adoption?.verify(current)
     const ledger = structuredClone(current.ledger), change = await documentMutation(io, current, ledger, text, adoption?.origin ?? 'user-manual')
+    if(formatting){const parsed=documentFormatting.parse(formatting);invariant([...parsed.characters,...parsed.paragraphs].every(row=>row.start<row.end&&row.end<=text.length&&unicodeBoundary(text,row.start)&&unicodeBoundary(text,row.end)),'FORMAT_RANGE_INVALID','排版范围已改变，请重新选择文字。');ledger.documents.paper.formatting=parsed}
     const nextRevision = await publishLedger(io, current, ledger, [...change.mutations, ...(adoption?.extra ?? [])])
     return { ...change, mutations: undefined, revision: nextRevision }
   })

@@ -154,3 +154,8 @@ body .sf-app .sf-pane-caption button{background:transparent;border-color:transpa
 @container(max-width:640px){.sf-paper-title,.sf-paper-running-head{display:none}.sf-paper-header{padding:0 var(--sf-space-2);gap:var(--sf-space-1)}.sf-native-tools{gap:var(--sf-space-1)}.sf-pane-caption{padding:0 var(--sf-space-2)}.sf-line-gutter{width:28px}.sf-source-input{padding-left:8px!important}.sf-editor-grid[data-view=split]{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}.sf-paper-scroll{padding:var(--sf-space-2)}.sf-paper-sheet{padding:var(--sf-space-4) var(--sf-space-5)}}
 @container(max-width:420px){.sf-paper-header select{width:64px}.sf-export-format-label{display:none}.sf-paper-toolbar{padding:0 var(--sf-space-2)}}
 `
+
+export const DISCLOSURE_CSS=`
+.sf-chapter-nav>summary,.sf-material-maintenance>summary{display:flex;align-items:center;gap:var(--sf-space-1);list-style:none}.sf-chapter-nav>summary::-webkit-details-marker,.sf-material-maintenance>summary::-webkit-details-marker{display:none}
+.sf-bibliography-link{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap;padding:var(--sf-space-2) 0}.sf-bibliography-link select{max-width:360px}
+`

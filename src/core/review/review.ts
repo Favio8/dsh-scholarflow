@@ -1,3 +1,4 @@
+import {citationGroups} from '../export/citation-groups.ts'
 import { snapshot, mutateLedger } from '../project/project.ts'
 import { digest, newId, json, type FileStore } from '../store/files.ts'
 import { invariant, parseStored } from '../../shared/errors.ts'
@@ -25,7 +26,7 @@ export async function reviewInput(io: FileStore) {
     const image = await io.read(path); contextHashes[path] = image ? digest(image.text) : 'missing'
   }
   const { requirements, materials, sources, evidence, claims, outline, claimAnchors } = current.ledger
-  return { current, materialHashes, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v4-outline-role-counting', configHash: current.configHash, documentHash: current.document.contentHash,
+  return { current, materialHashes, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v5-bibliography-groups', configHash: current.configHash, documentHash: current.document.contentHash,
     revisionId: current.document.revisionId, requirements, materials, sources, evidence, claims, outline, claimAnchors,
     materialHashes, contextHashes, reviewProfileHash: profile ? digest(profile.text) : 'missing' })) }
 }
@@ -64,6 +65,7 @@ export function manualEligibleChecks(report: ReviewReport, input: Awaited<Return
 export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): ReviewReport {
   const { current, materialHashes, dependencyHash } = input, { ledger, document } = current
   const reviewId = newId('review'), projection = projectMarkdown(document.text), count = wordStats(document.text, { bodyOnly: true, sectionKinds: ledger.outline.sections })
+  const citedSources=citationGroups(document.text,ledger).sources
   const checks: ReviewReport['checks'] = [], issues: Issue[] = []
   const check = (key: string, status: 'pass' | 'fail' | 'unknown', detail: string, category: Issue['category'], severity: Issue['severity'] = 'B1', refs: Partial<Issue> = {}, method: Issue['checkMethod'] = 'deterministic') => {
     checks.push({ id: key, status, method, detail })
@@ -103,7 +105,7 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
   for (const requirement of Object.values(ledger.requirements)) {
     let status: 'pass' | 'fail' | 'unknown' = 'unknown'
     const constraint = requirement.constraint
-    const counted = requirementCount(requirement, count, projection.citationOrder.map(key => Object.values(ledger.sources).find(source => source.citeKey === key)).filter(source => !!source))
+    const counted = requirementCount(requirement, count, citedSources)
     if (requirement.confirmation === 'confirmed' && constraint) {
       const actual = counted.actual
       if (actual !== undefined && typeof constraint.value === 'number') {
@@ -129,7 +131,7 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
   return reviewReportSchema.parse({ schemaVersion: 1, id: reviewId, projectId: ledger.projectId, documentId: 'paper', documentHash: document.contentHash,
     revisionId: document.revisionId, ledgerRevision: ledger.revision, dependencyHash, createdAt: new Date().toISOString(), checks, issues,
     limitations: ['本轮只执行列出的确定性检查；模型辅助与人工未知项不能视为通过。', '来源身份与全文访问状态不等同于论点支持；未选资料不进入审查。', '未使用的收录来源不会被自动加入正文。'],
-    statistics: { chineseCharacters: count.chineseCharacters, westernWords: count.westernWords, uniqueReferences: projection.citationOrder.length, countingPolicyId: 'sf-body-han-western-v1' } })
+    statistics: { chineseCharacters: count.chineseCharacters, westernWords: count.westernWords, uniqueReferences: citedSources.length, countingPolicyId: 'sf-body-han-western-v1' } })
 }
 
 export async function runReview(io: FileStore, expectedRevision: number, extra: Mutation[] | ((report: ReviewReport) => Mutation[]) = []) {
