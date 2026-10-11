@@ -614,23 +614,38 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
       onClick={() => goToStep(index)}><span aria-hidden="true">{index < step ? '✓' : index + 1}</span>{title}</button>)}</nav>
     <div className="sf-wizard-page" key={step} data-direction={direction === 1 ? 'forward' : 'back'}>
       {step === 0 && <>
-        <label>论文标题<input id="sf-field-title" placeholder="可以先留空，由写作要求生成" value={spec.title} maxLength={300} onChange={e => update({ title: e.target.value })} /></label>
-        <div className="sf-wizard-row"><label>论文类型<select value={spec.type} onChange={e => { const type = e.target.value as CreationSpec['type']
-          if (type === spec.type) return
-          // Switching the type replaces the structure, so an edited one asks first and can
-          // still be undone (design 02 §3). The old preset reference no longer applies.
-          const edited = history.length > 0 || spec.preset?.modified === true
-          if (edited && !window.confirm(`切换为「${TYPE_LABELS[type]}」后会保留已有结构，并在第三步按新任务生成候选。继续？`)) return
-          setHistory(rows => [...rows.slice(-9), spec.sections])
-          update({ type, preset: undefined }) }}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <label>语言<select value={spec.language} onChange={e => update({ language: e.target.value as CreationSpec['language'] })}><option value="zh-CN">中文</option><option value="en">English</option></select></label>
-          <label>提交格式<select value={spec.format} onChange={e => update({ format: e.target.value as CreationSpec['format'] })}>{Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
-        <div className="sf-field"><span className="sf-field-label">引用样式</span>
-          <p className="sf-choice-current">顺序编号 [1]</p>
-          <p className="sf-field-hint">当前只支持这一种样式。作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></div>
-        <label>写作要求<textarea id="sf-field-requirements" rows={6} placeholder="例如：机器学习课程论文，约4000字，结合课件和笔记讨论实际应用，需要参考文献。也可以粘贴老师的要求。" value={spec.requirements} maxLength={12000} onChange={e => update({ requirements: e.target.value })} /></label>
-        <div className="sf-field"><span className="sf-field-label">写作要求来源</span>
-          <div className="sf-assignment-row">
+        <div className="sf-form">
+          <div className="sf-field"><span className="sf-field-label">论文标题</span>
+            <div className="sf-field-control"><input id="sf-field-title" placeholder="可以先留空，由写作要求生成" value={spec.title} maxLength={300} onChange={e => update({ title: e.target.value })} /></div></div>
+        </div>
+        <div className="sf-form" data-layout="columns">
+          <div className="sf-field"><span className="sf-field-label">论文类型</span>
+            <div className="sf-field-control"><select value={spec.type} onChange={e => { const type = e.target.value as CreationSpec['type']
+              if (type === spec.type) return
+              // Switching the type replaces the structure, so an edited one asks first and can
+              // still be undone (design 02 §3). The old preset reference no longer applies.
+              const edited = history.length > 0 || spec.preset?.modified === true
+              if (edited && !window.confirm(`切换为「${TYPE_LABELS[type]}」后会保留已有结构，并在第三步按新任务生成候选。继续？`)) return
+              setHistory(rows => [...rows.slice(-9), spec.sections])
+              update({ type, preset: undefined }) }}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div></div>
+          <div className="sf-field"><span className="sf-field-label">语言</span>
+            <div className="sf-field-control"><select value={spec.language} onChange={e => update({ language: e.target.value as CreationSpec['language'] })}><option value="zh-CN">中文</option><option value="en">English</option></select></div></div>
+          <div className="sf-field"><span className="sf-field-label">提交格式</span>
+            <div className="sf-field-control"><select value={spec.format} onChange={e => update({ format: e.target.value as CreationSpec['format'] })}>{Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div></div>
+        </div>
+        <div className="sf-form">
+          <div className="sf-field"><span className="sf-field-label">引用样式</span>
+            <div className="sf-field-control"><p className="sf-choice-current">顺序编号 [1]</p></div>
+            <details className="sf-detail"><summary>当前只支持这一种样式，作者—年份等尚未实现</summary>
+              <p>作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></details></div>
+        </div>
+        <div className="sf-form">
+          <div className="sf-field"><span className="sf-field-label">写作要求</span>
+            <div className="sf-field-control"><textarea id="sf-field-requirements" rows={6} placeholder="例如：机器学习课程论文，约4000字，结合课件和笔记讨论实际应用，需要参考文献。也可以粘贴老师的要求。" value={spec.requirements} maxLength={12000} onChange={e => update({ requirements: e.target.value })} /></div></div>
+        </div>
+        <div className="sf-form">
+          <div className="sf-field"><span className="sf-field-label">写作要求来源</span>
+          <div className="sf-field-control sf-assignment-row">
             <RequirementPicker files={files} disabled={busy} scanning={scanning} onPick={addSource} onPickExternal={addExternalSource} onRescan={() => loadFiles(false)} />
             {operator === 'reading' || operator === 'structuring'
               ? <button className="sf-assignment-extract" onClick={stopReading}>停止</button>
@@ -650,6 +665,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
             ? <ul className="sf-source-list">{requirementRows}</ul>
             : <p className="sf-field-hint">还没有添加要求来源。也可以直接填写写作要求后继续。</p>}
           {truncated && <p className="sf-field-hint">工作区文件较多，只列出前 500 个，把要求文件放进更具体的文件夹可以缩小范围。</p>}
+          </div>
         </div>
       </>}
       {step === 1 && <>

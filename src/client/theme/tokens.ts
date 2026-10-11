@@ -189,11 +189,21 @@ body .sf-state-details pre,body .sf-boundary pre{background:transparent;border:0
    removes it from the accessibility tree, so those belong on the input. */
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form{display:grid;grid-template-columns:max-content minmax(0,1fr);align-items:center;column-gap:var(--sf-space-4);row-gap:var(--sf-space-3);max-width:100%}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field{display:contents}
+/* Column mode for a cluster of short, mutually independent fields (type / language / format).
+   The same markup, laid across instead of down: stacking those three would triple the height of
+   the step for no gain in legibility. Each field stacks label-over-control here, because a label
+   column per column of fields is what makes a form look ragged. --sf-form-columns sets the count. */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form[data-layout=columns]{grid-template-columns:repeat(var(--sf-form-columns,3),minmax(0,1fr));align-items:start}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form[data-layout=columns]>.sf-field{display:flex;flex-direction:column;gap:var(--sf-space-1);min-width:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form[data-layout=columns] .sf-field-label{margin:0}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-label{font-size:var(--sf-font-sm);font-weight:500;line-height:var(--sf-leading-sm);color:var(--sf-muted);min-width:0;overflow-wrap:anywhere}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-control{display:flex;align-items:center;gap:var(--sf-space-2);min-width:0}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-control>:is(input,select,textarea){flex:1 1 auto;min-width:0}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-control>button{flex:0 0 auto}
-body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-hint{grid-column:2;margin:0;font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm);color:var(--sf-text-faint)}
+/* Everything a field carries besides its label belongs in the control column. Without this the
+   auto-flow would put the second element back in column 1 and leave a hole beside it. */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field>*:not(.sf-field-label){grid-column:2}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) :is(.sf-field-hint,.sf-field>.sf-detail){margin:0;font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm);color:var(--sf-text-faint)}
 /* Section band. A band draws its boundary with a rule and never with a box; a band that also had
    a background would be a card, and cards inside cards are what made these pages read as tables.
    [data-surface=card] is the opt-in for the rare case that really is a card. */
@@ -218,6 +228,10 @@ body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *){border:0;background:transparent;padding:0;height:auto;min-height:0}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *)::file-selector-button{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));padding:0 var(--sf-space-3);margin-inline-end:var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-control);background:var(--sf-surface);color:var(--sf-text);font-family:var(--sf-family-sans);font-size:var(--sf-font-md);cursor:pointer;transition:background var(--sf-dur-quick),border-color var(--sf-dur-quick)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *)::file-selector-button:hover{background:var(--sf-hover);border-color:var(--sf-border-strong)}
+/* A checkbox with its own sentence. It spans the whole row rather than sitting in a field,
+   because the sentence IS the label and there is no separate control column to align to. */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-check{display:flex;align-items:flex-start;gap:var(--sf-space-2);font-size:var(--sf-font-md);line-height:var(--sf-leading-body);cursor:pointer}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-check>input{flex:none;margin-top:.25em}
 /* AI change card (SF-142): what changed and why, not two bare buttons. */
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change{display:flex;flex-direction:column;gap:var(--sf-space-3);padding:var(--sf-space-3) 0;border-top:1px solid var(--sf-border-soft)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change:first-child{border-top:0;padding-top:0}
@@ -235,4 +249,7 @@ body .sf-origin-ai::after{content:'';position:absolute;left:-2px;top:.15em;botto
    fire. Adding container-type to those roots would also make them the containing block for the
    fixed-position overlays they host, which this pass cannot verify. Known limit: a narrow pane in
    a wide viewport keeps the two-column grid. */
-@media(max-width:640px){body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form{grid-template-columns:minmax(0,1fr);row-gap:var(--sf-space-1)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-label{margin-top:var(--sf-space-2)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-hint{grid-column:1}}`
+@media(max-width:640px){body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form{grid-template-columns:minmax(0,1fr);row-gap:var(--sf-space-1)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-label{margin-top:var(--sf-space-2)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-hint{grid-column:1}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) :is(.sf-field-hint,.sf-field>.sf-detail){grid-column:1}
+/* The column mode needs its own override: [data-layout=columns] outweighs a bare .sf-form, so the
+   rule above would leave the three columns standing at 320px and overflow the pane (AT-41). */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form[data-layout=columns]{grid-template-columns:minmax(0,1fr);align-items:stretch}}`

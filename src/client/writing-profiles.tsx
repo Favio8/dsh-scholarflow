@@ -15,30 +15,38 @@ export function WritingProfiles({ api }: { api: Api }) {
   useEffect(() => { let live = true; api('profiles.library', {}).then(value => live && setLibrary(value)).catch(error => live && setMessage(error.message)); return () => { live = false } }, [])
   const run = async (operation: () => Promise<unknown>) => { setBusy(true); setMessage(''); try { await operation() } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) } }
   const profile = library?.profiles.find((row: any) => key(row) === selected)
-  return <section aria-label="Writing Profiles 私有模板库"><h3>Writing Profiles 文风模板</h3>
-    <p>内置模板和自定义版本供明确选择；导入与编辑不改变现有项目。项目定制在概览中完成，表达偏好不能覆盖真实性与权限规则。</p>
-    <button disabled={busy} onClick={() => run(reload)}>刷新文风模板库</button>
+  return <section className="sf-group" aria-label="Writing Profiles 私有模板库">
+    <header><h3>Writing Profiles 文风模板</h3><button disabled={busy} onClick={() => run(reload)}>刷新文风模板库</button></header>
+    <details className="sf-detail"><summary>内置模板与自定义版本的边界，以及表达偏好不能覆盖的范围</summary>
+      <p>内置模板和自定义版本供明确选择；导入与编辑不改变现有项目。项目定制在概览中完成，表达偏好不能覆盖真实性与权限规则。</p></details>
+    <div className="sf-group-body">
     {library?.diagnostics.map((warning: string, index: number) => <p key={index} role="alert">{warning}</p>)}
-    <label>选择文风模板版本<select aria-label="选择文风模板版本" value={selected} onChange={e => setSelected(e.target.value)}><option value="">请选择</option>
-      {library?.profiles.map((row: any) => <option key={key(row)} value={key(row)}>{row.displayName} · {row.scope} · {row.sourceDigest.slice(7, 19)}</option>)}</select></label>
-    {profile && <><p>固定来源：{profile.id} · {profile.sourceDigest}</p><pre>{profile.instructions}</pre>
-      {profile.structuredPreferences && <pre>{JSON.stringify(profile.structuredPreferences, null, 2)}</pre>}
-      <button disabled={busy || !!plan} onClick={() => { setEditorId(undefined); setName(`${profile.displayName}（自定义）`); setLanguage(profile.language); setText(profile.instructions); setPreferences(profile.structuredPreferences) }}>复制为自定义文风模板</button>
-      {profile.scope === 'library' && <button disabled={busy || !!plan} onClick={() => { setEditorId(profile.id); setName(profile.displayName); setLanguage(profile.language); setText(profile.instructions); setPreferences(profile.structuredPreferences) }}>编辑文风模板为新版本</button>}
-      <button disabled={busy} onClick={() => download(profile)}>导出所选文风说明</button></>}
-    <label>导入本机文风说明文件<input aria-label="导入本机文风说明文件" type="file" accept=".md,.txt,text/plain,text/markdown" disabled={busy || !!plan} onChange={e => {
-      const file = e.target.files?.[0]; if (!file) return
-      void run(async () => { if (file.size > 65536) throw new Error('文风文件最多 64 KiB。')
-        const instructions = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer())
-        setEditorId(undefined); setName(file.name.replace(/\.(md|txt)$/iu, '').slice(0, 300)); setText(instructions); setPreferences(undefined)
-      })
-    }} /></label>
-    <label>文风模板名称<input aria-label="文风模板名称" disabled={busy || !!plan} maxLength={300} value={name} onChange={e => setName(e.target.value)} /></label>
-    <label>文风模板语言<select aria-label="文风模板语言" disabled={busy || !!plan} value={language} onChange={e => setLanguage(e.target.value)}><option value="zh-CN">中文</option><option value="en">英文</option></select></label>
-    <label>文风模板说明<textarea aria-label="文风模板说明" disabled={busy || !!plan} value={text} maxLength={65536} rows={7} onChange={e => setText(e.target.value)} /></label>
-    {editorId && <p>保存为 {editorId} 的新固定版本；原版本与项目副本保留。</p>}
+    <div className="sf-form">
+      <div className="sf-field"><span className="sf-field-label">选择文风模板版本</span><div className="sf-field-control"><select aria-label="选择文风模板版本" value={selected} onChange={e => setSelected(e.target.value)}><option value="">请选择</option>
+        {library?.profiles.map((row: any) => <option key={key(row)} value={key(row)}>{row.displayName} · {row.scope} · {row.sourceDigest.slice(7, 19)}</option>)}</select></div></div>
+      <div className="sf-field"><span className="sf-field-label">导入本机文风说明文件</span><div className="sf-field-control"><input aria-label="导入本机文风说明文件" type="file" accept=".md,.txt,text/plain,text/markdown" disabled={busy || !!plan} onChange={e => {
+        const file = e.target.files?.[0]; if (!file) return
+        void run(async () => { if (file.size > 65536) throw new Error('文风文件最多 64 KiB。')
+          const instructions = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer())
+          setEditorId(undefined); setName(file.name.replace(/\.(md|txt)$/iu, '').slice(0, 300)); setText(instructions); setPreferences(undefined)
+        })
+      }} /></div></div>
+      <div className="sf-field"><span className="sf-field-label">文风模板名称</span><div className="sf-field-control"><input aria-label="文风模板名称" disabled={busy || !!plan} maxLength={300} value={name} onChange={e => setName(e.target.value)} /></div></div>
+      <div className="sf-field"><span className="sf-field-label">文风模板语言</span><div className="sf-field-control"><select aria-label="文风模板语言" disabled={busy || !!plan} value={language} onChange={e => setLanguage(e.target.value)}><option value="zh-CN">中文</option><option value="en">英文</option></select></div></div>
+      <div className="sf-field"><span className="sf-field-label">文风模板说明</span><div className="sf-field-control"><textarea aria-label="文风模板说明" disabled={busy || !!plan} value={text} maxLength={65536} rows={7} onChange={e => setText(e.target.value)} /></div></div>
+    </div>
+    {profile && <><details className="sf-detail"><summary>固定来源与模板说明全文</summary>
+      <p>固定来源：{profile.id} · {profile.sourceDigest}</p><pre>{profile.instructions}</pre>
+      {profile.structuredPreferences && <pre>{JSON.stringify(profile.structuredPreferences, null, 2)}</pre>}</details>
+      <div className="sf-change-actions">
+        <button disabled={busy || !!plan} onClick={() => { setEditorId(undefined); setName(`${profile.displayName}（自定义）`); setLanguage(profile.language); setText(profile.instructions); setPreferences(profile.structuredPreferences) }}>复制为自定义文风模板</button>
+        {profile.scope === 'library' && <button disabled={busy || !!plan} onClick={() => { setEditorId(profile.id); setName(profile.displayName); setLanguage(profile.language); setText(profile.instructions); setPreferences(profile.structuredPreferences) }}>编辑文风模板为新版本</button>}
+        <button disabled={busy} onClick={() => download(profile)}>导出所选文风说明</button>
+      </div></>}
+    {editorId && <p className="sf-field-hint">保存为 {editorId} 的新固定版本；原版本与项目副本保留。</p>}
     <button disabled={busy || !!plan || !name.trim() || !text.trim()} onClick={() => run(async () => setPlan(await api('profiles.prepareImport', { profile: {
       ...(editorId && { id: editorId }), displayName: name.trim(), language, instructions: text, ...(preferences && { structuredPreferences: preferences }) } })))}>预览导入文风模板</button>
+    </div>
     {plan && <section role="dialog" aria-label="文风模板导入确认"><h4>确认导入私有文风版本</h4><p>{plan.profile.displayName} · {plan.profile.sourceDigest}</p>
       <pre>{plan.profile.instructions}</pre>{plan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy} onClick={() => run(async () => { const result = await api('profiles.install', { planId: plan.planId, planHash: plan.planHash }); setSelected(key(result.profile)); setPlan(undefined); setMessage('文风模板已保存；当前论文未改变。'); await reload() })}>确认导入文风模板</button>

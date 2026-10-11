@@ -18,10 +18,10 @@ export function StructurePresets({ api, run, busy, language }: any) {
   })
   const mine = (library.all ?? []).filter((preset: any) => preset.source === 'user')
   const builtin = (library.all ?? []).filter((preset: any) => preset.source === 'builtin')
-  return <>{textPrompt.dialog}<section className="sf-settings-presets" aria-label="结构预设">
-    <h3>结构预设</h3>
-    <p>内置预设随插件发布，只读；可复制为我的预设后再修改。这里与创建引导的预设弹窗共用同一份数据。</p>
-    <p className="sf-muted">我的预设 {mine.length} 个 · 内置 {builtin.length} 个</p>
+  return <>{textPrompt.dialog}<section className="sf-settings-presets sf-group" aria-label="结构预设">
+    <header><h3>结构预设</h3><span className="sf-field-hint">我的预设 {mine.length} 个 · 内置 {builtin.length} 个</span></header>
+    <details className="sf-detail"><summary>内置预设只读，可复制为我的预设后再修改</summary>
+      <p>内置预设随插件发布，只读；可复制为我的预设后再修改。这里与创建引导的预设弹窗共用同一份数据。</p></details>
     {(library.issues ?? []).length > 0 && <p role="status" className="sf-error">
       {(library.issues ?? []).length} 个预设条目未通过校验，已跳过：{library.issues[0].message}</p>}
     <ul className="sf-settings-preset-list">

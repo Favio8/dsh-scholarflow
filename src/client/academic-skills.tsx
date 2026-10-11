@@ -35,37 +35,52 @@ export function AcademicSkills({ api }: { api: Api }) {
       : await api('skills.scanGithub', { url: url.trim(), ...(ref.trim() && { ref: ref.trim() }), ...(githubPath.trim() && { subpath: githubPath.trim() }) })
     setSource({ ...result, kind, diagnostics: result.diagnostics ?? result.warnings }); setSubpath(result.candidates[0]?.subpath ?? '')
   }
-  return <section aria-label="Academic Skills 私有库"><h3>Academic Skills · 学术 Skill 私有库</h3>
-    <p>保存在 {catalog?.location ?? '<DSH_HOME>/scholarflow/skills'}。导入后需在项目中选择固定版本和启用阶段。</p>
-    <p>只使用说明文本和静态资源；附带脚本、工具权限、依赖及服务声明不会执行。</p>
+  return <section className="sf-group" aria-label="Academic Skills 私有库">
+    <header><h3>Academic Skills · 学术 Skill 私有库</h3></header>
+    <details className="sf-detail"><summary>保存在 {catalog?.location ?? '<DSH_HOME>/scholarflow/skills'}；只使用说明文本与静态资源</summary>
+      <p>保存在 {catalog?.location ?? '<DSH_HOME>/scholarflow/skills'}。导入后需在项目中选择固定版本和启用阶段。</p>
+      <p>只使用说明文本和静态资源；附带脚本、工具权限、依赖及服务声明不会执行。</p></details>
     {error && <p role="alert" className="sf-error">{error}</p>}<p role="status">{message}</p>
-    <label>Skill 导入来源 <select aria-label="Skill 导入来源" disabled={busy} value={kind} onChange={e => {
-      const value = e.target.value as 'local' | 'github'
-      void act(async () => { await closePreview(); if (source) await api('skills.dismiss', { sourceId: source.sourceId }); setSource(undefined); setKind(value) })
-    }}><option value="local">Host 本地目录</option><option value="github">公开 GitHub 仓库</option></select></label>
+    <div className="sf-group-body">
+    <div className="sf-form">
+      <div className="sf-field"><span className="sf-field-label">Skill 导入来源</span><div className="sf-field-control"><select aria-label="Skill 导入来源" disabled={busy} value={kind} onChange={e => {
+        const value = e.target.value as 'local' | 'github'
+        void act(async () => { await closePreview(); if (source) await api('skills.dismiss', { sourceId: source.sourceId }); setSource(undefined); setKind(value) })
+      }}><option value="local">Host 本地目录</option><option value="github">公开 GitHub 仓库</option></select></div></div>
+    </div>
     {kind === 'local' ? <><h4>从 Host 本地目录导入</h4>
-    <p>这里选择运行 DSH 的 Host 文件目录，浏览器上传文件不是目录导入。</p>
-    {catalog?.pickerKind === 'native' && <button disabled={busy} onClick={() => act(async () => {
-      const result = await api('skills.pickLocal', {}); if (result.path) setPath(result.path)
-    })}>选择 Host Skill 目录</button>}
-    <label>Host Skill 来源目录 <input aria-label="Host Skill 来源目录" value={path} onChange={e => setPath(e.target.value)} maxLength={4000} /></label>
+    <p className="sf-field-hint">这里选择运行 DSH 的 Host 文件目录，浏览器上传文件不是目录导入。</p>
+    <div className="sf-form">
+      <div className="sf-field"><span className="sf-field-label">Host Skill 来源目录</span><div className="sf-field-control">
+        <input aria-label="Host Skill 来源目录" value={path} onChange={e => setPath(e.target.value)} maxLength={4000} />
+        {catalog?.pickerKind === 'native' && <button disabled={busy} onClick={() => act(async () => {
+          const result = await api('skills.pickLocal', {}); if (result.path) setPath(result.path)
+        })}>选择目录</button>}</div></div>
+    </div>
     <button disabled={busy || !path.trim()} onClick={() => act(scan)}>扫描本地 Skill 候选</button></> : <>
-      <h4>从 GitHub 导入</h4><p>读取动作向 api.github.com 发送仓库、ref 和子目录信息，不发送论文、资料或凭据。需先开启本插件网络设置。</p>
-      <label>GitHub Skill 地址 <input aria-label="GitHub Skill 地址" value={url} onChange={e => setUrl(e.target.value)} maxLength={3000} /></label>
-      <label>完整 ref（分支、标签或 commit） <input aria-label="GitHub 完整 ref" value={ref} onChange={e => setRef(e.target.value)} maxLength={300} /></label>
-      <p>仓库根地址留空 ref 时查询默认分支。tree／blob 地址必须明确填写完整 ref，避免将含斜杠的分支猜成路径。</p>
-      <label>仓库内子目录（根地址可选） <input aria-label="GitHub Skill 子目录" value={githubPath} onChange={e => setGithubPath(e.target.value)} maxLength={800} /></label>
+      <h4>从 GitHub 导入</h4><details className="sf-detail"><summary>读取动作会发送什么，不会发送什么</summary>
+        <p>读取动作向 api.github.com 发送仓库、ref 和子目录信息，不发送论文、资料或凭据。需先开启本插件网络设置。</p></details>
+      <div className="sf-form">
+      <div className="sf-field"><span className="sf-field-label">GitHub Skill 地址</span><div className="sf-field-control"><input aria-label="GitHub Skill 地址" value={url} onChange={e => setUrl(e.target.value)} maxLength={3000} /></div></div>
+      <div className="sf-field"><span className="sf-field-label">完整 ref（分支、标签或 commit）</span><div className="sf-field-control"><input aria-label="GitHub 完整 ref" value={ref} onChange={e => setRef(e.target.value)} maxLength={300} /></div></div>
+      </div>
+      <p className="sf-field-hint">仓库根地址留空 ref 时查询默认分支。tree／blob 地址必须明确填写完整 ref，避免将含斜杠的分支猜成路径。</p>
+      <div className="sf-form">
+        <div className="sf-field"><span className="sf-field-label">仓库内子目录（根地址可选）</span><div className="sf-field-control"><input aria-label="GitHub Skill 子目录" value={githubPath} onChange={e => setGithubPath(e.target.value)} maxLength={800} /></div></div>
+      </div>
       <button disabled={busy || !url.trim()} onClick={() => act(scan)}>读取 GitHub Skill 候选</button>
     </>}
     {source && <>
       {source.diagnostics.map((message: string) => <p key={message}>{message}</p>)}
       {source.kind === 'github' && <p>仓库：{source.repository} · ref：{source.ref}<br />本次固定 commit：{source.commit}</p>}
       {!source.candidates.length ? <p>没有发现带 SKILL.md 的目录。README 文件不会作为 Skill 导入。</p> : <>
-        <label>选择具体 Skill <select aria-label="选择具体 Skill" value={subpath} onChange={e => setSubpath(e.target.value)}>
-          {source.candidates.map((candidate: any) => <option key={candidate.subpath} value={candidate.subpath}>{candidate.subpath || '所选目录本身'}{candidate.instructionBytes !== undefined && ` · ${candidate.instructionBytes} 字节`}</option>)}
-        </select></label>
-        <fieldset><legend>此 Skill 的说明用途</legend>{CAPABILITIES.map(([value, label]) => <label key={value}><input type="checkbox" checked={capabilities.includes(value)} onChange={e => setCapabilities(toggle(capabilities, value, e.target.checked))} />{label}</label>)}</fieldset>
-        <fieldset><legend>建议阶段（项目启用时仍需确认）</legend>{STAGES.map(([value, label]) => <label key={value}><input type="checkbox" checked={stages.includes(value)} onChange={e => setStages(toggle(stages, value, e.target.checked))} />{label}</label>)}</fieldset>
+        <div className="sf-form">
+          <div className="sf-field"><span className="sf-field-label">选择具体 Skill</span><div className="sf-field-control"><select aria-label="选择具体 Skill" value={subpath} onChange={e => setSubpath(e.target.value)}>
+            {source.candidates.map((candidate: any) => <option key={candidate.subpath} value={candidate.subpath}>{candidate.subpath || '所选目录本身'}{candidate.instructionBytes !== undefined && ` · ${candidate.instructionBytes} 字节`}</option>)}
+          </select></div></div>
+        </div>
+        <fieldset><legend>此 Skill 的说明用途</legend>{CAPABILITIES.map(([value, label]) => <label className="sf-check" key={value}><input type="checkbox" checked={capabilities.includes(value)} onChange={e => setCapabilities(toggle(capabilities, value, e.target.checked))} /><span>{label}</span></label>)}</fieldset>
+        <fieldset><legend>建议阶段（项目启用时仍需确认）</legend>{STAGES.map(([value, label]) => <label className="sf-check" key={value}><input type="checkbox" checked={stages.includes(value)} onChange={e => setStages(toggle(stages, value, e.target.checked))} /><span>{label}</span></label>)}</fieldset>
         <button disabled={busy || !capabilities.length || !stages.length} onClick={() => act(async () => {
           await closePreview(); setPlan(await api(source.kind === 'github' ? 'skills.prepareGithub' : 'skills.prepareLocal', { sourceId: source.sourceId, subpath, options: { capabilities, suggestedStages: stages } }))
         })}>预览 Skill 导入</button>
@@ -110,5 +125,6 @@ export function AcademicSkills({ api }: { api: Api }) {
           })}>确认卸载到私有回收区</button></>}
       <button disabled={busy} onClick={() => act(async () => { if (retirement.planId) await api('skills.dismiss', { planId: retirement.planId }); setRetirement(undefined) })}>关闭卸载预检</button>
     </section>}
+    </div>
   </section>
 }

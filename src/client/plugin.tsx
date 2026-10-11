@@ -338,12 +338,19 @@ export function apply(ctx: Host) {
       } catch (e) { setMessage((e as Error).message) }
     }
     return <section ref={confirmationRoot} className="sf-app sf-settings" style={{ overflow: 'auto' }}><style>{THEME_CSS + CSS + EXTRA_CSS}</style><h2>ScholarFlow 设置</h2>
-      {row ? <><label>新项目默认类型 <select aria-label="新项目默认类型" value={row.value.defaultProjectType} onChange={e => save('defaultProjectType', e.target.value)}>
-        <option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></label>
-        <label>新项目默认语言 <select aria-label="新项目默认语言" value={row.value.language} onChange={e => save('language', e.target.value)}><option value="zh">中文</option><option value="en">英文</option></select></label>
-        <p>模型调用次数和任务耗时仅用于统计；可随时暂停或停止。</p>
-        <label><input type="checkbox" checked={row.value.networkEnabled} onChange={e => save('networkEnabled', e.target.checked)} />允许外部检索与公开 Skill 读取（每次操作展示发送范围）</label></>
-        : <p>正在读取宿主设置…</p>}<p role="status">{message}</p><WritingProfiles api={api} /><StructurePresets api={api} run={async (fn: () => Promise<unknown>) => { try { await fn() } catch (error) { setMessage((error as Error).message) } }} busy={false} /><AcademicSkills api={api} /></section>
+      <section className="sf-group">
+        {row ? <>
+          <div className="sf-form">
+            <div className="sf-field"><span className="sf-field-label">新项目默认类型</span><div className="sf-field-control"><select aria-label="新项目默认类型" value={row.value.defaultProjectType} onChange={e => save('defaultProjectType', e.target.value)}>
+              <option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></div></div>
+            <div className="sf-field"><span className="sf-field-label">新项目默认语言</span><div className="sf-field-control"><select aria-label="新项目默认语言" value={row.value.language} onChange={e => save('language', e.target.value)}><option value="zh">中文</option><option value="en">英文</option></select></div></div>
+          </div>
+          <details className="sf-detail"><summary>模型调用次数和任务耗时仅用于统计</summary>
+            <p>这些数字只做统计用途，不参与写作决策；任务可随时暂停或停止，已读到的内容会保留。</p></details>
+          <label className="sf-check"><input type="checkbox" checked={row.value.networkEnabled} onChange={e => save('networkEnabled', e.target.checked)} /><span>允许外部检索与公开 Skill 读取（每次操作展示发送范围）</span></label>
+        </>
+          : <p>正在读取宿主设置…</p>}</section>
+      <p role="status">{message}</p><WritingProfiles api={api} /><StructurePresets api={api} run={async (fn: () => Promise<unknown>) => { try { await fn() } catch (error) { setMessage((error as Error).message) } }} busy={false} /><AcademicSkills api={api} /></section>
   }
   ctx.effect(() => ctx.slots.registerFactory({ name: 'scholarflow.workspace', scope: 'session-maybe', children: { 'scholarflow.project': { kind: 'single', scope: 'session-maybe' } } }, Workspace), 'scholarflow: project surface')
   ctx.effect(() => ctx.slots.inject('scholarflow.project', () => ctx.slots.register({ name: 'scholarflow.project' }, ProjectSurface)), 'scholarflow: project')

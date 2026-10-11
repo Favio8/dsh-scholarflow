@@ -64,18 +64,30 @@ const head = (step) => `<header><span class="sf-wizard-eyebrow">科技论文写�
 
 const step1 = `<section class="sf-wizard">${head(0)}
 <div class="sf-wizard-page">
-<label>论文标题<input value="科技论文大作业" readonly /></label>
-<div class="sf-wizard-row"><label>论文类型<select><option>课程论文</option></select></label><label>语言<select><option>中文</option></select></label><label>提交格式<select><option>Word</option></select></label></div>
-<div class="sf-field"><span class="sf-field-label">引用样式</span><p class="sf-choice-current">顺序编号 [1]</p><p class="sf-field-hint">当前只支持这一种样式。作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></div>
-<label>写作要求<textarea rows="4" readonly>科技论文大作业，要求在文件中，要求4页内容，第一页是封面</textarea></label>
+<div class="sf-form">
+<div class="sf-field"><span class="sf-field-label">论文标题</span><div class="sf-field-control"><input value="科技论文大作业" readonly /></div></div>
+</div>
+<div class="sf-form" data-layout="columns">
+<div class="sf-field"><span class="sf-field-label">论文类型</span><div class="sf-field-control"><select><option>课程论文</option></select></div></div>
+<div class="sf-field"><span class="sf-field-label">语言</span><div class="sf-field-control"><select><option>中文</option></select></div></div>
+<div class="sf-field"><span class="sf-field-label">提交格式</span><div class="sf-field-control"><select><option>Word</option></select></div></div>
+</div>
+<div class="sf-form">
+<div class="sf-field"><span class="sf-field-label">引用样式</span><div class="sf-field-control"><p class="sf-choice-current">顺序编号 [1]</p></div><details class="sf-detail"><summary>当前只支持这一种样式，作者—年份等尚未实现</summary><p>作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></details></div>
+</div>
+<div class="sf-form">
+<div class="sf-field"><span class="sf-field-label">写作要求</span><div class="sf-field-control"><textarea rows="4" readonly>科技论文大作业，要求在文件中，要求4页内容，第一页是封面</textarea></div></div>
+</div>
+<div class="sf-form">
 <div class="sf-field"><span class="sf-field-label">写作要求来源</span>
-<div class="sf-assignment-row"><div class="sf-picker"><button class="sf-picker-toggle"><span class="sf-picker-current"><em>添加要求文件或文件夹</em></span><span class="sf-picker-caret">⌄</span></button></div><button class="sf-assignment-extract">整理要求</button></div>
+<div class="sf-field-control sf-assignment-row"><div class="sf-picker"><button class="sf-picker-toggle"><span class="sf-picker-current"><em>添加要求文件或文件夹</em></span><span class="sf-picker-caret">⌄</span></button></div><button class="sf-assignment-extract">整理要求</button></div>
 <p class="sf-field-hint">要求来源规定这篇论文该怎么写；第二步的论文参考材料提供写作所需的资料。两者独立选择，互不要求对方包含自己。文件保持原样，只在整理或写作时读取。</p>
 <ul class="sf-source-list">
 ${sourceRow('可读取', '', '作业说明.md', '要求', '<button class="sf-source-action">移除</button>')}
 ${sourceRow('图片', 'image', '老师截图.png', '要求/截图', '<button class="sf-source-action">识别文字</button><button class="sf-source-action">移除</button>')}
 ${sourceRow('文件夹', '', '课程要求', '工作区根目录', '<button class="sf-source-action">移除</button><ul class="sf-source-members"><li><span>课程要求/评分标准.pdf</span><button>×</button></li><li><span>课程要求/补充说明.md</span><button>×</button></li></ul>')}
 </ul></div></div>
+</div>
 <footer class="sf-wizard-footer"><span></span><button class="sf-primary">下一步 →</button></footer></section>`
 
 const step2 = `<section class="sf-wizard">${head(1)}
