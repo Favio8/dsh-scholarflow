@@ -73,7 +73,7 @@ const step1 = `<section class="sf-wizard">${head(0)}
 <div class="sf-field"><span class="sf-field-label">提交格式</span><div class="sf-field-control"><select><option>Word</option></select></div></div>
 </div>
 <div class="sf-form">
-<div class="sf-field"><span class="sf-field-label">引用样式</span><div class="sf-field-control"><p class="sf-choice-current">顺序编号 [1]</p></div><details class="sf-detail"><summary>当前只支持这一种样式，作者—年份等尚未实现</summary><p>作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></details></div>
+<div class="sf-field"><span class="sf-field-label">引用样式</span><div class="sf-field-control"><p class="sf-choice-current">顺序编号 [1]</p></div><details class="sf-detail"><summary>引用样式说明</summary><p>作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></details></div>
 </div>
 <div class="sf-form">
 <div class="sf-field"><span class="sf-field-label">写作要求</span><div class="sf-field-control"><textarea rows="4" readonly>科技论文大作业，要求在文件中，要求4页内容，第一页是封面</textarea></div></div>

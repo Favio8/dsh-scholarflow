@@ -59,12 +59,11 @@ export const PAPER_CSS = `
 .sf-paper-project{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;font-size:var(--sf-font-md);background:var(--sf-plane-0)}
 /* The header is the one boundary worth a rule: it is where the plugin's own chrome meets the
    host's canvas, and nothing else on screen crosses that edge. */
-.sf-paper-header{display:flex;align-items:center;gap:var(--sf-space-2);min-height:48px;padding:0 var(--sf-space-4);border-bottom:1px solid var(--sf-border);background:var(--sf-plane-1);flex-shrink:0}
+.sf-paper-header{display:flex;align-items:center;gap:var(--sf-space-3);min-height:56px;padding:0 var(--sf-space-4);border-bottom:1px solid var(--sf-border-soft);background:var(--sf-plane-1);flex-shrink:0}
 .sf-paper-title{font-size:var(--sf-font-prose);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:50px;max-width:40%}
-/* The creation wizard owns its controls; this fallback must not override its button variants. */
-.sf-paper-project button:not(.sf-native-tools *):not(:where(.sf-wizard *)),.sf-paper-project select:not(.sf-native-tools *):not(:where(.sf-wizard *)),.sf-paper-export button{font:inherit;color:inherit;background:transparent;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);padding:var(--sf-space-2);cursor:pointer}
 .sf-paper-project button:disabled:not(.sf-native-tools *){cursor:default;opacity:var(--sf-disabled-opacity)}
 .sf-paper-header .sf-type-chip,.sf-paper-header select{font-size:var(--sf-font-sm);padding:0 var(--sf-space-2);color:var(--sf-muted);max-width:160px}
+body .sf-app .sf-paper-header>.sf-type-chip,body .sf-app .sf-paper-header>select{background-color:transparent;border-color:transparent;box-shadow:none}
 .sf-paper-header .sf-native-tools{margin-left:auto}
 .sf-paper-export{flex-shrink:0}.sf-export-split{display:flex;align-items:center;gap:0}.sf-export-split>button{border:0!important;font-size:var(--sf-font-md)!important}.sf-export-split .sf-paper-export>summary{padding:0 var(--sf-space-2)}
 .sf-paper-menu{position:relative;flex-shrink:0}
@@ -77,15 +76,16 @@ export const PAPER_CSS = `
 /* The view switcher and the pane it governs are one control, so they share one band: the
    toolbar tints, the editor grid below it stays on the canvas. No rule between them. */
 .sf-paper-toolbar{display:flex;align-items:center;gap:var(--sf-space-3);height:38px;padding:0 var(--sf-space-4);background:var(--sf-plane-1);flex-shrink:0}
-.sf-paper-views{display:flex;align-items:center;height:100%;gap:var(--sf-space-1)}
-.sf-paper-views button{height:28px;min-width:48px;border:0;font-size:var(--sf-font-sm);color:var(--sf-muted)}
-.sf-paper-views button[aria-pressed=true]{color:var(--sf-accent-text);background:var(--sf-accent-soft);font-weight:600}
+.sf-paper-views{display:flex;align-items:center;gap:var(--sf-space-1);padding:var(--sf-space-1);background:var(--sf-fill);border-radius:var(--sf-radius-surface)}
+body .sf-app .sf-paper-views button{--sf-control-size:var(--sf-control-sm);min-width:48px;border-color:transparent;background:transparent;font-size:var(--sf-font-sm);color:var(--sf-muted)}
+body .sf-app .sf-paper-views button[aria-pressed=true]{color:var(--sf-text);background:var(--sf-surface);border-color:transparent;box-shadow:var(--sf-shadow-1);font-weight:600}
 .sf-paper-toolbar>.sf-paper-menu{margin-left:auto}
 .sf-paper-content{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .sf-paper-content>[role=tabpanel]{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-5);box-sizing:border-box}
 .sf-paper-content>#sf-panel-Draft{display:flex;padding:0;overflow:hidden}
 .sf-tool-back{display:flex;align-items:center;gap:var(--sf-space-3);padding:var(--sf-space-2) var(--sf-space-3);background:var(--sf-plane-1);flex-shrink:0}
-.sf-tool-back strong{font-size:var(--sf-font-md)}.sf-tool-back button{border:0;padding:0 var(--sf-space-2);color:var(--sf-accent-text)}
+.sf-tool-back strong{font-size:var(--sf-font-sm);font-weight:500;color:var(--sf-muted)}.sf-tool-back button{border:0;padding:0 var(--sf-space-2);color:var(--sf-accent-text)}
+body .sf-app .sf-tool-back button{background:transparent;border-color:transparent;font-size:var(--sf-font-sm)}
 .sf-draft{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden}
 .sf-editor-surface{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
 .sf-editor-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);flex:1;min-height:0;overflow:hidden}
@@ -95,6 +95,7 @@ export const PAPER_CSS = `
    tint instead of a rule. Sitting directly on the pane background, it needs none of its own. */
 .sf-pane-caption{display:flex;align-items:center;justify-content:space-between;height:32px;box-sizing:border-box;padding:0 var(--sf-space-3);color:var(--sf-text-faint);font-size:var(--sf-font-xs);background:var(--sf-plane-2);flex-shrink:0}
 .sf-pane-caption button{font-size:var(--sf-font-xs);border:0;padding:0 var(--sf-space-2)}
+body .sf-app .sf-pane-caption button{background:transparent;border-color:transparent;box-shadow:none;font-size:var(--sf-font-sm)}
 /* The split is two panes, not two cards. A rule would frame each pane like a panel; the
    canvas tint on the preview side is enough to say "the editor ends here". */
 .sf-source-pane{background:var(--sf-surface)}
@@ -102,7 +103,7 @@ export const PAPER_CSS = `
 .sf-line-gutter{width:48px;flex-shrink:0;box-sizing:border-box;overflow:hidden;padding:20px 10px 20px 0;text-align:right;user-select:none;color:var(--sf-text-faint);background:var(--sf-fill-sunken)}
 .sf-line-gutter>div{will-change:transform}
 .sf-line-gutter,.sf-app textarea.sf-source-input{font:var(--sf-editor-font,13px)/var(--sf-editor-line,24px) Consolas,'SFMono-Regular',monospace!important;tab-size:2}
-.sf-app textarea.sf-source-input{flex:1;width:0;min-width:0;height:100%;resize:none!important;border:0!important;border-radius:0;padding:20px 18px;white-space:pre-wrap;overflow-wrap:break-word;overflow-x:hidden;overflow-y:auto;outline:none!important;background:transparent;position:relative;z-index:1}
+.sf-app textarea.sf-source-input{flex:1;width:0;min-width:0;height:100%;resize:none!important;border:0!important;border-radius:0;padding:20px 18px;white-space:pre-wrap;overflow-wrap:break-word;overflow-x:hidden;overflow-y:auto;outline:none!important;background:transparent;color:var(--sf-text);position:relative;z-index:1}
 .sf-preview-pane{background:transparent}
 .sf-paper-scroll{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-6)}
 /* Paper floats on the canvas by tint and lift, not by outline. A border here draws a hard

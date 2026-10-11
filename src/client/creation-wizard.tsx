@@ -636,7 +636,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
         <div className="sf-form">
           <div className="sf-field"><span className="sf-field-label">引用样式</span>
             <div className="sf-field-control"><p className="sf-choice-current">顺序编号 [1]</p></div>
-            <details className="sf-detail"><summary>当前只支持这一种样式，作者—年份等尚未实现</summary>
+            <details className="sf-detail"><summary>引用样式说明</summary>
               <p>作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></details></div>
         </div>
         <div className="sf-form">
@@ -814,7 +814,7 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
    preference. Every text token clears WCAG AA on the surface its rule paints; verified by
    scripts/audit-appearance.mjs. */
 .sf-wizard-scroll{overflow:auto;flex:1;background:var(--sf-surface-2);padding:var(--sf-space-5) var(--sf-space-6)}
-.sf-wizard{--sf-control-min-height:var(--sf-space-6);color:var(--sf-text);max-width:760px;margin:0 auto;padding:var(--sf-space-6);background:var(--sf-surface);border:1px solid var(--sf-border);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-2);font-size:var(--sf-font-prose)}
+.sf-wizard{--sf-control-min-height:var(--sf-space-6);color:var(--sf-text);max-width:760px;margin:0 auto;padding:var(--sf-space-5);background:var(--sf-surface);border-radius:var(--sf-radius-surface);font-size:var(--sf-font-prose)}
 .sf-wizard h2{font-size:var(--sf-font-display-1);margin:var(--sf-space-2) 0}
 .sf-wizard h3{font-size:var(--sf-font-display-2);margin:0}
 .sf-wizard p,.sf-muted{color:var(--sf-muted);line-height:var(--sf-leading-body)}
@@ -823,8 +823,7 @@ export const WIZARD_CSS = `/* Colours and density come from src/client/theme/tok
 .sf-output-conflict{padding:var(--sf-space-3);margin-top:var(--sf-space-2);border:1px solid var(--sf-border);border-radius:var(--sf-radius-md)}
 .sf-output-conflict p{margin:0 0 var(--sf-space-2)}
 .sf-wizard label,.sf-wizard .sf-assignment-field{display:flex;flex-direction:column;gap:var(--sf-space-2);font-size:var(--sf-font-md);margin:var(--sf-space-4) 0 0}
-.sf-wizard button{font:inherit;font-size:var(--sf-font-md);height:var(--sf-space-6);min-height:var(--sf-control-min-height);padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:var(--sf-surface);color:var(--sf-text);cursor:pointer}
-.sf-wizard input:not([type=checkbox]),.sf-wizard select{box-sizing:border-box;font-family:inherit;height:var(--sf-space-7);width:100%;padding:0 var(--sf-space-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;color:inherit}
+.sf-wizard input:not([type=checkbox]),.sf-wizard select{width:100%}
 .sf-wizard textarea{font-family:var(--sf-family-sans);font-size:var(--sf-font-md);line-height:var(--sf-leading-body)}
 .sf-field-hint{margin:var(--sf-space-2) 0 0;font-size:var(--sf-font-sm);line-height:var(--sf-leading-body);color:var(--sf-text-faint)}
 .sf-wizard-steps{display:flex;gap:var(--sf-space-5);padding:var(--sf-space-4) 0;border-bottom:1px solid var(--sf-border);margin-bottom:var(--sf-space-5)}

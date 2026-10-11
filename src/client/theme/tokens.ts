@@ -13,8 +13,8 @@
  * is why an explicitly dark workbench used to keep the light palette). Every value below is checked
  * for ≥ 4.5:1 against the surface it is used on, in both themes.
  *
- * Scales: space runs on the 8px step (plus a 2px hairline for icon clusters), radius has five
- * steps, type has six sizes and three leadings. The editor metrics (`--sf-editor-font`,
+ * Scales: spacing uses the shared 4px steps, radius has two roles plus pills and explicit
+ * mark/circle exceptions, and type has seven roles. The editor metrics (`--sf-editor-font`,
  * `--sf-editor-line`) and the source padding that aligns the gutter are deliberately not here:
  * the wrap gate measures them.
  *
@@ -105,6 +105,8 @@ body :is(.sf-wizard-eyebrow,.sf-preset-group,.sf-outline-status,.sf-chat-mode){l
 body .sf-paper-project{background:var(--sf-plane-1)}
 body :is(.sf-wizard-scroll,.sf-create-scroll,.sf-settings){background:var(--sf-plane-0)}
 body :is(.sf-wizard-scroll,.sf-create-scroll){background:transparent}
+/* The workspace owns the outer gutter. Its wizard scroll seat must not add a second one. */
+body .sf-create-scroll>.sf-wizard-scroll{padding:0}
 body .sf-create-card,body .sf-settings-card{background:var(--sf-surface)}
 body :is(.sf-wizard,.sf-preset-dialog){background:var(--sf-surface)}
 body .sf-source-pane{background:var(--sf-surface)}
@@ -119,41 +121,60 @@ body .sf-preset-dialog :is(.sf-preset-preview p,.sf-preset-scene,.sf-preset-subs
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog) :is(input,textarea)::placeholder{color:var(--sf-text-faint);opacity:1}
 body .sf-wizard :is(.sf-field-hint,.sf-wizard-eyebrow,.sf-field-label,.sf-source-name small,.sf-source-badge:not([data-kind]),.sf-picker-current small,.sf-picker-current em,.sf-picker-caret,.sf-picker-dir,.sf-picker-row small,.sf-source-members,.sf-source-note,.sf-material-count,.sf-picker-note,.sf-brief dt,.sf-confirm dt,.sf-wizard-step-compact,.sf-wizard-clear){color:var(--sf-muted)}
 body .sf-paper-page{--sf-text:var(--sf-page-text);--sf-muted:var(--sf-page-muted);--sf-text-faint:var(--sf-page-faint);--sf-accent-text:var(--sf-page-accent);--sf-surface-2:var(--sf-page-surface-2);--sf-border:var(--sf-page-border);--sf-border-soft:var(--sf-page-border-soft);--sf-border-strong:var(--sf-page-border-strong);background:var(--sf-page-bg);color:var(--sf-text);border-color:var(--sf-border);box-shadow:var(--sf-shadow-1);max-width:var(--sf-measure);border-radius:0}
-/* Shared control contract. Native tools and the measured source textarea retain ownership. */
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt,.sf-boundary.sf-boundary) button:not(.sf-native-tools *){box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:var(--sf-space-2);min-width:var(--sf-control-sm);height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));min-height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));padding:0 var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-control);background:transparent;color:var(--sf-text);font-family:var(--sf-family-sans);cursor:pointer;transition:background var(--sf-dur-quick),border-color var(--sf-dur-quick),box-shadow var(--sf-dur-quick)}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt,.sf-boundary.sf-boundary) button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent);box-shadow:var(--sf-shadow-1)}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt,.sf-boundary.sf-boundary) button.sf-secondary{background:var(--sf-surface);border-color:var(--sf-border-strong);color:var(--sf-text)}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-boundary.sf-boundary) button:is(.sf-ghost,.sf-wizard-back,.sf-chat-icon,.sf-overlay-close,.sf-wizard-clear,.sf-source-action){background:transparent;border-color:transparent;box-shadow:none;color:var(--sf-muted)}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt,.sf-boundary.sf-boundary) button.sf-danger{background:var(--sf-danger-soft);border-color:var(--sf-danger-border);color:var(--sf-danger)}
-body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button:not(:disabled):not(.sf-primary):hover{background:var(--sf-hover);border-color:var(--sf-border-strong)}
-body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button.sf-primary:hover:not(:disabled){box-shadow:var(--sf-shadow-2)}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt,.sf-boundary.sf-boundary) button:active:not(:disabled){box-shadow:none}
+/* Shared controls own the defaults; named content and navigation controls own their layout.
+   A secondary action has a quiet fill. Outlines describe fields and floating surfaces,
+   rather than putting every action into an equally prominent box. */
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button:not(:where(.sf-native-tools *)){box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:var(--sf-space-2);min-width:var(--sf-control-sm);height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));min-height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));padding:0 var(--sf-space-3);border:1px solid transparent;border-radius:var(--sf-radius-control);background:var(--sf-fill);color:var(--sf-text);font-family:var(--sf-family-sans);font-weight:500;cursor:pointer;transition:background var(--sf-dur-quick),border-color var(--sf-dur-quick),box-shadow var(--sf-dur-quick)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button.sf-primary{background:var(--sf-accent);border-color:var(--sf-accent);color:var(--sf-on-accent);box-shadow:none}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button.sf-secondary{background:var(--sf-fill);border-color:transparent;color:var(--sf-text)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button:is(.sf-ghost,.sf-wizard-back,.sf-chat-icon,.sf-overlay-close,.sf-wizard-clear,.sf-source-action){background:transparent;border-color:transparent;box-shadow:none;color:var(--sf-muted)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button.sf-danger{background:var(--sf-danger-soft);border-color:transparent;color:var(--sf-danger)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button:not(:disabled):not(.sf-primary):not(:where(.sf-native-tools *)):hover{background:var(--sf-hover);border-color:transparent}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button.sf-primary:hover:not(:disabled){background:var(--sf-accent);filter:brightness(.94)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button:active:not(:disabled):not(:where(.sf-native-tools *)){box-shadow:none;filter:brightness(.88)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) button:disabled{cursor:default;opacity:var(--sf-disabled-opacity)}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog) button[aria-pressed=true]:not(.sf-primary){background:var(--sf-accent-soft);border-color:var(--sf-accent-border);color:var(--sf-accent-text)}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt) :is(input,select,textarea):not(.sf-source-input):not(.sf-native-tools *){box-sizing:border-box;max-width:100%;min-width:0;border:1px solid transparent;border-bottom-color:var(--sf-border-strong);border-radius:var(--sf-radius-control);background-color:var(--sf-surface-2);color:var(--sf-text);padding:0 var(--sf-space-3)}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt) :is(input:not([type=checkbox]):not([type=radio]),select):not(.sf-source-input):not(.sf-native-tools *){height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));min-height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min))}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt) textarea:not(.sf-source-input){height:auto;min-height:max(var(--sf-control-md),var(--sf-hit-min));padding:var(--sf-space-2) var(--sf-space-3);line-height:var(--sf-leading-body)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog) button[aria-pressed=true]:not(.sf-primary){background:var(--sf-accent-soft);border-color:transparent;color:var(--sf-accent-text)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt) :is(input,select,textarea):not(.sf-source-input):not(:where(.sf-native-tools *)){box-sizing:border-box;max-width:100%;min-width:0;border:1px solid var(--sf-border);border-radius:var(--sf-radius-control);background-color:var(--sf-surface);color:var(--sf-text);padding:0 var(--sf-space-3);transition:border-color var(--sf-dur-quick),background-color var(--sf-dur-quick)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt) :is(input,select,textarea):not(.sf-source-input):not(:disabled):not([type=checkbox]):not([type=radio]):hover{border-color:var(--sf-border-strong)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt) :is(input:not([type=checkbox]):not([type=radio]),select):not(.sf-source-input):not(.sf-native-tools *){height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));min-height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min))}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt) textarea:not(.sf-source-input){height:auto;min-height:max(var(--sf-control-md),var(--sf-hit-min));padding:var(--sf-space-2) var(--sf-space-3);line-height:var(--sf-leading-body)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt) select:not(.sf-native-tools *){appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--sf-muted) 50%),linear-gradient(135deg,var(--sf-muted) 50%,transparent 50%);background-position:calc(100% - 16px) center,calc(100% - 12px) center;background-size:4px 4px;background-repeat:no-repeat;padding-inline-end:var(--sf-space-6)}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt) select:not(.sf-native-tools *):not(.sf-source-input){padding-inline-end:var(--sf-space-6)}
-body .sf-app.sf-app .sf-paper-header>select:not(.sf-native-tools *){flex-shrink:0;min-width:9em}
-body :is(.sf-app.sf-app,.sf-wizard.sf-wizard,.sf-preset-dialog.sf-preset-dialog,.sf-text-prompt.sf-text-prompt,.sf-boundary.sf-boundary) :is(button,input,select,textarea):focus-visible:not(.sf-source-input):not(.sf-native-tools *){outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:2px;border-color:var(--sf-accent)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt) select:not(.sf-native-tools *):not(.sf-source-input){padding-inline-end:var(--sf-space-6)}
+body .sf-app .sf-paper-header>select:not(.sf-native-tools *){flex-shrink:0;min-width:9em}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) :is(button,input,select,textarea):focus-visible:not(.sf-source-input):not(.sf-native-tools *){outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:2px;border-color:var(--sf-accent)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog) :is(button,input,select)[data-size=sm]{--sf-control-size:var(--sf-control-sm)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog) :is(button,input,select)[data-size=lg],body .sf-wizard-nav{--sf-control-size:var(--sf-control-lg)}
-body .sf-wizard{box-sizing:border-box;width:100%;padding:var(--sf-space-5);box-shadow:var(--sf-shadow-1)}
+body .sf-wizard{box-sizing:border-box;width:100%;padding:var(--sf-space-5);border:0;box-shadow:none}
+body .sf-wizard .sf-wizard-steps{gap:var(--sf-space-5);padding:var(--sf-space-4) 0;margin:var(--sf-space-4) 0 var(--sf-space-5)}
+body .sf-wizard .sf-wizard-steps button{background:transparent;padding:0 var(--sf-space-2);font-size:var(--sf-font-sm)}
+body .sf-wizard .sf-wizard-steps span{width:var(--sf-control-sm);height:var(--sf-control-sm);font-size:var(--sf-font-sm)}
+body .sf-wizard .sf-wizard-footer{margin-top:var(--sf-space-6);padding-top:var(--sf-space-4)}
+body .sf-wizard .sf-wizard-page>.sf-form{margin-top:var(--sf-space-4)}
 body .sf-settings-card{padding:var(--sf-space-panel)}
+body .sf-settings{width:100%;box-sizing:border-box;max-width:800px;padding:var(--sf-space-5);height:auto;min-height:100%}
+body .sf-settings-heading{display:flex;align-items:center;gap:var(--sf-space-3);margin-bottom:var(--sf-space-6)}
+body .sf-settings-heading>svg{color:var(--sf-accent-text);flex:none}
+body .sf-settings-heading>h2{font-size:var(--sf-font-display-1);margin:0}
+body .sf-settings .sf-group{padding:var(--sf-space-4) 0;gap:var(--sf-space-4)}
+body .sf-settings .sf-group h3{font-size:var(--sf-font-title);line-height:var(--sf-leading-title)}
+body .sf-settings :is(.sf-group,.sf-group-body)>button{align-self:flex-start;max-width:100%;height:auto;min-height:max(var(--sf-control-md),var(--sf-hit-min));padding:var(--sf-space-2) var(--sf-space-3);text-align:left;white-space:normal}
+body .sf-settings .sf-group>header button{--sf-control-size:var(--sf-control-sm);font-size:var(--sf-font-sm);background:transparent;color:var(--sf-muted)}
+body .sf-settings .sf-form{row-gap:var(--sf-space-3)}
+body .sf-settings .sf-field-label{max-width:12em}
+body .sf-settings :is(p[role=status],p[role=alert]):empty{margin:0}
 body .sf-requirements-panel fieldset{min-width:0;border:0;margin:0;padding:var(--sf-space-4) 0}
 body .sf-requirements-panel .sf-requirements-actions{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sf-space-2) var(--sf-space-4);margin-top:var(--sf-space-4)}
 body .sf-wizard.sf-requirements-panel .sf-requirements-actions button.sf-requirements-save{background:var(--sf-accent-soft);border-color:var(--sf-accent-border);color:var(--sf-accent-text);box-shadow:none;white-space:nowrap;font-weight:600}
 body .sf-wizard.sf-requirements-panel .sf-requirements-actions button.sf-requirements-save:hover:not(:disabled){background:var(--sf-hover);border-color:var(--sf-accent)}
 body .sf-requirements-panel .sf-requirements-actions .sf-requirements-save-status{display:flex;align-items:center;gap:var(--sf-space-2);margin:0;font-size:var(--sf-font-sm);color:var(--sf-muted)}
 body .sf-requirements-save-status svg{flex-shrink:0;color:var(--sf-ok)}
-body .sf-preset-dialog.sf-preset-dialog button.sf-preset-row{height:auto;min-height:var(--sf-control-lg);display:flex;justify-content:flex-start;padding:var(--sf-space-2) var(--sf-space-3);border-color:transparent;border-radius:var(--sf-radius-surface);text-align:left;white-space:normal}
+body .sf-preset-dialog button.sf-preset-row{height:auto;min-height:var(--sf-control-lg);display:flex;justify-content:flex-start;padding:var(--sf-space-2) var(--sf-space-3);border-color:transparent;border-radius:var(--sf-radius-surface);text-align:left;white-space:normal}
 body .sf-wizard .sf-source-members,body .sf-preset-subsections{border:0}
 body .sf-wizard :is(.sf-wizard-steps,.sf-wizard-footer,.sf-picker-panel){border:0;background:transparent;box-shadow:none}
 body .sf-line-gutter{background:transparent}
 body :is(.sf-paper-toolbar,.sf-pane-caption){height:auto;min-height:max(var(--sf-control-sm),var(--sf-hit-min))}
 body .sf-pane-caption{border-bottom:0}
-body .sf-app.sf-app .sf-pane-zoom button{padding:var(--sf-space-1)}
+body .sf-app .sf-pane-zoom button{padding:var(--sf-space-1)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog) input:is([type=checkbox],[type=radio]){padding:0;background:transparent;accent-color:var(--sf-accent)}
 body .sf-wizard :is(.sf-output-conflict,.sf-brief,.sf-outline-candidate,.sf-create-summary,.sf-wizard-summary,.sf-wizard-error,.sf-wizard-issues,.sf-cover-fields,.sf-source-list,.sf-source-row,.sf-member-reads,.sf-member-reads li){border:0;background:transparent;box-shadow:none;border-radius:0;padding:var(--sf-space-2) 0}
 body .sf-wizard :is(.sf-source-row,.sf-member-reads li){gap:var(--sf-space-3);margin-top:var(--sf-space-2)}
@@ -179,7 +200,8 @@ body .sf-state-details pre,body .sf-boundary pre{background:transparent;border:0
 @media(prefers-reduced-motion:reduce){body .sf-state-icon[data-animated]{animation:none}}
 @media(max-width:520px){body .sf-state{flex-wrap:wrap;align-items:flex-start}body .sf-state>button{margin-left:48px}}
 @container(max-width:420px){body .sf-paper-header{flex-wrap:wrap}body .sf-paper-header .sf-native-tools{margin-left:auto}body .sf-pane-caption{flex-wrap:wrap;gap:var(--sf-space-1)}body .sf-pane-caption>span:first-child{flex:1}body .sf-pane-caption>button{flex-shrink:0;white-space:nowrap}body .sf-pane-caption .sf-pane-zoom{order:2;flex-basis:100%;justify-content:space-between}}
-@media(max-width:720px){:root{--sf-hit-min:44px}body .sf-wizard{padding:var(--sf-space-4)}body .sf-wizard-footer{flex-wrap:wrap;gap:var(--sf-space-2)}body .sf-wizard-footer>span{display:none}body .sf-wizard-footer>button{flex:1 1 auto;white-space:normal}body .sf-wizard .sf-outline-toolbar{gap:var(--sf-space-2)}}
+@media(max-width:720px){:root{--sf-hit-min:44px}body .sf-create-scroll{padding:var(--sf-space-3)}body .sf-wizard{padding:var(--sf-space-4)}body .sf-wizard-footer{flex-wrap:wrap;gap:var(--sf-space-2)}body .sf-wizard-footer>span{display:none}body .sf-wizard-footer>button{flex:1 1 auto;white-space:normal}body .sf-wizard .sf-outline-toolbar{gap:var(--sf-space-2)}}
+@media(max-width:420px){body .sf-wizard .sf-wizard-clear{float:none;margin-left:0}}
 /* Layout primitives (SF-136..139). One definition each — a field row, a section band, a
    disclosure — living here rather than in a component constant, because the screens had grown
    three different field-markup idioms and a second implementation would reintroduce the drift.
@@ -198,6 +220,7 @@ body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form[data-layout=columns] .sf-field-label{margin:0}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-label{font-size:var(--sf-font-sm);font-weight:500;line-height:var(--sf-leading-sm);color:var(--sf-muted);min-width:0;overflow-wrap:anywhere}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-control{display:flex;align-items:center;gap:var(--sf-space-2);min-width:0}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field:has(textarea)>.sf-field-label{align-self:start;padding-top:var(--sf-space-2)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-control>:is(input,select,textarea){flex:1 1 auto;min-width:0}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-control>button{flex:0 0 auto}
 /* Everything a field carries besides its label belongs in the control column. Without this the
@@ -209,7 +232,7 @@ body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) :is(
    [data-surface=card] is the opt-in for the rare case that really is a card. */
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group{display:flex;flex-direction:column;gap:var(--sf-space-4);padding:var(--sf-space-4) 0;border-top:1px solid var(--sf-border-soft)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group:first-child{border-top:0;padding-top:0}
-body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group>header{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3);min-height:var(--sf-control-sm)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group>header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--sf-space-3);min-height:var(--sf-control-sm)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group>header>:is(h2,h3){margin:0}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group-body{display:flex;flex-direction:column;gap:var(--sf-space-4);min-width:0}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-group[data-surface=card]{padding:var(--sf-space-4);border-top:0;background:var(--sf-surface);border-radius:var(--sf-radius-surface)}
@@ -219,6 +242,7 @@ body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail{border:0;padding:0}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary{display:flex;align-items:baseline;gap:var(--sf-space-2);cursor:pointer;list-style:none;font-size:var(--sf-font-sm);line-height:var(--sf-leading-sm);color:var(--sf-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary::-webkit-details-marker{display:none}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:2px}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail>summary::before{content:'';flex:none;width:0;height:0;margin-top:.35em;border-left:4px solid currentColor;border-top:3px solid transparent;border-bottom:3px solid transparent;transition:transform var(--sf-dur-quick)}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail[open]>summary{white-space:normal;text-overflow:clip}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-detail[open]>summary::before{transform:rotate(90deg)}
@@ -226,8 +250,8 @@ body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-
 /* File inputs were the one control the contract missed (SF-139), so the browser's own button sat
    beside the styled ones on the settings screen. It takes the secondary variant's geometry now. */
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *){border:0;background:transparent;padding:0;height:auto;min-height:0}
-body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *)::file-selector-button{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));padding:0 var(--sf-space-3);margin-inline-end:var(--sf-space-3);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-control);background:var(--sf-surface);color:var(--sf-text);font-family:var(--sf-family-sans);font-size:var(--sf-font-md);cursor:pointer;transition:background var(--sf-dur-quick),border-color var(--sf-dur-quick)}
-body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *)::file-selector-button:hover{background:var(--sf-hover);border-color:var(--sf-border-strong)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *)::file-selector-button{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:max(var(--sf-control-size,var(--sf-control-md)),var(--sf-hit-min));padding:0 var(--sf-space-3);margin-inline-end:var(--sf-space-3);border:1px solid transparent;border-radius:var(--sf-radius-control);background:var(--sf-fill);color:var(--sf-text);font-family:var(--sf-family-sans);font-size:var(--sf-font-md);font-weight:500;cursor:pointer;transition:background var(--sf-dur-quick)}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *)::file-selector-button:hover{background:var(--sf-hover)}
 /* A checkbox with its own sentence. It spans the whole row rather than sitting in a field,
    because the sentence IS the label and there is no separate control column to align to. */
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-check{display:flex;align-items:flex-start;gap:var(--sf-space-2);font-size:var(--sf-font-md);line-height:var(--sf-leading-body);cursor:pointer}
@@ -249,7 +273,7 @@ body .sf-origin-ai::after{content:'';position:absolute;left:-2px;top:.15em;botto
    fire. Adding container-type to those roots would also make them the containing block for the
    fixed-position overlays they host, which this pass cannot verify. Known limit: a narrow pane in
    a wide viewport keeps the two-column grid. */
-@media(max-width:640px){body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form{grid-template-columns:minmax(0,1fr);row-gap:var(--sf-space-1)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-label{margin-top:var(--sf-space-2)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-hint{grid-column:1}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) :is(.sf-field-hint,.sf-field>.sf-detail){grid-column:1}
+@media(max-width:640px){body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form{grid-template-columns:minmax(0,1fr);row-gap:var(--sf-space-1)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field-label{margin-top:var(--sf-space-2)}body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-field>*:not(.sf-field-label){grid-column:1}
 /* The column mode needs its own override: [data-layout=columns] outweighs a bare .sf-form, so the
    rule above would leave the three columns standing at 320px and overflow the pane (AT-41). */
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-form[data-layout=columns]{grid-template-columns:minmax(0,1fr);align-items:stretch}}`

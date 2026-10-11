@@ -17,7 +17,7 @@ export function WritingProfiles({ api }: { api: Api }) {
   const profile = library?.profiles.find((row: any) => key(row) === selected)
   return <section className="sf-group" aria-label="Writing Profiles 私有模板库">
     <header><h3>Writing Profiles 文风模板</h3><button disabled={busy} onClick={() => run(reload)}>刷新文风模板库</button></header>
-    <details className="sf-detail"><summary>内置模板与自定义版本的边界，以及表达偏好不能覆盖的范围</summary>
+    <details className="sf-detail"><summary>模板与项目的关系</summary>
       <p>内置模板和自定义版本供明确选择；导入与编辑不改变现有项目。项目定制在概览中完成，表达偏好不能覆盖真实性与权限规则。</p></details>
     <div className="sf-group-body">
     {library?.diagnostics.map((warning: string, index: number) => <p key={index} role="alert">{warning}</p>)}

@@ -34,7 +34,7 @@ import { SfState } from './sf-state.tsx'
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export', 'Settings', 'Changes', 'History'] as const
 const TAB_LABELS = ['写作要求', '资料与引用', '大纲', '正文', '审查', '导出', '项目设置', '修改建议', '版本记录']
-const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:var(--sf-space-4);border-bottom:1px solid var(--sf-border-strong)}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:var(--sf-space-5);overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid var(--sf-border-strong);display:flex;flex-direction:column;overflow:hidden}.sf-body button:not(.sf-native-tools *):not(:where(.sf-wizard *)),.sf-body select:not(.sf-native-tools *):not(:where(.sf-wizard *)),.sf-header button,.sf-settings button,.sf-settings select{font:inherit;color:inherit;padding:var(--sf-space-2) var(--sf-space-3);border-radius:var(--sf-radius-md);background:transparent;border:1px solid var(--sf-border-strong)}.sf-error{color:var(--sf-danger);white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:var(--sf-space-3) 0}.sf-settings{padding:var(--sf-space-5);max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid var(--sf-border-strong);flex-shrink:0}}`
+const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:var(--sf-space-4);border-bottom:1px solid var(--sf-border-strong)}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:var(--sf-space-5);overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid var(--sf-border-strong);display:flex;flex-direction:column;overflow:hidden}.sf-error{color:var(--sf-danger);white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:var(--sf-space-3) 0}.sf-settings{padding:var(--sf-space-5);max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid var(--sf-border-strong);flex-shrink:0}}`
 export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'layout', 'sidebarRight', 'sidebarRightTabs', 'inputTriggers', 'conversation']
 // A validation refusal carries the fields that failed; without them the message is a dead
 // end for whoever has to fix it, so they are part of the text.
@@ -43,7 +43,7 @@ function describeError(error: { code?: string; message?: string; details?: { fie
   return [error?.code, error?.message, fields.length ? `字段：${fields.join('、')}` : ''].filter(Boolean).join(' · ')
 }
 const LAYOUT_CSS = `.sf-agent-resize{width:var(--sf-space-2);flex-shrink:0;cursor:col-resize;touch-action:none;background:var(--sf-border-soft)}.sf-agent-resize:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:calc(-1 * var(--sf-focus-width))}.sf-app[data-sf-narrow=true] .sf-agent{height:100%;min-height:0;flex:1}.sf-header{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sf-space-3)}.sf-header button{margin-left:auto}`
-const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);padding:var(--sf-space-2);resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:var(--sf-space-2);border-bottom:1px solid var(--sf-border-strong);padding:var(--sf-space-3) 0;margin:var(--sf-space-3) 0}.sf-tabs button[aria-selected=true]{background:var(--sf-fill-strong);border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:var(--sf-focus-width)}`
+const EXTRA_CSS = `.sf-app [hidden]{display:none!important}.sf-app textarea{box-sizing:border-box;width:100%;resize:vertical}.sf-app input{font:inherit;max-width:100%;box-sizing:border-box}.sf-app pre{overflow-wrap:anywhere}.sf-tabs{display:flex;flex-wrap:wrap;gap:var(--sf-space-2);border-bottom:1px solid var(--sf-border-strong);padding:var(--sf-space-3) 0;margin:var(--sf-space-3) 0}.sf-tabs button[aria-selected=true]{background:var(--sf-fill-strong);border-color:currentColor}.sf-app button:focus-visible,.sf-app input:focus-visible,.sf-app select:focus-visible,.sf-app textarea:focus-visible{outline:var(--sf-focus-width) solid var(--sf-focus-color);outline-offset:var(--sf-focus-width)}`
 // The settings surface reached from the top entry: the same component as the global
 // settings section, so the two can never drift into two configurations.
 const SETTINGS_CSS = `.sf-caption-settings{position:absolute;top:calc(100% + var(--sf-space-1));left:var(--sf-caption-left,150px);width:min(600px,94vw);max-height:min(72vh,640px);overflow:auto;background:var(--sf-surface);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-xl);box-shadow:var(--sf-shadow-3);z-index:1200}
@@ -295,11 +295,11 @@ export function apply(ctx: Host) {
       </div>}
       {ready && <>
         <div className="sf-paper-toolbar"><nav className="sf-paper-views" aria-label="正文视图">
-          {(['edit', 'preview', 'split'] as const).map((name, index) => <button key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && view === name} onClick={() => { setTab('Draft'); setView(name) }}>{['编辑', '预览', '分屏'][index]}</button>)}
+          {(['edit', 'preview', 'split'] as const).map((name, index) => <button className="sf-ghost" key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && view === name} onClick={() => { setTab('Draft'); setView(name) }}>{['编辑', '预览', '分屏'][index]}</button>)}
         </nav><details className="sf-paper-menu"><summary aria-label="更多论文选项"><WorkbenchIcon kind="more" /></summary><div className="sf-paper-menu-popover">
           {(['Overview', 'Research', 'History'] as const).map(name => <button key={name} onClick={e => { closeMenu(e.currentTarget); setTab(name) }}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
         </div></details></div>
-        {tab !== 'Draft' && <div className="sf-tool-back"><button onClick={() => setTab('Draft')}><WorkbenchIcon kind="back" /> 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
+        {tab !== 'Draft' && <div className="sf-tool-back"><button className="sf-ghost" onClick={() => setTab('Draft')}><WorkbenchIcon kind="back" /> 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
         <WritingProgress api={api} context={context} refresh={refresh} onManage={setTab} onTask={(result:any)=>setGenerationMode(result.task?.mode)} />
         <div className="sf-paper-content">
           <div id="sf-panel-Overview" role="tabpanel" aria-label="概览" hidden={tab !== 'Overview'}><WritingRequirements key={`requirements_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} onFormat={setFormat} /></div>
@@ -337,7 +337,7 @@ export function apply(ctx: Host) {
         setRow(result.value); setMessage('已保存，仅影响新项目默认值。')
       } catch (e) { setMessage((e as Error).message) }
     }
-    return <section ref={confirmationRoot} className="sf-app sf-settings" style={{ overflow: 'auto' }}><style>{THEME_CSS + CSS + EXTRA_CSS}</style><h2>ScholarFlow 设置</h2>
+    return <section ref={confirmationRoot} className="sf-app sf-settings" style={{ overflow: 'auto' }}><style>{THEME_CSS + CSS + EXTRA_CSS}</style><header className="sf-settings-heading"><WorkbenchIcon kind="book" size={20} /><h2>ScholarFlow 设置</h2></header>
       <section className="sf-group">
         {row ? <>
           <div className="sf-form">
@@ -345,7 +345,7 @@ export function apply(ctx: Host) {
               <option value="course-paper">课程论文</option><option value="literature-review">文献综述</option><option value="research-paper">研究论文</option></select></div></div>
             <div className="sf-field"><span className="sf-field-label">新项目默认语言</span><div className="sf-field-control"><select aria-label="新项目默认语言" value={row.value.language} onChange={e => save('language', e.target.value)}><option value="zh">中文</option><option value="en">英文</option></select></div></div>
           </div>
-          <details className="sf-detail"><summary>模型调用次数和任务耗时仅用于统计</summary>
+          <details className="sf-detail"><summary>模型调用与耗时统计</summary>
             <p>这些数字只做统计用途，不参与写作决策；任务可随时暂停或停止，已读到的内容会保留。</p></details>
           <label className="sf-check"><input type="checkbox" checked={row.value.networkEnabled} onChange={e => save('networkEnabled', e.target.checked)} /><span>允许外部检索与公开 Skill 读取（每次操作展示发送范围）</span></label>
         </>
