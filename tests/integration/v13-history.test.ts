@@ -65,7 +65,7 @@ test('requirements data and expected hash come from the same bytes and do not re
 })
 test('no-task projection keeps historical length, materials and explicit fields without project.id or a 4000-word template', async () => {
   const { io, spec } = await setup()
-  await saveWritingSpec(io, spec, (await snapshot(io)).ledger.revision)
+  await saveWritingSpec(io, spec, (await snapshot(io)).ledger.revision,true)
   const old = await snapshot(io), fallback = requirementsFallback(old)
   assert.equal(fallback.targetLength, 1500); assert.deepEqual(fallback.materials, spec.materials)
   assert.equal('id' in fallback, false); assert.equal('project' in fallback, false)

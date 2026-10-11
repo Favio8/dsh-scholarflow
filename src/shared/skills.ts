@@ -8,6 +8,7 @@ export const skillMetadataSchema = z.object({ schemaVersion: z.literal(1), quali
   warnings: z.array(z.string().max(2000)).max(30) }).strict()
 export const skillFileSchema = z.object({ relativePath, hash, sizeBytes: z.number().int().min(0).max(20 * 1024 * 1024) }).strict()
 export const skillOriginSchema = z.discriminatedUnion('kind', [
+  z.object({kind:z.literal('user'),createdAt:z.iso.datetime(),derivedFrom:z.object({qualifiedId:z.string(),digest:hash}).strict().optional()}).strict(),
   z.object({ kind: z.literal('builtin'), asset: relativePath }).strict(),
   z.object({ kind: z.literal('project'), projectId: id, namespace: id, resourceId: id }).strict(),
   z.object({ kind: z.literal('local'), rootFingerprint: hash, subpath: z.string().max(800), license: z.string().max(2000).optional() }).strict(),

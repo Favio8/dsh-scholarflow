@@ -13,6 +13,7 @@ export interface FileStore {
    * be able to stop that step, and without this the bound cannot reach the file read at all.
    */
   readBytes(path: string, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array>
+  readImageAssetBytes?(path:string,maxBytes:number):Promise<Uint8Array>
   // Separate capability for fixed project Skill trees. The raw-material reader
   // continues to deny all metadata and manuscript paths.
   resourceStat?(path: string): Promise<FileEntry | undefined>

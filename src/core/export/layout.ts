@@ -13,7 +13,7 @@ export interface LayoutSpec {
   firstLineIndentChars: number
   captionSizePt: number
   tableStyle: 'three-line' | 'grid'
-  referenceStyle: 'gbt7714' | 'plain'
+  referenceStyle: 'gbt7714' | 'plain' | 'apa7'
   tableOfContents: 'none' | 'field' | 'auto'
 }
 
@@ -55,6 +55,6 @@ export function layoutOf(typography: TypographySpec, language: 'zh-CN' | 'en'): 
     referenceStyle: typography.referenceStyle ?? DEFAULT_LAYOUT.referenceStyle,
     tableOfContents: typography.tableOfContents ?? DEFAULT_LAYOUT.tableOfContents,
   }
-  if (language !== 'zh-CN') return { ...base, headingFontZh: typography.bodyFontEn, referenceStyle: 'plain' }
+  if (language !== 'zh-CN') return { ...base, headingFontZh: typography.bodyFontEn, referenceStyle: base.referenceStyle==='apa7'||typography.referenceStyleExplicit?base.referenceStyle:'plain' }
   return base
 }

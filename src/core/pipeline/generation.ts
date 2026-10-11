@@ -8,7 +8,8 @@ import { validateSelection, projectMarkdown, citationKeys } from '../editing/mar
 import { commit, inspectRecovery } from '../store/transactions.ts'
 import { MAX_MATERIAL_BYTES, sensitivePath } from '../materials/materials.ts'
 import { approvedMemory } from '../project/memory.ts'
-import { resolveStageSkills, RESOURCE_LOCK, type SkillReader } from '../skills/bindings.ts'
+import { RESOURCE_LOCK, type SkillReader } from '../skills/bindings.ts'
+import { assertWritingAllowed, writingContext } from './writing-context.ts'
 import { sectionTarget, sectionEdit } from '../editing/sections.ts'
 import { ACTIVE_RUN as ACTIVE, runFile as statePath, inputFile, readRun } from './run-store.ts'
 import { frozenPlanFile, checkpointFile, readGenerationCheckpoint, validateRunAction, type RunActionPlan } from './run-control.ts'
@@ -47,9 +48,7 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
     'STALE_LEDGER_REVISION', '请重新读取项目后生成计划。')
   invariant(!current.document.externalChange, 'STALE_DOCUMENT_VERSION', '请先确认采用外部稿件版本。')
   invariant(!(await inspectRecovery(io, current.config.paths.manuscriptDir)).pending.length, 'RECOVERY_REQUIRED', '先恢复已记录事务。')
-  invariant(Object.values(current.ledger.requirements).every(requirement => requirement.confirmation === 'confirmed'), 'REQUIREMENT_CONFIRMATION_REQUIRED', '写作要求尚有未确认项或冲突。')
-  invariant(!Object.values(current.ledger.requirements).some(requirement => requirement.kind === 'ai-policy' && requirement.confirmation === 'confirmed' &&
-    (['forbidden', 'deny', 'disallowed'].includes(String(requirement.constraint?.value).toLowerCase()) || /(?:禁止|不允许|不得)\s*(?:使用\s*)?(?:AI|人工智能|生成式)/i.test(requirement.description))), 'AI_POLICY_FORBIDS_GENERATION', '已确认的课程政策禁止 AI 生成正文。')
+  assertWritingAllowed(current)
   if (!input.selection) invariant(current.ledger.outline.confirmation === 'confirmed' && current.ledger.outline.sections.length, 'OUTLINE_CONFIRMATION_REQUIRED', '请先确认至少一个有论点的大纲章节。')
   if (input.selection) {
     invariant(input.selection.projectId === current.config.project.id && input.selection.documentHash === current.document.contentHash && input.selection.revisionId === current.document.revisionId, 'STALE_DOCUMENT_VERSION', '选区版本已改变。')
@@ -80,14 +79,11 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
     invariant(materialHashes[material.id] === item.sourceContentHash, 'STALE_MATERIAL_VERSION', '原始资料已改变，请重新定位证据。')
     sourceHashes[source.id] = item.sourceContentHash
   }
-  const profile = await io.read(current.config.writing.projectProfile)
-  invariant(profile && Buffer.byteLength(profile.text) <= 65536, 'PROFILE_UNAVAILABLE', '项目文风缺失或超过 64 KiB。')
-  const memory = current.config.writing.useApprovedProjectMemory ? await approvedMemory(io, current.ledger.projectId) : {}
   invariant(!input.skillBindingId || input.selection, 'SKILL_SELECTION_UNAVAILABLE', '明确选择 Skill 的动作需要有效正文选区。')
-  const skills = await resolveStageSkills(io, input.selection ? 'revision' : 'drafting', skillReader, input.skillBindingId)
+  const writing = await writingContext(io, current, input.selection ? 'revision' : 'drafting', skillReader, input.skillBindingId)
   const context = { ...(structuralGap && { structuralGap: true }), project: current.config.project, requirements: Object.values(current.ledger.requirements), outline: { ...current.ledger.outline, sections },
-    claims, evidence, sources: [...new Set(evidence.map(item => item.sourceId))].map(id => current.ledger.sources[id]), projectProfile: profile.text, approvedMemory: memory,
-    academicSkills: skills.resources,
+    claims, evidence, sources: [...new Set(evidence.map(item => item.sourceId))].map(id => current.ledger.sources[id]), projectProfile: writing.projectProfile, approvedMemory: writing.approvedMemory,
+    academicSkills: writing.academicSkills,
     ...(reviewIssue && { reviewIssue: { id: reviewIssue.id, category: reviewIssue.category, severity: reviewIssue.severity, title: reviewIssue.title,
       explanation: reviewIssue.explanation, suggestedFix: reviewIssue.suggestedFix, location: reviewIssue.location, claimIds: reviewIssue.claimIds, evidenceIds: reviewIssue.evidenceIds,
       instruction: '仅为此已定位问题生成完整目标段落修复候选；保留引用、事实、限定与人工内容。不能自报问题已经解决；接受后须对应复查。' } }),
@@ -106,8 +102,8 @@ export async function prepareGeneration(io: FileStore, input: z.infer<typeof gen
   const plan = { id: newId('plan'), snapshot: runSnapshotSchema.parse({ schemaVersion: 1, runId, projectId: current.config.project.id, sessionId: input.context.sessionId,
     ...(workflowId && { workflowId }),
     stage: input.selection ? 'revision' : 'drafting', configHash: current.configHash, ledgerRevision: current.ledger.revision, documentHash: current.document.contentHash,
-    outlineVersion: current.ledger.outline.version, materialHashes, sourceHashes, profileHash: digest(profile.text),
-    skillDigests: skills.resources.map(resource => ({ qualifiedId: resource.qualifiedId, digest: resource.digest })), resourceLockHash: skills.resourceLockHash,
+    outlineVersion: current.ledger.outline.version, materialHashes, sourceHashes, profileHash: writing.profileHash,
+    skillDigests: writing.skillDigests, resourceLockHash: writing.resourceLockHash,
     modelDescriptor: { ...model, maxOutputTokens: model.maxOutputTokens ?? 16384 },
     budget: current.config.workflow.budget, networkScope: 'local-only', createdAt: new Date().toISOString() }), input, context, evidenceIds,
     inputBytes: Buffer.byteLength(SYSTEM + input.instruction + json(context)), ledgerHash: current.ledgerHash, ...(target && { sectionTarget: target }) }

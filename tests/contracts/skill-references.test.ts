@@ -13,6 +13,8 @@ import { confirmOutline } from '../../src/core/evidence/evidence.ts'
 import { prepareAutomatic, startAutomatic } from '../../src/core/pipeline/workflow-automatic.ts'
 import { automaticPolicySchema } from '../../src/shared/workflow-automatic.ts'
 import { prepareModelReview } from '../../src/core/review/model.ts'
+import {proposeCowrite} from '../../src/core/editing/cowrite.ts'
+import {digest} from '../../src/core/store/files.ts'
 
 // TEST_ONLY Host seam; native installed tests separately exercise real fs APIs.
 async function fixture(review = false) {
@@ -32,6 +34,15 @@ async function fixture(review = false) {
   } }
   return { io, host, bundle }
 }
+
+test('quick rewrite history retains a private Skill after unbinding, even when no legacy run directory exists',async()=>{
+  const {io,host,bundle}=await fixture(),current=await snapshot(io),context={academicSkills:[{qualifiedId:bundle.manifest.metadata.qualifiedId,digest:bundle.manifest.digest,instructions:bundle.instructions}]}
+  const suggestion=await proposeCowrite(io,'session_TEST_ONLY',{text:current.document.text,baseDocumentHash:current.document.contentHash,start:0,end:0,replacementText:'TEST_ONLY candidate',instruction:'TEST_ONLY history reference',usage:{stage:'revision',profileHash:digest('TEST_ONLY profile'),resourceLockHash:digest('TEST_ONLY lock'),skillDigests:[{qualifiedId:bundle.manifest.metadata.qualifiedId,digest:bundle.manifest.digest}]}})
+  await io.write('.scholarflow/writing/contexts/cowrite_TEST_ONLY.json',json({projectId:current.ledger.projectId,runId:'cowrite_TEST_ONLY',context,inputHash:digest(json(context))}),undefined)
+  await applyBindings(io,await prepareBindings(io,[],async()=>bundle))
+  const result=await knownSkillReferences(host,bundle.manifest.metadata.qualifiedId,bundle.manifest.digest,new AbortController().signal)
+  assert.ok(result.references.some(row=>row.recordId===suggestion.id));assert.ok(result.references.some(row=>row.recordId==='cowrite_TEST_ONLY'))
+})
 
 test('an approved automatic review retains exact private Skill references before its child exists, including copied ancestry and corrupted-plan refusal', async () => {
   const { io, host, bundle } = await fixture(true), sessionId = 'session_TEST_ONLY'

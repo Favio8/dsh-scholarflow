@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { OnlineResearch } from './online-research.tsx'
+import {BibliographyImport} from './bibliography-import.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 export function Research({ project, context, api, refresh, run, busy }: Props) {
@@ -36,6 +37,7 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
   const load = (id: string) => run(async () => { setMaterialId(id); setParsed(undefined); setBlockIndex(0); setParsed(await api('materials.read', { context: context(), materialId: id })) })
   const locate = (locator: any) => locator.kind === 'text' ? `第 ${locator.lineStart}–${locator.lineEnd} 行` : locator.kind === 'pdf' ? `物理页 ${locator.pageNumber}` : `段落 ${locator.paragraphIndex}`
   return <section aria-label="资料与证据"><h3>资料、来源与证据</h3>
+    <BibliographyImport api={api} context={context} refresh={refresh} run={run} busy={busy}/>
     <p>文件清单只读取路径、类型与大小。确认登记后逐份解析；资料文字作为研究数据，不构成插件操作指令。</p>
     <label>资料目录（相对工作区，留空为根目录）<input aria-label="资料目录" value={directory} onChange={e => setDirectory(e.target.value)} /></label>
     <button disabled={busy} onClick={() => scan()}>列出可选资料</button>

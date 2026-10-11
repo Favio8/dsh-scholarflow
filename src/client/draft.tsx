@@ -201,11 +201,13 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const [saving, setSaving] = useState(false), [cursor, setCursor] = useState(0)
   const followStream = useRef(true), previousScroll = useRef(0), generationAnchor = useRef<HTMLSpanElement>(null)
   const [showReturnToStream,setShowReturnToStream] = useState(false)
+  const [citations,setCitations]=useState<any>()
+  useEffect(()=>{let live=true;const timer=setTimeout(()=>{api('document.citations',{context:context(),text:displayedText}).then(row=>live&&setCitations(row)).catch(err=>live&&setMessage(err.message))},300);return()=>{live=false;clearTimeout(timer)}},[displayedText,project.ledger.revision])
   const livePreview = useMemo(() => {
-    try { const projection = projectMarkdown(displayedText)
+    try { const projection = projectMarkdown(displayedText,[],citations?.labels)
       return { projection, statistics: wordStatsFromProjection(projection), error: '' } }
     catch (error) { return { projection: undefined, statistics: undefined, error: (error as Error).message } }
-  }, [displayedText])
+  }, [displayedText,citations])
   useEffect(() => {
     if (!issueLocation || issueLocation.projectId !== projectId || issueLocation.documentHash !== project.document.contentHash) return
     const block = root.current?.querySelector<HTMLElement>(`[data-sf-block="${CSS.escape(issueLocation.location.blockId)}"]`)
@@ -328,13 +330,14 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       try {
         const result = await api('cowrite.propose', { context: context(), text, baseDocumentHash: baseHash,
           baseBufferHash: await textHash(text), action: rewrite.action, instruction: rewrite.instruction,
+          ...(skillBindingId && {skillBindingId}),
           start: target.start, end: target.end }, controller.signal)
         if (controller.signal.aborted) return
         const row = result.suggestion
         if (typeof row?.after !== 'string' || !row.after.trim()) throw new ApplicationError({ code: 'INVALID_MODEL_OUTPUT', message: '模型未返回可用的改写结果，请重试。', details: { category: 'model-response', operation: 'cowrite.propose' } })
         setCandidate(current => current && current.id === requestId && current.state === 'generating'
           ? { ...current, id: row.id, after: row.after, state: 'ready', elapsedMs: Date.now() - startedAt,
-              protectedFactChanges: row.protectedFactChanges, citationChanges: row.citationChanges }
+              protectedFactChanges: row.protectedFactChanges, citationChanges: row.citationChanges, usage: row.usage }
           : current)
       } catch (error) {
         if (controller.signal.aborted) return
@@ -362,15 +365,26 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     const before = text.slice(0, candidate.start) + candidate.after + text.slice(candidate.end)
     await cowrite.merge(before, text)
     setUndoSnapshot({ start: candidate.start, before: candidate.before, after: candidate.after })
-    await api('cowrite.decide', { context: context(), suggestionId: candidate.id, state: 'accepted' }).catch(() => undefined)
-    setCandidate({ ...candidate, end: candidate.start + candidate.after.length, state: 'accepted', note: '已采用，可撤销。' }); setRewrite(undefined)
+    const accepted:RewriteCandidate={ ...candidate, end: candidate.start + candidate.after.length, state: 'accepted', pendingDecision:'accepted', note: '已合并到编辑缓冲，正在保存采用决定。' }
+    setCandidate(accepted);setRewrite(undefined)
     // The range now covers the accepted text, so a follow-up rewrite targets what is actually there.
     setEditRange({ start: candidate.start, end: candidate.start + candidate.after.length })
+    try { await api('cowrite.decide',{context:context(),suggestionId:candidate.id,state:'accepted',acceptedStart:candidate.start});setCandidate({...accepted,pendingDecision:undefined,note:'已采用，可撤销。'}) }
+    catch(error){setCandidate({...accepted,note:`文字已合并，采用决定尚未同步：${(error as Error).message}`})}
     await cowrite.reload()
   }
+  const syncDecision=()=>run(async()=>{
+    if(!candidate?.pendingDecision)return
+    await api('cowrite.decide',{context:context(),suggestionId:candidate.id,state:candidate.pendingDecision,...(candidate.pendingDecision==='accepted'&&{acceptedStart:candidate.start})})
+    if(candidate.pendingDecision==='rejected'){setCandidate(undefined);setRewrite(undefined)}
+    else setCandidate({...candidate,pendingDecision:undefined,note:'采用决定已同步，可撤销。'})
+    await cowrite.reload()
+  })
   const discardRewrite = async () => {
     if (candidate && !candidate.id.startsWith('local_')) {
-      await api('cowrite.decide', { context: context(), suggestionId: candidate.id, state: 'rejected' }).catch(() => undefined)
+      setCandidate({...candidate,pendingDecision:'rejected',note:'正在保存放弃决定。'})
+      try{await api('cowrite.decide', { context: context(), suggestionId: candidate.id, state: 'rejected' })}
+      catch(error){setCandidate({...candidate,pendingDecision:'rejected',note:`放弃决定尚未同步：${(error as Error).message}`});return}
     }
     rewriteController.current?.abort('discarded')
     setCandidate(undefined); setRewrite(undefined); await cowrite.reload()
@@ -475,8 +489,8 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const currentHeading = [...headings].reverse().find(node => (node.position?.start.offset ?? 0) <= cursor)
   const statistics = livePreview.statistics
   const candidateView = candidate && <RewriteCandidateView candidate={candidate} busy={busy} citationOrder={livePreview.projection?.citationOrder}
-    canAccept={candidate.before === text.slice(candidate.start, candidate.end)}
-    onAccept={() => run(acceptRewrite)} onDiscard={() => run(discardRewrite)} onUndo={undoSnapshot ? () => run(undoRewrite) : undefined}
+    canAccept={!candidate.pendingDecision && candidate.before === text.slice(candidate.start, candidate.end)}
+    onAccept={() => run(acceptRewrite)} onDiscard={() => run(discardRewrite)} onUndo={undoSnapshot && !candidate?.pendingDecision ? () => run(undoRewrite) : undefined}
     onRegenerate={() => submitRewrite({ start: candidate.start, end: candidate.end })} />
   const sourceCandidate = candidate && (view === 'edit' || view === 'split' && candidate.origin !== 'preview')
   const candidateBlock = livePreview.projection?.blocks.filter(block => block.node.type === 'paragraph' && block.start < (candidate?.end ?? 0)).at(-1)
@@ -519,6 +533,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       }}>{textOf(node)}</button>)}</div></details>
     </div>
     {cowrite.message && <p className="sf-editor-notice" role="status">{cowrite.message}</p>}
+    {candidate?.pendingDecision && <div className="sf-editor-notice" role="status">{candidate.note}<button disabled={busy} onClick={syncDecision}>重试保存决定</button></div>}
       {(recoverable || baseHash !== project.document.contentHash || project.document.externalChange) && <div className="sf-editor-notice" role="status">
         {recoverable ? '有暂存编辑可恢复' : '正文版本发生变化，当前编辑已保留'}<button onClick={onTool}>查看与处理</button>
       </div>}
@@ -563,15 +578,15 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
             const node=event.currentTarget
             if(generating && node.scrollTop < previousScroll.current-8){followStream.current=false;setShowReturnToStream(true)}
             previousScroll.current=node.scrollTop
-          }}><div className="sf-paper-page" style={{ zoom: previewZoom.zoom }} data-format={format} ref={root} onMouseUp={generating?undefined:capture} onKeyUp={generating?undefined:capture}>
-            {livePreview.projection ? <MarkdownView projection={livePreview.projection}
+          }}><div className="sf-paper-page" style={{ zoom: previewZoom.zoom }} data-format={format} ref={root} onMouseUp={generating?undefined:capture} onKeyUp={generating?undefined:capture}><div className="sf-paper-sheet"><div className="sf-paper-running-head" data-sf-protected="true">{project.config.project.title}</div>
+            {livePreview.projection ? <MarkdownView projection={livePreview.projection} origins={citations?.origins}
               afterBlock={(start) => <>{candidate && view !== 'edit' && candidateBlock?.start === start ? candidateView : null}{streamBlock?.start===start && <span ref={generationAnchor} className="sf-stream-anchor" aria-hidden="true" />}</>}
               markRange={previewMark} annotations={(start, end) => <>{cowrite.annotations(start, end, candidate?.id)}{!dirty && (Object.values(project.ledger.reviewIssues) as any[]).filter(issue => !issue.stale && issue.state !== 'resolved' && issue.documentHash === project.document.contentHash && issue.location?.sourceRange.startUtf16 >= start && issue.location.sourceRange.startUtf16 < end).map(issue => <button className="sf-review-marker" key={issue.id} title={issue.explanation} onClick={onReview}>{issue.severity} · {issue.title}</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
-            {!!livePreview.projection?.citationOrder.length && <section className="sf-paper-references"><h3>参考文献</h3><ol>{livePreview.projection.citationOrder.map(key => {
+            {!!livePreview.projection?.citationOrder.length && <section className="sf-paper-references"><h3>参考文献</h3>{citations?.style==='apa7'?<div>{citations.references.map(([key,entry]:[string,string])=><p key={key}>{entry}</p>)}</div>:<ol>{livePreview.projection.citationOrder.map(key => {
               const source = (Object.values(project.ledger.sources) as any[]).find(row => row.citeKey === key)
               return <li key={key}>{source ? [source.authors.map((author: any) => author.literal ?? [author.given, author.family].filter(Boolean).join(' ')).join(', '), source.title, source.year, source.venue].filter(Boolean).join('. ') : `待登记引用：${key}`}</li>
-            })}</ol></section>}
-          </div></div>
+            })}</ol>}</section>}
+          <div className="sf-paper-foot" aria-hidden="true" /></div></div></div>
         </div>
       </div>
       {!generating && stream.preview?.text && ['paused','stopped','failed'].includes(stream.preview.status) && stream.task?.status!=='completed' && <details className="sf-unfinished-preview">
@@ -579,7 +594,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       </details>}
       {sourceCandidate && !generating && <SourceCandidate area={sourceArea} end={textareaOffset(candidate.end)} identity={candidate.id}>{candidateView}</SourceCandidate>}
       <footer className="sf-draft-status"><span role="status" title={message || bufferMessage}>{saving ? '保存中…' : dirty ? '未保存 · 编辑已在本页保留' : project.document.externalChange ? '外部正文已改变' : <><span className="sf-saved-dot">●</span>已保存</>}{message && ` · ${message}`}</span>
-        <span>{statistics ? `${statistics?.chineseCharacters ?? 0} 汉字 · ${statistics?.westernWords ?? 0} 词` : '字数暂不可用'}{currentHeading && ` · ${textOf(currentHeading)}`}</span></footer>
+        <span>{statistics ? `${statistics?.chineseCharacters ?? 0} 汉字 · ${statistics?.westernWords ?? 0} 词` : '字数暂不可用'}{currentHeading && <span className="sf-status-heading"> · {textOf(currentHeading)}</span>}</span></footer>
     </div>
     {/* The overlay lives inside the middle column, so it never reaches the left workspace or the
         right pane, and the scroller gains matching room while it is open (SPEC v1.2 §11). */}
@@ -612,6 +627,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         <button aria-label="收起输入" onClick={() => setOverlayCollapsed(true)}>收起</button>
       </div> : <>
         <div className="sf-overlay-row">
+          {!!skills.length && <select aria-label="本次改写 Skill" value={skillBindingId} onChange={e=>setSkillBindingId(e.target.value)}>
+            <option value="">已启用修订 Skill</option>{skills.map(row=><option key={row.binding.bindingId} value={row.binding.bindingId}>{row.metadata.displayName}</option>)}
+          </select>}
           <select aria-label="修改功能" value={rewrite?.action ?? 'custom'} onChange={event => setRewrite(current => ({ action: event.target.value as RewriteAction, instruction: current?.instruction ?? '' }))}>
             {REWRITE_ACTIONS.map(entry => <option key={entry.action} value={entry.action}>{entry.label.replace('…', '')}</option>)}
           </select>

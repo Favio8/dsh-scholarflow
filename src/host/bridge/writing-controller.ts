@@ -5,16 +5,19 @@ import { id, requestContext, hash } from '../../shared/schema.ts'
 import { resolveStore } from './project-api.ts'
 import { prepareInit, initialize, snapshot, mutateLedger, CONFIG_PATH, updatePresentation } from '../../core/project/project.ts'
 import { digest, json, newId, type FileStore } from '../../core/store/files.ts'
-import { sensitivePath, mediaType } from '../../core/materials/materials.ts'
+import { sensitivePath, mediaType,registerMaterial } from '../../core/materials/materials.ts'
 import { parseRegisteredMaterial } from '../../core/materials/parse.ts'
 import { parseMaterialBytes } from '../parsers/parse.ts'
 import { selectedModel, callStageModel, callStageModelWithImage } from '../executor/model.ts'
 import { invariant, ScholarError, parseModel, parseStored } from '../../shared/errors.ts'
 import { pendingQuestion, writingRequirementsRequest, writingPreferencesRequest } from '../../shared/writing-task.ts'
-import { createWritingTask, readWritingTask, readWritingSpec, readWritingSpecImage, saveWritingTask, saveWritingSpec, taskPath, specPath, noteTask, dirtyWritingBuffers } from '../../core/pipeline/writing-task-store.ts'
+import { createWritingTask, readWritingTask, readWritingSpec, readWritingSpecImage, saveWritingTask, saveWritingSpec, taskPath, specPath, noteTask, dirtyWritingBuffers,ownedRequirementsHash } from '../../core/pipeline/writing-task-store.ts'
 import { driveWritingTask, registerDownloadedText } from '../../core/pipeline/writing-task.ts'
 import { readRequirementSources } from '../../core/pipeline/spec-compat.ts'
 import { prepareGeneration, executeGeneration } from '../../core/pipeline/generation.ts'
+import { assertWritingAllowed, writingContext } from '../../core/pipeline/writing-context.ts'
+import {prepareVersionRestore,restoreVersion} from '../../core/editing/version-restore.ts'
+import {cowriteContext} from '../../core/pipeline/cowrite-context.ts'
 import { prepareModelReview } from '../../core/review/model.ts'
 import { executeModelReview } from '../../core/review/model-run.ts'
 import { readRun, runFile } from '../../core/pipeline/run-store.ts'
@@ -634,7 +637,7 @@ export class WritingController {
   async requirements(request: unknown, signal: AbortSignal) {
     const { context } = writingRequirementsRequest.parse(request)
     const { io } = await resolveStore(this.ctx, context, signal)
-    return readWritingSpecImage(io)
+    const image=await readWritingSpecImage(io);return {...image,...(image.spec&&{spec:{...image.spec,requirementSources:readRequirementSources(image.spec)}}),baseRequirementsHash:image.spec?ownedRequirementsHash(image.spec):null}
   }
   async inspect(request: unknown, signal: AbortSignal) {
     const { context, taskId } = writingTaskRequest.parse(request), { io } = await resolveStore(this.ctx, context, signal)
@@ -669,6 +672,29 @@ export class WritingController {
       const file = await io.read(row.path + '/manifest.json'); if (file) versions.push(JSON.parse(file.text))
     }
     return { versions: versions.sort((a, b) => b.createdAt.localeCompare(a.createdAt)), currentRevisionId: current.document.revisionId }
+  }
+  async restore(request:unknown,signal:AbortSignal){
+    const input=z.object({context:requestContext,revisionId:id,planHash:hash.optional()}).strict().parse(request)
+    const {io}=await resolveStore(this.ctx,input.context,signal)
+    return input.planHash?restoreVersion(io,input.revisionId,input.planHash):prepareVersionRestore(io,input.revisionId)
+  }
+  async inputs(request:unknown,operator:string,signal:AbortSignal){
+    const input=z.object({context:requestContext,baseSpecHash:hash.nullable(),materials:creationSpec.shape.materials,baseMaterials:creationSpec.shape.materials.optional(),
+      requirementSources:creationSpec.shape.requirementSources,online:z.boolean()}).strict().parse(request)
+    const {io}=await resolveStore(this.ctx,input.context,signal),image=await readWritingSpecImage(io),task=await readWritingTask(io)
+    invariant(image.spec&&image.baseSpecHash===input.baseSpecHash,'WRITING_SPEC_CHANGED','写作来源已经改变，请重新读取后核对。')
+    invariant(!task||!this.active.has(task.id),'WRITING_IN_PROGRESS','请先暂停写作任务，再修改资料与联网选项。')
+    const current=await snapshot(io),available=(await this.scan({context:input.context},signal)).files.filter(row=>row.supported).map(row=>row.relativePath)
+    if(input.baseMaterials){const removed=input.baseMaterials.filter(path=>!input.materials.includes(path)),added=input.materials.filter(path=>!input.baseMaterials!.includes(path));input.materials=[...new Set([...current.config.materials.include.filter(path=>!removed.includes(path)),...added])]}
+    invariant(input.materials.every(path=>available.includes(path)||current.config.materials.include.includes(path)),'MATERIAL_SELECTION_REQUIRED','新增资料不在当前可选范围，请重新列出资料。')
+    const sources=input.requirementSources.map(source=>source.origin==='external'?{...source,state:source.handle&&this.external.resolve(source.handle,operator)?'connected' as const:'disconnected' as const}:source)
+    for(const path of input.materials)if(!Object.values((await snapshot(io)).ledger.materials).some(row=>row.projectRelativePath===path))
+      await registerMaterial(io,{relativePath:path,role:'paper',confirmExcludedFile:false},(await snapshot(io)).ledger.revision)
+    const {assignmentPath:_legacyAssignment,...fields}=image.spec
+    const spec={...fields,materials:input.materials,requirementSources:sources,online:input.online}
+    await saveWritingSpec(io,spec,(await snapshot(io)).ledger.revision,true)
+    if(task){task.spec=spec;task.materialIndex=0;task.evidenceMaterialIndex=0;task.evidenceBlockIndex=0;if(input.online){task.researchComplete=false;task.searchQueries=[];task.searchQueryIndex=0}await saveWritingTask(io,task)}
+    return readWritingSpecImage(io)
   }
   async action(request: unknown, signal: AbortSignal) {
     const input = writingTaskAction.parse(request), { io } = await resolveStore(this.ctx, input.context, signal)
@@ -722,7 +748,7 @@ export class WritingController {
       // instead of adding an allowance, which no longer exists (SPEC v1.2 §8.3).
       task.consecutiveFailures = 0
       task.reviewStalls = 0; task.semanticReviewStalls = 0
-      await saveWritingSpec(io, task.spec, (await snapshot(io)).ledger.revision)
+      await saveWritingSpec(io, task.spec, (await snapshot(io)).ledger.revision,input.materials!==undefined)
     }
     if (input.action === 'resume') { const spec = await readWritingSpec(io); if (spec) task.spec = spec; await saveWritingSpec(io, task.spec, (await snapshot(io)).ledger.revision) }
     if (task.mode === 'first-draft') {
@@ -884,7 +910,14 @@ export class WritingController {
     const input = writingPreferencesRequest.parse(request)
     const { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io)
     const previous = await io.read(specPath)
-    if (input.baseSpecHash !== undefined && input.baseSpecHash !== (previous ? digest(previous.text) : null)) throw new ScholarError('WRITING_SPEC_CHANGED', '写作要求已由另一操作改变，当前输入已保留，请重新读取后合并。', { category: 'stale-target', operation: 'writingTask.preferences' })
+    const latestSpec = await readWritingSpec(io)
+    // This form owns requirements, presentation and length, not resource grants.
+    const {assignmentPath:_requestedAssignment,...owned}=input.spec,assignmentPath=latestSpec?latestSpec.assignmentPath:input.spec.assignmentPath
+    input.spec = { ...owned,...(assignmentPath&&{assignmentPath}),materials: [...current.config.materials.include],
+      requirementSources: latestSpec?.requirementSources ?? input.spec.requirementSources,
+      online: latestSpec?.online ?? input.spec.online }
+    if (input.baseSpecHash !== undefined && input.baseSpecHash !== (previous ? digest(previous.text) : null)&&
+      (!latestSpec||input.baseRequirementsHash!==ownedRequirementsHash(latestSpec))) throw new ScholarError('WRITING_SPEC_CHANGED', '写作要求已由另一操作改变，当前输入已保留，请重新读取后合并。', { category: 'stale-target', operation: 'writingTask.preferences' })
     const task = await readWritingTask(io)
     invariant(input.context.expectedLedgerRevision === current.ledger.revision, 'STALE_LEDGER_REVISION', '写作要求已改变，请重新读取后保存；当前输入已保留。')
     invariant(!task || !this.active.has(task.id), 'WRITING_IN_PROGRESS', '请先暂停写作，再修改要求。')
@@ -904,7 +937,7 @@ export class WritingController {
       else if (structureChanged) { task.stage = 'outline'; task.sectionIndex = 0 }
       await saveWritingTask(io, task)
     }
-    return { spec: input.spec, baseSpecHash: digest(json({ schemaVersion: 1, projectId: current.ledger.projectId, spec: input.spec })) }
+    const saved=await readWritingSpecImage(io);return {...saved,baseRequirementsHash:saved.spec?ownedRequirementsHash(saved.spec):null}
   }
   async format(request: unknown, signal: AbortSignal) {
     const input = z.object({ context: requestContext, format: creationSpec.shape.format }).parse(request)
@@ -920,21 +953,30 @@ export class WritingController {
   }
   async propose(request: unknown, signal: AbortSignal) {
     const input = cowriteProposalRequest.parse(request), { io } = await resolveStore(this.ctx, input.context, signal), current = await snapshot(io)
+    assertWritingAllowed(current)
     // The user may submit a chosen function with nothing typed, so an action supplies the
     // instruction when the free-text field is empty (PRD §5.2).
     const instruction = (input.instruction || ACTION_INSTRUCTION[input.action]).trim()
     invariant(instruction, 'INSTRUCTION_REQUIRED', '请写一句修改要求，或选择一个改写功能。')
     invariant(input.baseDocumentHash === current.document.contentHash && input.end >= input.start && input.end <= input.text.length &&
       unicodeBoundary(input.text, input.start) && unicodeBoundary(input.text, input.end), 'STALE_DOCUMENT_VERSION', '编辑基础或范围改变，请重新选择。')
-    const before = input.text.slice(input.start, input.end), model = await selectedModel(this.ctx, input.context.sessionId, signal)
+    const writing = await writingContext(io, current, 'revision', binding => readPrivateSkill(binding, io), input.skillBindingId)
+    const model = await selectedModel(this.ctx, input.context.sessionId, signal)
     const { cover, ...requirements } = await readWritingSpec(io) ?? {}
-    const raw = await callStageModel(this.ctx, model.session, model.selected, { runId: newId('cowrite'), signal, maxTokens: model.maxOutputTokens,
+    const planned=cowriteContext(input.text,input.start,input.end,{requirements,project:current.config.project,projectProfile:writing.projectProfile,
+      approvedMemory:writing.approvedMemory,academicSkills:writing.academicSkills},current.ledger,model,COWRITE_SYSTEM+instruction)
+    const runId=newId('cowrite'),inputHash=digest(json(planned.context))
+    await io.lock(()=>io.write(`.scholarflow/writing/contexts/${runId}.json`,json({schemaVersion:1,projectId:current.ledger.projectId,sessionId:input.context.sessionId,
+      runId,inputHash,system:COWRITE_SYSTEM,instruction,model:model.selected,contextWindow:model.contextWindow,maxOutputTokens:model.maxOutputTokens,...planned}),undefined))
+    const raw = await callStageModel(this.ctx, model.session, model.selected, { runId, signal, maxTokens: model.maxOutputTokens,
       system: COWRITE_SYSTEM,
-      instruction, context: { target: before, manuscript: input.text, requirements, sources: Object.values(current.ledger.sources) } })
+      instruction, context:planned.context })
     const output = parseModel(z.object({ replacementText: z.string().min(1).max(2 * 1024 * 1024).refine(text => !!text.trim()) }), raw, 'cowrite.propose')
     signal.throwIfAborted()
     const suggestion = await proposeCowrite(io, input.context.sessionId, { ...input, instruction, replacementText: output.replacementText,
-      ...(input.baseBufferHash && { baseBufferHash: input.baseBufferHash }) }, signal)
+      ...(input.baseBufferHash && { baseBufferHash: input.baseBufferHash }),
+      usage: { stage: 'revision', profileHash: writing.profileHash, resourceLockHash: writing.resourceLockHash, skillDigests: writing.skillDigests,
+        runId,inputHash,inputBytes:planned.inputBytes,contextScope:planned.scope } }, signal)
     return { suggestion }
   }
   async suggestions(request: unknown, signal: AbortSignal) {
@@ -979,16 +1021,20 @@ export class WritingController {
     return { suggestion }
   }
   async decideSuggestion(request: unknown, signal: AbortSignal) {
-    const input = z.object({ context: requestContext, suggestionId: id, state: z.enum(['accepted', 'rejected']) }).parse(request)
+    const input = z.object({ context: requestContext, suggestionId: id, state: z.enum(['accepted', 'rejected']),acceptedStart:z.number().int().nonnegative().optional() }).parse(request)
     const { io } = await resolveStore(this.ctx, input.context, signal), path = `.scholarflow/writing/suggestions/${input.suggestionId}.json`
     await io.lock(async () => { const before = await io.read(path); invariant(before, 'PROPOSAL_NOT_FOUND', '修改建议不存在。')
       const suggestion = parseStored(cowriteSuggestion, before.text, 'COWRITE_SUGGESTION_INVALID', 'cowrite.decide')
       invariant(suggestion.sessionId === input.context.sessionId && suggestion.projectId === (await snapshot(io)).ledger.projectId, 'SESSION_BINDING_CHANGED', '建议属于另一会话。')
+      if (suggestion.state === input.state) return
       invariant(suggestion.state === 'pending', 'PROPOSAL_ALREADY_DECIDED', '建议已经处理。')
       if (input.state === 'accepted') {
         const live = await currentWritingText(io, input.context.sessionId)
-        invariant(live.text.slice(suggestion.start, suggestion.start + suggestion.after.length) === suggestion.after,
+        const start=input.acceptedStart??suggestion.start
+        invariant(live.text.slice(start, start + suggestion.after.length) === suggestion.after,
           'EDITOR_BUFFER_CONFLICT', '请先将建议合并到编辑缓冲。')
+        suggestion.acceptedBufferHash=live.bufferHash
+        suggestion.acceptedStart=start
       }
       suggestion.state = input.state; suggestion.updatedAt = new Date().toISOString(); await io.write(path, json(suggestion), before)
     })

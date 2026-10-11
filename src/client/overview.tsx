@@ -5,8 +5,8 @@ import { GuidedWorkflow } from './workflow.tsx'
 import { ProjectIdentityHistory } from './project-identity.tsx'
 import { ProjectTextEditor } from './project-text-editor.tsx'
 
-type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean; navigate?: (page: string) => void }
-export function Overview({ project, context, api, refresh, run, busy, navigate }: Props) {
+type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean; navigate?: (page: string) => void; section?: 'requirements' | 'skills' | 'context' | 'workflow' }
+export function Overview({ project, context, api, refresh, run, busy, navigate, section = 'requirements' }: Props) {
   const [description, setDescription] = useState(''), [kind, setKind] = useState('length'), [value, setValue] = useState('2000')
   const [operator, setOperator] = useState('min'), [unit, setUnit] = useState('zh-characters'), [materialId, setMaterialId] = useState('')
   const [editing, setEditing] = useState<any>(), [changeReason, setChangeReason] = useState(''), [requirementPreview, setRequirementPreview] = useState<any>(), [history, setHistory] = useState<any>()
@@ -29,9 +29,11 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
   const beginEdit = (row: any) => { setEditing({ row: structuredClone(row), revision: project.ledger.revision }); setDescription(row.description); setKind(row.kind);
     setOperator(row.constraint?.operator ?? 'equals'); setValue(String(row.constraint?.value ?? '')); setUnit(row.constraint?.unit === 'words' ? 'words' : 'zh-characters');
     setYearStart(row.constraint?.windowStart ?? ''); setYearEnd(row.constraint?.windowEnd ?? ''); setSourceKinds(row.constraint?.sourceKinds ?? []); setMixedCount(row.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1'); setChangeReason(''); setRequirementPreview(undefined) }
-  return <section aria-label="项目概览"><h3>项目概览与要求确认</h3>
+  return <section className="sf-capability-panel" aria-label="项目概览"><h2>{{requirements:'高级要求与确认',skills:'本项目写作 Skill',context:'文风与项目记忆',workflow:'引导流程与检查点'}[section]}</h2>
+    <div hidden={section !== 'workflow'}>
     <GuidedWorkflow project={project} context={context} api={api} run={run} refresh={refresh} busy={busy} navigate={navigate} />
     <ProjectIdentityHistory context={context} api={api} run={run} busy={busy} />
+    </div><div hidden={section !== 'requirements'}>
     <p>{project.config.project.type} · {project.config.project.language} · 要求 {requirements.length} · 已登记材料 {Object.keys(project.ledger.materials).length}</p>
     <p>资料中的要求先作为候选。老师要求与用户输入不一致时，保留双方并由你明确选择；插件不擅自采用最大值或最新值。</p>
     <label>要求资料<select aria-label="要求资料" value={materialId} onChange={e => setMaterialId(e.target.value)}><option value="">选择已解析资料</option>
@@ -93,10 +95,14 @@ export function Overview({ project, context, api, refresh, run, busy, navigate }
         await api('requirements.resolveConflict', { context: context(), requirementIds: conflicts.filter(row => row.kind === chosen.kind).map(row => row.id), selectedId: selected, reason }); setReason(''); setSelected(''); await refresh()
       })}>确认保留所选要求并归档冲突原文</button>
     </section>}
-    <h3>项目文风与已确认记忆</h3><p>只进入当前 ScholarFlow 项目的阶段输入。保存会使相关检查需更新，其他项目保持独立。</p>
+    </div><div hidden={section !== 'context'}>
+    <p>本论文的文风、术语与研究决定。保存后用于后续写作，相关检查会提示复查。</p>
     <ProjectWritingProfile project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} dirty={instructionDirty} />
     <ProjectTextEditor project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} onDirty={setInstructionDirty} />
+    </div>
     <p role="status">{message}</p>
+    <div hidden={section !== 'skills'}>
     <ProjectSkills project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} />
+    </div>
   </section>
 }

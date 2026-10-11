@@ -82,7 +82,7 @@ test('relative resources preserve original project targets; no resource or remot
   assert.ok(reads.every(row => row === path))
   await applyManuscriptAdoption(io, prepared)
   assert.equal(await io.read('old/notes.md'), undefined); assert.equal(await io.read('old/fig/a.png'), undefined)
-  await assert.rejects(prepareDelivery(io), { code: 'IMAGE_EXPORT_UNAVAILABLE' })
+  await assert.rejects(prepareDelivery(io), { code: 'IMAGE_ASSET_MISSING' })
 })
 test('changed original, current body, references, plan bytes and denied source paths do not overwrite either manuscript', async () => {
   const io = await fixture(), prepared = await plan(io), before = await snapshot(io)

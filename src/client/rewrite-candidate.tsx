@@ -13,6 +13,8 @@ import { ApplicationError, ErrorNotice } from './application-error.tsx'
 export type RewriteCandidate = { id: string; action: string; instruction: string; origin?: 'source' | 'preview'
   start: number; end: number; before: string; after: string
   protectedFactChanges?: string[]; citationChanges?: { added: string[]; removed: string[] }
+  pendingDecision?: 'accepted' | 'rejected'
+  usage?: { stage: 'revision'; profileHash: string; resourceLockHash: string; skillDigests: {qualifiedId:string;digest:string}[];contextScope?:string;inputBytes?:number;inputHash?:string;runId?:string }
   state: 'generating' | 'ready' | 'accepted' | 'discarded' | 'stopped' | 'failed'
   note?: string; elapsedMs?: number; phase?: string; diagnostic?: { code: string; message: string; details?: ApplicationError['details'] } }
 
@@ -20,8 +22,16 @@ const ACTION_LABEL: Record<string, string> = { rewrite: 'AI 改写', polish: '�
 
 /** Word-level diff so insertions and deletions are visible instead of implied. */
 export function diffSegments(before: string, after: string) {
-  const left = before.split(/(\s+|(?<=[\u4e00-\u9fa5])|(?=[\u4e00-\u9fa5]))/).filter(Boolean)
-  const right = after.split(/(\s+|(?<=[\u4e00-\u9fa5])|(?=[\u4e00-\u9fa5]))/).filter(Boolean)
+  const old = before.split(/(\s+|(?<=[\u4e00-\u9fa5])|(?=[\u4e00-\u9fa5]))/).filter(Boolean)
+  const next = after.split(/(\s+|(?<=[\u4e00-\u9fa5])|(?=[\u4e00-\u9fa5]))/).filter(Boolean)
+  let prefix=0,suffix=0
+  while(prefix<old.length&&prefix<next.length&&old[prefix]===next[prefix])prefix++
+  while(suffix<old.length-prefix&&suffix<next.length-prefix&&old[old.length-1-suffix]===next[next.length-1-suffix])suffix++
+  const left=old.slice(prefix,old.length-suffix),right=next.slice(prefix,next.length-suffix)
+  const head=old.slice(0,prefix).join(''),tail=suffix?old.slice(-suffix).join(''):''
+  // Preserve exact unchanged edges; long changed spans use a range diff rather than
+  // allocating a quadratic matrix for an entire manuscript.
+  if(left.length*right.length>250000)return [{kind:'same' as const,text:head},{kind:'remove' as const,text:left.join('')},{kind:'add' as const,text:right.join('')},{kind:'same' as const,text:tail}].filter(row=>row.text)
   const table: number[][] = Array.from({ length: left.length + 1 }, () => new Array(right.length + 1).fill(0))
   for (let i = left.length - 1; i >= 0; i--)
     for (let j = right.length - 1; j >= 0; j--)
@@ -32,6 +42,7 @@ export function diffSegments(before: string, after: string) {
     if (last && last.kind === kind) last.text += text
     else segments.push({ kind, text })
   }
+  if(head)push('same',head)
   let i = 0, j = 0
   while (i < left.length && j < right.length) {
     if (left[i] === right[j]) { push('same', left[i]); i++; j++ }
@@ -40,6 +51,7 @@ export function diffSegments(before: string, after: string) {
   }
   while (i < left.length) push('remove', left[i++])
   while (j < right.length) push('add', right[j++])
+  if(tail)push('same',tail)
   return segments
 }
 
@@ -65,10 +77,10 @@ export function RewriteCandidateView({ candidate, onAccept, onDiscard, onUndo, o
   const [showDiff, setShowDiff] = useState(false)
   const changes = candidate.state === 'ready' ? (candidate.protectedFactChanges ?? protectedChanges(candidate.before, candidate.after)) : []
   const citations = candidate.citationChanges
-  return <section className="sf-rewrite" data-state={candidate.state} aria-label="改写候选" data-sf-protected="true" onMouseUp={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
+  return <section className="sf-rewrite sf-change" data-state={candidate.state} aria-label="改写候选" data-sf-protected="true" onMouseUp={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
     <header>
       <strong>{ACTION_LABEL[candidate.action] ?? '改写候选'}</strong>
-      {!!candidate.instruction && <span className="sf-rewrite-instruction">{candidate.instruction}</span>}
+      <span className="sf-rewrite-instruction sf-change-why">{candidate.instruction||'无理由'}</span>
       <span className="sf-rewrite-state" role="status">{stateLabel(candidate)}</span>
     </header>
     {/* The gradient belongs to the candidate's own area and stops the moment the state does. */}
@@ -76,10 +88,11 @@ export function RewriteCandidateView({ candidate, onAccept, onDiscard, onUndo, o
       {candidate.elapsedMs !== undefined && <span className="sf-rewrite-elapsed">已用 {formatElapsed(candidate.elapsedMs)}</span>}
       {onStop && <button type="button" disabled={busy} onClick={onStop}>停止</button>}</div>}
     {ready && preview && <>
+      {candidate.usage&&<details className="sf-detail"><summary>本次实际使用的写作规则</summary><p>阶段：修订 · 上下文：{candidate.usage.contextScope==='target-and-neighbors'?'目标与邻接段落':'完整主稿'} · {candidate.usage.inputBytes??'未记录'} 字节</p><p>文风摘要：{candidate.usage.profileHash}</p>{candidate.usage.skillDigests.length?candidate.usage.skillDigests.map(row=><p key={row.qualifiedId}>{row.qualifiedId} · {row.digest}</p>):<p>本次未启用修订 Skill。</p>}</details>}
       <div className="sf-rewrite-reading"><MarkdownView projection={preview} /></div>
       <details className="sf-rewrite-technical" onToggle={event => setShowDiff(event.currentTarget.open)}><summary>查看原文与差异</summary>{showDiff && <div className="sf-rewrite-diff">
       <div className="sf-rewrite-before"><b>原文</b><p>{candidate.before}</p></div>
-      <div className="sf-rewrite-after"><b>新文</b><p>{diffSegments(candidate.before, candidate.after).map((segment, index) =>
+      <div className="sf-rewrite-after"><b>新文</b><p className="sf-change-diff">{diffSegments(candidate.before, candidate.after).map((segment, index) =>
         segment.kind === 'same' ? <React.Fragment key={index}>{segment.text}</React.Fragment>
           : segment.kind === 'add' ? <ins key={index}>{segment.text}</ins> : <del key={index}>{segment.text}</del>)}</p></div>
       </div>}</details>
@@ -91,10 +104,10 @@ export function RewriteCandidateView({ candidate, onAccept, onDiscard, onUndo, o
       {!!citations?.removed.length && <p>移除引用：{citations.removed.join('、')}</p>}
     </details>}
     {candidate.diagnostic ? <ErrorNotice error={new ApplicationError(candidate.diagnostic)} /> : candidate.note && <p className="sf-rewrite-note" role="status">{candidate.note}</p>}
-    <div className="sf-rewrite-actions">
+    <div className="sf-rewrite-actions sf-change-actions">
       {ready && <>
         <button type="button" className="sf-primary" disabled={busy || !canAccept} onClick={onAccept} data-sf-accept>√ 采用</button>
-        <button type="button" disabled={busy} onClick={onDiscard} data-sf-discard><WorkbenchIcon kind="close" /> 放弃</button>
+        <button type="button" disabled={busy || !!candidate.pendingDecision} onClick={onDiscard} data-sf-discard><WorkbenchIcon kind="close" /> 放弃</button>
       </>}
       {(candidate.state === 'stopped' || candidate.state === 'failed') && onRegenerate &&
         <button type="button" disabled={busy} onClick={onRegenerate}>重新生成</button>}

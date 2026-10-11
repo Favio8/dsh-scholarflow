@@ -16,7 +16,7 @@ const bibAuthors = (authors: Ledger['sources'][string]['authors']) =>
   authors.map(author => `{${author.literal ?? [author.given, author.family].filter(Boolean).join(' ')}}`).join(' and ')
 
 function bibtex(records: { key: string; type: string; title: string; authors: Ledger['sources'][string]['authors'],
-  year?: number; venue?: string; doi?: string; url?: string }[]) {
+  year?: number; venue?: string; doi?: string; url?: string;bibliography?:Ledger['sources'][string]['bibliography'] }[]) {
   return records.map(record => {
     const fields: [string, string][] = []
     if (record.authors.length) fields.push(['author', bibAuthors(record.authors)])
@@ -25,6 +25,7 @@ function bibtex(records: { key: string; type: string; title: string; authors: Le
     if (record.venue) fields.push(['journal', bibEscape(record.venue)])
     if (record.doi) fields.push(['doi', record.doi])
     if (record.url) fields.push(['url', record.url.replace(/[\\{}]/g, '')])
+    if(record.bibliography)for(const [key,value] of Object.entries(record.bibliography))if(value)fields.push([({issue:'number',publisherPlace:'address'} as Record<string,string>)[key]??key,bibEscape(value)])
     return `@${bibEntryType(record.type)}{${record.key},\n` +
       fields.map(([name, value]) => `\t${name} = {${value}},`).join('\n') + '\n}\n'
   }).join('')
@@ -37,7 +38,7 @@ export function bibliography(document: string, ledger: Ledger) {
   const records = projection.citationOrder.map(key => {
     const source = Object.values(ledger.sources).find(source => source.citeKey === key)
     invariant(source, 'CITATION_KEY_UNKNOWN', `引用 ${key} 没有项目来源记录。`)
-    return { key, type: source.kind, title: source.title, authors: source.authors, ...(source.year && { year: source.year }),
+    return { key, type: source.kind, title: source.title, authors: source.authors,bibliography:source.bibliography, ...(source.year && { year: source.year }),
       ...(source.venue && { venue: source.venue }), ...(source.identifiers.doi && { doi: source.identifiers.doi }),
       ...(source.identifiers.url ? { url: source.identifiers.url } : source.identifiers.arxiv ? { url: `https://arxiv.org/abs/${normalizeArxiv(source.identifiers.arxiv)}` } : {}) }
   })

@@ -9,6 +9,7 @@ import { SurfaceBoundary, SURFACE_BOUNDARY_CSS } from '../../src/client/surface-
 import { THEME_CSS } from '../../src/client/theme/tokens.ts'
 import { headingSizes } from '../../src/core/export/layout.ts'
 import { WritingRequirements } from '../../src/client/writing-requirements.tsx'
+import {creationSpec} from '../../src/shared/writing-task.ts'
 
 const noop = () => {}
 ;(window as any).sfVisualContracts = { headingRatios: [10, 12, 14].map(bodySize => {
@@ -66,11 +67,11 @@ const component = (key: string) => {
   return <Seat {...props} />
 }
 function Boom(): React.ReactElement { throw new Error('TEST_ONLY 渲染失败：用于审计真实错误边界') }
-const project = { ledger: { materials: {}, sources: {}, evidence: {}, claims: {}, outline: { researchQuestion: 'TEST_ONLY' } }, config: { research: {} } }
-const requirementSpec = { title: 'TEST_ONLY 写作要求', type: 'course-paper', language: 'zh-CN', format: 'docx',
+const project = { ledger: { materials: {}, sources: {}, evidence: {}, claims: {}, outline: { researchQuestion: 'TEST_ONLY' } }, config: { research: {},materials:{include:[] as string[]} } }
+const requirementSpec = creationSpec.parse({ title: 'TEST_ONLY 写作要求', type: 'course-paper', language: 'zh-CN', format: 'docx',materials:[],
   requirements: 'TEST_ONLY 分析论文结构与材料，不调用模型。', targetLength: 1500,
   sections: [{ id: 'section_TEST_ONLY', title: '分析与讨论', targetLength: 1500 }],
-  cover: { enabled: true, title: 'TEST_ONLY 分析报告', fields: [{ label: '姓名', value: 'TEST_ONLY 作者' }, { label: '学号', value: 'TEST_ONLY' }] } }
+  cover: { enabled: true, title: 'TEST_ONLY 分析报告', fields: [{ label: '姓名', value: 'TEST_ONLY 作者' }, { label: '学号', value: 'TEST_ONLY' }] } })
 const requirementApi = async (method: string) => {
   if (method === 'writingTask.requirements') return { spec: requirementSpec, baseSpecHash: null }
   if (method === 'writingTask.preferences') return { baseSpecHash: 'a'.repeat(64) }
@@ -78,8 +79,8 @@ const requirementApi = async (method: string) => {
 }
 const longMaterialName = 'Graph_Convolution-Based_Decoupling_and_Consistency-Driven_Fusion_for_Multimodal_Emotion_Recognition.pdf'
 const materialPaths = ['报告笔记.md', '个人报告笔记.md', longMaterialName, '作业要求/1.jpg', '作业要求/2.jpg', '作业要求/3.jpg']
-const statuses = ['ready', 'ready', 'ready', 'pending', 'partial', 'failed']
-const populatedProject = { ...project, ledger: { ...project.ledger,
+const statuses = ['ready', 'ready', 'ready', 'registered', 'partial', 'failed']
+const populatedProject = { ...project,config:{...project.config,materials:{include:materialPaths}}, ledger: { ...project.ledger,
   materials: Object.fromEntries(materialPaths.map((projectRelativePath, index) => [`material_TEST_ONLY_${index}`,
     { id: `material_TEST_ONLY_${index}`, projectRelativePath, parseStatus: statuses[index] }])),
   sources: Object.fromEntries([1, 2, 3].map(index => [`source_TEST_ONLY_${index}`, {
@@ -101,7 +102,7 @@ const fixtures: Record<string, React.ReactNode> = {
   empty: <div className="sf-app sf-paper-project"><style>{THEME_CSS + MATERIALS_CSS}</style><PaperMaterials project={project} api={materialApi} context={() => ({ sessionId })} refresh={async () => {}} run={noop} busy={false} /></div>,
   materials: <div className="sf-app sf-paper-project"><style>{THEME_CSS + MATERIALS_CSS}</style><PaperMaterials project={populatedProject} api={materialApi} context={() => ({ sessionId })} refresh={async () => {}} run={(operation: () => Promise<void>) => operation()} busy={false} /></div>,
   materialsBusy: <div className="sf-app sf-paper-project"><style>{THEME_CSS + MATERIALS_CSS}</style><PaperMaterials project={populatedProject} api={materialApi} context={() => ({ sessionId })} refresh={async () => {}} run={noop} busy={true} /></div>,
-  requirements: <div className="sf-app sf-paper-project"><WritingRequirements project={{ binding: { projectId: 'project_TEST_ONLY' } }} api={requirementApi} context={() => ({ sessionId })} refresh={async () => {}} onFormat={noop} /></div>,
+  requirements: <div className="sf-app sf-paper-project"><WritingRequirements project={{...project, binding: { projectId: 'project_TEST_ONLY' } }} api={requirementApi} context={() => ({ sessionId })} refresh={async () => {}} onFormat={noop} /></div>,
   loading: component('scholarflow.project:'),
   error: <div className="sf-app"><ErrorNotice error={new ApplicationError({ code: 'INVALID_REQUEST', message: 'TEST_ONLY 输入有误', details: { operation: 'TEST_ONLY', fields: ['targetLength'] } })} /></div>,
   boundary: <><style>{THEME_CSS + SURFACE_BOUNDARY_CSS}</style><SurfaceBoundary label="TEST_ONLY" onEscape={noop}><Boom /></SurfaceBoundary></>,

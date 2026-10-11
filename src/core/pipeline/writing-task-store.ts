@@ -1,7 +1,7 @@
 import { creationSpec, writingTaskSchema, type WritingTask, type CreationSpec } from '../../shared/writing-task.ts'
 import { json, newId, digest, type FileStore } from '../store/files.ts'
 import { commit } from '../store/transactions.ts'
-import { snapshot, mutateLedger } from '../project/project.ts'
+import { snapshot, mutateLedger,invalidateReviews } from '../project/project.ts'
 import { parseDocument } from 'yaml'
 import { CONFIG_PATH } from '../project/project.ts'
 import { invariant, parseStored } from '../../shared/errors.ts'
@@ -12,6 +12,7 @@ import { classifyNote, handledIssue, mergeIssue, progressIssue } from './task-is
 const POINTER = '.scholarflow/writing/current.json'
 export const taskPath = (taskId: string) => `.scholarflow/writing/tasks/${taskId}.json`
 export const specPath = '.scholarflow/writing/requirements.json'
+export function ownedRequirementsHash(spec:CreationSpec){const {materials,requirementSources,online,assignmentPath,...owned}=creationSpec.parse(spec);return digest(json(owned))}
 
 /**
  * `notes` stays the raw audit trail the quality report reads; `issues` is the same event
@@ -84,7 +85,7 @@ export async function createWritingTask(io: FileStore, spec: CreationSpec, sessi
     { path: specPath, before: await io.read(specPath), after: json({ schemaVersion: 1, projectId: state.projectId, spec }) }]) })
   return state
 }
-export async function saveWritingSpec(io: FileStore, spec: CreationSpec, revision: number) {
+export async function saveWritingSpec(io: FileStore, spec: CreationSpec, revision: number,replaceMaterials=false) {
   return mutateLedger(io, revision, async (ledger, config) => {
     const now = new Date().toISOString()
     ledger.requirements.writing_brief = { id: 'writing_brief', kind: 'other', description: spec.requirements,
@@ -100,7 +101,13 @@ export async function saveWritingSpec(io: FileStore, spec: CreationSpec, revisio
     ledger.requirements.writing_format = { id: 'writing_format', kind: 'format', description: `提交格式：${spec.format}`,
       origin: { type: 'user' }, confirmation: 'confirmed', verificationMethod: 'manual', confirmedAt: now }
     const before = (await io.read(CONFIG_PATH))!, yaml = parseDocument(before.text)
-    yaml.setIn(['materials', 'include'], [...new Set([...spec.materials, ...config.materials.include.filter(path => path.startsWith('.scholarflow/cache/writing-assets/'))])])
+    const previousSpec=await io.read(specPath)
+    const paths=replaceMaterials||!previousSpec?[...new Set(spec.materials)]:[...config.materials.include]
+    spec={...spec,materials:paths};yaml.setIn(['materials', 'include'],paths)
+    const removed=config.materials.include.filter(path=>!paths.includes(path))
+    if(removed.length){for(const evidence of Object.values(ledger.evidence)){const material=ledger.materials[ledger.sources[evidence.sourceId]?.materialId??''];if(material&&removed.includes(material.projectRelativePath))evidence.validation='stale'}
+      for(const claim of Object.values(ledger.claims))if(claim.evidenceLinks.some(link=>ledger.evidence[link.evidenceId]?.validation==='stale'))claim.status='stale'
+      invalidateReviews(ledger,['evidence','citation','integrity'])}
     yaml.setIn(['output', 'defaultFormat'], spec.format)
     return [{ path: specPath, before: await io.read(specPath), after: json({ schemaVersion: 1, projectId: ledger.projectId, spec }) }, { path: CONFIG_PATH, before, after: yaml.toString() }]
   })

@@ -66,7 +66,8 @@ export const materialSchema = z.object({ id, projectRelativePath: relativePath, 
   parsedRanges: z.array(z.object({ kind: z.enum(['pages', 'paragraphs']), from: z.number().int().min(1), to: z.number().int().min(1) }).strict()),
   parser: z.object({ id: z.string(), version: z.string() }).strict().optional(), failureCode: z.string().optional(),
 }).strict()
-export const sourceSchema = z.object({ id, kind: z.enum(['paper', 'dataset', 'web', 'book', 'user-result', 'other']), title: z.string().min(1), authors: z.array(z.object({ literal: z.string(), family: z.string().optional(), given: z.string().optional() }).strict()),
+export const bibliographyMetadata=z.object({volume:z.string().max(100).optional(),issue:z.string().max(100).optional(),pages:z.string().max(200).optional(),publisher:z.string().max(1000).optional(),publisherPlace:z.string().max(1000).optional(),edition:z.string().max(100).optional()}).strict()
+export const sourceSchema = z.object({ id, kind: z.enum(['paper', 'dataset', 'web', 'book', 'user-result', 'other']), title: z.string().min(1), authors: z.array(z.object({ literal: z.string(), family: z.string().optional(), given: z.string().optional() }).strict()),bibliography:bibliographyMetadata.optional(),
   year: z.number().int().min(1).max(9999).optional(), venue: z.string().optional(),
   identifiers: z.object({ doi: z.string().optional(), arxiv: z.string().optional(), url: z.string().optional(), other: z.array(z.string()).optional() }).strict(),
   citeKey: z.string().regex(/^sf_[a-zA-Z0-9_]+$/), provenance: z.array(z.object({ provider: z.string(), retrievedAt: z.string(), recordId: z.string().optional() }).strict()),
@@ -96,7 +97,7 @@ export const issueSchema = z.object({ id, reviewId: id, category: z.enum(['citat
 export const deliverySchema = z.object({ id, projectId: id, documentId: id, documentHash: hash, revisionId: id,
   ledgerRevision: z.number().int().min(0), reviewId: id.optional(), reviewState: z.enum(['draft-incomplete', 'draft-reviewed', 'review-stale']),
   unresolvedIssueIds: z.array(id), sourceIds: z.array(id),
-  files: z.array(z.object({ relativePath, hash, sizeBytes: z.number().int().min(0) }).strict()), createdAt: z.string() }).strict()
+  files: z.array(z.object({ relativePath, hash, sizeBytes: z.number().int().min(0),encoding:z.literal('base64').optional() }).strict()), createdAt: z.string() }).strict()
 const record = <T extends z.ZodType>(schema: T) => z.record(id, schema)
 export const memoryEntrySchema = z.object({ id, kind: z.enum(['decision', 'terminology', 'writing-preference']), state: z.literal('confirmed'),
   textHash: hash, contextHash: hash, startUtf16: z.number().int().nonnegative(), endUtf16: z.number().int().nonnegative(),

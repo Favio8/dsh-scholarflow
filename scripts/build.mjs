@@ -42,5 +42,5 @@ const client = await build({ entryPoints: ['src/client/plugin.tsx'], bundle: tru
   define: { __SF_KATEX_CSS__: JSON.stringify(scopedMathCss) },
   plugins: [jsxRuntimeShim],
   platform: 'browser', format: 'cjs', external: ['react', 'react-dom', '@deepseek-ai/*'],
-  target: 'chrome148', sourcemap: false })
+  target: 'chrome148', sourcemap: false,minifyWhitespace:true,minifySyntax:true,keepNames:true })
 await writeFile('dist/client.js', `window.__ModuleLoader__.load({id:'dsh-scholarflow',factory:(require)=>{\nconst module={exports:{}};const exports=module.exports;\n${client.outputFiles[0].text}\nreturn module.exports;}});\n`)

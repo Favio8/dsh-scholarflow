@@ -161,9 +161,9 @@ document.querySelectorAll('.sf-source-editor').forEach(editor => {
     on a range that actually wraps — a one-line span cannot show a seam. */
 const draftPreviewBody = () => `<div class="sf-app sf-paper-project" style="height:340px;display:flex;flex-direction:column">
 <div class="sf-preview-pane" style="display:flex;flex-direction:column;min-height:0;flex:1">
-<div class="sf-paper-scroll" style="flex:1;min-height:0;overflow:auto"><div class="sf-paper-page">
+<div class="sf-paper-scroll" style="flex:1;min-height:0;overflow:auto"><div class="sf-paper-page"><div class="sf-paper-sheet">
 <article class="sf-prose"><p data-sf-block="p_TEST_ONLY" style="white-space:pre-wrap"><span data-sf-leaf="leaf_TEST_ONLY_plain">同样长度的未标注文字</span><span class="sf-mark-inline" data-sf-marked="true" data-flow="off">这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续这是一段很长的被标注文字用来测试折行之后渐变是否仍然连续</span></p></article>
-</div></div></div></div>`
+</div></div></div></div></div>`
 
 const presetRow = (title, summary, chosen, current, manage) => `<div style="display:flex;align-items:center">
 <button class="sf-preset-row"${chosen ? ' aria-pressed="true"' : ''}><span><strong>${title}</strong><small>${summary}</small></span>${current ? '<em>当前</em>' : ''}</button>
@@ -208,10 +208,10 @@ const stage = (id, title, body, width) => `<div class="stage" id="${id}"><h1>${t
 const splitBody = () => `<div class="sf-app sf-paper-project" style="height:620px">
 <div class="sf-editor-grid" data-view="split">
 <div class="sf-source-pane" style="--sf-editor-font:13px;--sf-editor-line:24px">${draftSource('sf-split-gutter')}</div></div>
-<div class="sf-preview-pane"><div class="sf-paper-scroll"><div class="sf-paper-page" data-format="docx"><article class="sf-prose">
+<div class="sf-preview-pane"><div class="sf-paper-scroll"><div class="sf-paper-page" data-format="docx"><div class="sf-paper-sheet"><div class="sf-paper-running-head">TEST_ONLY 科技论文</div><article class="sf-prose">
 <h1>TEST_ONLY 科技论文</h1><h2>研究背景</h2><h3>材料范围</h3>
 <p>TEST_ONLY 用于测量屏幕与导出标题比率及分屏接缝，不是学术生成结果。</p>
-</article></div></div></div></div></div>`
+</article><div class="sf-paper-foot"></div></div></div></div></div></div></div>`
 
 const controlsBody = () => `<div class="sf-app" style="height:auto;min-height:320px"><p>TEST_ONLY · 四种按钮与三档尺寸</p><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sf-space-4)">${['primary','secondary','ghost','danger'].flatMap(variant => ['sm','md','lg'].map(size => `<div><button class="sf-${variant}" data-size="${size}" data-contract-control="${variant}-${size}">测试</button><button class="sf-${variant}" data-size="${size}" disabled>禁用</button></div>`)).join('')}</div></div>`
 

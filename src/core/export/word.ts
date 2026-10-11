@@ -1,6 +1,6 @@
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, HeadingLevel, AlignmentType,
   ExternalHyperlink, PageNumber, Footer, LevelFormat, TableOfContents, BorderStyle, WidthType, VerticalAlign,
-  type FileChild, type ISectionOptions, type ParagraphChild } from 'docx'
+  ImageRun,type FileChild, type ISectionOptions, type ParagraphChild } from 'docx'
 import type { AstNode, Projection } from '../editing/markdown.ts'
 import { projectMarkdown, textOf } from '../editing/markdown.ts'
 import type { CoverSpec, TypographySpec } from '../../shared/writing-task.ts'
@@ -9,6 +9,8 @@ import { DEFAULT_TYPOGRAPHY, typographyToDocx } from './typography.ts'
 import { scanDocument } from './scan.ts'
 import { gbt7714Entry, plainEntry } from './citations.ts'
 import { A4, THREE_LINE, firstLineIndentTwips, headingSizes, layoutOf, type LayoutSpec } from './layout.ts'
+import {apaLabels,apaReferences} from './apa.ts'
+import type {ExportImage} from './images.ts'
 
 // The Word exporter. Structure comes from `scanDocument`, values from `typographyToDocx` and
 // `layoutOf`; this file decides how a planned block becomes docx objects and nothing else.
@@ -46,6 +48,7 @@ export interface WordInput {
   typography?: TypographySpec
   cover?: CoverSpec
   layout?: LayoutSpec
+  images?:ExportImage[]
 }
 
 export async function buildWord(input: WordInput): Promise<Uint8Array> {
@@ -59,6 +62,7 @@ export async function buildWord(input: WordInput): Promise<Uint8Array> {
   const sources: Source[] = projection.citationOrder
     .map(key => Object.values(ledger.sources).find(row => row.citeKey === key))
     .filter((source): source is Source => !!source)
+  const apa=layout.referenceStyle==='apa7',labels=apa?apaLabels(input.text,sources):undefined
   const bodyPt = docx.sizeHalfPoints / 2
   const font = { ascii: docx.fonts.ascii, hAnsi: docx.fonts.hAnsi, eastAsia: docx.fonts.eastAsia, cs: docx.fonts.cs }
   const headingFont = { ascii: docx.fonts.ascii, hAnsi: docx.fonts.hAnsi, eastAsia: layout.headingFontZh, cs: docx.fonts.cs }
@@ -69,7 +73,12 @@ export async function buildWord(input: WordInput): Promise<Uint8Array> {
   const wantsToc = layout.tableOfContents !== 'none' && plan.headings.length >= TOC_THRESHOLD
 
   const inline = (node: AstNode, style: { bold?: boolean; italics?: boolean; strike?: boolean; size?: number } = {}): ParagraphChild[] => {
-    if (node.type === 'text') return [new TextRun({ text: (node.leafIds ?? []).map(id => leaves.get(id)!).filter(leaf => !leaf.citationKeys).map(leaf => leaf.text).join('') || node.value || '', font, ...style })]
+    if (node.type === 'text') return [new TextRun({ text: (node.leafIds ?? []).map(id => leaves.get(id)!).map(leaf => leaf.citationKeys&&apa?labels?.[leaf.citationKeys.join(';')]??leaf.text:leaf.text).join('') || node.value || '', font, ...style })]
+    if(node.type==='image'||node.type==='imageReference'){
+      const url=node.url??projection.tree.children?.find(row=>row.type==='definition'&&row.identifier===node.identifier)?.url
+      const image=input.images?.find(row=>row.relativePath===url)
+      if(image){const scale=Math.min(600/image.width,780/image.height,1),width=Math.max(1,Math.round(image.width*scale)),height=Math.max(1,Math.round(image.height*scale));return [new ImageRun({data:image.bytes,type:image.type,transformation:{width,height},altText:{title:node.alt??'',description:node.alt??'',name:node.alt??'Figure'}})]}
+    }
     if (node.type === 'inlineMath') return [new TextRun({ text: `$${node.value ?? ''}$`, font, ...style })]
     if (node.type === 'inlineCode') return [new TextRun({ text: node.value ?? '', font: { ...font, ascii: 'Consolas', hAnsi: 'Consolas' }, ...style })]
     if (node.type === 'break') return [new TextRun({ break: 1 })]
@@ -142,12 +151,10 @@ export async function buildWord(input: WordInput): Promise<Uint8Array> {
     switch (block.role) {
       case 'table': children.push(...table(block.node, block.caption)); break
       case 'figure': {
-        // The exporter cannot yet copy image assets, so the reference is shown as text
-        // rather than silently dropped or replaced with a placeholder.
         const image = block.node.type === 'image' ? block.node : (block.node.children ?? []).find(node => node.type === 'image')
         if (block.captionAbove && block.caption) children.push(caption(block.caption, true))
         children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: bodySpacing, indent: { firstLine: 0 },
-          children: [new TextRun({ text: `${image?.alt ? `${image.alt}：` : ''}${image?.url ?? ''}`, font, italics: true })] }))
+          children: image?inline(image):inline(block.node) }))
         if (!block.captionAbove && block.caption) children.push(caption(block.caption, false))
         break
       }
@@ -172,9 +179,10 @@ export async function buildWord(input: WordInput): Promise<Uint8Array> {
     // GB/T 7714 hangs the entry two characters so the [n] markers line up; the plain style
     // has nothing to line up and stays flush.
     const gbt = layout.referenceStyle === 'gbt7714'
-    sources.forEach((source, index) => children.push(new Paragraph({ alignment: AlignmentType.JUSTIFIED, spacing: bodySpacing,
-      ...(gbt ? { indent: { left: 480, hanging: 480 } } : {}),
-      children: [new TextRun({ text: gbt ? gbt7714Entry(source, index + 1) : plainEntry(source, index + 1), font, size: docx.sizeHalfPoints })] })))
+    const entries=apa?apaReferences(sources).map(([,entry])=>entry):sources.map((source,index)=>gbt?gbt7714Entry(source,index+1):plainEntry(source,index+1))
+    entries.forEach(entry=>children.push(new Paragraph({ alignment: AlignmentType.JUSTIFIED, spacing: bodySpacing,
+      ...(gbt||apa ? { indent: { left: apa?720:480, hanging: apa?720:480 } } : {}),
+      children: [new TextRun({ text:entry,font,size:docx.sizeHalfPoints })] })))
   }
   if (wantsToc) children.unshift(new TableOfContents(language === 'zh-CN' ? '目录' : 'Contents', { hyperlink: true, headingStyleRange: '1-3',
     cachedEntries: plan.headings.slice(0, 60).map(row => ({ title: row.text, level: Math.max(0, Math.min(2, row.depth - 1)) })), beginDirty: true }))

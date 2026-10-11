@@ -105,17 +105,20 @@ body .sf-app .sf-pane-caption button{background:transparent;border-color:transpa
 .sf-line-gutter,.sf-app textarea.sf-source-input{font:var(--sf-editor-font,13px)/var(--sf-editor-line,24px) Consolas,'SFMono-Regular',monospace!important;tab-size:2}
 .sf-app textarea.sf-source-input{flex:1;width:0;min-width:0;height:100%;resize:none!important;border:0!important;border-radius:0;padding:20px 18px;white-space:pre-wrap;overflow-wrap:break-word;overflow-x:hidden;overflow-y:auto;outline:none!important;background:transparent;color:var(--sf-text);position:relative;z-index:1}
 .sf-preview-pane{background:transparent}
-.sf-paper-scroll{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-6)}
+.sf-paper-scroll{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-5) var(--sf-space-6)}
 /* Paper floats on the canvas by tint and lift, not by outline. A border here draws a hard
    rectangle around a sheet of paper, which reads as a card pasted onto the page; the wide,
    very soft shadow says "this is above that" without drawing a line. */
-.sf-paper-page{box-sizing:border-box;width:100%;max-width:var(--sf-measure);min-height:900px;margin:auto;padding:var(--sf-space-5) var(--sf-space-6);background:var(--sf-page-bg);color:var(--sf-page-text);border:0;border-radius:2px;box-shadow:0 1px 2px rgba(31,28,23,.05),0 8px 28px rgba(31,28,23,.07)}
+.sf-paper-page{box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;width:100%;max-width:var(--sf-measure);min-height:900px;margin:auto;padding:0;background:var(--sf-page-bg);color:var(--sf-page-text);border:0;border-radius:0;box-shadow:0 1px 2px rgba(31,28,23,.05),0 8px 28px rgba(31,28,23,.07)}
+.sf-paper-sheet{display:flex;flex-direction:column;flex:1;min-height:0;padding:var(--sf-space-7) var(--sf-space-8)}
+.sf-paper-running-head{flex:none;font-family:var(--sf-family-sans);font-size:var(--sf-font-xs);letter-spacing:.04em;color:var(--sf-page-faint);padding-bottom:var(--sf-space-4);margin-bottom:var(--sf-space-5);border-bottom:1px solid var(--sf-page-border-soft)}
+.sf-paper-foot{flex:none;margin-top:auto;padding-top:var(--sf-space-4);border-top:1px solid var(--sf-page-border-soft);font-family:var(--sf-family-sans);font-size:var(--sf-font-xs);color:var(--sf-page-faint);display:flex;justify-content:center;min-height:1.4em}
 .sf-paper-page{font-family:var(--sf-family-serif);font-size:var(--sf-font-prose)}
 .sf-paper-page .sf-prose{font-size:var(--sf-font-prose);line-height:var(--sf-leading-prose);overflow-wrap:anywhere}
 .sf-paper-page .sf-prose h1{font-size:var(--sf-font-display-2);line-height:var(--sf-leading-display-2);text-align:center;margin:0 0 28px}
 .sf-paper-page .sf-prose h2{font-size:var(--sf-font-title);line-height:var(--sf-leading-title);margin:26px 0 12px}
 .sf-paper-page .sf-prose h3{font-size:var(--sf-font-prose);margin:22px 0 10px}
-.sf-paper-page .sf-prose p{margin:.9em 0}.sf-paper-page .sf-prose pre{padding:var(--sf-space-2);background:var(--sf-surface-2)}
+.sf-paper-page .sf-prose p{margin:.9em 0}.sf-paper-page .sf-prose>p{text-indent:2em}.sf-paper-page .sf-prose :is(li,blockquote,figcaption,td,th) p,.sf-paper-page .sf-prose>p[data-no-indent]{text-indent:0}.sf-paper-page .sf-prose pre{padding:var(--sf-space-2);background:var(--sf-surface-2)}
 .sf-paper-page .sf-prose table{border-collapse:collapse;width:100%}.sf-paper-page .sf-prose td{padding:var(--sf-space-2);border:1px solid var(--sf-border)}
 .sf-paper-page .katex-display{overflow-x:auto;overflow-y:hidden;padding:var(--sf-space-2) 0}
 /* References belong to the sheet above them, so the rule is the sheet's own ink, one step
@@ -141,13 +144,13 @@ body .sf-app .sf-pane-caption button{background:transparent;border-color:transpa
 .sf-export-choice{position:absolute;inset:0;z-index:20;background:var(--sf-scrim);display:flex;align-items:center;justify-content:center;padding:var(--sf-space-5)}
 .sf-export-choice>section{width:390px;max-width:100%;padding:var(--sf-space-5);border-radius:var(--sf-radius-xl);background:var(--sf-surface);box-shadow:var(--sf-shadow-3)}
 .sf-export-choice button{display:block;width:100%;margin-top:var(--sf-space-2)}
-@container (max-width:700px){.sf-paper-header{padding:0 var(--sf-space-3);gap:var(--sf-space-2)}.sf-paper-title{max-width:26%}.sf-paper-page{padding:var(--sf-space-4) var(--sf-space-5)}.sf-paper-scroll{padding:var(--sf-space-4) var(--sf-space-5)}.sf-line-gutter{width:36px}}
+@container (max-width:700px){.sf-paper-header{padding:0 var(--sf-space-3);gap:var(--sf-space-2)}.sf-paper-title{max-width:26%}.sf-paper-sheet{padding:var(--sf-space-5) var(--sf-space-6)}.sf-paper-scroll{padding:var(--sf-space-4) var(--sf-space-5)}.sf-line-gutter{width:36px}}
 .sf-paper-project{position:relative;container-type:inline-size}
 .sf-pane-caption>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .sf-pane-zoom{display:flex;align-items:center;flex:none;white-space:nowrap;gap:1px}
 .sf-paper-project .sf-pane-zoom button{padding:var(--sf-space-1);min-width:22px;border:0;font-size:var(--sf-font-xs);font-variant-numeric:tabular-nums}
 .sf-paper-header{flex-wrap:nowrap}.sf-type-chip,.sf-export-split>button{white-space:nowrap;flex-shrink:0}
 .sf-paper-title{min-width:0;flex:1}.sf-paper-header .sf-native-tools{gap:var(--sf-space-1)}.sf-paper-header select{flex-shrink:0;width:82px}
-@container(max-width:640px){.sf-paper-title{display:none}.sf-paper-header{padding:0 var(--sf-space-2);gap:var(--sf-space-1)}.sf-native-tools{gap:var(--sf-space-1)}.sf-pane-caption{padding:0 var(--sf-space-2)}.sf-line-gutter{width:28px}.sf-source-input{padding-left:8px!important}.sf-paper-page{padding:var(--sf-space-4) var(--sf-space-5)}}
+@container(max-width:640px){.sf-paper-title,.sf-paper-running-head{display:none}.sf-paper-header{padding:0 var(--sf-space-2);gap:var(--sf-space-1)}.sf-native-tools{gap:var(--sf-space-1)}.sf-pane-caption{padding:0 var(--sf-space-2)}.sf-line-gutter{width:28px}.sf-source-input{padding-left:8px!important}.sf-editor-grid[data-view=split]{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}.sf-paper-scroll{padding:var(--sf-space-2)}.sf-paper-sheet{padding:var(--sf-space-4) var(--sf-space-5)}}
 @container(max-width:420px){.sf-paper-header select{width:64px}.sf-export-format-label{display:none}.sf-paper-toolbar{padding:0 var(--sf-space-2)}}
 `

@@ -6,6 +6,8 @@ import type { Ledger, ProjectConfig, Source } from '../../shared/schema.ts'
 import type { CoverSpec, TypographySpec } from '../../shared/writing-task.ts'
 import { projectMarkdown, type AstNode } from '../editing/markdown.ts'
 import { buildWord } from './word.ts'
+import {apaLabels,apaReferences} from './apa.ts'
+import type {ExportImage} from './images.ts'
 
 const texEscapes: Record<string, string> = {
   '\\': '\\textbackslash{}', '{': '\\{', '}': '\\}', '$': '\\$', '&': '\\&', '#': '\\#', '%': '\\%',
@@ -21,7 +23,7 @@ const texEscape = (text: string): string => text.replace(/[\\{}$&#%_^~]/g, char 
  * package, which this plugin does not introduce. The reference list here is hand-written
  * `thebibliography` with an approximate hanging indent, and that is what the notes say.
  */
-export function latexDocument(text: string, config: ProjectConfig, ledger?: Ledger, typography?: TypographySpec) {
+export function latexDocument(text: string, config: ProjectConfig, ledger?: Ledger, typography?: TypographySpec,images:ExportImage[] = []) {
   const projection = projectMarkdown(text), leaves = new Map(projection.leaves.map(leaf => [leaf.id, leaf]))
   const plan = scanDocument(projection)
   const layout = layoutOf(typography ?? DEFAULT_TYPOGRAPHY, config.project.language)
@@ -30,12 +32,15 @@ export function latexDocument(text: string, config: ProjectConfig, ledger?: Ledg
   const sources: Source[] = projection.citationOrder
     .map(key => Object.values(ledger?.sources ?? {}).find(row => row.citeKey === key))
     .filter((source): source is Source => !!source)
+  const apa=layout.referenceStyle==='apa7',labels=apa?apaLabels(text,sources):undefined
   const render = (node: AstNode): string => {
     const children = () => (node.children ?? []).map(render).join('')
     switch (node.type) {
       case 'root': return children()
       case 'text': return node.leafIds?.map(id => { const leaf = leaves.get(id)!; return leaf.citationKeys
-        ? `\\cite{${leaf.citationKeys.join(',')}}` : texEscape(leaf.text) }).join('') ?? texEscape(node.value ?? '')
+        ? apa?texEscape(labels?.[leaf.citationKeys.join(';')]??leaf.text):`\\cite{${leaf.citationKeys.join(',')}}` : texEscape(leaf.text) }).join('') ?? texEscape(node.value ?? '')
+      case 'image': return `\\includegraphics[width=\\linewidth,height=.8\\textheight,keepaspectratio]{${texEscape(node.url??'')}}`
+      case 'imageReference': {const definition=projection.tree.children?.find(row=>row.type==='definition'&&row.identifier===node.identifier);return definition?`\\includegraphics[width=\\linewidth,height=.8\\textheight,keepaspectratio]{${texEscape(definition.url??'')}}`:''}
       case 'paragraph': return children() + '\n\n'
       case 'heading': return node === firstTitle ? `\\title{${children()}}\\date{}\\maketitle\n\n`
         : `\\${['section', 'section', 'subsection', 'subsubsection', 'paragraph', 'subparagraph'][Math.min(5, (node.depth ?? 1) - 1)]}{${children()}}\n\n`
@@ -74,14 +79,14 @@ export function latexDocument(text: string, config: ProjectConfig, ledger?: Ledg
   // table is not in the list, so it cannot be printed twice.
   const body = plan.blocks.map(block => render(block.node)).join('')
   const chinese = config.project.language === 'zh-CN'
-  const bibliography = layout.referenceStyle === 'gbt7714' && sources.length
-    ? ['\\begin{thebibliography}{9}', ...sources.map((source, index) => `\\bibitem{ref_${index + 1}} ${texEscape(gbt7714Entry(source, index + 1))}`), '\\end{thebibliography}']
+  const bibliography = apa&&sources.length?['\\section*{'+(chinese?'参考文献':'References')+'}',...apaReferences(sources).map(([,entry])=>'\\noindent '+texEscape(entry)+'\\par\\medskip')]:layout.referenceStyle === 'gbt7714' && sources.length
+    ? ['\\begin{thebibliography}{9}', ...sources.map((source, index) => `\\bibitem{${source.citeKey}} ${texEscape(gbt7714Entry(source, index + 1).replace(/^\[\d+\]\s/u,''))}`), '\\end{thebibliography}']
     : projection.citationOrder.length ? ['\\bibliographystyle{unsrt}', '\\bibliography{references}'] : []
   return [
     chinese ? '\\documentclass[UTF8,a4paper,12pt]{ctexart}' : '\\documentclass[a4paper,12pt]{article}',
     '\\usepackage[margin=25mm]{geometry}', '\\usepackage{amsmath,amssymb}', '\\usepackage[normalem]{ulem}',
     '\\usepackage{booktabs}', '\\usepackage{caption}', '\\usepackage{fancyhdr}', '\\usepackage{titlesec}',
-    '\\usepackage{longtable}',
+    '\\usepackage{longtable}',...(images.length?['\\usepackage{graphicx}']:[]),
     ...(chinese ? ['\\pagestyle{fancy}\\fancyhf{}\\fancyfoot[C]{\\thepage}'] : []),
     ...(layout.headingNumbering === 'none' ? ['\\setcounter{secnumdepth}{0}'] : ['\\setcounter{secnumdepth}{3}']),
     ...(layout.headingNumbering === 'chinese' && chinese ? ['\\renewcommand{\\thesection}{\\zhnum{section}}'] : []),
@@ -94,7 +99,7 @@ export function latexDocument(text: string, config: ProjectConfig, ledger?: Ledg
  * so a caller never has to know how the document is assembled.
  */
 export async function wordDocument(text: string, config: ProjectConfig, ledger: Ledger,
-  options: { typography?: TypographySpec; cover?: CoverSpec } = {}): Promise<Uint8Array> {
+  options: { typography?: TypographySpec; cover?: CoverSpec;images?:ExportImage[] } = {}): Promise<Uint8Array> {
   return buildWord({ text, config, ledger, typography: options.typography ?? DEFAULT_TYPOGRAPHY, cover: options.cover,
-    layout: layoutOf(options.typography ?? DEFAULT_TYPOGRAPHY, config.project.language) })
+    layout: layoutOf(options.typography ?? DEFAULT_TYPOGRAPHY, config.project.language),images:options.images })
 }

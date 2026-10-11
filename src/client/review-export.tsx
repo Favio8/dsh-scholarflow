@@ -8,6 +8,7 @@ import { ReviewFixes } from './review-fixes.tsx'
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 export function ReviewExport({ project, context, api, refresh, run, busy, mode, onLocate, format = 'markdown', exportTrigger = 0 }: Props & { mode: string; format?: ExportFormat; exportTrigger?: number; onLocate: (location: any) => void }) {
   const [review, setReview] = useState<any>(), [message, setMessage] = useState('')
+  const [lastDelivery,setLastDelivery]=useState<any>()
   const handledTrigger = useRef(0)
   const download = (data: BlobPart, filename: string, type: string) => {
     const url = URL.createObjectURL(new Blob([data], { type })), link = document.createElement('a')
@@ -35,9 +36,10 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode, 
       const main = delivery.files.find((file: any) => file.relativePath === 'paper.' + extension)
       if (!main) throw new Error('交付中缺少所选格式的正文。')
       const data = bytes(main)
-      download(typeof data === 'string' ? data : new Uint8Array(data).buffer, project.config.project.title.replace(/[<>:"/\\|?*]/g, '_') + '.' + extension, main.mediaType)
-      if (format === 'latex') { const bib = delivery.files.find((file: any) => file.relativePath === 'references.bib'); if (bib) download(bib.text, 'references.bib', 'text/plain;charset=utf-8') }
-      setMessage('已导出 ' + FORMAT_LABELS[format] + (plan.unresolvedIssueIds.length ? ' · 有待检查项，可在正文审查中查看。' : ''))
+      if(delivery.files.some((file:any)=>file.relativePath.startsWith('assets/'))||format==='latex')await downloadBundle(result.manifest.id)
+      else download(typeof data === 'string' ? data : new Uint8Array(data).buffer, project.config.project.title.replace(/[<>:"/\\|?*]/g, '_') + '.' + extension, main.mediaType)
+      setLastDelivery(result.manifest)
+      setMessage('已导出 '+(plan.reviewedAllowed?'已审查草稿':'工作草稿')+' · '+FORMAT_LABELS[format]+(plan.reviewState==='review-stale'?' · 审查已过期':plan.unresolvedIssueIds.length?' · 仍有待检查项':' · '+(plan.reviewedAllowed?'审查对应当前版本':'尚未完成全部审查')))
       await refresh()
     })
   }, [exportTrigger])
@@ -50,7 +52,7 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode, 
   }, [project.ledger.revision, project.document.contentHash, project.document.externalChange])
   const issues = Object.values(project.ledger.reviewIssues) as any[]
   return <>
-    {message && mode !== 'Export' && <div className="sf-editor-notice" role="status">{message}</div>}
+    {message && mode !== 'Export' && <div className="sf-editor-notice" role="status">{message}{lastDelivery&&<><button disabled={busy} onClick={()=>run(()=>downloadBundle(lastDelivery.id))}>下载完整交付包</button><button disabled={busy} onClick={()=>run(async()=>{const result=await api('export.read',{context:context(),deliveryId:lastDelivery.id}),file=result.files.find((row:any)=>row.relativePath==='quality-report.md');download(file.text,'quality-report.md','text/markdown;charset=utf-8')})}>下载质量报告</button></>}</div>}
     <section id="sf-panel-Review" role="tabpanel"  hidden={mode !== 'Review'} aria-label="审查"><h3>审查</h3>
       <p>规则检查、模型辅助与人工判断分别显示。未知项不能当作通过；问题经对应复查后才关闭。</p>
       <button disabled={busy || project.document.externalChange} onClick={() => run(async () => {

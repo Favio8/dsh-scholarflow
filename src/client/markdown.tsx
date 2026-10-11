@@ -1,6 +1,6 @@
 import React from 'react'
 import katex from 'katex'
-import { type AstNode, type Projection, type Leaf, type TextUnit, mapLeafPoint, validateRange, validateProseRange } from '../core/editing/markdown.ts'
+import { type AstNode, type Projection, type Leaf, type TextUnit, mapLeafPoint, validateRange, validateProseRange,projectMarkdown } from '../core/editing/markdown.ts'
 import type { SelectionPayload } from '../shared/editing.ts'
 
 /**
@@ -21,9 +21,11 @@ export function markedSlice(leaf: Leaf, range: { start: number; end: number }) {
   return { start: first.renderedStart, end: last.renderedEnd }
 }
 
-export function MarkdownView({ projection, annotations, afterBlock, markRange }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode;
-  afterBlock?: (start: number, end: number) => React.ReactNode; markRange?: { start: number; end: number; flowing: boolean } }) {
+export function MarkdownView({ projection, annotations, afterBlock, markRange,origins }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode;
+  afterBlock?: (start: number, end: number) => React.ReactNode; markRange?: { start: number; end: number; flowing: boolean };origins?:Array<{start:number;end:number;proposalId:string}> }) {
   const leaves = new Map(projection.leaves.map(leaf => [leaf.id, leaf]))
+  const noIndent=new Set<string>();let special=false
+  for(const node of projection.tree.children??[]){if(node.type==='heading')special=/^(?:摘要|abstract|关键词|keywords|参考文献|references|bibliography)$/iu.test((node.children??[]).map(child=>child.value??'').join('').trim());if(special&&node.blockId)noIndent.add(node.blockId)}
   const render = (node: AstNode, key: string): React.ReactNode => {
     const children = node.children?.map((child, index) => render(child, `${key}_${index}`))
     if (node.type === 'text') return <React.Fragment key={key}>{node.leafIds?.map(id => {
@@ -36,7 +38,7 @@ export function MarkdownView({ projection, annotations, afterBlock, markRange }:
     if (node.type === 'root') return <React.Fragment key={key}>{node.children?.map((child, index) => <React.Fragment key={index}>
       {annotations?.(child.position?.start.offset ?? 0, node.children?.[index + 1]?.position?.start.offset ?? projection.source.length + 1)}
       {render(child, `${key}_${index}`)}</React.Fragment>)}</React.Fragment>
-    if (node.type === 'paragraph') return <React.Fragment key={key}><p data-sf-block={node.blockId} tabIndex={-1} style={{ whiteSpace: 'pre-wrap' }}>{children}</p>
+    if (node.type === 'paragraph') return <React.Fragment key={key}><p data-sf-block={node.blockId} data-no-indent={noIndent.has(node.blockId??'')||undefined} className={origins?.some(range=>range.start<node.position!.end.offset!&&range.end>node.position!.start.offset!)?'sf-origin-ai':undefined} title={origins?.filter(range=>range.start<node.position!.end.offset!&&range.end>node.position!.start.offset!).map(range=>`包含已采用 AI 修改：${range.proposalId}`).join('；')||undefined} tabIndex={-1} style={{ whiteSpace: 'pre-wrap' }}>{children}</p>
       {afterBlock?.(node.position!.start.offset!, node.position!.end.offset!)}</React.Fragment>
     if (node.type === 'heading') return React.createElement(`h${node.depth ?? 2}`, { key, 'data-sf-heading-offset': node.position?.start.offset, tabIndex: -1 }, children)
     if (node.type === 'strong') return <strong key={key}>{children}</strong>
@@ -52,7 +54,7 @@ export function MarkdownView({ projection, annotations, afterBlock, markRange }:
     if (node.type === 'inlineCode') return <code key={key} data-sf-protected="true">{node.value}</code>
     if (node.type === 'code') return <pre key={key} data-sf-protected="true"><code>{node.value}</code></pre>
     if (node.type === 'html') return <span key={key} data-sf-protected="true">{node.value}</span>
-    if (node.type === 'image') return <span key={key} data-sf-protected="true">[图片：{node.alt || '未命名'}；未加载外部地址]</span>
+    if (node.type === 'image') return <span key={key} data-sf-protected="true">[图片：{node.alt || '未命名'}；{/^https?:/iu.test(node.url??'')?'未加载外部地址':'本地资源将在导出时检查并打包'}]</span>
     if (node.type === 'break') return <br key={key} data-sf-protected="true" />
     if (node.type === 'thematicBreak') return <hr key={key} />
     if (node.type === 'definition') return null
@@ -91,8 +93,11 @@ export function captureSelection(root: HTMLElement, projection: Projection, docu
   // exact text, allowing only that DOM paragraph separator to differ from source spacing.
   const separators = (text: string) => text.replace(/\r\n/g, '\n').replace(/\n{2,}/g, '\n')
   if (separators(validated.renderedText) !== separators(selection.toString())) throw new Error('选区包含非正文内容，请重新选择普通段落。')
+  // Display labels may use APA; authorization still uses the canonical citation-token
+  // projection shared with Core. The actual DOM text was verified immediately above.
+  const canonical=local?validateProseRange(projectMarkdown(projection.source),from,to):validateRange(projectMarkdown(projection.source),from,to)
   return { projectId, documentId: 'paper', documentHash: documentSnapshot.contentHash, revisionId: documentSnapshot.revisionId, blockIds: validated.blockIds,
-    sourceRange: { startUtf16: from, endUtf16: to }, sourceText: projection.source.slice(from, to), renderedText: validated.renderedText,
+    sourceRange: { startUtf16: from, endUtf16: to }, sourceText: projection.source.slice(from, to), renderedText: canonical.renderedText,
     prefixContext: projection.source.slice(Math.max(0, from - 200), from), suffixContext: projection.source.slice(to, to + 200),
     citationKeys: validated.citationKeys, claimIds: [], scope: 'inline', capturedAt: new Date().toISOString() }
 }

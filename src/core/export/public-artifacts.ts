@@ -23,14 +23,14 @@ export function validateExportUrl(value: string) {
   if (url!.protocol === 'http:' || url!.protocol === 'https:') invariant(!!url!.hostname, 'PUBLIC_LINK_INVALID', '公开链接缺少主机名。')
 }
 
-export function validateManuscriptPublication(text: string, tree: AstNode) {
+export function validateManuscriptPublication(text: string, tree: AstNode,assets:readonly string[] = []) {
   validateArtifactPrivacy(text)
   walk(tree, node => {
-    invariant(!['image', 'imageReference'].includes(node.type), 'IMAGE_EXPORT_UNAVAILABLE',
+    invariant(!['image', 'imageReference'].includes(node.type)||assets.length>0, 'IMAGE_EXPORT_UNAVAILABLE',
       '当前导出器尚未验证图片资源；请先移除图片或等待已测试的资源导出支持。')
   })
   walk(tree, node => {
     invariant(node.type !== 'html', 'HTML_EXPORT_UNAVAILABLE', '当前导出尚未验证原始 HTML 内资源与隐私，请明确改为已支持的 Markdown 后重新预检。')
-    if (['link', 'definition'].includes(node.type) && node.url) validateExportUrl(node.url)
+    if (['link', 'definition','image'].includes(node.type) && node.url&&!assets.includes(node.url)) validateExportUrl(node.url)
   })
 }

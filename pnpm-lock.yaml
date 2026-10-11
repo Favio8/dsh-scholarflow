@@ -18,6 +18,12 @@ importers:
       '@citation-js/plugin-bibtex':
         specifier: ^0.9.0
         version: 0.9.0(@citation-js/core@0.9.0)
+      '@citation-js/plugin-csl':
+        specifier: ^0.9.0
+        version: 0.9.0(@citation-js/core@0.9.0)
+      '@citation-js/plugin-ris':
+        specifier: ^0.9.0
+        version: 0.9.0(@citation-js/core@0.9.0)
       '@deepseek-ai/cordis':
         specifier: ~4.0.4
         version: 4.0.4
@@ -141,6 +147,18 @@ packages:
 
   '@citation-js/plugin-bibtex@0.9.0':
     resolution: {integrity: sha512-9n8EVP/kq+v7VuoWVI+p8SRE3KikQYd2c78NSRq9btC4b3XzuBA3qFI3uF6xyxbNLPtY7+Y4BQDayta2yrl1zQ==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      '@citation-js/core': ^0.9.0
+
+  '@citation-js/plugin-csl@0.9.0':
+    resolution: {integrity: sha512-P0uxGr/rE9LaT5mY0T+Xh6JqDc+rdA7U3HDR/tLkiJ1ITRszQVhV9wBaOLc7vwCD+vuwh+m0Bha13hlgZEB7Ng==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      '@citation-js/core': ^0.9.0
+
+  '@citation-js/plugin-ris@0.9.0':
+    resolution: {integrity: sha512-cqnZtV5C260xFYnwzu5fnrH/RDOUPuCLH9JOtkIgwUZvGtSbsBJ3sDrBtSXoH1h3/r2Aa1lCiWanVqv6jDRegQ==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@citation-js/core': ^0.9.0
@@ -729,6 +747,9 @@ packages:
   character-entities@2.0.2:
     resolution: {integrity: sha512-shx7oQ0Awen/BRIdkjkvz54PnEEI/EjwXDSIZp86/KKdbafHh1Df/RYGBhn4hbe2+uKC9FnT5UCEdyPz3ai9hQ==}
 
+  citeproc@2.4.63:
+    resolution: {integrity: sha512-68F95Bp4UbgZU/DBUGQn0qV3HDZLCdI9+Bb2ByrTaNJDL5VEm9LqaiNaxljsvoaExSLEXe1/r6n2Z06SCzW3/Q==}
+
   comma-separated-tokens@2.0.3:
     resolution: {integrity: sha512-Fu4hJdvzeylCfQPp9SGWidpzrMs7tTrlu6Vb8XGaRGck8QSNZJJp538Wrb60Lax4fPwR64ViY468OIUTbRlGZg==}
 
@@ -1277,6 +1298,18 @@ snapshots:
       '@citation-js/name': 0.4.2
       moo: 0.5.3
 
+  '@citation-js/plugin-csl@0.9.0(@citation-js/core@0.9.0)':
+    dependencies:
+      '@citation-js/core': 0.9.0
+      '@citation-js/date': 0.5.1
+      citeproc: 2.4.63
+
+  '@citation-js/plugin-ris@0.9.0(@citation-js/core@0.9.0)':
+    dependencies:
+      '@citation-js/core': 0.9.0
+      '@citation-js/date': 0.5.1
+      '@citation-js/name': 0.4.2
+
   '@deepseek-ai/cordis@4.0.4':
     dependencies:
       '@deepseek-ai/cosmokit': 1.8.5
@@ -1674,6 +1707,8 @@ snapshots:
   character-entities-legacy@3.0.0: {}
 
   character-entities@2.0.2: {}
+
+  citeproc@2.4.63: {}
 
   comma-separated-tokens@2.0.3: {}
 

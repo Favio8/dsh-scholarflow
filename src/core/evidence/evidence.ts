@@ -16,7 +16,7 @@ export async function registerSource(io: FileStore, input: z.infer<typeof source
       'STALE_LEDGER_REVISION', '来源提交前项目输入改变，未沿用旧预览。') }
     const material = input.materialId ? ledger.materials[input.materialId] : undefined
     invariant(!input.materialId || material?.contentHash, 'MATERIAL_NOT_PARSED', '请先解析关联的本地资料。')
-    if (material) await readParsed(io, material.id)
+    const parsed=material?await readParsed(io,material.id):undefined
     const doi = input.identifiers.doi?.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').toLowerCase()
     const arxiv = input.identifiers.arxiv ? normalizeArxiv(input.identifiers.arxiv) : undefined
     const matches = sourceMatches(input, ledger.sources), review = duplicateReview && duplicateSourceReview.parse(duplicateReview)
@@ -30,7 +30,7 @@ export async function registerSource(io: FileStore, input: z.infer<typeof source
       citeKey: `sf_${sourceId.slice(4, 16)}`, provenance: [{ provider: material ? 'local-material' : 'user-metadata', retrievedAt: new Date().toISOString() }],
       identity: { status: 'unverified', method: 'none', reason: '已登记用户元数据，尚未独立核验出版身份。' },
       textAccess: material ? 'fulltext' : 'metadata', ...(material?.contentHash && { contentHash: material.contentHash }), publicationState: 'unknown' })
-    if (material && material.parseStatus !== 'ready') ledger.sources[sourceId].textAccess = 'excerpt'
+    if (parsed) ledger.sources[sourceId].textAccess=parsed.blocks.length?parsed.coverage==='complete'?'fulltext':'excerpt':'none'
     invalidateReviews(ledger, ['citation', 'evidence'])
     if (review) return [{ path: `.scholarflow/research/source-decisions/${newId('decision')}.json`, before: undefined,
       after: json({ schemaVersion: 1, projectId: ledger.projectId, sourceId, sourceSessionId, decision: review.decision, reason: review.reason,

@@ -21,9 +21,10 @@ export function ProposalRevision({ image, context, api, run, busy, disabled, onR
       })}>预览编辑校验</button>
       <button disabled={busy || !!plan} onClick={() => setEditing(false)}>取消候选编辑</button>
     </>}
-    {plan && <section role="dialog" aria-label="编辑候选校验确认"><h4>校验后的新候选</h4>
+    {plan && <section className="sf-change" role="dialog" aria-label="编辑候选校验确认"><h4>校验后的新候选</h4>
       <p>原建议 {original.id} 将保留。主稿只在随后明确接受新候选时改变。</p>
-      {plan.proposal.edits.map((edit: any, index: number) => <div key={index}><b>− 当前主稿原文</b><pre>{edit.expectedText}</pre><b>+ 编辑后的候选</b><pre>{edit.replacementText}</pre></div>)}
+      {plan.proposal.edits.map((edit: any, index: number) => <div key={index}><b>当前主稿原文</b><pre className="sf-change-diff"><del>{edit.expectedText}</del></pre><b>编辑后的候选</b><pre className="sf-change-diff"><ins>{edit.replacementText}</ins></pre></div>)}
+      <p className="sf-change-why">{reason||'无理由'}</p>
       {plan.proposal.checks.map((check: any) => <p key={check.id}>{check.status} · {check.detail}</p>)}
       {plan.proposal.protectedFactChanges.map((change: string) => <p key={change}>{change}</p>)}
       <p>引用新增 {plan.proposal.citationChanges.added.join('、') || '无'}；删除 {plan.proposal.citationChanges.removed.join('、') || '无'}。</p>

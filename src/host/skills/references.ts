@@ -13,6 +13,7 @@ import { validateFrozenModelReview } from '../../core/review/model-run.ts'
 import { validateFrozenGeneration } from '../../core/pipeline/run-control.ts'
 import { batchPlanSchema } from '../../shared/research-batch.ts'
 import { verifyPlan as verifyResearchPlan } from '../../core/research/batch.ts'
+import {cowriteSuggestion} from '../../shared/writing-task.ts'
 
 type Host = any
 export async function knownSkillReferences(ctx: Host, qualifiedId: string, resourceDigest: string, signal: AbortSignal) {
@@ -35,7 +36,7 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
     const read = async (path: string) => {
       const selected = await target(path), before = await ctx.fs.stat(selected, signal)
       if (!before) { observations.push({ rootFingerprint, path, hash: 'absent' }); return undefined }
-      const cap = /^\.scholarflow\/runs\/workflow_[\w]+\/automatic\/automatic_[\w]+\/(?:review|work)-plan\.json$/u.test(path) ? 20 * 1024 * 1024 :
+      const cap = /^\.scholarflow\/(?:runs\/workflow_[\w]+\/automatic\/automatic_[\w]+\/(?:review|work)-plan|writing\/(?:contexts|suggestions)\/cowrite_[\w]+)\.json$/u.test(path) ? 20 * 1024 * 1024 :
         /^\.scholarflow\/identity\/history\/project_copy_[a-f0-9]{32}\.json$/u.test(path) ? 8 * 1024 * 1024 : 2 * 1024 * 1024
       invariant(before.type === 'file' && before.size <= cap, 'SKILL_REFERENCES_UNAVAILABLE', '已登记项目的引用记录类型或大小异常，未卸载。')
       const text = await ctx.fs.readText(selected, signal)
@@ -65,6 +66,26 @@ export async function knownSkillReferences(ctx: Host, qualifiedId: string, resou
     } else {
       invariant(raw.schemaVersion === 1 && raw.projectId === config.project.id && Array.isArray(raw.skills) && raw.skills.length === 0 && config.skills.bindings.length === 0,
         'SKILL_REFERENCES_UNAVAILABLE', '旧资源锁含无法确认的引用，未卸载。')
+    }
+    for(const kind of ['contexts','suggestions']){
+      const path=`.scholarflow/writing/${kind}`,directory=await target(path),info=await ctx.fs.stat(directory,signal)
+      if(!info)continue
+      invariant(info.type==='directory','SKILL_REFERENCES_UNAVAILABLE','改写历史目录类型异常。')
+      const records=await ctx.fs.listDir(directory,signal)
+      observations.push({rootFingerprint,path,hash:digest(json(records.map((row:Host)=>({name:row.name,type:row.type})).sort((a:Host,b:Host)=>a.name.localeCompare(b.name))))})
+      for(const row of records){
+        invariant(row.type==='file'&&/^cowrite_[\w]+\.json$/u.test(row.name)&&++checkedRuns<=1000,'SKILL_REFERENCES_UNAVAILABLE','改写历史记录异常或超过扫描范围。')
+        const text=await read(`${path}/${row.name}`);invariant(text,'SKILL_REFERENCES_UNAVAILABLE','改写历史记录缺失。')
+        if(kind==='suggestions'){
+          const suggestion=parseStored(cowriteSuggestion,text,'SKILL_REFERENCES_UNAVAILABLE','skills.references')
+          invariant(historicalIdentity(suggestion.projectId),'SKILL_REFERENCES_UNAVAILABLE','改写历史不属于本项目谱系。')
+          if(suggestion.usage?.skillDigests.some(skill=>skill.qualifiedId===qualifiedId&&skill.digest===resourceDigest))references.push({workspaceId:workspace.id,kind:'run',recordId:suggestion.id})
+        }else{
+          const frozen=JSON.parse(text)
+          invariant(historicalIdentity(frozen.projectId)&&frozen.inputHash===digest(json(frozen.context))&&Array.isArray(frozen.context.academicSkills),'SKILL_REFERENCES_UNAVAILABLE','冻结改写输入缺失或改变。')
+          if(frozen.context.academicSkills.some((skill:Host)=>skill.qualifiedId===qualifiedId&&skill.digest===resourceDigest))references.push({workspaceId:workspace.id,kind:'run',recordId:frozen.runId})
+        }
+      }
     }
     const runRoot = await target('.scholarflow/runs'), info = await ctx.fs.stat(runRoot, signal)
     if (!info) continue

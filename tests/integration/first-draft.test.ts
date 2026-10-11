@@ -84,7 +84,7 @@ test('changed approved files stop before model use and historical tasks still de
 })
 test('missing evidence makes a complete labelled working draft without repeated material questions',async()=>{
   const f=await fixture();f.task.spec.materials=[]
-  await saveWritingSpec(f.io,f.task.spec,(await snapshot(f.io)).ledger.revision)
+  await saveWritingSpec(f.io,f.task.spec,(await snapshot(f.io)).ledger.revision,true)
   f.services.generate=async()=>{throw Error('facts cannot be generated without evidence')}
   await driveWritingTask(f.io,f.task,f.services)
   assert.equal(f.task.status,'completed');assert.equal(f.task.questions.length,0)

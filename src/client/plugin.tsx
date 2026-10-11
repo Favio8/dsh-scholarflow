@@ -184,6 +184,8 @@ export function apply(ctx: Host) {
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
     const [tab, setTab] = useState<(typeof TABS)[number]>('Draft')
+    const [overviewPage,setOverviewPage]=useState<'writing'|'requirements'|'skills'|'context'|'workflow'>('writing')
+    const [historyView,setHistoryView]=useState<'versions'|'runs'>('versions')
     const [registrationError, setRegistrationError] = useState('')
     const [registering, setRegistering] = useState(false)
     const registrationSequence = useRef(0)
@@ -221,7 +223,7 @@ export function apply(ctx: Host) {
     const refreshRef = useRef(refresh); refreshRef.current = refresh
     useEffect(() => {
       let live = true
-      setProject(undefined); setError(''); setTab('Draft'); setView('split'); setFormat('markdown'); setExportPrompt(false); setExportTrigger(0); setEditor(undefined); setIssueLocation(undefined); setGenerating(false); setGenerationMode(undefined)
+      setProject(undefined); setError(''); setTab('Draft');setOverviewPage('writing');setHistoryView('versions'); setView('split'); setFormat('markdown'); setExportPrompt(false); setExportTrigger(0); setEditor(undefined); setIssueLocation(undefined); setGenerating(false); setGenerationMode(undefined)
       if (workspace && props.sessionId) refresh().catch(e => live && setError(e.message))
       return () => { live = false }
     }, [workspace?.workspaceId, props.sessionId])
@@ -267,13 +269,13 @@ export function apply(ctx: Host) {
     }, [ready, bindingKey, project?.binding?.projectId, project?.config?.project?.title])
     useEffect(() => { if (project?.initialized) setFormat(project.config.output.defaultFormat ?? 'markdown') }, [project?.config?.output?.defaultFormat, project?.binding.projectId])
     const changeFormat = (value: ExportFormat) => act(async () => { await api('writingTask.format', { context: context(), format: value }); setFormat(value); await refresh() })
-    const draftTool = tab === 'Changes' ? tab : undefined
+    const draftTool = tab === 'Changes' ? tab : tab === 'History' && historyView === 'runs' ? 'History' : undefined
     const startExport = () => { setExportPrompt(false); setExportTrigger(value => value + 1) }
     const requestExport = (selected: ExportFormat) => { setFormat(selected); if (editor?.dirty) setExportPrompt(true); else startExport() }
     const closeMenu = (element: HTMLElement) => element.closest('details')?.removeAttribute('open')
     return <section ref={confirmationRoot} className="sf-project sf-paper-project" aria-label="ScholarFlow 项目" data-sf-session-id={props.sessionId} aria-busy={busy}>
       <header className="sf-paper-header"><strong className="sf-paper-title" title={ready ? project.config.project.title : 'ScholarFlow'}>{ready ? project.config.project.title : 'ScholarFlow'}</strong>
-        {ready && <><button className="sf-type-chip" title="写作要求" onClick={() => setTab('Overview')}>{TYPE_LABELS[project.config.project.type]} <WorkbenchIcon kind="down" /></button>
+        {ready && <><button className="sf-type-chip" title="写作要求" onClick={() => { setOverviewPage('writing'); setTab('Overview') }}>{TYPE_LABELS[project.config.project.type]} <WorkbenchIcon kind="down" /></button>
           <select aria-label="排版与导出格式" title="排版与导出格式" value={format} onChange={e => changeFormat(e.target.value as ExportFormat)}>
             {Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></>}
         {props.renderNativeTools?.(ready && <div className="sf-export-split"><button disabled={busy} onClick={() => requestExport(format)}>导出<span className="sf-export-format-label"> {FORMAT_LABELS[format]}</span></button><details className="sf-paper-menu sf-paper-export"><summary aria-label="更多导出选项"><WorkbenchIcon kind="down" /></summary><div className="sf-paper-menu-popover">
@@ -297,14 +299,17 @@ export function apply(ctx: Host) {
         <div className="sf-paper-toolbar"><nav className="sf-paper-views" aria-label="正文视图">
           {(['edit', 'preview', 'split'] as const).map((name, index) => <button className="sf-ghost" key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && view === name} onClick={() => { setTab('Draft'); setView(name) }}>{['编辑', '预览', '分屏'][index]}</button>)}
         </nav><details className="sf-paper-menu"><summary aria-label="更多论文选项"><WorkbenchIcon kind="more" /></summary><div className="sf-paper-menu-popover">
-          {(['Overview', 'Research', 'History'] as const).map(name => <button key={name} onClick={e => { closeMenu(e.currentTarget); setTab(name) }}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
+          {(['Overview', 'Research', 'Outline', 'Review', 'Changes', 'Settings', 'History','Export'] as const).map(name => <button key={name} onClick={e => { closeMenu(e.currentTarget); if(name==='Overview')setOverviewPage('writing');if(name==='History')setHistoryView('versions');setTab(name) }}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
+          <button onClick={e=>{closeMenu(e.currentTarget);setHistoryView('runs');setTab('History')}}>运行记录与恢复</button>
+          {([['skills','本项目 Skill'],['context','文风与记忆'],['requirements','高级要求'],['workflow','引导流程']] as const).map(([page,label])=><button key={page} onClick={e=>{closeMenu(e.currentTarget);setOverviewPage(page);setTab('Overview')}}>{label}</button>)}
         </div></details></div>
         {tab !== 'Draft' && <div className="sf-tool-back"><button className="sf-ghost" onClick={() => setTab('Draft')}><WorkbenchIcon kind="back" /> 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
         <WritingProgress api={api} context={context} refresh={refresh} onManage={setTab} onTask={(result:any)=>setGenerationMode(result.task?.mode)} />
         <div className="sf-paper-content">
-          <div id="sf-panel-Overview" role="tabpanel" aria-label="概览" hidden={tab !== 'Overview'}><WritingRequirements key={`requirements_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} onFormat={setFormat} /></div>
+          <div id="sf-panel-Overview" role="tabpanel" aria-label="概览" hidden={tab !== 'Overview'}><div hidden={overviewPage!=='writing'}><WritingRequirements key={`requirements_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} onFormat={setFormat} /></div>
+            <div hidden={overviewPage==='writing'}><Overview project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} section={overviewPage==='writing'?'requirements':overviewPage} navigate={page=>setTab(page as typeof tab)} /></div></div>
           <div id="sf-panel-Research" role="tabpanel" aria-label="资料与研究" hidden={tab !== 'Research'}><PaperMaterials key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
-          <div id="sf-panel-History" role="tabpanel" aria-label="版本记录" hidden={tab !== 'History'}><PaperVersions project={project} api={api} context={context} /></div>
+          <div id="sf-panel-History" role="tabpanel" aria-label="版本记录" hidden={tab !== 'History' || historyView !== 'versions'}><PaperVersions project={project} api={api} context={context} refresh={refresh} /></div>
           <div id="sf-panel-Outline" role="tabpanel" aria-label="大纲" hidden={tab !== 'Outline'}><OutlineEditor key={`outline_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
           <div id="sf-panel-Draft" role="tabpanel" aria-label={draftTool ? TAB_LABELS[TABS.indexOf(draftTool)] : '正文'} hidden={tab !== 'Draft' && !draftTool}>
             <Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} issueLocation={issueLocation}

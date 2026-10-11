@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { requestContext, id, hash, sourceSchema, evidenceSchema, claimSchema, outlineSchema } from './schema.ts'
 
 export const sourceInput = z.object({ title: sourceSchema.shape.title, authors: sourceSchema.shape.authors, year: sourceSchema.shape.year,
-  venue: sourceSchema.shape.venue, kind: sourceSchema.shape.kind, identifiers: sourceSchema.shape.identifiers, materialId: id.optional() }).strict()
+  venue: sourceSchema.shape.venue,bibliography:sourceSchema.shape.bibliography, kind: sourceSchema.shape.kind, identifiers: sourceSchema.shape.identifiers, materialId: id.optional() }).strict()
 export const registerSourceRequest = z.object({ context: requestContext, source: sourceInput }).strict()
 export const duplicateSourceReview = z.object({ decision: z.literal('keep-separate'), reason: z.string().trim().min(1).max(4000),
   matches: z.array(z.object({ sourceId: id, sourceHash: hash }).strict()).min(1).max(1000) }).strict()

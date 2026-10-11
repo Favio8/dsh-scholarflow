@@ -53,6 +53,19 @@ export async function registerMaterial(io: FileStore, input: { relativePath: str
 }
 export const materialCachePath = (materialId: string, contentHash: string, parser: ParsedMaterial['parser'], ranges: ParsedMaterial['ranges']) =>
   `.scholarflow/cache/materials/${materialId}/${contentHash.slice(7)}/${digest(json({ parser, ranges })).slice(7)}.json`
+export async function selectMaterial(io:FileStore,materialId:string,included:boolean,revision:number){
+  return mutateLedger(io,revision,async(ledger,config)=>{
+    const material=ledger.materials[materialId];invariant(material,'MATERIAL_NOT_FOUND','资料不存在。')
+    const paths=included?[...new Set([...config.materials.include,material.projectRelativePath])]:config.materials.include.filter(path=>path!==material.projectRelativePath)
+    const before=(await io.read(CONFIG_PATH))!,yaml=parseDocument(before.text);yaml.setIn(['materials','include'],paths)
+    if(!included){for(const evidence of Object.values(ledger.evidence))if(ledger.sources[evidence.sourceId]?.materialId===materialId)evidence.validation='stale'
+      for(const claim of Object.values(ledger.claims))if(claim.evidenceLinks.some(link=>ledger.evidence[link.evidenceId]?.validation==='stale'))claim.status='stale'}
+    invalidateReviews(ledger,['evidence','citation','integrity'])
+    const specFile=await io.read('.scholarflow/writing/requirements.json'),mutations=[{path:CONFIG_PATH,before,after:yaml.toString()}]
+    if(specFile){const image=JSON.parse(specFile.text);image.spec.materials=paths;mutations.push({path:'.scholarflow/writing/requirements.json',before:specFile,after:json(image)})}
+    return mutations
+  })
+}
 export async function readParsed(io: FileStore, materialId: string) {
   const { config, ledger } = await snapshot(io)
   const material = ledger.materials[materialId]

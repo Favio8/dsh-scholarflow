@@ -151,6 +151,12 @@ body .sf-wizard .sf-wizard-steps span{width:var(--sf-control-sm);height:var(--sf
 body .sf-wizard .sf-wizard-footer{margin-top:var(--sf-space-6);padding-top:var(--sf-space-4)}
 body .sf-wizard .sf-wizard-page>.sf-form{margin-top:var(--sf-space-4)}
 body .sf-settings-card{padding:var(--sf-space-panel)}
+body .sf-capability-panel{max-width:960px;margin:auto}
+body .sf-capability-panel fieldset{min-width:0;border:0;margin:0;padding:var(--sf-space-3) 0}
+body .sf-capability-panel legend{font-weight:600;color:var(--sf-text)}
+body .sf-capability-panel label:has(input[type=checkbox]){display:inline-flex;align-items:flex-start;gap:var(--sf-space-2);margin:var(--sf-space-2) var(--sf-space-3) var(--sf-space-2) 0}
+body .sf-capability-panel :is(input,select,textarea){max-width:100%}
+body .sf-paper-toolbar .sf-paper-menu-popover{max-height:60vh;overflow:auto}
 body .sf-settings{width:100%;box-sizing:border-box;max-width:800px;padding:var(--sf-space-5);height:auto;min-height:100%}
 body .sf-settings-heading{display:flex;align-items:center;gap:var(--sf-space-3);margin-bottom:var(--sf-space-6)}
 body .sf-settings-heading>svg{color:var(--sf-accent-text);flex:none}
@@ -199,7 +205,7 @@ body .sf-state-details pre,body .sf-boundary pre{background:transparent;border:0
 @keyframes sf-state-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){body .sf-state-icon[data-animated]{animation:none}}
 @media(max-width:520px){body .sf-state{flex-wrap:wrap;align-items:flex-start}body .sf-state>button{margin-left:48px}}
-@container(max-width:420px){body .sf-paper-header{flex-wrap:wrap}body .sf-paper-header .sf-native-tools{margin-left:auto}body .sf-pane-caption{flex-wrap:wrap;gap:var(--sf-space-1)}body .sf-pane-caption>span:first-child{flex:1}body .sf-pane-caption>button{flex-shrink:0;white-space:nowrap}body .sf-pane-caption .sf-pane-zoom{order:2;flex-basis:100%;justify-content:space-between}}
+@container(max-width:420px){body .sf-paper-header{flex-wrap:wrap}body .sf-paper-header .sf-native-tools{margin-left:auto}body .sf-pane-caption{gap:var(--sf-space-1)}body .sf-pane-caption>span:first-child{flex:1}body .sf-pane-caption>button{flex-shrink:0;white-space:nowrap}body .sf-status-heading{display:none}}
 @media(max-width:720px){:root{--sf-hit-min:44px}body .sf-create-scroll{padding:var(--sf-space-3)}body .sf-wizard{padding:var(--sf-space-4)}body .sf-wizard-footer{flex-wrap:wrap;gap:var(--sf-space-2)}body .sf-wizard-footer>span{display:none}body .sf-wizard-footer>button{flex:1 1 auto;white-space:normal}body .sf-wizard .sf-outline-toolbar{gap:var(--sf-space-2)}}
 @media(max-width:420px){body .sf-wizard .sf-wizard-clear{float:none;margin-left:0}}
 /* Layout primitives (SF-136..139). One definition each — a field row, a section band, a

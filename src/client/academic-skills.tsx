@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import type { SkillManifest } from '../shared/skills.ts'
+import { SkillAuthor } from './skill-author.tsx'
 
 type Api = (method: string, request: any) => Promise<any>
 const CAPABILITIES = [['draft-section', '章节写作'], ['selection-transform', '选区改写'], ['review', '审查'], ['research', '研究'], ['planning', '规划']] as const
@@ -7,6 +8,7 @@ const STAGES = [['requirements', '要求'], ['research', '研究'], ['outline', 
 const toggle = (values: string[], value: string, enabled: boolean) => enabled ? [...new Set([...values, value])] : values.filter(item => item !== value)
 
 export function AcademicSkills({ api }: { api: Api }) {
+  const [author,setAuthor]=useState<{source?:SkillManifest}>()
   const [catalog, setCatalog] = useState<any>(), [source, setSource] = useState<any>(), [plan, setPlan] = useState<any>()
   const [retirement, setRetirement] = useState<any>()
   const [path, setPath] = useState(''), [subpath, setSubpath] = useState('')
@@ -42,6 +44,8 @@ export function AcademicSkills({ api }: { api: Api }) {
       <p>只使用说明文本和静态资源；附带脚本、工具权限、依赖及服务声明不会执行。</p></details>
     {error && <p role="alert" className="sf-error">{error}</p>}<p role="status">{message}</p>
     <div className="sf-group-body">
+    <button className="sf-primary" onClick={()=>setAuthor({})}>新建写作 Skill</button>
+    {author&&<SkillAuthor key={author.source?.digest??'new'} api={api} source={author.source} onClose={()=>setAuthor(undefined)} onInstalled={async()=>{await refresh();setMessage('已保存固定版本。请到「项目 Skill」绑定并启用，写作时可查看使用记录。')}}/>}
     <div className="sf-form">
       <div className="sf-field"><span className="sf-field-label">Skill 导入来源</span><div className="sf-field-control"><select aria-label="Skill 导入来源" disabled={busy} value={kind} onChange={e => {
         const value = e.target.value as 'local' | 'github'
@@ -108,6 +112,7 @@ export function AcademicSkills({ api }: { api: Api }) {
     {catalog?.versions.length ? <ul>{catalog.versions.map((manifest: SkillManifest) => <li key={`${manifest.metadata.qualifiedId}:${manifest.digest}`}>
       <b>{manifest.metadata.displayName}</b> · {manifest.metadata.compatibility === 'partial' ? '部分支持' : '说明性支持'}
       <p>{manifest.metadata.description}</p><p>身份：{manifest.metadata.qualifiedId}<br />固定摘要：{manifest.digest}</p>
+      <button disabled={busy} onClick={()=>setAuthor({source:manifest})}>{manifest.origin.kind==='user'?'编辑并保存新版本':'复制为我的 Skill'}</button>
       <button disabled={busy} onClick={() => act(async () => {
         if (retirement?.planId) await api('skills.dismiss', { planId: retirement.planId })
         setRetirement(await api('skills.prepareRetirement', { qualifiedId: manifest.metadata.qualifiedId, digest: manifest.digest }))

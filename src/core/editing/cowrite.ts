@@ -1,4 +1,5 @@
-import { cowriteSuggestion } from '../../shared/writing-task.ts'
+import { cowriteSuggestion, type cowriteUsage } from '../../shared/writing-task.ts'
+import type { z } from 'zod'
 import { snapshot } from '../project/project.ts'
 import { readEditorBuffer } from './buffer.ts'
 import { citationKeys, parseMarkdown, unicodeBoundary } from './markdown.ts'
@@ -20,6 +21,7 @@ export async function currentWritingText(io: FileStore, sessionId: string) {
 export async function proposeCowrite(io: FileStore, sessionId: string, input: {
   text: string; baseDocumentHash: string; start: number; end: number; replacementText: string; instruction: string
   action?: 'rewrite' | 'polish' | 'shorten' | 'expand' | 'custom'; blockId?: string; baseBufferHash?: string
+  usage?: z.infer<typeof cowriteUsage>
 }, signal?: AbortSignal) {
   const current = await snapshot(io), before = input.text.slice(input.start, input.end)
   invariant(input.replacementText.trim(), 'INVALID_MODEL_OUTPUT', '模型未返回可用的改写结果，请重试。')
@@ -33,7 +35,7 @@ export async function proposeCowrite(io: FileStore, sessionId: string, input: {
     start: input.start, end: input.end, before, after: input.replacementText, instruction: input.instruction,
     action: input.action ?? 'custom', ...(input.blockId && { blockId: input.blockId }),
     protectedFactChanges: protectedChanges(before, input.replacementText), citationChanges: { added: citationKeys(input.replacementText).filter(key => !citationKeys(before).includes(key)), removed: citationKeys(before).filter(key => !citationKeys(input.replacementText).includes(key)) },
-    state: 'pending', createdAt: now, updatedAt: now })
+    ...(input.usage && { usage: input.usage }), state: 'pending', createdAt: now, updatedAt: now })
   await io.lock(async () => {
     signal?.throwIfAborted()
     await io.write(`.scholarflow/writing/suggestions/${suggestion.id}.json`, json(suggestion), undefined)

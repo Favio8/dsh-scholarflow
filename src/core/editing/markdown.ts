@@ -7,7 +7,7 @@ import { invariant } from '../../shared/errors.ts'
 import type { SelectionPayload } from '../../shared/editing.ts'
 
 export interface AstNode { type: string; value?: string; children?: AstNode[]; depth?: number; url?: string; alt?: string; ordered?: boolean;
-  position?: { start: { offset?: number }; end: { offset?: number } }; leafIds?: string[]; blockId?: string }
+  position?: { start: { offset?: number }; end: { offset?: number } }; leafIds?: string[]; blockId?: string;identifier?:string }
 export interface TextUnit { renderedStart: number; renderedEnd: number; sourceStart: number; sourceEnd: number }
 export interface Leaf { id: string; blockId?: string; text: string; start: number; end: number; units: TextUnit[]; mappable: boolean; citationKeys?: string[] }
 export interface Block { id: string; start: number; end: number; node: AstNode; editable: boolean }
@@ -68,7 +68,7 @@ function decodeUnits(raw: string, value: string, base: number) {
   return { units, mappable: rendered === value }
 }
 
-export function projectMarkdown(source: string, numbering: readonly string[] = []): Projection {
+export function projectMarkdown(source: string, numbering: readonly string[] = [], citationLabels?:Record<string,string>): Projection {
   const tree = parseMarkdown(source), leaves: Leaf[] = [], blocks: Block[] = [], citationOrder: string[] = []
   const addText = (node: AstNode, blockId?: string) => {
     const value = (node.value ?? '').replace(/\r\n|\r/g, '\n'), base = start(node), last = end(node)
@@ -83,7 +83,8 @@ export function projectMarkdown(source: string, numbering: readonly string[] = [
       const keys = [...match[0].matchAll(/@(sf_[a-zA-Z0-9_]+)/g)].map(item => item[1])
       for (const key of keys) if (!citationOrder.includes(key)) citationOrder.push(key)
       const order = [...numbering, ...citationOrder.filter(key => !numbering.includes(key))]
-      chunks.push({ from, to, text: `[${keys.map(key => order.indexOf(key) + 1).join(', ')}]`, citationKeys: keys }); cursor = to
+      const label=citationLabels?.[keys.join(';')]??(citationLabels&&keys.every(key=>citationLabels[key])?`(${keys.map(key=>citationLabels[key].replace(/^\(|\)$/g,'')).join('; ')})`:undefined)
+      chunks.push({ from, to, text: label??`[${keys.map(key => order.indexOf(key) + 1).join(', ')}]`, citationKeys: keys }); cursor = to
     }
     if (cursor < value.length) chunks.push({ from: cursor, to: value.length, text: value.slice(cursor) })
     node.leafIds = []

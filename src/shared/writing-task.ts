@@ -55,7 +55,8 @@ export const typographySpec = z.object({ bodyFontZh: z.string().trim().min(1).ma
   firstLineIndentChars: z.coerce.number().min(0).max(6).default(2),
   captionSizePt: z.coerce.number().min(6).max(24).default(10.5),
   tableStyle: z.enum(['three-line', 'grid']).default('three-line'),
-  referenceStyle: z.enum(['gbt7714', 'plain']).default('gbt7714'),
+  referenceStyle: z.enum(['gbt7714', 'plain', 'apa7']).default('gbt7714'),
+  referenceStyleExplicit:z.boolean().optional(),
   tableOfContents: z.enum(['none', 'field', 'auto']).default('auto') }).prefault({})
 export type TypographySpec = z.infer<typeof typographySpec>
 
@@ -247,7 +248,7 @@ export function writingReadPaths(spec: CreationSpec) {
 export const creationPrepareRequest = z.object({ context: requestContext, spec: creationSpec, mode: z.enum(['guided', 'first-draft']).default('guided') }).strict()
 export const writingTaskRequest = z.object({ context: requestContext, taskId: id.optional() }).strict()
 export const writingRequirementsRequest = z.object({ context: requestContext }).strict()
-export const writingPreferencesRequest = z.object({ context: requestContext, spec: creationSpec, baseSpecHash: hash.nullable().optional() }).strict()
+export const writingPreferencesRequest = z.object({ context: requestContext, spec: creationSpec, baseSpecHash: hash.nullable().optional(),baseRequirementsHash:hash.nullable().optional() }).strict()
 export const writingTaskAction = writingTaskRequest.extend({ action: z.enum(['pause', 'resume', 'cancel', 'answer', 'start-first-draft']),
   materials: z.array(relativePath).max(500).optional(), questionId: id.optional(), answer: z.string().trim().max(12000).optional(),
   duplicateDecision: z.literal('keep-separate').optional(), sourceConflictHash: hash.optional() }).strict()
@@ -258,12 +259,16 @@ export const cowriteRequest = z.object({ context: requestContext, text: z.string
  * buffer is the basis, while `baseDocumentHash` still guards the committed manuscript.
  */
 export const cowriteProposalRequest = cowriteRequest.extend({ baseBufferHash: hash.optional(), action: z.enum(['rewrite', 'polish', 'shorten', 'expand', 'custom']).default('custom'),
+  skillBindingId: id.optional(),
   instruction: z.string().trim().max(12000).default('') }).strict()
+export const cowriteUsage = z.object({ stage: z.literal('revision'), profileHash: hash, resourceLockHash: hash,
+  skillDigests: z.array(z.object({ qualifiedId: z.string(), digest: hash }).strict()).max(30),
+  runId:id.optional(),inputHash:hash.optional(),inputBytes:z.number().int().nonnegative().optional(),contextScope:z.enum(['full-manuscript','target-and-neighbors']).optional() }).strict()
 export const cowriteSuggestion = z.object({ schemaVersion: z.literal(1), id, projectId: id, sessionId: id, baseBufferHash: hash,
   baseDocumentHash: hash, start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), before: z.string(), after: z.string(),
   protectedFactChanges: z.array(z.string()).default([]), citationChanges: z.object({ added: z.array(z.string()), removed: z.array(z.string()) }).default({ added: [], removed: [] }),
   instruction: z.string(), action: z.enum(['rewrite', 'polish', 'shorten', 'expand', 'custom']).default('custom'),
-  blockId: id.optional(), state: z.enum(['pending', 'accepted', 'rejected']), createdAt: z.string(), updatedAt: z.string() }).strict()
+  usage: cowriteUsage.optional(),acceptedBufferHash:hash.optional(),acceptedStart:z.number().int().nonnegative().optional(), blockId: id.optional(), state: z.enum(['pending', 'accepted', 'rejected']), createdAt: z.string(), updatedAt: z.string() }).strict()
 
 export const STRUCTURES: Record<CreationSpec['type'], string[]> = {
   'course-paper': ['引言', '主题分析', '讨论', '结论'],

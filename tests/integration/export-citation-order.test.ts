@@ -45,7 +45,7 @@ test('V5: Markdown, LaTeX and Word deliver the same numbered citation order', as
   assert.match(tex, /\\cite\{sf_/)
   assert.ok(tex.includes(`\\cite{${keyB},${keyA}}`) || (tex.includes(`\\cite{${keyB}}`) && tex.includes(`\\cite{${keyA}}`)), 'LaTeX 使用真实引用键')
   assert.ok(tex.indexOf(`\\cite{${keyB}}`) < tex.indexOf(`\\cite{${keyA}}`), 'LaTeX 正文引用顺序保持')
-  assert.ok(tex.indexOf('\\bibitem{ref_1}') < tex.indexOf('\\bibitem{ref_2}'), '文献表顺序与引用顺序一致')
+  assert.ok(tex.indexOf(`\\bibitem{${keyB}}`) < tex.indexOf(`\\bibitem{${keyA}}`), '文献表使用真实引用键，顺序与正文一致')
   assert.ok(tex.indexOf('来源乙') < tex.indexOf('来源甲'), '文献表条目顺序与引用顺序一致')
   const bib = deliveries.latex!['references.bib']!
   assert.ok(bib.includes(keyB) && bib.includes(keyA), 'BibTeX 提供被引来源')

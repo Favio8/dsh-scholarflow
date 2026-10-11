@@ -20,7 +20,7 @@ test('AT-22/SF-025: unbundled relative links, definitions, referenced images and
     ['TEST_ONLY [local](../unselected-secret.txt)', 'LOCAL_RESOURCE_NOT_EXPORTABLE'],
     ['TEST_ONLY [resource][r]\n\n[r]: figures/data.csv "TEST_ONLY title"', 'LOCAL_RESOURCE_NOT_EXPORTABLE'],
     ['TEST_ONLY [unsafe](javascript:alert%281%29)', 'LOCAL_RESOURCE_NOT_EXPORTABLE'],
-    ['TEST_ONLY ![image][r]\n\n[r]: https://example.org/figure.png', 'IMAGE_EXPORT_UNAVAILABLE'],
+    ['TEST_ONLY ![image][r]\n\n[r]: https://example.org/figure.png', 'REMOTE_IMAGE_NOT_EXPORTABLE'],
     ['TEST_ONLY <a href="../unselected-secret.txt">private</a>', 'HTML_EXPORT_UNAVAILABLE'],
   ]) {
     const io = await setup(text), before = [...io.files.entries()], reads: string[] = [], read = io.read.bind(io)

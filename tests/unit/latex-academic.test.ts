@@ -52,7 +52,7 @@ test('the reference list is thebibliography, and never both lists', () => {
   assert.equal(/\\bibliographystyle/.test(tex), false)
   assert.equal(/\\bibliography\{references\}/.test(tex), false)
   assert.ok(tex.indexOf('TEST\\_ONLY 乙') < tex.indexOf('TEST\\_ONLY 甲'), '文献表顺序与引用顺序一致')
-  assert.match(tex, /\\bibitem\{ref_1\}/u)
+  assert.match(tex, /\\bibitem\{sf_two\}/u)
 })
 
 test('a caption the manuscript wrote is printed once, not twice', () => {

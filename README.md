@@ -1,6 +1,18 @@
+# ScholarFlow
+
+当前实现基线为 **PRD / SPEC v1.14**（2026-10-11），沿用 v1.0–v1.13；包版本仍为 1.0.0，本轮未发布。
+
+本轮接通完整工具导航、项目 Skill / 文风 / 记忆、资料读取与排除、创建后的要求来源与联网管理。私有库可新建写作 Skill、编辑为固定新版本、复制已有 Skill，再单独绑定项目和阶段。快捷改写统一政策与写作规则，保存实际输入和版本使用记录；保存决定失败可重试。
+
+历史版本可比较并明确恢复为新修订。新增 APA 7 作者年份、BibTeX / RIS 候选导入和重复预览；本地 PNG / JPEG 随 Markdown / Word / LaTeX 交付打包，Word 实际嵌图。快捷导出显示工作草稿/审查状态，提供同一快照的质量报告和完整 ZIP。过期审查按历史结果显示，统计来自当前导出稿。
+
+界面采用纸面与版心、首行缩进、真实改动与来源提示；窄窗分屏上下排列。构建和分层测试、隔离真实 Host 操作证据见 [v1.14 验证记录](docs/decisions/product-completion-v1.14.md)。真实提供方内容质量与这些证据分开，本轮不宣称正式 V1 发布完成。
+
+下面保留早期版本的能力说明与开发记录；各日期的验证结果仅对应当时构建。
+
 2026-10-10：首稿模式按确认大纲串行生成，正文真实增量预览、整节校验保存；普通问题后置、缺项待补，暂停即时取消，成稿后选文修改。旧任务保持原流程，可明确切换。602项分层测试及隔离安装版模型替身闭环通过，非真实模型内容验收。见[实现与验证](docs/decisions/streaming-first-draft.md)。
 
-# ScholarFlow
+
 
 DeepSeek Harness 学术项目工作区插件。当前版本 **1.0.0**，实现 PRD/SPEC v1.0 的 35 项 P0。实际支持 Windows DSH Desktop **0.2.0-rc.2**；验收证据见 [最终验证记录](docs/final-runtime-validation.md)。
 
@@ -157,8 +169,8 @@ node tests/e2e/installed-host-smoke.mjs --live-skills
 
 ## 实现依据与证据
 
-- 产品基线：../docs/ScholarFlow_PRD_v1.12.md（版本链自 v1.0 起，见 ../AGENTS.md 规则三）
-- 实现合同：../docs/ScholarFlow_Design_SPEC_v1.12.md
+- 产品基线：../docs/ScholarFlow_PRD_v1.14.md（版本链自 v1.0 起，见 ../AGENTS.md 规则三）
+- 实现合同：../docs/ScholarFlow_Design_SPEC_v1.14.md
 - 最新真实宿主验证：[G0 installed Host](docs/g0-installed-host-2026-10-04.md)
 - 项目持久化验证：[M1 project store](docs/m1-project-store-2026-10-04.md)
 - 本地证据链验证：[M2 local evidence](docs/m2-local-evidence-2026-10-04.md)

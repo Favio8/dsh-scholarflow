@@ -74,6 +74,16 @@ export class HostFileStore implements FileStore {
     invariant(before.version === (await this.ctx.fs.stat(target, signal))?.version, 'STALE_MATERIAL_VERSION', '读取期间原始资料发生变化。')
     return bytes
   }
+  async readImageAssetBytes(path:string,maxBytes:number){
+    invariant(/\.(?:png|jpe?g)$/iu.test(path),'IMAGE_FORMAT_UNSUPPORTED','图片资源仅支持 PNG/JPEG。')
+    const target=await this.target(path),canonical=relative(this.binding.canonicalRoot,this.ctx.fs.processPath(target)).split(sep).join('/')
+    invariant(!sensitivePath(canonical)&&!canonical.startsWith('.scholarflow/')&&!canonical.startsWith(this.binding.manuscriptDir+'/exports/'),'MATERIAL_ACCESS_DENIED','图片不能指向私有元数据或已有交付。')
+    const before=await this.ctx.fs.stat(target,this.signal)
+    invariant(before?.type==='file'&&before.size<=maxBytes,'CONTENT_TOO_LARGE','图片需为 20 MiB 内的普通文件。')
+    const bytes=await this.ctx.fs.readBytes(target,this.signal,maxBytes)
+    invariant(before.version===(await this.ctx.fs.stat(target,this.signal))?.version,'STALE_MATERIAL_VERSION','读取期间图片改变。')
+    return bytes
+  }
   private async resourceTarget(path: string) {
     this.signal.throwIfAborted()
     relativePath.parse(path)
@@ -181,8 +191,8 @@ export class HostFileStore implements FileStore {
   }
   private exportPath(path: string) {
     relativePath.parse(path)
-    invariant(path.startsWith(this.binding.manuscriptDir + '/exports/') && /\/delivery_[\w]+\/paper\.docx$/.test(path),
-      'PATH_OUTSIDE_ALLOWED_ROOT', '二进制交付仅允许独立交付目录中的 Word 文件。')
+    invariant(path.startsWith(this.binding.manuscriptDir + '/exports/') && /\/delivery_[\w]+\/(?:paper\.docx|assets\/[a-f0-9]{64}\.(?:png|jpg))$/.test(path),
+      'PATH_OUTSIDE_ALLOWED_ROOT', '二进制交付仅允许独立交付目录中的 Word 和固定图片资源。')
   }
   async readExportBytes(path: string) {
     this.exportPath(path)

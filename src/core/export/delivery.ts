@@ -2,7 +2,7 @@ import { snapshot, mutateLedger } from '../project/project.ts'
 import { inspectReview, reviewInput } from '../review/review.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
 import { bibliography } from './bibliography.ts'
-import { projectMarkdown } from '../editing/markdown.ts'
+import { projectMarkdown,wordStats } from '../editing/markdown.ts'
 import { scanDocument } from './scan.ts'
 import { validateArtifactPrivacy, validateExportUrl, validateManuscriptPublication } from './public-artifacts.ts'
 import { deliverySchema, type Ledger } from '../../shared/schema.ts'
@@ -10,6 +10,8 @@ import { invariant } from '../../shared/errors.ts'
 import { latexDocument, wordDocument } from './formats.ts'
 import { readWritingSpec } from '../pipeline/writing-task-store.ts'
 import type { ExportFormat } from '../../shared/presentation.ts'
+import {exportImages} from './images.ts'
+import {apaLabels,apaReferences,publicationMarkdown} from './apa.ts'
 
 export async function prepareDelivery(io: FileStore, format: ExportFormat = 'markdown') {
   const current = await snapshot(io), review = await inspectReview(io), input = await reviewInput(io)
@@ -20,11 +22,12 @@ export async function prepareDelivery(io: FileStore, format: ExportFormat = 'mar
     invariant(source, 'CITATION_KEY_UNKNOWN', `引用 ${key} 缺少来源，导出前必须修复。`)
     return source.id
   })
-  validateManuscriptPublication(current.document.text, projection.tree)
+  const assets=await exportImages(io,current.document.text,current.config.paths.mainDocument)
+  validateManuscriptPublication(assets.text, projectMarkdown(assets.text).tree,assets.images.map(image=>image.relativePath))
   if (format === 'docx') validateArtifactPrivacy(current.config.project.title)
   for (const sourceId of sourceIds) {
     const source = current.ledger.sources[sourceId], url = source.identifiers.url
-    validateArtifactPrivacy([source.title, source.venue, ...source.authors.flatMap(author => [author.literal, author.family, author.given]),
+    validateArtifactPrivacy([source.title, source.venue,...Object.values(source.bibliography??{}), ...source.authors.flatMap(author => [author.literal, author.family, author.given]),
       url, source.identifiers.doi, source.identifiers.arxiv].filter(value => value !== undefined).join('\n'))
     if (url) validateExportUrl(url)
   }
@@ -38,14 +41,14 @@ export async function prepareDelivery(io: FileStore, format: ExportFormat = 'mar
     ledgerRevision: current.ledger.revision, ledgerHash: current.ledgerHash, configHash: current.configHash, dependencyHash: input.dependencyHash,
     reviewId: review.report?.id, reviewState, sourceIds, unresolvedIssueIds: issues.filter(issue => issue.state !== 'resolved').map(issue => issue.id),
     reviewedAllowed: reviewed, limitations: review.report?.limitations ?? ['当前稿件尚未执行审查；只能导出工作草稿。'],
-    format, formats: [...(format === 'markdown' ? [] : [format]), 'markdown', 'bibtex', 'quality-report'],
+    format,imageHash:assets.hash,imageCount:assets.images.length,formats: [...(format === 'markdown' ? [] : [format]), 'markdown', 'bibtex', 'quality-report'],
     // The scan runs here so the delivery states what the layout did and did not do, rather
     // than leaving the reader to find out in Word.
     formatNotes: format === 'docx' ? [...scanDocument(projectMarkdown(current.document.text)).formatNotes,
       '标题编号、三线表与题注按主稿实际结构生成；没有写题注的图表按原样导出，不自动补编号。',
       '导出成功不等于排版合格：封面与正文的实际页数要在 Word 或等效查看环境中核对后才能称为已验证。']
       : format === 'latex' ? ['LaTeX 为完整源码，中文使用 ctex；下载包含 references.bib。'] : [] }
-  invariant(format !== 'docx' || io.createExportBytes && io.readExportBytes, 'BINARY_EXPORT_UNAVAILABLE', '当前宿主不能保存 Word 交付。')
+  invariant(format !== 'docx' && !assets.images.length || io.createExportBytes && io.readExportBytes, 'BINARY_EXPORT_UNAVAILABLE', '当前宿主不能保存二进制交付。')
   return { ...plan, planHash: digest(json(plan)) }
 }
 export type DeliveryPlan = Awaited<ReturnType<typeof prepareDelivery>>
@@ -61,40 +64,50 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
   const result = await mutateLedger(io, expectedRevision, async (ledger, config) => {
     const fresh = await prepareDelivery(io, plan.format ?? 'markdown')
     invariant(fresh.ledgerHash === plan.ledgerHash && fresh.configHash === plan.configHash && fresh.documentHash === plan.documentHash &&
-      fresh.dependencyHash === plan.dependencyHash && fresh.reviewId === plan.reviewId && fresh.reviewState === plan.reviewState,
+      fresh.dependencyHash === plan.dependencyHash && fresh.reviewId === plan.reviewId && fresh.reviewState === plan.reviewState&&fresh.imageHash===plan.imageHash,
       'EXPORT_PLAN_STALE', '导出确认期间稿件、审查、资料或项目数据改变，请重新预检。')
     const current = await snapshot(io), review = await inspectReview(io), deliveryId = newId('delivery')
     const writingSpec = await readWritingSpec(io)
+    const assets=await exportImages(io,current.document.text,config.paths.mainDocument)
+    const sources=plan.sourceIds.map(id=>ledger.sources[id]),apa=writingSpec?.typography?.referenceStyle==='apa7'
+    const labels=apa?apaLabels(assets.text,sources):undefined
+    const exportedMarkdown=apa&&sources.length?publicationMarkdown(assets.text,labels)+(scanDocument(projectMarkdown(assets.text)).hasReferencesHeading?'\n\n':'\n\n## '+(config.project.language==='en'?'References':'参考文献')+'\n\n')+apaReferences(sources).map(([,entry])=>entry).join('\n\n')+'\n':assets.text
+    const mixedLength = ledger.requirements.writing_length?.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1'
+    const statistics=wordStats(current.document.text,{bodyOnly:true,sectionKinds:ledger.outline.sections}),words=ledger.requirements.writing_length?.constraint?.unit==='words'||!ledger.requirements.writing_length?.constraint?.unit&&(writingSpec?.countingPolicy.unit??writingSpec?.language)==='en'
+    const lengthUnit = mixedLength ? '字词合计' : words ? '词' : '汉字'
+    const actualLength = mixedLength ? statistics.chineseCharacters + statistics.westernWords:words?statistics.westernWords:statistics.chineseCharacters
+    const lengthDifference = actualLength !== undefined && writingSpec ? actualLength - writingSpec.targetLength : undefined
     const reviewState = deliveryType === 'working-draft' ? (plan.reviewState === 'review-stale' ? 'review-stale' : 'draft-incomplete') : 'draft-reviewed'
     const currentIssues = Object.values(ledger.reviewIssues).filter(issue => issue.state !== 'resolved')
     const report = [ '# ScholarFlow 质量报告', '', `交付：${deliveryId}`, `项目：${ledger.projectId}`, `稿件修订：${plan.revisionId}`,
       `稿件 SHA-256：${plan.documentHash}`, `数据版本：${plan.ledgerRevision}`, `审查：${plan.reviewId ?? '未执行'}`, `状态：${reviewState}`, '',
       '## 本次检查范围', '', '正文、实际引用的来源记录和已登记的所选资料；不包含完整会话、原始资料副本或模型推理。', '',
-      ...(review.report ? [`统计口径：${review.report.statistics.countingPolicyId}；${review.report.statistics.chineseCharacters} 汉字，${review.report.statistics.westernWords} 西文词元，${review.report.statistics.uniqueReferences} 个实际引用。`,
+      `统计口径：${statistics.countingPolicyId}；${statistics.chineseCharacters} 汉字，${statistics.westernWords} 西文词元，${plan.sourceIds.length} 个实际引用。`,
         // The confirmed length sits beside the actual count: a report whose length was asked for
         // has to state the deviation itself rather than leave the reader to measure it.
-        ...(writingSpec ? [`篇幅：实际 ${review.report.statistics.chineseCharacters} 汉字／已确认要求 ${writingSpec.targetLength} ${writingSpec.language === 'en' ? '词' : '汉字'}${writingSpec.brief?.length?.approximate ? '（来源写为「约」）' : ''}；偏差 ${review.report.statistics.chineseCharacters - writingSpec.targetLength >= 0 ? '+' : ''}${review.report.statistics.chineseCharacters - writingSpec.targetLength}。`] : []), '',
-        '## 检查结果', '', ...review.report.checks.map(check => `- ${check.status} · ${check.method} · ${check.id} · ${reportText(check.detail)}`), ''] : ['尚未执行审查；没有可宣称通过的检查结果。', '']),
+        ...(writingSpec ? [`篇幅：实际 ${actualLength} ${lengthUnit}／已确认要求 ${writingSpec.targetLength} ${lengthUnit}${writingSpec.brief?.length?.approximate ? '（来源写为「约」）' : ''}；偏差 ${lengthDifference! >= 0 ? '+' : ''}${lengthDifference}。`] : []), '',
+      ...(review.report ? ['## 检查结果', '',...(review.stale?['这份审查已过期，以下结果仅作历史参考；请按本次导出的稿件重新审查。','']:[]), ...review.report.checks.map(check => `- ${check.status} · ${check.method} · ${check.id} · ${reportText(check.detail)}`), ''] : ['尚未执行审查；没有可宣称通过的检查结果。', '']),
       '## 尚未关闭的问题与接受的风险', '', ...currentIssues.map(issue => `- ${issue.id} · ${issue.severity} · ${issue.state}${issue.stale ? ' · 过期' : ''} · ${reportText(issue.explanation)}${issue.resolutionReason ? `；理由：${reportText(issue.resolutionReason)}` : ''}`), '',
       '## 资料获取限制', '', ...plan.sourceIds.map(id => { const source = ledger.sources[id]; return `- ${id} · identity=${source.identity.status} · textAccess=${source.textAccess}` }), '',
       '## 限制与建议下一步', '', ...plan.limitations.map(item => `- ${reportText(item)}`), '- 处理未关闭问题和未知检查，接受修改后按新版本重新审查。',
       '- 本报告不提供课程成绩、接收概率或学术真实性保证。', '' ].join('\n')
     const root = `${config.paths.manuscriptDir}/exports/${deliveryId}`
-    const files: Array<{ relativePath: string; text: string; encoding?: 'base64' }> = [{ relativePath: 'paper.md', text: current.document.text }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger) }, { relativePath: 'quality-report.md', text: report }]
+    const files: Array<{ relativePath: string; text: string; encoding?: 'base64' }> = [{ relativePath: 'paper.md', text: exportedMarkdown }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger) }, { relativePath: 'quality-report.md', text: report }]
+    for(const image of assets.images)if(!files.some(file=>file.relativePath===image.relativePath))files.push({relativePath:image.relativePath,text:Buffer.from(image.bytes).toString('base64'),encoding:'base64'})
     if (plan.format === 'latex') files.unshift({ relativePath: 'paper.tex',
-      text: latexDocument(current.document.text, config, current.ledger, writingSpec?.typography) })
+      text: latexDocument(assets.text, config, current.ledger, writingSpec?.typography,assets.images) })
     // 排版 is read from the confirmed spec, not from prose: the requirement's own fields are
     // what actually shapes the exported page (SPEC v1.2 §16.1).
     if (plan.format === 'docx') {
       const spec = await readWritingSpec(io)
-      const bytes = await wordDocument(current.document.text, config, ledger, { typography: spec?.typography, cover: spec?.cover })
+      const bytes = await wordDocument(assets.text, config, ledger, { typography: spec?.typography, cover: spec?.cover,images:assets.images })
       files.unshift({ relativePath: 'paper.docx', text: Buffer.from(bytes).toString('base64'), encoding: 'base64' })
     }
     for (const file of files) if (!file.encoding) validateArtifactPrivacy(file.text)
     manifest = deliverySchema.parse({ id: deliveryId, projectId: ledger.projectId, documentId: 'paper', documentHash: plan.documentHash,
       revisionId: plan.revisionId, ledgerRevision: plan.ledgerRevision, ...(plan.reviewId && { reviewId: plan.reviewId }), reviewState,
       unresolvedIssueIds: plan.unresolvedIssueIds, sourceIds: plan.sourceIds,
-      files: files.map(file => { const bytes = file.encoding ? Buffer.from(file.text, 'base64') : Buffer.from(file.text); return { relativePath: file.relativePath, hash: digest(bytes), sizeBytes: bytes.byteLength } }), createdAt: new Date().toISOString() })
+      files: files.map(file => { const bytes = file.encoding ? Buffer.from(file.text, 'base64') : Buffer.from(file.text); return { relativePath: file.relativePath, hash: digest(bytes), sizeBytes: bytes.byteLength,...(file.encoding&&{encoding:file.encoding}) } }), createdAt: new Date().toISOString() })
     invariant(!await io.stat(root), 'OUTPUT_PATH_CONFLICT', '交付快照目录已存在，禁止覆盖。')
     ledger.deliveries[deliveryId] = manifest
     return [...files.map(file => ({ path: `${root}/${file.relativePath}`, before: undefined, after: file.text, ...(file.encoding && { encoding: file.encoding }) })),
@@ -108,11 +121,11 @@ export async function readDelivery(io: FileStore, deliveryId: string) {
   invariant(manifest && manifest.projectId === current.ledger.projectId, 'DELIVERY_NOT_FOUND', '交付不存在或不属于当前项目。')
   const files = []
   for (const file of manifest.files) {
-    if (file.relativePath === 'paper.docx') {
+    if (file.encoding==='base64'||file.relativePath === 'paper.docx') {
       invariant(io.readExportBytes, 'BINARY_EXPORT_UNAVAILABLE', '当前宿主无法读取 Word 交付。')
       const image = await io.readExportBytes(`${current.config.paths.manuscriptDir}/exports/${deliveryId}/${file.relativePath}`)
       invariant(image && digest(image.bytes) === file.hash && image.bytes.byteLength === file.sizeBytes, 'DELIVERY_CHANGED', 'Word 交付快照缺失或已修改。')
-      files.push({ ...file, encoding: 'base64' as const, base64: Buffer.from(image.bytes).toString('base64'), mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+      files.push({ ...file, encoding: 'base64' as const, base64: Buffer.from(image.bytes).toString('base64'), mediaType: file.relativePath.endsWith('.png')?'image/png':file.relativePath.endsWith('.jpg')?'image/jpeg':'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
       continue
     }
     const image = await io.read(`${current.config.paths.manuscriptDir}/exports/${deliveryId}/${file.relativePath}`)

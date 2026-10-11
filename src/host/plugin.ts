@@ -13,7 +13,7 @@ import { newId, digest, json } from '../core/store/files.ts'
 import { invariant } from '../shared/errors.ts'
 import { scanRequest, registerMaterialRequest, parseMaterialRequest, readMaterialRequest } from '../shared/materials.ts'
 import { registerSourceRequest, confirmEvidenceRequest, upsertClaimRequest, confirmOutlineRequest } from '../shared/research.ts'
-import { scanMaterials, registerMaterial, readParsed } from '../core/materials/materials.ts'
+import { scanMaterials, registerMaterial, readParsed,selectMaterial } from '../core/materials/materials.ts'
 import { parseRegisteredMaterial } from '../core/materials/parse.ts'
 import { parseMaterialBytes } from './parsers/parse.ts'
 import { registerSource, confirmEvidence, upsertClaim, confirmOutline, saveOutline } from '../core/evidence/evidence.ts'
@@ -23,6 +23,10 @@ import { prepareProposalRevision, publishProposalRevision, type ProposalRevision
 import { saveManual, rejectProposal, undoRevision, proposalImage } from '../core/editing/proposals.ts'
 import { inspectManuscriptSource, prepareManuscriptAdoption, applyManuscriptAdoption, type ManuscriptAdoptionPlan } from '../core/editing/manuscript-adoption.ts'
 import { wordStats } from '../core/editing/markdown.ts'
+import {citationKeys} from '../core/editing/markdown.ts'
+import {apaLabels,apaReferences} from '../core/export/apa.ts'
+import {readWritingSpec} from '../core/pipeline/writing-task-store.ts'
+import {aiProvenance} from '../core/editing/provenance.ts'
 import { generationRequest, runStartRequest, runControlRequest, runStateSchema } from '../shared/runs.ts'
 import { prepareGeneration, executeGeneration, type GenerationPlan } from '../core/pipeline/generation.ts'
 import { draftSequenceRequest, draftSequenceActionRequest } from '../shared/draft-sequence.ts'
@@ -52,6 +56,7 @@ import { prepareSearch, executeSearch, listSearches, readSearch, decideCandidate
 import { PrivateSkillLibrary } from './skills/library.ts'
 import { LocalSkillSource } from './skills/local.ts'
 import { skillOptions, type SkillBundle } from '../shared/skills.ts'
+import {authorSkill,authorSkillRequest} from '../core/skills/authoring.ts'
 import { hash, relativePath } from '../shared/schema.ts'
 import { githubLocation, githubSkills, type GithubDiscovery, type GithubSkillPreview } from './skills/github.ts'
 import { prepareBindings, applyBindings, readBindings, currentSkillStage, selectSkillStage, type BindingPlan } from '../core/skills/bindings.ts'
@@ -80,7 +85,8 @@ import { executeModelReview, readModelReviewCheckpoint, prepareModelReviewAction
 import { modelReviewRequest } from '../shared/review.ts'
 import { locateIssue, issueFixSelection } from '../core/review/issue-fixes.ts'
 import { acceptAndRecheck } from '../core/review/fix-workflow.ts'
-import { id } from '../shared/schema.ts'
+import { id,requestContext } from '../shared/schema.ts'
+import {prepareBibliographyImport,confirmBibliographyImport,bibliographyImportInput,type BibliographyImportPlan} from '../core/research/bibliography-import.ts'
 import { prepareSourceRegistration, confirmSourceRegistration, type SourceRegistrationPlan } from '../core/research/source-registration.ts'
 import { batchPrepareRequest, batchActionRequest, type ResearchBatchPlan } from '../shared/research-batch.ts'
 import { prepareResearchBatch, executeResearchBatch, readResearchBatch, prepareResearchBatchAction, closeResearchBatch, type ResearchBatchAction } from '../core/research/batch.ts'
@@ -133,6 +139,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private modelReviewActions = new Map<string, { action: ModelReviewAction; plan: ModelReviewPlan; context: RequestContext; peerId: string; expires: number; selected?: { provider: string; model: string; reasoningEffort?: string } }>()
   private proposalRevisionPlans = new Map<string, { plan: ProposalRevisionPlan; peerId: string; expires: number }>()
   private sourceRegistrationPlans = new Map<string, { plan: SourceRegistrationPlan; peerId: string; expires: number }>()
+  private bibliographyPlans=new Map<string,{plan:BibliographyImportPlan;context:RequestContext;peerId:string;expires:number}>()
   private researchBatchPlans = new Map<string, { plan: ResearchBatchPlan; action?: ResearchBatchAction; context: RequestContext; peerId: string; expires: number }>()
   private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
   private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
@@ -865,6 +872,25 @@ export class ScholarFlowRemote extends TypertRemoteService {
     })
   }
 
+  @Remote('skills.readLibraryVersion')
+  async skillsReadLibraryVersion(request:unknown){return applicationResult(async()=>{
+    this.requireOperator();const input=z.object({qualifiedId:z.string().max(1000),digest:hash}).strict().parse(request)
+    const bundle=await this.skillLibrary.read(input.qualifiedId,input.digest)
+    return {manifest:bundle.manifest,instructions:bundle.instructions}
+  })}
+  @Remote('skills.prepareAuthor')
+  async skillsPrepareAuthor(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
+    const peerId=this.requireOperator(),input=authorSkillRequest.parse(request);this.pruneSkills()
+    invariant(this.skillPlans.size<8,'TOO_MANY_PENDING_PLANS','请先处理当前 Skill 预览。')
+    const source=input.derivedFrom?await this.skillLibrary.read(input.derivedFrom.qualifiedId,input.derivedFrom.digest):undefined
+    invariant(!input.qualifiedId||source?.manifest.metadata.qualifiedId===input.qualifiedId,'SKILL_AUTHOR_ID_INVALID','编辑新版本需要对应的原固定版本。')
+    const bundle=authorSkill(input,source);signal.throwIfAborted()
+    const planId=newId('skill_author'),planHash=digest(JSON.stringify(bundle.manifest))
+    this.skillPlans.set(planId,{resource:{kind:'local',bundle},hash:planHash,peerId,expires:Date.now()+600000})
+    return {planId,planHash,manifest:bundle.manifest,instructions:bundle.instructions,previousInstructions:source?.instructions,
+      risks:['保存为用户创作的固定版本；原版本与项目绑定保留。','安装后请在当前论文明确启用。']}
+  })}
+
   @Remote('skills.prepareLocal')
   async skillsPrepareLocal(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => {
@@ -1243,7 +1269,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   @Remote('writingTask.issueAction')
   async writingTaskIssueAction(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.issueAction(request, signal) }) }
   @Remote('typography.update')
-  async typographyUpdate(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.preferencesTypography(request, signal)) }
+  async typographyUpdate(request: unknown, signal: AbortSignal) { return applicationResult(async () => {this.requireOperator();return this.writingController.preferencesTypography(request, signal)}) }
   @Remote('writingTask.inspect')
   async writingTaskInspect(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.inspect(request, signal) }) }
   @Remote('writingTask.watch')
@@ -1256,10 +1282,22 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async writingTaskRequirements(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.requirements(request, signal) }) }
   @Remote('document.versions')
   async documentVersions(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.versions(request, signal) }) }
+  @Remote('document.restoreVersion')
+  async documentRestoreVersion(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();return this.writingController.restore(request,signal)})}
+  @Remote('document.citations')
+  async documentCitations(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
+    this.requireOperator();const input=z.object({context:requestContext,text:z.string().max(2*1024*1024)}).strict().parse(request)
+    const {io}=await resolveStore(this.ctx,input.context,signal),current=await snapshot(io),spec=await readWritingSpec(io)
+    const keys=citationKeys(input.text),sources=Object.values(current.ledger.sources).filter(source=>keys.includes(source.citeKey))
+    const origins=await aiProvenance(io,input.text,input.context.sessionId)
+    return spec?.typography?.referenceStyle==='apa7'?{style:'apa7',labels:apaLabels(input.text,sources),references:apaReferences(sources),origins}:{style:spec?.typography?.referenceStyle??'gbt7714',origins}
+  })}
   @Remote('writingTask.action')
   async writingTaskAction(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.action(request, signal) }) }
   @Remote('writingTask.preferences')
   async writingTaskPreferences(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.preferences(request, signal) }) }
+  @Remote('writingTask.inputs')
+  async writingTaskInputs(request:unknown,signal:AbortSignal){return applicationResult(async()=>this.writingController.inputs(request,this.requireOperator(),signal))}
   @Remote('cowrite.propose')
   async cowritePropose(request: unknown, signal: AbortSignal) { return applicationResult(async () => { this.requireOperator(); return this.writingController.propose(request, signal) }) }
   @Remote('cowrite.list')
@@ -1991,6 +2029,11 @@ export class ScholarFlowRemote extends TypertRemoteService {
       return registerMaterial(io, input, revision) })
   }
 
+  @Remote('materials.select')
+  async materialsSelect(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
+    this.requireOperator();const input=z.object({context:requestContext,materialId:id,included:z.boolean()}).strict().parse(request),{io}=await resolveStore(this.ctx,input.context,signal)
+    return selectMaterial(io,input.materialId,input.included,mutationRevision(input.context))
+  })}
   @Remote('materials.parse')
   async materialsParse(request: unknown, signal: AbortSignal) {
     return applicationResult(async () => { this.requireOperator(); const input = parseMaterialRequest.parse(request)
@@ -2004,6 +2047,24 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const { io } = await resolveStore(this.ctx, input.context, signal)
       return readParsed(io, input.materialId) })
   }
+
+  @Remote('sources.prepareBibliography')
+  async sourcesPrepareBibliography(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
+    const peerId=this.requireOperator();const input=bibliographyImportInput.extend({context:requestContext}).parse(request),{io}=await resolveStore(this.ctx,input.context,signal)
+    for(const [key,row] of this.bibliographyPlans)if(row.expires<Date.now())this.bibliographyPlans.delete(key)
+    invariant(this.bibliographyPlans.size<8,'TOO_MANY_PENDING_PLANS','请先处理已有书目导入预览。')
+    const plan=await prepareBibliographyImport(io,{text:input.text,format:input.format});this.bibliographyPlans.set(plan.id,{plan,context:input.context,peerId,expires:Date.now()+600000});return plan
+  })}
+  @Remote('sources.confirmBibliography')
+  async sourcesConfirmBibliography(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
+    const peerId=this.requireOperator(),input=z.object({context:requestContext,planId:id,planHash:hash,selected:z.array(z.object({index:z.number().int().nonnegative(),reason:z.string().max(4000)})).max(500)}).strict().parse(request),row=this.bibliographyPlans.get(input.planId)
+    invariant(row&&row.peerId===peerId&&row.expires>Date.now()&&row.plan.planHash===input.planHash,'INVALID_APPROVAL','请重新预览书目导入。')
+    invariant(row.context.workspaceId===input.context.workspaceId&&row.context.sessionId===input.context.sessionId&&row.context.projectId===input.context.projectId,'SESSION_BINDING_CHANGED','书目预览不属于当前项目会话。')
+    const {io}=await resolveStore(this.ctx,input.context,signal),result=await confirmBibliographyImport(io,row.plan,input.selected,input.context.sessionId)
+    this.bibliographyPlans.delete(input.planId);return result
+  })}
+  @Remote('sources.dismissBibliography')
+  async sourcesDismissBibliography(request:unknown){return applicationResult(async()=>{const peerId=this.requireOperator(),input=z.object({planId:id}).strict().parse(request),row=this.bibliographyPlans.get(input.planId);if(row?.peerId===peerId)this.bibliographyPlans.delete(input.planId);return {dismissed:true}})}
 
   @Remote('sources.prepareRegistration')
   async sourcesPrepareRegistration(request: unknown, signal: AbortSignal) {
