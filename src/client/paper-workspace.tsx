@@ -23,6 +23,44 @@ export function ProjectSettings({project,refresh,run,busy,diagnostics}:any){
 }
 
 export const PAPER_CSS = `
+/* Requirements use the same field grid at every level, and compact horizontal choice rows. */
+body .sf-app .sf-requirements-panel{container-name:sf-requirements;container-type:inline-size}
+body .sf-app .sf-requirements-panel .sf-form{grid-template-columns:7em minmax(0,1fr)}
+body .sf-app .sf-requirements-panel .sf-requirements-sections{margin-top:var(--sf-space-5)}
+body .sf-app .sf-requirements-panel .sf-settings-section{margin:0;padding:var(--sf-space-3) 0;border:0;border-top:1px solid var(--sf-border-soft)}
+body .sf-app .sf-requirements-panel .sf-settings-section>summary{min-height:var(--sf-control-lg);align-items:center;white-space:normal;overflow:visible;font-size:var(--sf-font-md);font-weight:500;color:var(--sf-text)}
+body .sf-app .sf-requirements-panel .sf-settings-section-body{margin-top:var(--sf-space-4)}
+body .sf-app .sf-requirements-panel .sf-settings-group{margin:0;padding:0}
+body .sf-app .sf-requirements-panel .sf-settings-group+.sf-settings-group{margin-top:var(--sf-space-5)}
+body .sf-app .sf-requirements-panel .sf-settings-group>header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--sf-space-2);margin-bottom:var(--sf-space-3)}
+body .sf-app .sf-requirements-panel .sf-settings-group h4{margin:0;font-family:var(--sf-family-sans);font-size:var(--sf-font-md);font-weight:600}
+body .sf-app .sf-requirements-panel .sf-choice-list{display:flex;flex-direction:column;align-items:stretch;gap:var(--sf-space-1);min-width:0}
+body .sf-app .sf-requirements-panel .sf-check{flex-direction:row;min-width:0;min-height:34px;box-sizing:border-box;align-items:flex-start;gap:var(--sf-space-2);margin:0;padding:var(--sf-space-2) 0;border-radius:var(--sf-radius-control)}
+body .sf-app .sf-requirements-panel .sf-check:hover{background:var(--sf-fill)}
+body .sf-app .sf-requirements-panel .sf-check>input{flex:none;margin:2px 0 0}
+body .sf-app .sf-requirements-panel .sf-check>span{flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere}
+body .sf-app .sf-requirements-panel .sf-choice-field>.sf-field-label{align-self:start;padding-top:var(--sf-space-2)}
+body .sf-app .sf-requirements-panel .sf-choice-list>button{align-self:flex-start;margin-top:var(--sf-space-3)}
+body .sf-app .sf-requirements-panel .sf-selected-sources{margin-top:var(--sf-space-4)}
+body .sf-app .sf-requirements-panel .sf-source-entry{min-width:0;padding:var(--sf-space-3) 0}
+body .sf-app .sf-requirements-panel .sf-source-entry+.sf-source-entry{border-top:1px solid var(--sf-border-soft)}
+body .sf-app .sf-requirements-panel .sf-source-entry>header{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sf-space-3);margin-bottom:var(--sf-space-2)}
+body .sf-app .sf-requirements-panel .sf-source-entry>header>div:first-child{flex:1;min-width:0;overflow-wrap:anywhere}
+body .sf-app .sf-requirements-panel .sf-source-entry small{display:block;margin-top:var(--sf-space-1);font-size:var(--sf-font-sm)}
+body .sf-app .sf-requirements-panel .sf-settings-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sf-space-2);margin-top:var(--sf-space-5)}
+body .sf-app .sf-requirements-panel .sf-settings-group>p{margin:var(--sf-space-1) 0 0;font-size:var(--sf-font-sm)}
+body .sf-app .sf-requirements-panel .sf-cover-settings>header{margin-bottom:var(--sf-space-4)}
+body .sf-app .sf-requirements-panel .sf-cover-settings h3{margin:0;font-family:var(--sf-family-sans);font-size:var(--sf-font-md);font-weight:600}
+body .sf-app .sf-requirements-panel .sf-requirements-actions{margin-top:var(--sf-space-5)}
+@container sf-requirements (max-width:560px){
+  body .sf-app .sf-requirements-panel .sf-form{grid-template-columns:minmax(0,1fr);align-items:stretch}
+  body .sf-app .sf-requirements-panel .sf-field>*:not(.sf-field-label){grid-column:1}
+  body .sf-app .sf-requirements-panel .sf-field-label{margin-top:var(--sf-space-2);padding-top:0}
+  body .sf-app .sf-requirements-panel .sf-field-control{flex-wrap:wrap}
+  body .sf-app .sf-requirements-panel .sf-field-control>select{flex-basis:100%}
+  body .sf-app .sf-requirements-panel .sf-source-entry>header{flex-wrap:wrap}
+  body .sf-app .sf-requirements-panel .sf-source-entry>header>div:first-child{flex-basis:100%}
+}
 body .sf-app .sf-review-item>h3{font-family:var(--sf-family-sans);font-size:var(--sf-font-md);font-weight:600;line-height:var(--sf-leading-body)}body .sf-app :is(.sf-page-heading,.sf-review-panel,.sf-writing-options,.sf-history-panel,.sf-history-tabs,.sf-outline-panel){font-family:var(--sf-family-sans)}body .sf-app .sf-page-heading h2{font-size:var(--sf-font-display-1);font-weight:600}.sf-outline-list{list-style:none;padding:0}.sf-outline-list>li{padding:var(--sf-space-3) 0;border-bottom:1px solid var(--sf-border-soft)}.sf-writing-options .sf-field-control:has(.sf-check){display:block}
 .sf-page-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3);margin-bottom:var(--sf-space-4)}.sf-page-heading :is(h2,h3){margin:0}.sf-page-heading p{margin:var(--sf-space-1) 0 0}.sf-page-actions{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap}
 .sf-paper-actions{display:flex;gap:var(--sf-space-1);margin-left:auto}.sf-paper-actions button{font-size:var(--sf-font-sm)}.sf-paper-actions button[aria-pressed=true]{color:var(--sf-accent-text);font-weight:600}
@@ -70,7 +108,7 @@ body .sf-app .sf-paper-header>.sf-type-chip,body .sf-app .sf-paper-header>select
 .sf-paper-views{display:flex;align-items:center;gap:var(--sf-space-1);padding:var(--sf-space-1);background:var(--sf-fill);border-radius:var(--sf-radius-surface)}
 body .sf-app .sf-paper-views button{--sf-control-size:var(--sf-control-sm);min-width:48px;border-color:transparent;background:transparent;font-size:var(--sf-font-sm);color:var(--sf-muted)}
 body .sf-app .sf-paper-views button[aria-pressed=true]{color:var(--sf-text);background:var(--sf-surface);border-color:transparent;box-shadow:var(--sf-shadow-1);font-weight:600}
-.sf-paper-toolbar>.sf-paper-menu{margin-left:auto}
+.sf-paper-toolbar>.sf-paper-menu{margin-left:0}
 .sf-paper-content{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .sf-paper-content>[role=tabpanel]{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-5);box-sizing:border-box}
 .sf-paper-content>#sf-panel-Draft{display:flex;padding:0;overflow:hidden}

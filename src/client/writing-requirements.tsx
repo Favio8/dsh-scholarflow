@@ -32,14 +32,16 @@ export function WritingRequirements({ project, api, context, refresh, onFormat }
       <div className="sf-field"><span className="sf-field-label">目标篇幅</span><div className="sf-field-control"><input aria-label="目标篇幅" type="number" min={200} max={60000} value={spec.targetLength ?? ''} placeholder="原项目未记录篇幅" onChange={e => update({ targetLength: Number(e.target.value) })} /></div></div>
       <div className="sf-field"><span className="sf-field-label">引用格式</span><div className="sf-field-control"><select aria-label="引用格式" value={spec.language==='en'&&!spec.typography?.referenceStyleExplicit&&spec.typography?.referenceStyle!=='apa7'?'plain':spec.typography?.referenceStyle??'gbt7714'} onChange={e=>update({typography:typographySpec.parse({...spec.typography,referenceStyle:e.target.value,referenceStyleExplicit:true})})}><option value="gbt7714">GB/T 7714 · 数字编号</option><option value="plain">简明元数据 · 数字编号</option><option value="apa7">APA 第 7 版 · 作者年份</option></select></div></div>
     </div>
+    <div className="sf-requirements-sections">
     <WritingInputs key={project.binding.projectId} project={project} spec={spec} update={update} api={api} context={context} refresh={refresh} baseSpecHash={baseSpecHash} onSaved={(row:any)=>{setBaseSpecHash(row.baseSpecHash);update({materials:row.spec.materials,requirementSources:row.spec.requirementSources,online:row.spec.online})}}/>
-    <details className="sf-detail" onToggle={event=>setOptionsOpen(event.currentTarget.open)}><summary>文风与写作模板</summary>{optionsOpen&&<WritingOptions project={project} api={api} context={context} refresh={refresh}/>}</details>
+    <details className="sf-detail sf-settings-section" onToggle={event=>setOptionsOpen(event.currentTarget.open)}><summary>文风与写作模板</summary>{optionsOpen&&<div className="sf-settings-section-body"><WritingOptions project={project} api={api} context={context} refresh={refresh}/></div>}</details>
     {!spec.sections.length && <button disabled={!spec.targetLength || spec.targetLength < 200} onClick={() => update({ sections: presetSections(spec.type, spec.targetLength!) })}>添加章节结构</button>}
-    {spec.cover?.enabled && <fieldset><legend>封面</legend>
-      <label>封面标题<input value={spec.cover.title} onChange={event => update({ cover: { ...spec.cover!, title: event.target.value } })} /></label>
-      {spec.cover.fields.map((field, index) => <label key={index}>{field.label}<input value={field.value} onChange={event => update({ cover: {
-        ...spec.cover!, fields: spec.cover!.fields.map((row, at) => at === index ? { ...row, value: event.target.value } : row) } })} /></label>)}
-    </fieldset>}
+    {spec.cover?.enabled && <section className="sf-settings-section sf-cover-settings" aria-label="封面"><header><h3>封面</h3></header><div className="sf-form">
+      <div className="sf-field"><span className="sf-field-label">封面标题</span><div className="sf-field-control"><input aria-label="封面标题" value={spec.cover.title} onChange={event => update({ cover: { ...spec.cover!, title: event.target.value } })} /></div></div>
+      {spec.cover.fields.map((field, index) => <div className="sf-field" key={index}><span className="sf-field-label">{field.label}</span><div className="sf-field-control"><input aria-label={field.label} value={field.value} onChange={event => update({ cover: {
+        ...spec.cover!, fields: spec.cover!.fields.map((row, at) => at === index ? { ...row, value: event.target.value } : row) } })} /></div></div>)}
+    </div></section>}
+    </div>
     <div className="sf-requirements-actions"><button className="sf-secondary sf-requirements-save" aria-busy={busy} disabled={busy || !spec.title.trim() || !spec.requirements.trim()} onClick={async () => { setBusy(true); setMessage(''); setError(undefined)
       try { const saved = await api('writingTask.preferences', { context: context(), spec, baseSpecHash,baseRequirementsHash }); setBaseSpecHash(saved.baseSpecHash);setBaseRequirementsHash(saved.baseRequirementsHash); onFormat(spec.format); await refresh(); setMessage('已保存写作要求。') }
       catch (error) { setError(error as Error) } finally { setBusy(false) }

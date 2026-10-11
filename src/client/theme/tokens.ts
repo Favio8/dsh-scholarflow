@@ -260,7 +260,7 @@ body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) inpu
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) input[type=file]:not(.sf-native-tools *)::file-selector-button:hover{background:var(--sf-hover)}
 /* A checkbox with its own sentence. It spans the whole row rather than sitting in a field,
    because the sentence IS the label and there is no separate control column to align to. */
-body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-check{display:flex;align-items:flex-start;gap:var(--sf-space-2);font-size:var(--sf-font-md);line-height:var(--sf-leading-body);cursor:pointer}
+body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-check{display:flex;flex-direction:row;align-items:flex-start;gap:var(--sf-space-2);font-size:var(--sf-font-md);line-height:var(--sf-leading-body);cursor:pointer}
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-check>input{flex:none;margin-top:.25em}
 /* AI change card (SF-142): what changed and why, not two bare buttons. */
 body :is(.sf-app,.sf-wizard,.sf-preset-dialog,.sf-text-prompt,.sf-boundary) .sf-change{display:flex;flex-direction:column;gap:var(--sf-space-3);padding:var(--sf-space-3) 0;border-top:1px solid var(--sf-border-soft)}
