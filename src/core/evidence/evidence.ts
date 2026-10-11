@@ -19,15 +19,15 @@ export async function registerSource(io: FileStore, input: z.infer<typeof source
     const parsed=material?await readParsed(io,material.id):undefined
     const doi = input.identifiers.doi?.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').toLowerCase()
     const arxiv = input.identifiers.arxiv ? normalizeArxiv(input.identifiers.arxiv) : undefined
-    const matches = sourceMatches(input, ledger.sources), review = duplicateReview && duplicateSourceReview.parse(duplicateReview)
+    const sameDoi=doi&&Object.values(ledger.sources).find(source=>source.identifiers.doi?.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//iu,'').toLowerCase()===doi)
+    const matches = sourceMatches(input, ledger.sources).filter(row=>!doi||ledger.sources[row.sourceId].identifiers.doi?.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//iu,'').toLowerCase()!==doi), review = duplicateReview && duplicateSourceReview.parse(duplicateReview)
     invariant(!doi || /^10\.\d{4,9}\/\S+$/.test(doi), 'SOURCE_IDENTIFIER_INVALID', 'DOI 格式无效。')
-    invariant(!Object.values(ledger.sources).some(source => (doi && source.identifiers.doi?.toLowerCase() === doi) ||
-      (material && source.materialId === material.id)) && (material || !matches.some(row => row.kind === 'same-arxiv-reference')), 'SOURCE_ALREADY_REGISTERED', '该 DOI、具体 arXiv 元数据或资料已有来源记录，请沿用稳定引用标识。')
+    invariant(!(sameDoi&&!material)&&!Object.values(ledger.sources).some(source => material && source.materialId === material.id) && (material || !matches.some(row => row.kind === 'same-arxiv-reference')), 'SOURCE_ALREADY_REGISTERED', '该 DOI、具体 arXiv 元数据或资料已有来源记录，请沿用稳定引用标识。')
     if (matches.length && (!review || json(review.matches) !== json(matches.map(({ sourceId, sourceHash }) => ({ sourceId, sourceHash })))))
       throw new ScholarError('SOURCE_DUPLICATE_REVIEW_REQUIRED', '来源与已有记录疑似重复，请预览并明确沿用原来源或说明为什么保留独立文本记录。', { sourceIds: matches.map(row => row.sourceId) })
     invariant(!review || matches.length && sourceSessionId, 'INVALID_APPROVAL', '疑似重复确认需要实际来源观察和用户会话。')
     ledger.sources[sourceId] = sourceSchema.parse({ ...input, id: sourceId, identifiers: { ...input.identifiers, ...(doi && { doi }), ...(arxiv && { arxiv }) },
-      citeKey: `sf_${sourceId.slice(4, 16)}`, provenance: [{ provider: material ? 'local-material' : 'user-metadata', retrievedAt: new Date().toISOString() }],
+      citeKey: `sf_${sourceId.slice(4, 16)}`, ...(sameDoi&&{bibliographySourceId:sameDoi.bibliographySourceId??sameDoi.id}), provenance: [{ provider: material ? 'local-material' : 'user-metadata', retrievedAt: new Date().toISOString() }],
       identity: { status: 'unverified', method: 'none', reason: '已登记用户元数据，尚未独立核验出版身份。' },
       textAccess: material ? 'fulltext' : 'metadata', ...(material?.contentHash && { contentHash: material.contentHash }), publicationState: 'unknown' })
     if (parsed) ledger.sources[sourceId].textAccess=parsed.blocks.length?parsed.coverage==='complete'?'fulltext':'excerpt':'none'

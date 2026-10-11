@@ -2,7 +2,7 @@ import { WorkbenchIcon } from './workbench-chrome.tsx'
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { projectMarkdown, wordStatsFromProjection, textOf, validateRange, validateProseRange } from '../core/editing/markdown.ts'
 import { sectionTarget } from '../core/editing/sections.ts'
-import { MarkdownView, captureSelection } from './markdown.tsx'
+import { MarkdownView, captureSelection,restoreSelection } from './markdown.tsx'
 import type { SelectionPayload } from '../shared/editing.ts'
 import { ProposalRevision } from './proposal-revision.tsx'
 import { DraftSequence } from './draft-sequence.tsx'
@@ -28,6 +28,9 @@ import {emptyFormatting,rebaseFormatting} from '../core/editing/formatting.ts'
 import {documentFormatting,type DocumentFormatting,type CharacterFormat,type ParagraphFormat} from '../shared/formatting.ts'
 import {DEFAULT_TYPOGRAPHY} from '../core/export/typography.ts'
 import {scanDocument} from '../core/export/scan.ts'
+import {toggleInlineFormat} from '../core/editing/inline-format.ts'
+import {OutlineEditor} from './outline.tsx'
+import {reviewItems} from './review-presentation.ts'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any, signal?: AbortSignal) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 const buffers = new Map<string, { text: string; baseHash: string }>()
@@ -36,8 +39,8 @@ function readLocalBuffer(key: string) {
     return readScratch(window.localStorage, key, 8 * 1024 * 1024)
   } catch { /* Host temporary buffer remains available when browser storage fails. */ }
 }
-export function Draft({ project, context, api, refresh, run, busy, issueLocation, view: preferredView = 'preview', format = 'markdown', tool, visible = true, onController, onTool, onReview, onReturnEditor, onAttachSelection, captureChatInsertion, onGenerationState, generationMode }: Props & {
-  issueLocation?: any; view?: PaperView; format?: ExportFormat; tool?: 'Changes' | 'History'; visible?: boolean;
+export function Draft({ project, context, api, refresh, run, busy, issueLocation, view: preferredView = 'preview', format = 'markdown', tool, suggestionsOnly=false, visible = true, onController, onTool, onReview, onReturnEditor, onAttachSelection, captureChatInsertion, onGenerationState, generationMode }: Props & {
+  issueLocation?: any; view?: PaperView; format?: ExportFormat; tool?: 'Changes' | 'History'; visible?: boolean;suggestionsOnly?:boolean;
   onController?: (value: DraftController) => void; onTool?: () => void; onReview?: () => void; onReturnEditor?: () => void
   onAttachSelection?: (card: SelectionContext, ask: boolean, insertion: any) => void; captureChatInsertion?: () => any
   onGenerationState?: (active: boolean) => void
@@ -53,7 +56,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const initialFormatting=()=>{try{const row=JSON.parse(localStorage.getItem(formattingKey)??'null');if(row?.baseHash===(cached?.baseHash??project.document.contentHash))return documentFormatting.parse(row.formatting)}catch{/* Saved project formatting remains available. */}return project.document.externalChange?emptyFormatting():project.document.formatting??emptyFormatting()}
   const [formatting,setFormatting]=useState<DocumentFormatting>(initialFormatting),[formatDirty,setFormatDirty]=useState(()=>localStorage.getItem(formattingKey)!==null)
   const [typographyOverride,setTypographyOverride]=useState<any>()
-  const setText=(next:string)=>{setFormatting(previous=>rebaseFormatting(previous,text,next));setTextRaw(next);if(formatting.characters.length||formatting.paragraphs.length)setFormatDirty(true)}
+  const setText=(next:string,changes?:Array<{startUtf16:number;endUtf16:number;replacementText:string}>)=>{setFormatting(previous=>rebaseFormatting(previous,text,next,changes));setTextRaw(next);if(formatting.characters.length||formatting.paragraphs.length)setFormatDirty(true)}
   useEffect(()=>{if(formatDirty)localStorage.setItem(formattingKey,JSON.stringify({baseHash,formatting}));else localStorage.removeItem(formattingKey)},[formatting,formatDirty,baseHash])
   const stream = useFirstDraftStream({api,context,project,refresh,mode:generationMode})
   const activePreview = stream.preview && ['generating','validating','saved'].includes(stream.preview.status)
@@ -191,6 +194,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     finally { setAnswerBusy(false) }
   }
   const [editRange, setEditRange] = useState<{ start: number; end: number }>(), [rewriteScope, setRewriteScope] = useState('selection'), [rewriteInstruction, setRewriteInstruction] = useState('')
+  const pendingFormatRange=useRef<{start:number;end:number}|undefined>(undefined),[outlineOpen,setOutlineOpen]=useState(false)
   useEffect(() => {
     if (!rewriteRestored.current) return
     try {
@@ -219,10 +223,17 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       return { projection, statistics: wordStatsFromProjection(projection), error: '' } }
     catch (error) { return { projection: undefined, statistics: undefined, error: (error as Error).message } }
   }, [displayedText,citations])
+  useLayoutEffect(()=>{
+    const range=pendingFormatRange.current
+    if(!range||!livePreview.projection)return
+    pendingFormatRange.current=undefined
+    if(view==='edit'){sourceArea.current?.focus();sourceArea.current?.setSelectionRange(paneOffset(text,range.start),paneOffset(text,range.end))}
+    else if(root.current)restoreSelection(root.current,livePreview.projection,range)
+  },[text,livePreview])
   useEffect(() => {
     if (!issueLocation || issueLocation.projectId !== projectId || issueLocation.documentHash !== project.document.contentHash) return
     const block = root.current?.querySelector<HTMLElement>(`[data-sf-block="${CSS.escape(issueLocation.location.blockId)}"]`)
-    if (block) { block.scrollIntoView({ block: 'center' }); block.focus(); setMessage(`已定位当前正文问题 ${issueLocation.issueId}；未保存缓冲保持原样。`) }
+    if (block) { block.scrollIntoView({ block: 'center' }); block.focus(); setMessage('已定位到对应正文。') }
   }, [issueLocation?.request])
   useEffect(() => {
     let live = true
@@ -434,9 +445,12 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   }
   const formatMarkdown=(kind:string)=>{
     let next=text
-    if(kind==='bold'||kind==='italic'){const token=kind==='bold'?'**':'*',from=formatRange.start,to=formatRange.end
-      if(from===to)return
-      next=text.slice(Math.max(0,from-token.length),from)===token&&text.slice(to,to+token.length)===token?text.slice(0,from-token.length)+text.slice(from,to)+text.slice(to+token.length):text.slice(0,from)+token+text.slice(from,to)+token+text.slice(to)
+    if(kind==='bold'||kind==='italic'){const from=formatRange.start,to=formatRange.end
+      const range=liveRange().range??{start:from,end:to},result=toggleInlineFormat(text,range,kind)
+      if(result.text===text)return
+      setText(result.text,result.changes);remember({text:result.text,baseHash});setSelection(undefined);setSelectionAnchor(undefined)
+      setEditRange(result.range);setCursor(result.range.start);pendingFormatRange.current=result.range
+      return
     }else{
       const documentPlan=livePreview.projection&&scanDocument(livePreview.projection),baseDepth=documentPlan?.title?Math.min(2,...documentPlan.headings.map(row=>row.depth)):1
       const nodes=livePreview.projection?.tree.children?.filter(node=>['paragraph','heading'].includes(node.type)&&node.position!.start.offset!<(formatRange.end||formatRange.start+1)&&node.position!.end.offset!>formatRange.start)??[]
@@ -509,7 +523,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   useEffect(() => {
     const sync = () => {
       const { origin, range } = liveLatest.current()
-      if (!range) return
+      if (!range) {if(!document.activeElement?.closest('.sf-format-tools'))setEditRange(undefined);return}
       selectionOrigin.current = origin
       setEditRange(previous => previous && previous.start === range.start && previous.end === range.end ? previous : range)
     }
@@ -563,8 +577,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
         const offset = node.position!.start.offset!; setCursor(offset); e.currentTarget.closest('details')?.removeAttribute('open')
         if (view === 'preview') root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${offset}"]`)?.scrollIntoView({ block: 'start' })
         else { const area = sourceArea.current!; area.focus(); area.setSelectionRange(offset, offset); revealSourceOffset(area, offset, 40) }
-      }}>{textOf(node)}</button>)}</div></details>
+      }}>{textOf(node)}</button>)}<button onClick={e=>{e.currentTarget.closest('details')?.removeAttribute('open');setOutlineOpen(true)}}>调整章节结构</button></div></details>
     </div>
+    <section hidden={!outlineOpen} className="sf-outline-panel"><header className="sf-page-heading"><h2>章节结构</h2><button onClick={()=>setOutlineOpen(false)}>返回正文</button></header><OutlineEditor project={project} context={context} api={api} refresh={refresh} run={run} busy={busy}/></section>
     {cowrite.message && <p className="sf-editor-notice" role="status">{cowrite.message}</p>}
     {candidate?.pendingDecision && <div className="sf-editor-notice" role="status">{candidate.note}<button disabled={busy} onClick={syncDecision}>重试保存决定</button></div>}
       {(recoverable || baseHash !== project.document.contentHash || project.document.externalChange) && <div className="sf-editor-notice" role="status">
@@ -614,7 +629,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
           }}><div className="sf-paper-page" style={{ ...paperStyle,maxWidth:'210mm',zoom: previewZoom.zoom }} data-format={format} ref={root} onMouseUp={generating?undefined:capture} onKeyUp={generating?undefined:capture}><div className="sf-paper-sheet" style={{padding:`min(${typography.marginsMm}mm,12cqw)`}}><div className="sf-paper-running-head" data-sf-protected="true">{typography.headerText||project.config.project.title}</div>
             {livePreview.projection ? <MarkdownView projection={livePreview.projection} origins={citations?.origins} formatting={formatting} typography={typography} interactiveSelection
               afterBlock={(start) => <>{candidate && view !== 'edit' && candidateBlock?.start === start ? candidateView : null}{streamBlock?.start===start && <span ref={generationAnchor} className="sf-stream-anchor" aria-hidden="true" />}</>}
-              markRange={previewMark} annotations={(start, end) => <>{cowrite.annotations(start, end, candidate?.id)}{!dirty && (Object.values(project.ledger.reviewIssues) as any[]).filter(issue => !issue.stale && issue.state !== 'resolved' && issue.documentHash === project.document.contentHash && issue.location?.sourceRange.startUtf16 >= start && issue.location.sourceRange.startUtf16 < end).map(issue => <button className="sf-review-marker" key={issue.id} title={issue.explanation} onClick={onReview}>{issue.severity} · {issue.title}</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
+              markRange={previewMark} annotations={(start, end) => <>{cowrite.annotations(start, end, candidate?.id)}{!dirty && reviewItems(project).filter(item=>item.issue.location?.sourceRange.startUtf16>=start&&item.issue.location.sourceRange.startUtf16<end).map(item=><button className="sf-review-marker" key={item.key} title={item.detail} onClick={onReview}>查看检查问题</button>)}</>} /> : <p role="alert">{livePreview.error}</p>}
             {!!citations?.references?.length && <section className="sf-paper-references"><h3>参考文献</h3>{citations.references.map(([key,entry]:[string,string])=><p key={key}>{entry}</p>)}</section>}
            <div className="sf-paper-foot" aria-hidden="true">{typography.footerText}</div></div></div></div>
         </div>
@@ -680,7 +695,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     </OverlayHost>
     </div>
     <div className="sf-draft-tools" hidden={!tool}>
-    <div hidden={tool !== 'Changes'}><h3>修改建议与正文管理</h3>
+    <div hidden={tool !== 'Changes'||suggestionsOnly&&!recoverable&&!project.document.externalChange}><h3>正文管理</h3>
     <ManuscriptImport project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} dirty={dirty || !!recoverable} />
     {baseHash !== project.document.contentHash && <p role="alert">服务端稿件版本已改变，当前未保存缓冲已保留。请复制比较后显式采用当前版本。</p>}
     <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>保存手工稿</button>
@@ -771,7 +786,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       <button onClick={() => api('runs.cancel', { context: context(), runId: activeRun }).then(() => setMessage('已请求取消，等待阶段保存检查点。')).catch(e => setMessage(e.message))}>取消当前生成</button></section>}
     </div><div hidden={tool !== 'History'}><section aria-label="写作运行历史"><h4>写作运行历史</h4><button disabled={busy} onClick={() => setHistorySequence(value => value + 1)}>刷新写作运行历史</button>
       {history?.diagnostics.map((warning: string, index: number) => <p role="alert" key={index}>{warning}</p>)}
-      {history?.runs.map((row: any) => <p key={row.runId}>{row.runId} · {row.status} · 已调用模型 {row.usedModelCalls} 次{row.errorCode ? ` · ${row.errorCode}` : ''}
+      {history?.runs.filter((row:any)=>row.stage!=='review').map((row: any) => <p key={row.runId}>{row.runId} · {row.status} · 已调用模型 {row.usedModelCalls} 次{row.errorCode ? ` · ${row.errorCode}` : ''}
         {row.parentRunId && <span> · 重试来源 {row.parentRunId}</span>}
         {row.inheritedArchive && <span> · 副本来源历史，只读；旧身份 {row.projectId}，不接管或重放请求。</span>}
         {!row.inheritedArchive && ['paused', 'interrupted', 'running', 'queued', 'waiting-input'].includes(row.status) && <>
@@ -802,9 +817,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
       {migrationPlan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
       <button disabled={busy} onClick={() => run(async () => { await api('runs.migrate', { context: context(), planId: migrationPlan.planId, planHash: migrationPlan.planHash }); setMigrationPlan(undefined); setHistorySequence(value => value + 1) })}>确认迁移旧运行存储</button>
       <button disabled={busy} onClick={() => run(async () => { await api('runs.dismissMigration', { planId: migrationPlan.planId }); setMigrationPlan(undefined) })}>取消运行存储迁移</button></section>}
-    </div><div hidden={tool !== 'Changes'}>{(Object.values(project.ledger.proposalStates) as any[]).filter(state => state.state === 'pending').map(state => <button key={state.proposalId} disabled={busy} onClick={() => run(async () => setProposal(await api('edits.read', { context: context(), proposalId: state.proposalId })))}>查看待审阅建议 {state.proposalId}</button>)}
-    {proposal && <section aria-label="建议差异"><h4>待审阅差异 · {proposal.proposal.id}</h4><p>范围：{proposal.proposal.scope}。接受会使旧审查过期。</p>
-      {proposal.proposal.edits.map((edit: any, index: number) => <div key={index}><p>源码 [{edit.startUtf16}, {edit.endUtf16})</p><b>− 原文</b><pre>{edit.expectedText}</pre><b>+ 新文</b><pre>{edit.replacementText}</pre></div>)}
+    </div><div hidden={tool !== 'Changes'}>{(Object.values(project.ledger.proposalStates) as any[]).filter(state => state.state === 'pending').map((state,index) => <button key={state.proposalId} disabled={busy} onClick={() => run(async () => setProposal(await api('edits.read', { context: context(), proposalId: state.proposalId })))}>查看修改建议 {index+1}</button>)}
+    {proposal && <section aria-label="建议差异"><h4>修改建议</h4>
+      {proposal.proposal.edits.map((edit: any, index: number) => <div key={index}><b>原文</b><pre>{edit.expectedText}</pre><b>修改后</b><pre>{edit.replacementText}</pre></div>)}
       <p>引用新增：{proposal.proposal.citationChanges.added.join('、') || '无'}；删除：{proposal.proposal.citationChanges.removed.join('、') || '无'}。</p>
       {proposal.proposal.section && <div><p>章节 {proposal.proposal.section.sectionId} · 大纲版本 {proposal.proposal.section.outlineVersion}。段落映射是待核对的关联，不能证明证据支持。</p>
         {proposal.proposal.section.paragraphClaims.map((row: any) => <p key={row.paragraphIndex}>段落 {row.paragraphIndex + 1} 改为 {row.claimIds.join('、') || '无论点关联／待补'}</p>)}

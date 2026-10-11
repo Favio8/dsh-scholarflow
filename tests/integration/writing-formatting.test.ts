@@ -64,6 +64,7 @@ test('SF-166: confirmed book entry aliases share numeric/APA references and expo
 test('SF-162: completed draft checklist ignores old interruption logs and deduplicates source checks',async()=>{
   const spec=creationSpec.parse({title:'TEST_ONLY',requirements:'TEST_ONLY 写作要求',type:'course-paper',language:'zh-CN',format:'docx',targetLength:1500,materials:[],sections:[{id:'section_a',title:'第一章',targetLength:1500}],online:false,manuscriptDir:'manuscript'})
   const task=writingTaskSchema.parse({schemaVersion:1,id:'writing_test',projectId:'prj_test',sessionId:'session_test',mode:'first-draft',status:'completed',stage:'completed',revision:1,spec,materialIndex:0,sectionIndex:1,usedModelCalls:0,usedSearchQueries:0,elapsedMs:0,owner:'TEST_ONLY',expectedDocumentHash:'sha256:'+'0'.repeat(64),questions:[],notes:['本次执行未完成：旧问题'],issues:[],onlineSources:[],createdAt:'2026-10-11T00:00:00Z',updatedAt:'2026-10-11T00:00:00Z'})
-  const rows=draftChecklist(task,{document:{text:manuscript},config:{materials:{include:[]}},ledger:{sources:{a:{identity:{status:'unverified'}},b:{identity:{status:'unverified'}}},materials:{},reviewIssues:{}}})
+  const source=(id:string)=>sourceSchema.parse({id,citeKey:'sf_'+id,title:'TEST_ONLY '+id,authors:[],kind:'paper',identifiers:{},provenance:[],identity:{status:'unverified',method:'none'},textAccess:'metadata'})
+  const rows=draftChecklist(task,{document:{text:manuscript+'\n引用[@sf_a; @sf_b]。'},config:{materials:{include:[]}},ledger:{sources:{a:source('a'),b:source('b')},materials:{},reviewIssues:{}}})
   assert.equal(rows.length,1);assert.equal(rows[0].key,'source-identity');assert.equal(rows[0].detail.includes('旧问题'),false)
 })

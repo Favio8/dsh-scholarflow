@@ -12,7 +12,7 @@ export async function prepareSourceRegistration(io: FileStore, request: unknown)
     'STALE_LEDGER_REVISION', '来源预览需要当前项目版本。')
   if (input.source.identifiers.doi) input.source.identifiers.doi = doi.parse(input.source.identifiers.doi)
   if (input.source.identifiers.arxiv) input.source.identifiers.arxiv = normalizeArxiv(input.source.identifiers.arxiv)
-  const matches = sourceMatches(input.source, current.ledger.sources)
+  const matches = sourceMatches(input.source, current.ledger.sources).filter(row=>!input.source.identifiers.doi||current.ledger.sources[row.sourceId].identifiers.doi?.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//iu,'').toLowerCase()!==input.source.identifiers.doi)
   const body = { id: newId('sourceplan'), input, matches, configHash: current.configHash, ledgerHash: current.ledgerHash }
   return { ...body, contentHash: digest(json(body)) }
 }

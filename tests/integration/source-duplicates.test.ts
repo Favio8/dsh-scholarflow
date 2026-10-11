@@ -11,7 +11,21 @@ import { normalizeArxiv, sourceMatches } from '../../src/core/research/source-ma
 import { prepareSourceRegistration, confirmSourceRegistration } from '../../src/core/research/source-registration.ts'
 import { json } from '../../src/core/store/files.ts'
 import { bibliography } from '../../src/core/export/bibliography.ts'
+import {bibliographyGroups,citationPresentation} from '../../src/core/export/citation-groups.ts'
 function context(current: Awaited<ReturnType<typeof snapshot>>) { return { requestId: 'req_TEST_ONLY', workspaceId: 'ws_TEST_ONLY', sessionId: 'ses_TEST_ONLY', projectId: current.ledger.projectId, expectedLedgerRevision: current.ledger.revision } }
+test('SF-169: another text with the same DOI shares bibliography without another duplicate form or evidence migration',async()=>{
+  const {io,first,evidence,input}=await setup()
+  await mutateLedger(io,(await snapshot(io)).ledger.revision,ledger=>{ledger.sources[first.source.id].identifiers.doi='10.1234/test-only'})
+  const before=await snapshot(io),plan=await prepareSourceRegistration(io,{...input,context:context(before),source:{...input.source,identifiers:{doi:'https://doi.org/10.1234/TEST-ONLY'}}})
+  assert.equal(plan.matches.length,0)
+  const second=await confirmSourceRegistration(io,plan,'','ses_TEST_ONLY'),after=await snapshot(io)
+  assert.equal(second.source.bibliographySourceId,first.source.id)
+  assert.equal(bibliographyGroups(after.ledger).groups.length,1)
+  assert.equal(bibliographyGroups(after.ledger).groups[0].records.length,2)
+  assert.equal(citationPresentation('正文[@'+second.source.citeKey+'; @'+first.source.citeKey+']。',after.ledger,'gbt7714').references.length,1)
+  assert.deepEqual(after.ledger.evidence[evidence.evidence.id],before.ledger.evidence[evidence.evidence.id])
+  assert.equal((await io.read('v1.txt'))!.text,'TEST_ONLY first text version\r\n')
+})
 async function setup() {
   const io = new MemoryStore({ 'v1.txt': 'TEST_ONLY first text version\r\n', 'v2.txt': 'TEST_ONLY second text version\r\n' })
   await initialize(io, await prepareInit(io, { title: 'TEST_ONLY source versions', type: 'literature-review' }))

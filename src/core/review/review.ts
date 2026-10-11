@@ -2,7 +2,7 @@ import {citationGroups} from '../export/citation-groups.ts'
 import { snapshot, mutateLedger } from '../project/project.ts'
 import { digest, newId, json, type FileStore } from '../store/files.ts'
 import { invariant, parseStored } from '../../shared/errors.ts'
-import { reviewReportSchema, semanticReviewChecks, type ReviewReport } from '../../shared/review.ts'
+import { reviewReportSchema, semanticReviewChecks, pendingModelReviewDetails, type ReviewReport } from '../../shared/review.ts'
 import { projectMarkdown, walk, textOf, wordStats, citationMarkers } from '../editing/markdown.ts'
 import type { Ledger } from '../../shared/schema.ts'
 import { requirementCount } from '../requirements/counting.ts'
@@ -123,11 +123,11 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
     const results = Object.values(ledger.evidence).filter(evidence => evidence.kind === 'user-measurement' && evidence.validation === 'located' && evidence.measurement?.origin === 'user-supplied')
     check('own_research_results', results.length ? 'unknown' : 'fail', results.length ? '已登记用户测量；完整实验设置、记录与正文对应仍需人工核验。' : '本项目没有已登记的真实实验结果；其他论文结果不能替代本项目实验。', 'integrity', 'B0', { evidenceIds: results.map(item => item.id) }, 'manual')
   }
-  check('argument_assessment', 'unknown', '本轮未执行模型辅助论证审查；支持范围、反例与推论质量仍需审阅。', 'logic', 'B1', {}, 'model-assisted')
-  check('style_assessment', 'unknown', '本轮未执行模型辅助文风审查；不存在课程成绩或接收概率评分。', 'style', 'B2', {}, 'model-assisted')
-  check('terminology_consistency', 'unknown', '本轮未审查跨节术语指代与已确认术语的一致性；需要全文模型辅助或人工核对。', 'style', 'B2', {}, 'model-assisted')
-  check('contribution_consistency', 'unknown', '本轮未核对各节贡献项的数量、名称、范围及实际依据是否一致；不能把未实施贡献当作已完成。', 'logic', 'B1', {}, 'model-assisted')
-  check('summary_body_consistency', 'unknown', '本轮未将摘要和结论与实际已保存正文比较；缺项、待补实验和超出证据的总结保持未知。', 'integrity', 'B1', {}, 'model-assisted')
+  check('argument_assessment', 'unknown', pendingModelReviewDetails.argument_assessment, 'logic', 'B1', {}, 'model-assisted')
+  check('style_assessment', 'unknown', pendingModelReviewDetails.style_assessment, 'style', 'B2', {}, 'model-assisted')
+  check('terminology_consistency', 'unknown', pendingModelReviewDetails.terminology_consistency, 'style', 'B2', {}, 'model-assisted')
+  check('contribution_consistency', 'unknown', pendingModelReviewDetails.contribution_consistency, 'logic', 'B1', {}, 'model-assisted')
+  check('summary_body_consistency', 'unknown', pendingModelReviewDetails.summary_body_consistency, 'integrity', 'B1', {}, 'model-assisted')
   return reviewReportSchema.parse({ schemaVersion: 1, id: reviewId, projectId: ledger.projectId, documentId: 'paper', documentHash: document.contentHash,
     revisionId: document.revisionId, ledgerRevision: ledger.revision, dependencyHash, createdAt: new Date().toISOString(), checks, issues,
     limitations: ['本轮只执行列出的确定性检查；模型辅助与人工未知项不能视为通过。', '来源身份与全文访问状态不等同于论点支持；未选资料不进入审查。', '未使用的收录来源不会被自动加入正文。'],

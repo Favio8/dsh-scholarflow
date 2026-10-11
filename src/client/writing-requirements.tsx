@@ -5,6 +5,7 @@ import { requirementsFallback } from '../core/pipeline/requirements-fallback.ts'
 import { ErrorNotice } from './application-error.tsx'
 import { WorkbenchIcon } from './workbench-chrome.tsx'
 import {WritingInputs} from './writing-inputs.tsx'
+import {WritingOptions} from './writing-options.tsx'
 
 export function WritingRequirements({ project, api, context, refresh, onFormat }: any) {
   const [spec, setSpec] = useState<ReturnType<typeof requirementsFallback>>(), [busy, setBusy] = useState(false), [message, setMessage] = useState('')
@@ -12,6 +13,7 @@ export function WritingRequirements({ project, api, context, refresh, onFormat }
   const [baseSpecHash, setBaseSpecHash] = useState<string | null>()
   const [baseRequirementsHash,setBaseRequirementsHash]=useState<string|null>()
   const [savedVersion, setSavedVersion] = useState<{ spec: CreationSpec; baseSpecHash: string | null }>()
+  const [optionsOpen,setOptionsOpen]=useState(false)
   useEffect(() => { let live = true
     api('writingTask.requirements', { context: context() }).then((result: any) => { if (live) {
       setSpec(result.spec ?? requirementsFallback(project)); setBaseSpecHash(result.baseSpecHash);setBaseRequirementsHash(result.baseRequirementsHash); setError(undefined)
@@ -20,14 +22,18 @@ export function WritingRequirements({ project, api, context, refresh, onFormat }
   }, [project.binding.projectId])
   if (!spec) return error ? <ErrorNotice error={error} /> : <p>正在读取写作要求…</p>
   const update = (value: Partial<CreationSpec>) => { setSpec({ ...spec, ...value }); setError(undefined); setMessage('') }
-  return <section className="sf-wizard sf-requirements-panel"><h2>写作要求</h2><label>论文标题<input value={spec.title} onChange={e => update({ title: e.target.value })} /></label>
-    <div className="sf-wizard-row"><label>论文类型<select value={spec.type} onChange={e => update({ type: e.target.value as CreationSpec['type'] })}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <label>语言<select value={spec.language} onChange={e => update({ language: e.target.value as CreationSpec['language'] })}><option value="zh-CN">中文</option><option value="en">English</option></select></label>
-      <label>提交格式<select value={spec.format} onChange={e => update({ format: e.target.value as CreationSpec['format'] })}>{Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
-    <label>写作要求<textarea rows={8} value={spec.requirements} onChange={e => update({ requirements: e.target.value })} /></label>
-    <label>目标篇幅<input type="number" min={200} max={60000} value={spec.targetLength ?? ''} placeholder="原项目未记录篇幅" onChange={e => update({ targetLength: Number(e.target.value) })} /></label>
-    <label>引用格式<select aria-label="引用格式" value={spec.language==='en'&&!spec.typography?.referenceStyleExplicit&&spec.typography?.referenceStyle!=='apa7'?'plain':spec.typography?.referenceStyle??'gbt7714'} onChange={e=>update({typography:typographySpec.parse({...spec.typography,referenceStyle:e.target.value,referenceStyleExplicit:true})})}><option value="gbt7714">GB/T 7714 · 数字编号</option><option value="plain">简明元数据 · 数字编号</option><option value="apa7">APA 第 7 版 · 作者年份</option></select></label>
+  return <section className="sf-wizard sf-requirements-panel"><header className="sf-page-heading"><h2>写作要求</h2></header>
+    <div className="sf-form">
+      <div className="sf-field"><span className="sf-field-label">论文标题</span><div className="sf-field-control"><input aria-label="论文标题" value={spec.title} onChange={e => update({ title: e.target.value })} /></div></div>
+      <div className="sf-field"><span className="sf-field-label">论文类型</span><div className="sf-field-control"><select aria-label="论文类型" value={spec.type} onChange={e => update({ type: e.target.value as CreationSpec['type'] })}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div></div>
+      <div className="sf-field"><span className="sf-field-label">语言</span><div className="sf-field-control"><select aria-label="语言" value={spec.language} onChange={e => update({ language: e.target.value as CreationSpec['language'] })}><option value="zh-CN">中文</option><option value="en">English</option></select></div></div>
+      <div className="sf-field"><span className="sf-field-label">提交格式</span><div className="sf-field-control"><select aria-label="提交格式" value={spec.format} onChange={e => update({ format: e.target.value as CreationSpec['format'] })}>{Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div></div>
+      <div className="sf-field"><span className="sf-field-label">写作要求</span><div className="sf-field-control"><textarea aria-label="写作要求" rows={5} value={spec.requirements} onChange={e => update({ requirements: e.target.value })} /></div></div>
+      <div className="sf-field"><span className="sf-field-label">目标篇幅</span><div className="sf-field-control"><input aria-label="目标篇幅" type="number" min={200} max={60000} value={spec.targetLength ?? ''} placeholder="原项目未记录篇幅" onChange={e => update({ targetLength: Number(e.target.value) })} /></div></div>
+      <div className="sf-field"><span className="sf-field-label">引用格式</span><div className="sf-field-control"><select aria-label="引用格式" value={spec.language==='en'&&!spec.typography?.referenceStyleExplicit&&spec.typography?.referenceStyle!=='apa7'?'plain':spec.typography?.referenceStyle??'gbt7714'} onChange={e=>update({typography:typographySpec.parse({...spec.typography,referenceStyle:e.target.value,referenceStyleExplicit:true})})}><option value="gbt7714">GB/T 7714 · 数字编号</option><option value="plain">简明元数据 · 数字编号</option><option value="apa7">APA 第 7 版 · 作者年份</option></select></div></div>
+    </div>
     <WritingInputs key={project.binding.projectId} project={project} spec={spec} update={update} api={api} context={context} refresh={refresh} baseSpecHash={baseSpecHash} onSaved={(row:any)=>{setBaseSpecHash(row.baseSpecHash);update({materials:row.spec.materials,requirementSources:row.spec.requirementSources,online:row.spec.online})}}/>
+    <details className="sf-detail" onToggle={event=>setOptionsOpen(event.currentTarget.open)}><summary>文风与写作模板</summary>{optionsOpen&&<WritingOptions project={project} api={api} context={context} refresh={refresh}/>}</details>
     {!spec.sections.length && <button disabled={!spec.targetLength || spec.targetLength < 200} onClick={() => update({ sections: presetSections(spec.type, spec.targetLength!) })}>添加章节结构</button>}
     {spec.cover?.enabled && <fieldset><legend>封面</legend>
       <label>封面标题<input value={spec.cover.title} onChange={event => update({ cover: { ...spec.cover!, title: event.target.value } })} /></label>

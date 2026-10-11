@@ -16,6 +16,13 @@ export const manualAssessmentSchema = z.object({ checkId: id, status: z.enum(['p
 export const manualReviewRequest = z.object({ context: requestContext, reviewId: id, assessments: z.array(manualAssessmentSchema).min(1).max(100) }).strict()
 const semanticStatus = z.enum(['pass', 'fail', 'unknown'])
 export const semanticReviewChecks = ['argument_assessment', 'style_assessment', 'terminology_consistency', 'contribution_consistency', 'summary_body_consistency'] as const
+export const pendingModelReviewDetails = {
+  argument_assessment:'本轮未执行模型辅助论证审查；支持范围、反例与推论质量仍需审阅。',
+  style_assessment:'本轮未执行模型辅助文风审查；不存在课程成绩或接收概率评分。',
+  terminology_consistency:'本轮未审查跨节术语指代与已确认术语的一致性；需要全文模型辅助或人工核对。',
+  contribution_consistency:'本轮未核对各节贡献项的数量、名称、范围及实际依据是否一致；不能把未实施贡献当作已完成。',
+  summary_body_consistency:'本轮未将摘要和结论与实际已保存正文比较；缺项、待补实验和超出证据的总结保持未知。',
+} as const
 export const modelReviewRequest = z.object({ context: requestContext, assessmentScope: z.enum(['cross-section', 'argument-style']).default('cross-section') }).strict()
 export const modelReviewOutputSchema = z.object({ checks: z.array(z.object({ id: z.enum(semanticReviewChecks), status: semanticStatus,
   detail: z.string().min(10).max(4000) }).strict()).min(2).max(5),

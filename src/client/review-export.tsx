@@ -4,9 +4,10 @@ import { FORMAT_LABELS } from './paper-workspace.tsx'
 import type { ExportFormat } from '../shared/presentation.ts'
 import { ModelReview } from './model-review.tsx'
 import { ReviewFixes } from './review-fixes.tsx'
+import {reviewItems} from './review-presentation.ts'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
-export function ReviewExport({ project, context, api, refresh, run, busy, mode, onLocate, format = 'markdown', exportTrigger = 0 }: Props & { mode: string; format?: ExportFormat; exportTrigger?: number; onLocate: (location: any) => void }) {
+export function ReviewExport({ project, context, api, refresh, run, busy, mode, onLocate, format = 'markdown', exportTrigger = 0, editor, onSources }: Props & { mode: string; format?: ExportFormat; exportTrigger?: number; onLocate: (location: any) => void; editor?:any; onSources?:()=>void }) {
   const [review, setReview] = useState<any>(), [message, setMessage] = useState('')
   const [lastDelivery,setLastDelivery]=useState<any>()
   const handledTrigger = useRef(0)
@@ -43,64 +44,41 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode, 
       await refresh()
     })
   }, [exportTrigger])
-  const [reasons, setReasons] = useState<Record<string, string>>({})
-  const [manualCheck, setManualCheck] = useState(''), [manualStatus, setManualStatus] = useState('unknown'), [manualReason, setManualReason] = useState('')
-  const [manualEvidence, setManualEvidence] = useState<string[]>([]), [manualClaims, setManualClaims] = useState<string[]>([]), [manualPlan, setManualPlan] = useState<any>()
-  useEffect(() => { let live = true
-    api('review.inspect', { context: context() }).then(value => live && setReview(value)).catch(error => live && setMessage(error.message))
-    return () => { live = false }
-  }, [project.ledger.revision, project.document.contentHash, project.document.externalChange])
-  const issues = Object.values(project.ledger.reviewIssues) as any[]
+  const [reasons,setReasons]=useState<Record<string,string>>({}),[fixRequest,setFixRequest]=useState<{issueId:string;request:string}>()
+  useEffect(()=>{let live=true
+    api('review.inspect',{context:context()}).then(value=>live&&setReview(value)).catch(error=>live&&setMessage(error.message))
+    return()=>{live=false}
+  },[project.ledger.revision,project.document.contentHash,project.document.externalChange])
+  const items=reviewItems(project),passed=review?.report?.checks.filter((check:any)=>check.status==='pass').length??0
   return <>
-    {message && mode !== 'Export' && <div className="sf-editor-notice" role="status">{message}{lastDelivery&&<><button disabled={busy} onClick={()=>run(()=>downloadBundle(lastDelivery.id))}>下载完整交付包</button><button disabled={busy} onClick={()=>run(async()=>{const result=await api('export.read',{context:context(),deliveryId:lastDelivery.id}),file=result.files.find((row:any)=>row.relativePath==='quality-report.md');download(file.text,'quality-report.md','text/markdown;charset=utf-8')})}>下载质量报告</button></>}</div>}
-    <section id="sf-panel-Review" role="tabpanel"  hidden={mode !== 'Review'} aria-label="审查"><h3>审查</h3>
-      <p>规则检查、模型辅助与人工判断分别显示。未知项不能当作通过；问题经对应复查后才关闭。</p>
-      <button disabled={busy || project.document.externalChange} onClick={() => run(async () => {
-        const result = await api('review.run', { context: context() }); setReview(result); await refresh()
-      })}>运行确定性审查</button>
-      <ModelReview project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} onReview={setReview} />
-      {review?.report ? <><p role="status">审查 {review.report.id} · {review.stale ? '已过期，需按当前版本重跑' : '对应当前版本'}</p>
-        <ul aria-label="审查检查结果">{review.report.checks.map((check: any) => <li key={check.id}>{check.status} · {check.method} · {check.detail}</li>)}</ul>
-        {review.report.limitations.map((limit: string) => <p key={limit}>{limit}</p>)}</> : <p>当前尚无审查快照。</p>}
-      {review?.report && <section aria-label="人工同版本复核"><h4>人工复核与依据</h4>
-        <p>只复核当前稿件的可人工判断项；填写具体依据后预览确认。缺失实验、不可用证据与确定性失败须先修复，不能勾选绕过。</p>
-        <label>人工复核检查<select aria-label="人工复核检查" value={manualCheck} disabled={busy || review.stale || !!manualPlan} onChange={e => { setManualCheck(e.target.value); setManualEvidence([]); setManualClaims([]); setManualReason('') }}><option value="">请选择</option>
-          {review.manualEligible?.map((id: string) => <option key={id} value={id}>{id} · {review.report.checks.find((row: any) => row.id === id)?.status}</option>)}</select></label>
-        <label>人工复核结果<select aria-label="人工复核结果" disabled={busy || !!manualPlan} value={manualStatus} onChange={e => setManualStatus(e.target.value)}><option value="unknown">未知／依据不足</option><option value="fail">发现问题</option><option value="pass">已核对，通过此项</option></select></label>
-        <label>人工复核依据<textarea aria-label="人工复核依据" rows={4} maxLength={4000} value={manualReason} disabled={busy || !!manualPlan} onChange={e => setManualReason(e.target.value)} /></label>
-        <label>人工复核关联证据<select aria-label="人工复核关联证据" multiple size={4} value={manualEvidence} disabled={busy || !!manualPlan} onChange={e => setManualEvidence(Array.from(e.target.selectedOptions, option => option.value))}>
-          {(Object.values(project.ledger.evidence) as any[]).map(row => <option key={row.id} value={row.id}>{row.id} · {row.kind} · {row.excerpt.slice(0, 100)}</option>)}</select></label>
-        <label>人工复核关联论点<select aria-label="人工复核关联论点" multiple size={4} value={manualClaims} disabled={busy || !!manualPlan} onChange={e => setManualClaims(Array.from(e.target.selectedOptions, option => option.value))}>
-          {(Object.values(project.ledger.claims) as any[]).map(row => <option key={row.id} value={row.id}>{row.id} · {row.text.slice(0, 100)}</option>)}</select></label>
-        <button disabled={busy || review.stale || !!manualPlan || !manualCheck || manualReason.trim().length < 10} onClick={() => run(async () => setManualPlan(await api('review.prepareManual', { context: context(), reviewId: review.report.id,
-          assessments: [{ checkId: manualCheck, status: manualStatus, reason: manualReason.trim(), evidenceIds: manualEvidence, claimIds: manualClaims,
-            requirementIds: manualCheck.startsWith('requirement_') ? [manualCheck.slice('requirement_'.length)] : [] }] })))}>预览人工复核结果</button>
-        {manualPlan && <section role="dialog" aria-label="人工复核确认"><h4>确认同版本人工结果</h4><p>{manualPlan.reviewId} · {manualPlan.documentHash}</p>
-          <pre>{JSON.stringify(manualPlan.assessments, null, 2)}</pre>{manualPlan.risks.map((risk: string) => <p key={risk}>{risk}</p>)}
-          <button disabled={busy} onClick={() => run(async () => { const result = await api('review.submitManual', { context: context(), planId: manualPlan.planId, planHash: manualPlan.planHash }); setReview(result); setManualPlan(undefined); setManualReason(''); await refresh() })}>确认保存人工复核</button>
-          <button disabled={busy} onClick={() => run(async () => { await api('review.dismissManual', { planId: manualPlan.planId }); setManualPlan(undefined) })}>取消人工复核预览</button></section>}
-      </section>}
-      {issues.map(issue => <section key={issue.id} aria-label={`审查问题 ${issue.id}`}><h4>{issue.severity} · {issue.title}</h4>
-        <p>{issue.checkMethod} · {issue.state} · {issue.stale ? '需更新' : '当前'} · {issue.explanation}</p>
-        {issue.location && <blockquote>位置：{issue.location.sourceRange.startUtf16}–{issue.location.sourceRange.endUtf16}<br />{issue.location.quote}</blockquote>}
-        {issue.location && <button disabled={busy || issue.stale || issue.documentHash !== project.document.contentHash} onClick={() => run(async () => onLocate(await api('review.locateIssue', { context: context(), issueId: issue.id })))}>定位正文问题 {issue.id}</button>}
-        {issue.suggestedFix && <p>修订建议：{issue.suggestedFix}</p>}
-        {issue.resolutionReason && <p>处理理由：{issue.resolutionReason}</p>}
-        {issue.state !== 'resolved' && <><label>处理理由<input aria-label={`处理理由 ${issue.id}`} value={reasons[issue.id] ?? ''} onChange={e => setReasons({ ...reasons, [issue.id]: e.target.value })} maxLength={2000} /></label>
-          {(['accepted-risk', 'dismissed'] as const).map(state => <button key={state} disabled={busy || !(reasons[issue.id] ?? '').trim()} onClick={() => run(async () => {
-            await api('review.decideIssue', { context: context(), issueId: issue.id, state, reason: reasons[issue.id] }); await refresh()
-          })}>{state === 'accepted-risk' ? '记录接受风险' : '记录不采纳理由'}</button>)}</>}
-      </section>)}
-      <ReviewFixes project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} />
+    {message&&mode!=='Export'&&<div className="sf-editor-notice" role="status">{message}{lastDelivery&&<><button disabled={busy} onClick={()=>run(()=>downloadBundle(lastDelivery.id))}>下载完整交付包</button><button disabled={busy} onClick={()=>run(async()=>{const result=await api('export.read',{context:context(),deliveryId:lastDelivery.id}),file=result.files.find((row:any)=>row.relativePath==='quality-report.md');download(file.text,'quality-report.md','text/markdown;charset=utf-8')})}>下载检查报告</button></>}</div>}
+    <section id="sf-panel-Review" className="sf-review-panel" role="tabpanel" hidden={mode!=='Review'} aria-label="检查与修改">
+      <header className="sf-page-heading"><h2>检查与修改</h2></header>
+      <ModelReview project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} onReview={setReview} editor={editor}/>
+      <p className="sf-review-summary" role="status">{review?.stale?'正文或资料已更新，请重新检查。':review?.report?items.length?'发现 '+items.length+' 项需要处理或确认的问题。':'当前没有待处理问题。':'点击检查全文，查看问题与修改建议。'}</p>
+      {!!passed&&!review?.stale&&<p className="sf-muted">{passed} 项检查已通过。</p>}
+      {items.map(item=><article className="sf-review-item" data-sf-review-id={item.issue.id} key={item.key}>
+        <header><span className="sf-review-kind">{item.identity?'待核对':item.issue.severity==='B0'?'需要处理':item.issue.severity==='B2'?'表达建议':'待检查'}</span><small className="sf-muted">{item.method}</small></header>
+        <h3>{item.title}</h3>{item.detail!==item.title&&<p>{item.detail}</p>}
+        {item.issue.location&&<blockquote>{item.issue.location.quote}</blockquote>}
+        {item.issue.suggestedFix&&<p className="sf-review-advice">{item.issue.suggestedFix}</p>}
+        <div className="sf-page-actions">
+          {item.issue.location&&<><button disabled={busy} onClick={()=>run(async()=>onLocate(await api('review.locateIssue',{context:context(),issueId:item.issue.id})))}>定位正文</button>
+            <button disabled={busy} onClick={()=>setFixRequest({issueId:item.issue.id,request:crypto.randomUUID()})}>生成修改建议</button></>}
+          {item.sourceId&&<button onClick={onSources}>查看参考来源</button>}
+        </div>
+        <details className="sf-detail"><summary>暂不修改此问题</summary><label>原因<input value={reasons[item.key]??''} onChange={event=>setReasons({...reasons,[item.key]:event.target.value})}/></label>
+          <button disabled={busy||!reasons[item.key]?.trim()} onClick={()=>run(async()=>{const current=context();for(const issueId of item.issueIds){const result=await api('review.decideIssue',{context:current,issueId,state:'accepted-risk',reason:reasons[item.key]});current.expectedLedgerRevision=result.revision}await refresh()})}>保留问题并记录原因</button></details>
+      </article>)}
+      <ReviewFixes project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} request={fixRequest}/>
     </section>
-    <section id="sf-panel-Export" role="tabpanel" hidden={mode !== 'Export'} aria-label="交付历史"><h3>交付历史</h3><p>正文、引用库和质量报告保存在同一稿件快照中。</p>
-      {(Object.values(project.ledger.deliveries) as any[]).map(delivery => <div key={delivery.id}><p>{delivery.id} · {delivery.reviewState} · {delivery.revisionId}</p>
-        <button disabled={busy} onClick={() => run(() => downloadBundle(delivery.id))}>下载完整交付包</button>
-        {delivery.files.map((file: any) => <button key={file.relativePath} disabled={busy} onClick={() => run(async () => {
-          const result = await api('export.read', { context: context(), deliveryId: delivery.id })
-          const content = result.files.find((item: any) => item.relativePath === file.relativePath)
-          download(bytes(content) as BlobPart, file.relativePath, content.mediaType ?? 'text/plain;charset=utf-8')
-        })}>下载 {file.relativePath} · {file.sizeBytes} bytes</button>)}</div>)}
+    {mode==='ReviewHistory'&&<ModelReview project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} onReview={setReview} historyOnly/>}
+    <section id="sf-panel-Export" className="sf-history-panel" role="tabpanel" hidden={mode!=='Export'} aria-label="导出记录"><header className="sf-page-heading"><h2>导出记录</h2></header>
+      {(Object.values(project.ledger.deliveries) as any[]).reverse().map(delivery=><article className="sf-reference-row" key={delivery.id}><strong>{new Date(delivery.createdAt).toLocaleString()}</strong><p className="sf-muted">{delivery.reviewState==='draft-reviewed'?'已完成工具检查':delivery.reviewState==='review-stale'?'检查对应旧版本':'工作草稿'}</p>
+        <button disabled={busy} onClick={()=>run(()=>downloadBundle(delivery.id))}>下载完整交付包</button>
+        <details className="sf-detail"><summary>下载单个文件</summary>{delivery.files.map((file:any)=><button key={file.relativePath} disabled={busy} onClick={()=>run(async()=>{const result=await api('export.read',{context:context(),deliveryId:delivery.id}),content=result.files.find((item:any)=>item.relativePath===file.relativePath);download(bytes(content) as BlobPart,file.relativePath,content.mediaType??'text/plain;charset=utf-8')})}>{file.relativePath}</button>)}</details>
+      </article>)}
+      {!Object.keys(project.ledger.deliveries).length&&<p className="sf-muted">顶部导出后，文件会保存在这里。</p>}
       <p role="status">{message}</p>
     </section>
   </>

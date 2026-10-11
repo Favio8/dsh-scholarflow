@@ -128,6 +128,21 @@ function point(root: HTMLElement, node: Node, offset: number, edge: 'start' | 'e
   for(let child=walker.nextNode();child;child=walker.nextNode()){if(child===node)return {leafId:element.dataset.sfLeaf!,offset:prefix+offset};prefix+=child.textContent?.length??0}
   throw new Error('这处内容不属于正文文字，请重新选择。')
 }
+export function restoreSelection(root:HTMLElement,projection:Projection,range:{start:number;end:number}){
+  const pointAt=(offset:number,edge:'start'|'end')=>{
+    const leaf=projection.leaves.find(row=>edge==='start'?row.start<=offset&&row.end>offset:row.start<offset&&row.end>=offset)
+    if(!leaf)return
+    const unit=leaf.units.find(row=>edge==='start'?row.sourceStart<=offset&&row.sourceEnd>offset:row.sourceStart<offset&&row.sourceEnd>=offset)
+    if(!unit)return
+    const element=root.querySelector(`[data-sf-leaf="${leaf.id}"]`)
+    if(!element)return
+    let remaining=edge==='start'?unit.renderedStart:unit.renderedEnd
+    const walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT)
+    for(let node=walker.nextNode();node;node=walker.nextNode()){const length=node.textContent!.length;if(remaining<=length)return {node,offset:remaining};remaining-=length}
+  }
+  const from=pointAt(range.start,'start'),to=pointAt(range.end,'end')
+  if(from&&to)window.getSelection()?.setBaseAndExtent(from.node,from.offset,to.node,to.offset)
+}
 export function captureSelection(root: HTMLElement, projection: Projection, documentSnapshot: any, projectId: string, local = false): SelectionPayload {
   const selection = window.getSelection()
   if (!selection?.rangeCount || selection.isCollapsed) throw new Error('请先在渲染正文中选择一段连续文字。')

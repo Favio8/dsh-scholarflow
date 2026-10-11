@@ -8,37 +8,28 @@ export const TYPE_LABELS: Record<string, string> = { 'course-paper': '课程论�
 declare const __SF_KATEX_CSS__: string
 export const MATH_CSS = __SF_KATEX_CSS__
 
-export function ProjectSettings({ project, api, context, refresh, run, busy, diagnostics }: any) {
-  const [title, setTitle] = useState(project.config.project.title)
-  const [type, setType] = useState(project.config.project.type)
-  const [language, setLanguage] = useState(project.config.project.language)
-  const [baseHash, setBaseHash] = useState(project.configHash)
-  const [message, setMessage] = useState('')
-  const [hostInfo, setHostInfo] = useState<any>()
-  useEffect(() => {
-    setTitle(project.config.project.title); setType(project.config.project.type)
-    setLanguage(project.config.project.language); setBaseHash(project.configHash)
-  }, [project.binding.projectId, project.configHash])
-  return <section className="sf-settings-card" aria-label="项目设置">
-    <h3>项目设置</h3>
-    <label>论文标题<input value={title} maxLength={300} onChange={e => setTitle(e.target.value)} /></label>
-    <div className="sf-form-row"><label>论文类型<select value={type} onChange={e => setType(e.target.value)}>
-      {Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <label>论文语言<select value={language} onChange={e => setLanguage(e.target.value)}><option value="zh-CN">中文</option><option value="en">英文</option></select></label></div>
-    <button className="sf-primary" disabled={busy || !title.trim()} onClick={() => run(async () => {
-      const result = await api('project.updatePresentation', { context: context(), baseConfigHash: baseHash, title: title.trim(), type, language })
-      await refresh(); setMessage(result.sessionRegistration?.diagnostic ? `项目设置已保存；${result.sessionRegistration.diagnostic.message}` : '项目设置已保存。')
-    })}>保存设置</button><p role="status">{message}</p>
-    <details onToggle={e => { if (e.currentTarget.open && !hostInfo && diagnostics) diagnostics().then(setHostInfo).catch((error: Error) => setMessage(error.message)) }}><summary>项目详情</summary>
-      {hostInfo && <p>已连接 Host · 协议 v{hostInfo.protocol} · {hostInfo.settings.length ? '设置可持久化' : '设置能力不足'}</p>}
-      <p>工作区：{project.binding.workspaceId}</p><p>项目：{project.binding.projectId}</p>
-      <p>主稿：{project.config.paths.mainDocument}</p><p>当前阶段：{project.ledger.workflow?.stage ?? '以引导任务进度为准'}</p>
-      <p>数据版本：{project.ledger.revision} · {project.document.externalChange ? '检测到外部正文修改' : '正文版本一致'}</p>
-      {!!project.configWarnings?.length && <p>{project.configWarnings.join('、')}</p>}</details>
+export function ProjectSettings({project,refresh,run,busy,diagnostics}:any){
+  const [hostInfo,setHostInfo]=useState<any>(),[message,setMessage]=useState('')
+  return <section className="sf-settings-card" aria-label="项目设置"><header className="sf-page-heading"><h2>项目设置</h2><button disabled={busy} onClick={()=>run(async()=>{await refresh();setMessage('已重新读取项目。')})}>重新读取项目</button></header>
+    <h3>文件位置</h3><div className="sf-form"><div className="sf-field"><span className="sf-field-label">论文主稿</span><div className="sf-field-control">{project.config.paths.mainDocument}</div></div>
+      <div className="sf-field"><span className="sf-field-label">项目配置</span><div className="sf-field-control">.scholarflow/project.yaml</div></div></div>
+    <p className="sf-muted">{project.document.externalChange?'正文在外部发生了修改，请返回正文比较后继续。':'已保存的正文可以继续编辑。'}</p>
+    <details className="sf-detail" onToggle={event=>{if(event.currentTarget.open&&!hostInfo)diagnostics().then(setHostInfo).catch((error:Error)=>setMessage(error.message))}}><summary>诊断详情</summary>
+      {hostInfo&&<p>宿主协议 v{hostInfo.protocol} · {hostInfo.settings.length?'设置可保存':'设置能力不足'}</p>}
+      <p>项目：{project.binding.projectId}</p><p>数据版本：{project.ledger.revision}</p>
+      {!!project.configWarnings?.length&&<p>{project.configWarnings.join('、')}</p>}</details>
+    {message&&<p role="status">{message}</p>}
   </section>
 }
 
 export const PAPER_CSS = `
+body .sf-app .sf-review-item>h3{font-family:var(--sf-family-sans);font-size:var(--sf-font-md);font-weight:600;line-height:var(--sf-leading-body)}body .sf-app :is(.sf-page-heading,.sf-review-panel,.sf-writing-options,.sf-history-panel,.sf-history-tabs,.sf-outline-panel){font-family:var(--sf-family-sans)}body .sf-app .sf-page-heading h2{font-size:var(--sf-font-display-1);font-weight:600}.sf-outline-list{list-style:none;padding:0}.sf-outline-list>li{padding:var(--sf-space-3) 0;border-bottom:1px solid var(--sf-border-soft)}.sf-writing-options .sf-field-control:has(.sf-check){display:block}
+.sf-page-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3);margin-bottom:var(--sf-space-4)}.sf-page-heading :is(h2,h3){margin:0}.sf-page-heading p{margin:var(--sf-space-1) 0 0}.sf-page-actions{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap}
+.sf-paper-actions{display:flex;gap:var(--sf-space-1);margin-left:auto}.sf-paper-actions button{font-size:var(--sf-font-sm)}.sf-paper-actions button[aria-pressed=true]{color:var(--sf-accent-text);font-weight:600}
+.sf-review-panel,.sf-history-panel,.sf-review-history,.sf-settings-card,.sf-requirements-panel{max-width:960px;width:100%;margin-inline:auto;box-sizing:border-box}.sf-review-action>span{display:block;margin-top:var(--sf-space-2);font-size:var(--sf-font-sm)}.sf-review-summary{font-weight:600;margin:var(--sf-space-5) 0 var(--sf-space-1)}.sf-review-item{padding:var(--sf-space-4) 0;border-bottom:1px solid var(--sf-border-soft)}.sf-review-item>header{display:flex;align-items:center;gap:var(--sf-space-3)}.sf-review-item h3{font-size:var(--sf-font-md);font-weight:600;margin:var(--sf-space-2) 0}.sf-review-item>p{font-size:var(--sf-font-sm);line-height:var(--sf-leading-body)}.sf-review-kind{font-size:var(--sf-font-xs);color:var(--sf-accent-text)}.sf-review-item blockquote{margin:var(--sf-space-3) 0;padding-left:var(--sf-space-3);border-left:2px solid var(--sf-border-soft);color:var(--sf-muted);font-size:var(--sf-font-sm)}.sf-review-running{display:flex;gap:var(--sf-space-2);align-items:center}.sf-review-running span{flex:1}.sf-review-fix:empty{display:none}
+.sf-duplicate-notice{display:flex;gap:var(--sf-space-3);align-items:center;padding:var(--sf-space-3);background:var(--sf-fill);border-radius:var(--sf-radius-control)}.sf-duplicate-notice p{flex:1;font-size:var(--sf-font-sm);margin:0}.sf-reference-row .sf-detail{margin:var(--sf-space-2) 0}.sf-reference-row .sf-detail button{display:block;text-align:left;margin-top:var(--sf-space-1);white-space:normal}
+.sf-paper-content[data-page=Review],.sf-paper-content[data-page=History]{overflow:auto;display:block}.sf-paper-content[data-page=Review]>#sf-panel-Review{overflow:visible}.sf-paper-content>#sf-panel-Draft[data-sf-tool]{display:block;overflow:visible;padding:var(--sf-space-4) var(--sf-space-5);max-width:960px;width:100%;margin-inline:auto}.sf-paper-content>#sf-panel-Draft[data-sf-tool] .sf-draft{display:block;overflow:visible}.sf-history-tabs{display:flex;gap:var(--sf-space-2);max-width:960px;margin:var(--sf-space-3) auto;padding-inline:var(--sf-space-5)}.sf-history-tabs button[aria-selected=true]{color:var(--sf-accent-text);font-weight:600}.sf-outline-panel{position:absolute;inset:0;z-index:5;overflow:auto;padding:var(--sf-space-5);background:var(--sf-plane-0);box-sizing:border-box}.sf-outline-panel>section{max-width:960px;margin:auto}.sf-draft{position:relative}
+@container(max-width:600px){.sf-duplicate-notice{align-items:flex-start;flex-direction:column}.sf-page-heading{align-items:flex-start}.sf-review-action>span{max-width:35ch}}
 /* Progress read-out, not a band. It carries no rule: the toolbar above it already separates
    chrome from canvas, and a rule here would stack a third hairline onto the two above. */
 .sf-stream-status{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-1) var(--sf-space-4);font-size:var(--sf-font-sm);color:var(--sf-muted);flex-shrink:0}
@@ -130,7 +121,7 @@ body .sf-app .sf-pane-caption button{background:transparent;border-color:transpa
 .sf-editor-notice{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap;padding:var(--sf-space-2) var(--sf-space-3);background:var(--sf-accent-soft);border-bottom:1px solid var(--sf-border);font-size:var(--sf-font-sm);flex-shrink:0}
 .sf-editor-notice button{padding:0 var(--sf-space-2);font-size:var(--sf-font-sm)}
 .sf-draft-tools{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-5)}
-.sf-draft-tools>section,.sf-paper-content>#sf-panel-Review>section,.sf-paper-content>#sf-panel-Export>section{border:1px solid var(--sf-border);padding:var(--sf-space-4);margin:var(--sf-space-3) 0;border-radius:var(--sf-radius-lg)}
+.sf-draft-tools>section{border:1px solid var(--sf-border);padding:var(--sf-space-4);margin:var(--sf-space-3) 0;border-radius:var(--sf-radius-lg)}
 .sf-paper-project h3{font-size:var(--sf-font-display-2);margin:0 0 var(--sf-space-4)}.sf-paper-project h4{font-size:var(--sf-font-prose);margin:var(--sf-space-3) 0}
 .sf-paper-project label{font-size:var(--sf-font-sm);color:var(--sf-muted);display:flex;flex-direction:column;gap:var(--sf-space-2);margin:var(--sf-space-3) 0}
 .sf-paper-project input:not([type=checkbox]),.sf-paper-project label select{width:100%;height:36px;border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-md);background:transparent;padding:var(--sf-space-2);color:inherit;box-sizing:border-box;font-size:var(--sf-font-md)}
