@@ -12,7 +12,7 @@ const STAGES: Record<string, string> = { materials: '读取工作区资料', res
  * in the middle column's bottom overlay, so this component never grows a large card that
  * pushes the text down; it reports real counts and keeps technical text one level deeper.
  */
-export function WritingProgress({ api, context, refresh, onTask, taskRevision, onManage,project,onRecords,onCheck }: any) {
+export function WritingProgress({ api, context, refresh, onTask, taskRevision, onManage,project,onRecords,onCheck,variant }: any) {
   const [task, setTask] = useState<WritingTask>(), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [elapsed, setElapsed] = useState(0)
   const [command,setCommand] = useState<string>()
@@ -35,7 +35,7 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
     const timer = window.setInterval(() => setElapsed(base + Date.now() - started), 1000)
     return () => clearInterval(timer)
   }, [task?.status, task?.revision])
-  if (!task) return error ? <details className="sf-writing-progress"><summary>历史任务进度暂不可用</summary>{error}</details> : null
+  if (!task) return error ? <details className="sf-writing-progress sf-progress-pill"><summary>历史任务进度暂不可用</summary>{error}</details> : null
   const action = async (name: string) => { if(busy || command)return; setBusy(true); setCommand(name); setError('')
     try { const result = await api('writingTask.action', { context: context(), taskId: task.id, action: name }); setTask(result.task); latest.current.onTask?.(result); await refresh(); if(!result.stopping)setCommand(undefined) }
     catch (error) { setError((error as Error).message);setCommand(undefined) } finally { setBusy(false) }
@@ -54,15 +54,25 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
   // A task stored before this field existed still has to render, so absence is an empty list.
   const issues = task.issues?.length ? task.issues : mapLegacyNotes(task.notes ?? [], task.updatedAt)
   const { needsAction, inProgress, handled } = groupIssues(issues)
+  // v1.20: the progress line and the toolbar share one grid row, so the same report renders as a
+  // pill inside the work bar. Only the wrapper changes; polling, actions and the onTask hand-off
+  // stay exactly where they were, which is why both shapes keep the .sf-writing-progress class.
+  const pill = variant === 'pill'
+  // A problem must not hide behind the disclosure: the bar has one line to say it in, so the state
+  // itself turns amber and the badge stops being a neutral count.
+  const pillBox = (status: string, badge: string, body: React.ReactNode, alert = false) =>
+    <section className="sf-writing-progress sf-progress-pill" data-alert={alert || undefined} aria-label="论文写作进度">
+      <span className={`sf-progress-dot ${alert?'sf-progress-alert':''}`} /><span className="sf-progress-summary" role="status">{status}</span>
+      <details className="sf-progress-details"><summary aria-label="写作进度详情"><WorkbenchIcon kind="down" />{badge}</summary>
+        <div className="sf-issue-popover">{body}</div></details>
+    </section>
   if(task.mode==='first-draft'){
     const running=['running','queued'].includes(task.status),complete=task.status==='completed',checks=complete?draftChecklist(task,project):[]
     const section=task.spec.sections[task.sectionIndex]
-    return <section className="sf-writing-progress" aria-label="论文写作进度"><div className="sf-writing-line">
-      <span className={`sf-progress-dot ${running?'sf-progress-working':''}`} />
-      <strong>{command==='pause'?'正在暂停…':command==='cancel'?'正在停止…':complete?'初稿已生成':running?STAGES[task.stage]:task.status==='cancelled'?'写作已停止':'写作已暂停'}</strong>
-      {running&&<span className="sf-muted">{task.stage==='drafting'&&section?`${section.title} · `:''}{countsOf(task)}</span>}
-      {complete&&<span className="sf-muted">{task.sectionIndex} / {task.spec.sections.length} 节</span>}
-      <div className="sf-writing-controls">{running?<><button disabled={busy||!!command} onClick={()=>action('pause')}>暂停</button><button disabled={busy||!!command} onClick={()=>action('cancel')}>停止</button></>
+    const status=command==='pause'?'正在暂停…':command==='cancel'?'正在停止…':complete?'初稿已生成':running?STAGES[task.stage]:task.status==='cancelled'?'写作已停止':'写作已暂停'
+    const notes=<>{running&&<span className="sf-muted">{task.stage==='drafting'&&section?`${section.title} · `:''}{countsOf(task)}</span>}
+      {complete&&<span className="sf-muted">{task.sectionIndex} / {task.spec.sections.length} 节</span>}</>
+    const controls=<div className="sf-writing-controls">{running?<><button disabled={busy||!!command} onClick={()=>action('pause')}>暂停</button><button disabled={busy||!!command} onClick={()=>action('cancel')}>停止</button></>
         :!complete&&<button disabled={busy||!!command} onClick={()=>action(task.diagnostic?.code==='FIRST_DRAFT_APPROVAL_STALE'?'start-first-draft':'resume')}>继续生成</button>}
         {complete&&<details className="sf-review-checklist"><summary><WorkbenchIcon kind="down" />{checks.length?`核对清单 · ${checks.length} 项`:'核对与修改'}</summary><div className="sf-issue-popover">
           <header><strong>初稿核对</strong><button onClick={()=>onManage('Review')}>检查全文</button></header>
@@ -70,9 +80,16 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
           {checks.map(row=><article key={row.key} className="sf-checklist-row"><strong>{row.title}</strong><p>{row.detail}</p><button onClick={()=>onCheck?onCheck(row):onManage(row.page)}>查看{row.page==='Research'?'资料与引用':row.page==='Review'?'对应问题':row.page==='Overview'?'写作要求':'正文'}</button></article>)}
         </div></details>}
         {!running&&onRecords&&<button className="sf-ghost" onClick={onRecords}>运行记录</button>}
-      </div></div>
-      {!complete&&task.diagnostic&&<p role="alert" className="sf-error">{task.diagnostic.message}</p>}
-      {error&&<p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/,'')}</p>}
+      </div>
+    const reports=<>{!complete&&task.diagnostic&&<p role="alert" className="sf-error">{task.diagnostic.message}</p>}
+      {error&&<p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/,'')}</p>}</>
+    const alert=!!error||(!complete&&!!task.diagnostic)
+    if(pill) return pillBox(status, alert?'需处理':complete&&checks.length?`核对 ${checks.length} 项`:'详情', <>{notes}{controls}{reports}</>, alert)
+    return <section className="sf-writing-progress" aria-label="论文写作进度"><div className="sf-writing-line">
+      <span className={`sf-progress-dot ${running?'sf-progress-working':''}`} />
+      <strong>{status}</strong>
+      {notes}{controls}
+    </div>{reports}
     </section>
   }
   const main = command==='pause' ? '正在暂停，已请求停止当前生成' : command==='cancel' ? '正在停止，已有正文保留'
@@ -85,28 +102,31 @@ export function WritingProgress({ api, context, refresh, onTask, taskRevision, o
     : question ? '等待你的决定：已放到中栏底部'
     : task.status === 'completed' ? (needsAction.length ? '生成结束，仍有待处理问题' : '已完成本次可验证检查')
     : STAGES[task.stage]
+  const notes=<><span className="sf-muted">引导模式</span>
+    <span className="sf-muted">{countsOf(task)}</span>
+    <span className="sf-muted sf-progress-elapsed">已用 {formatElapsed(elapsed)} · 调用 {task.usedModelCalls} 次</span></>
+  const controls=<div className="sf-writing-controls">
+      {task.status === 'running' || task.status === 'queued' ? <button disabled={busy || !!command} onClick={() => action('pause')}>暂停</button>
+        : task.status !== 'completed' && task.status !== 'cancelled' && !question && <button disabled={busy || !!command} onClick={() => action('resume')}>继续</button>}
+      {!['completed','cancelled','failed'].includes(task.status) && <button disabled={busy || !!command} onClick={() => action('cancel')}>停止</button>}
+      {!['running','queued','completed'].includes(task.status) && <><button disabled={busy || !!command} onClick={()=>action('start-first-draft')}>按新方式继续初稿</button><span className="sf-muted">所选文件分别保留，缺项待补继续，成稿后修改。</span></>}
+      {!!issues.length && <details><summary>详情（{needsAction.length} 项待处理）</summary>
+        <div className="sf-issue-popover">
+          {!!task.deferredIssues?.length && <details><summary>成稿后处理（{task.deferredIssues.length}）</summary>{task.deferredIssues.map((row,index)=><p key={index}>{row.message}</p>)}</details>}
+          <IssueGroup title="需要处理" rows={needsAction} tone="needs" onAction={handleIssue} disabled={busy || task.status === 'running'} />
+          <IssueGroup title="继续中" rows={inProgress} tone="working" />
+          <IssueGroup title="已处理" rows={handled} tone="done" collapsed />
+        </div></details>}
+    </div>
+  const reports=<>{error && <p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}</>
+  if(pill) return pillBox(main, error?'需处理':needsAction.length?`${needsAction.length} 项待处理`:issues.length?`${issues.length} 项`:'详情',
+    <>{notes}{controls}{reports}</>, !!error||!!needsAction.length)
   return <section className="sf-writing-progress" aria-label="论文写作进度">
     <div className="sf-writing-line">
       <span className={`sf-progress-dot ${task.status === 'running' ? 'sf-progress-working' : ''}`} />
       <strong>{main}</strong>
-      <span className="sf-muted">引导模式</span>
-      <span className="sf-muted">{countsOf(task)}</span>
-      <span className="sf-muted sf-progress-elapsed">已用 {formatElapsed(elapsed)} · 调用 {task.usedModelCalls} 次</span>
-      <div className="sf-writing-controls">
-        {task.status === 'running' || task.status === 'queued' ? <button disabled={busy || !!command} onClick={() => action('pause')}>暂停</button>
-          : task.status !== 'completed' && task.status !== 'cancelled' && !question && <button disabled={busy || !!command} onClick={() => action('resume')}>继续</button>}
-        {!['completed','cancelled','failed'].includes(task.status) && <button disabled={busy || !!command} onClick={() => action('cancel')}>停止</button>}
-        {!['running','queued','completed'].includes(task.status) && <><button disabled={busy || !!command} onClick={()=>action('start-first-draft')}>按新方式继续初稿</button><span className="sf-muted">所选文件分别保留，缺项待补继续，成稿后修改。</span></>}
-        {!!issues.length && <details><summary>详情（{needsAction.length} 项待处理）</summary>
-          <div className="sf-issue-popover">
-            {!!task.deferredIssues?.length && <details><summary>成稿后处理（{task.deferredIssues.length}）</summary>{task.deferredIssues.map((row,index)=><p key={index}>{row.message}</p>)}</details>}
-            <IssueGroup title="需要处理" rows={needsAction} tone="needs" onAction={handleIssue} disabled={busy || task.status === 'running'} />
-            <IssueGroup title="继续中" rows={inProgress} tone="working" />
-            <IssueGroup title="已处理" rows={handled} tone="done" collapsed />
-          </div></details>}
-      </div>
-    </div>
-    {error && <p role="alert" className="sf-error">{error.replace(/^[A-Z_]+:\s*/, '')}</p>}
+      {notes}{controls}
+    </div>{reports}
   </section>
 }
 
@@ -155,6 +175,10 @@ export const PROGRESS_CSS = `/* Status band: tint, no rule. A hairline under eve
 .sf-writing-controls button{border:0!important;padding:0 var(--sf-space-2);font-size:var(--sf-font-sm)}
 .sf-writing-controls details{position:relative}
 .sf-issue-popover{position:absolute;right:0;z-index:40;top:var(--sf-space-5);width:min(400px,calc(100vw - 48px));max-height:420px;overflow:auto;background:var(--sf-surface);box-shadow:var(--sf-shadow-2);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);padding:var(--sf-space-3);text-align:left}
+/* v1.20: the pill carries every action inside one popover. A nested popover would float over the
+   panel that already opened it, so a popover inside a popover returns to the normal flow. */
+.sf-issue-popover .sf-issue-popover{position:static;width:auto;max-height:none;box-shadow:none;border:0;padding:var(--sf-space-2) 0 0}
+.sf-issue-popover .sf-writing-controls{margin-left:0;justify-content:flex-start}
 .sf-review-checklist>summary{display:flex;align-items:center;gap:var(--sf-space-1);cursor:pointer;list-style:none;color:var(--sf-accent-text)}.sf-review-checklist>summary::-webkit-details-marker{display:none}.sf-review-checklist[open]>summary>svg{transform:rotate(180deg)}
 .sf-issue-popover>header{display:flex;justify-content:space-between;align-items:center;padding:var(--sf-space-2) 0}.sf-checklist-row{padding:var(--sf-space-3) 0;border-top:1px solid var(--sf-border-soft)}.sf-checklist-row>p{margin:var(--sf-space-1) 0;color:var(--sf-muted);line-height:var(--sf-leading-body)}
 .sf-issue-group{margin:0 0 var(--sf-space-2)}
@@ -179,9 +203,26 @@ export const PROGRESS_CSS = `/* Status band: tint, no rule. A hairline under eve
 .sf-cowrite-inline pre{font-family:inherit;font-size:var(--sf-font-md);line-height:var(--sf-leading-prose);margin:var(--sf-space-2) 0;padding:var(--sf-space-2);border-radius:var(--sf-radius-sm)}
 .sf-cowrite-before{background:var(--sf-danger-soft);color:var(--sf-danger);white-space:pre-wrap;overflow-wrap:anywhere}
 .sf-cowrite-after{background:var(--sf-ok-soft);white-space:pre-wrap;overflow-wrap:anywhere}
-.sf-cowrite-bar{display:flex;align-items:center;gap:var(--sf-space-2);padding:var(--sf-space-1) var(--sf-space-4);background:var(--sf-plane-1);font-size:var(--sf-font-sm)}
 .sf-cowrite-hint{flex:1;min-width:0;color:var(--sf-text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sf-pending-list{max-height:320px;overflow:auto}
+/* The pill. It sits in the work bar's grid row, so its job is to report the run without asking
+   for a band of its own; everything actionable waits one click away, behind the caret. */
+.sf-progress-pill{display:flex;align-items:center;gap:var(--sf-space-2);padding:0 var(--sf-space-1);background:transparent;font-size:var(--sf-font-sm);white-space:nowrap}
+.sf-progress-pill .sf-progress-summary{overflow:hidden;text-overflow:ellipsis;max-width:20ch}
+.sf-progress-pill .sf-writing-line,.sf-progress-pill .sf-muted{flex-wrap:wrap}
+.sf-progress-details{position:relative}
+.sf-progress-details>summary{display:flex;align-items:center;gap:var(--sf-space-1);cursor:pointer;list-style:none;color:var(--sf-accent-text);padding:0 var(--sf-space-1)}
+.sf-progress-details>summary::-webkit-details-marker{display:none}
+.sf-progress-details[open]>summary>svg{transform:rotate(180deg)}
+/* The pill sits at the right edge of the work bar, so its panel grows leftwards from the caret.
+   Anchored the other way it ran 300px past the viewport and took its own buttons with it. */
+.sf-progress-details>.sf-issue-popover{top:calc(100% + var(--sf-space-2));right:0;left:auto}
+.sf-progress-pill[data-alert] .sf-progress-summary{color:var(--sf-warn-text);font-weight:600}
+.sf-progress-pill[data-alert] .sf-progress-details>summary{color:var(--sf-warn-text);font-weight:600}
+.sf-progress-alert{background:var(--sf-warn)!important;animation:sf-progress-pulse 1.4s infinite}
+.sf-progress-details .sf-progress-summary,.sf-progress-details .sf-writing-line{display:flex}
+.sf-progress-details .sf-writing-line{margin-bottom:var(--sf-space-2)}
+@container sf-workbench (max-width:850px){.sf-progress-pill .sf-progress-summary{max-width:12ch}}
 .sf-chapter-nav{position:relative}
 .sf-chapter-nav>div{position:absolute;z-index:30;left:0;top:var(--sf-space-6);min-width:220px;max-height:320px;overflow:auto;display:flex;flex-direction:column;padding:var(--sf-space-2);background:var(--sf-surface);border:1px solid var(--sf-border-strong);border-radius:var(--sf-radius-lg);box-shadow:var(--sf-shadow-2)}
 .sf-chapter-nav button{text-align:left;border:0!important;font-size:var(--sf-font-sm);padding:var(--sf-space-2)}

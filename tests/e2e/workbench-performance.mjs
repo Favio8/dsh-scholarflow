@@ -64,15 +64,21 @@ try {
   if (!nativeDesktop) await page.goto(await url)
   await page.getByRole('button', { name: '新建会话', exact: true }).first().waitFor({ timeout: 45000 })
   const dismissOnboarding = async () => {
-    await page.waitForTimeout(800)
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Both onboarding dialogs are optional, and a dismissal is asynchronous: the host keeps the node
+    // mounted with its button disabled until it finishes taking it away. So wait for a dialog to
+    // appear, click only while the button is enabled, then wait for the node to actually go.
+    // Checking once and clicking blind raced the mount (the dialog arrived after the shell painted
+    // and covered the sidebar); re-clicking the closing node only burned the click timeout.
+    for (let attempt = 0; attempt < 6; attempt++) {
       const dialog = page.getByRole('dialog').first()
-      if (!await dialog.count()) break
-      const text = await dialog.innerText()
-      if (text.startsWith('预览版说明')) await dialog.getByRole('button', { name: '继续', exact: true }).click()
-      else if (text.startsWith('添加一个 API Key')) await dialog.getByRole('button', { name: '稍后配置', exact: true }).click()
-      else break
-      await page.waitForTimeout(700)
+      const appeared = await dialog.waitFor({ state: 'visible', timeout: attempt === 0 ? 5000 : 3000 }).then(() => true).catch(() => false)
+      if (!appeared) return
+      const text = (await dialog.innerText().catch(() => '')).trimStart()
+      const name = text.startsWith('预览版说明') ? '继续' : text.startsWith('添加一个 API Key') ? '稍后配置' : undefined
+      if (!name) throw new Error('unexpected dialog: ' + text.slice(0, 80))
+      const button = dialog.getByRole('button', { name, exact: true })
+      if (await button.isEnabled()) await button.click({ timeout: 15000 })
+      await button.waitFor({ state: 'hidden', timeout: 45000 }).catch(() => {})
     }
   }
   await dismissOnboarding()
@@ -336,8 +342,9 @@ try {
   if (nativeDesktop && !materialsOnly) {
     // Save only this isolated TEST_ONLY manuscript before closing Electron. A dirty
     // beforeunload dialog racing renderer shutdown otherwise makes cleanup fail.
-    const save = page.locator('.sf-pane-caption').getByRole('button', { name: '保存', exact: true })
-    if (await save.isEnabled()) { await save.click(); await expect(save).toBeDisabled() }
+    // v1.20 (SF-187): saving moved out of the pane caption into the single editor bar.
+    const save = page.locator('.sf-format-toolbar').getByRole('button', { name: '保存', exact: true })
+    if (await save.count() && await save.isEnabled()) { await save.click(); await expect(save).toBeDisabled() }
     await page.evaluate(() => { document.documentElement.style.zoom = '1' })
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     const collapse = page.getByRole('button', { name: '收起输入', exact: true })

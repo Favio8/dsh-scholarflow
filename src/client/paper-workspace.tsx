@@ -123,6 +123,11 @@ body .sf-app .sf-tool-back button{background:transparent;border-color:transparen
 /* A pane caption labels the pane; it is part of the pane's own surface, so it takes the pane's
    tint instead of a rule. Sitting directly on the pane background, it needs none of its own. */
 .sf-pane-caption{display:flex;align-items:center;justify-content:space-between;height:32px;box-sizing:border-box;padding:0 var(--sf-space-3);color:var(--sf-text-faint);font-size:var(--sf-font-xs);background:var(--sf-plane-2);flex-shrink:0}
+/* v1.20 (SF-187): with one pane visible the caption only repeated what the view switcher and the
+   reading-ratio control already said, so it stops costing a row. It returns the moment the grid
+   genuinely splits, where the label is the only thing telling the two panes apart. */
+.sf-editor-surface .sf-pane-caption{display:none}
+.sf-editor-grid:not([data-view=edit]):not([data-view=preview]) .sf-pane-caption{display:flex}
 .sf-pane-caption button{font-size:var(--sf-font-xs);border:0;padding:0 var(--sf-space-2)}
 body .sf-app .sf-pane-caption button{background:transparent;border-color:transparent;box-shadow:none;font-size:var(--sf-font-sm)}
 /* The split is two panes, not two cards. A rule would frame each pane like a panel; the
@@ -158,6 +163,20 @@ body .sf-app .sf-pane-caption button{background:transparent;border-color:transpa
 .sf-draft-status>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sf-saved-dot{color:var(--sf-ok);margin-right:var(--sf-space-1)}
 .sf-editor-notice{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap;padding:var(--sf-space-2) var(--sf-space-3);background:var(--sf-accent-soft);border-bottom:1px solid var(--sf-border);font-size:var(--sf-font-sm);flex-shrink:0}
 .sf-editor-notice button{padding:0 var(--sf-space-2);font-size:var(--sf-font-sm)}
+/* v1.20 (SF-189): one row for every notice. The first is stated outright; opening the rest grows
+   this bar in place instead of hanging a panel over the manuscript — the editor surface clips its
+   overflow, so a panel below it would be cut off by the very container it hangs from. */
+.sf-editor-notices{display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap;padding:var(--sf-space-2) var(--sf-space-3);background:var(--sf-accent-soft);border-bottom:1px solid var(--sf-border);font-size:var(--sf-font-sm);flex-shrink:0}
+.sf-notice-first{flex:1;min-width:0;display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap}
+.sf-notice-first button,.sf-notice-row button{padding:0 var(--sf-space-2);font-size:var(--sf-font-sm)}
+.sf-notice-more{position:relative;flex:none}
+.sf-notice-more>summary{display:flex;align-items:center;gap:var(--sf-space-1);cursor:pointer;list-style:none;color:var(--sf-accent-text);white-space:nowrap}
+.sf-notice-more>summary::-webkit-details-marker{display:none}
+.sf-notice-more[open]>summary>svg{transform:rotate(180deg)}
+.sf-notice-more[open] .sf-notice-rest{flex-basis:100%}
+.sf-notice-rest{display:flex;flex-direction:column;gap:var(--sf-space-1)}
+.sf-notice-row{padding:var(--sf-space-1) 0;display:flex;align-items:center;gap:var(--sf-space-2);flex-wrap:wrap}
+.sf-notice-row+.sf-notice-row{border-top:1px solid var(--sf-border-soft);padding-top:var(--sf-space-2)}
 .sf-draft-tools{flex:1;min-height:0;overflow:auto;padding:var(--sf-space-5)}
 .sf-draft-tools>section{border:1px solid var(--sf-border);padding:var(--sf-space-4);margin:var(--sf-space-3) 0;border-radius:var(--sf-radius-lg)}
 .sf-paper-project h3{font-size:var(--sf-font-display-2);margin:0 0 var(--sf-space-4)}.sf-paper-project h4{font-size:var(--sf-font-prose);margin:var(--sf-space-3) 0}

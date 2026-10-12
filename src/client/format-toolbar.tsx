@@ -6,7 +6,7 @@ import {WorkbenchIcon} from './workbench-chrome.tsx'
 
 const chineseFonts=['宋体','黑体','楷体','仿宋','微软雅黑','思源宋体']
 const latinFonts=['Times New Roman','Arial','Calibri','Cambria']
-export function FormatToolbar({range,formatting,typography=DEFAULT_TYPOGRAPHY,disabled,onMarkdown,onCharacters,onParagraph,onSave,dirty,api,context,refresh,onTypography}:any){
+export function FormatToolbar({range,formatting,typography=DEFAULT_TYPOGRAPHY,disabled,onMarkdown,onCharacters,onParagraph,onSave,dirty,canSave=true,saving,api,context,refresh,onTypography,trailing}:any){
   const [open,setOpen]=useState(false)
   const selected=!!range&&range.end>range.start
   const character=(formatting as DocumentFormatting).characters.filter(row=>range&&row.start<range.end&&row.end>range.start).reduce((style,row)=>({...style,...row}),{} as Partial<CharacterFormat>)
@@ -15,12 +15,18 @@ export function FormatToolbar({range,formatting,typography=DEFAULT_TYPOGRAPHY,di
     <div className="sf-format-toolbar" role="toolbar" aria-label="正文格式">
       <button title="加粗" aria-label="加粗" disabled={disabled||!selected} onClick={()=>onMarkdown('bold')}><strong>B</strong></button>
       <button title="斜体" aria-label="斜体" disabled={disabled||!selected} onClick={()=>onMarkdown('italic')}><em>I</em></button>
-      <select aria-label="段落类型" value="" disabled={disabled} onChange={event=>onMarkdown(event.target.value)}><option value="" disabled>正文／标题</option><option value="body">正文</option><option value="h1">一级标题</option><option value="h2">二级标题</option><option value="h3">三级标题</option></select>
-      <select aria-label="选中文字字号" disabled={disabled||!selected} value={character.sizePt??typography.bodySizePt} onChange={event=>onCharacters({sizePt:Number(event.target.value)})}>{CHINESE_SIZE_LABELS.filter(row=>row.pt<=36).map(row=><option key={row.pt} value={row.pt}>{row.label} · {row.pt}</option>)}</select>
+      <select className="sf-format-wide-only" aria-label="段落类型" value="" disabled={disabled} onChange={event=>onMarkdown(event.target.value)}><option value="" disabled>正文／标题</option><option value="body">正文</option><option value="h1">一级标题</option><option value="h2">二级标题</option><option value="h3">三级标题</option></select>
+      <select className="sf-format-wide-only" aria-label="选中文字字号" disabled={disabled||!selected} value={character.sizePt??typography.bodySizePt} onChange={event=>onCharacters({sizePt:Number(event.target.value)})}>{CHINESE_SIZE_LABELS.filter(row=>row.pt<=36).map(row=><option key={row.pt} value={row.pt}>{row.label} · {row.pt}</option>)}</select>
       <button className="sf-format-settings" disabled={disabled} aria-expanded={open} onClick={()=>setOpen(!open)}>排版<WorkbenchIcon kind="down" /></button>
-      {dirty&&<button disabled={disabled} onClick={onSave}><WorkbenchIcon kind="save" />保存</button>}
+      {trailing}
+      {dirty&&<button disabled={disabled||!canSave} onClick={onSave}><WorkbenchIcon kind="save" />{saving?'保存中…':'保存'}</button>}
     </div>
-    {open&&<div className="sf-format-popover"><section className="sf-formatting-panel" aria-label="局部排版"><header><strong>{selected?"选中文字与段落":"当前段落"}</strong></header><div className="sf-formatting-fields"><label>中文字体<select aria-label="选中文字中文字体" disabled={disabled||!selected} value={character.fontZh??typography.bodyFontZh} onChange={event=>onCharacters({fontZh:event.target.value})}>{[...new Set([typography.bodyFontZh,...chineseFonts])].map(font=><option key={font}>{font}</option>)}</select></label>
+    {open&&<div className="sf-format-popover"><section className="sf-formatting-panel" aria-label="局部排版"><header><strong>{selected?"选中文字与段落":"当前段落"}</strong></header><div className="sf-formatting-fields">
+      {/* v1.20: below 560px the bar keeps only B/I and hands these two over, so the row never
+          squeezes a select down to a single glyph. They stay on the bar at every wider size. */}
+      <label className="sf-format-narrow-only">段落类型<select aria-label="面板段落类型" value="" disabled={disabled} onChange={event=>onMarkdown(event.target.value)}><option value="" disabled>正文／标题</option><option value="body">正文</option><option value="h1">一级标题</option><option value="h2">二级标题</option><option value="h3">三级标题</option></select></label>
+      <label className="sf-format-narrow-only">字号<select aria-label="面板文字字号" disabled={disabled||!selected} value={character.sizePt??typography.bodySizePt} onChange={event=>onCharacters({sizePt:Number(event.target.value)})}>{CHINESE_SIZE_LABELS.filter(row=>row.pt<=36).map(row=><option key={row.pt} value={row.pt}>{row.label} · {row.pt}</option>)}</select></label>
+      <label>中文字体<select aria-label="选中文字中文字体" disabled={disabled||!selected} value={character.fontZh??typography.bodyFontZh} onChange={event=>onCharacters({fontZh:event.target.value})}>{[...new Set([typography.bodyFontZh,...chineseFonts])].map(font=><option key={font}>{font}</option>)}</select></label>
 <label>英文字体<select aria-label="选中文字英文字体" disabled={disabled||!selected} value={character.fontEn??typography.bodyFontEn} onChange={event=>onCharacters({fontEn:event.target.value})}>{[...new Set([typography.bodyFontEn,...latinFonts])].map(font=><option key={font}>{font}</option>)}</select></label>
 <label>对齐<select aria-label="段落对齐" disabled={disabled} value={paragraph?.alignment??typography.bodyAlignment} onChange={event=>onParagraph({alignment:event.target.value})}><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option><option value="justify">两端对齐</option></select></label>
 <label>首行缩进<select aria-label="段落首行缩进" disabled={disabled} value={paragraph?.firstLineIndentChars??typography.firstLineIndentChars} onChange={event=>onParagraph({firstLineIndentChars:Number(event.target.value)})}>{[0,1,2,3,4].map(value=><option key={value} value={value}>缩进 {value} 字</option>)}</select></label>
@@ -57,9 +63,21 @@ function TypographyPanel({api,context,refresh,onTypography,onClose}:any){
   </section>
 }
 export const FORMAT_TOOLBAR_CSS=`
-.sf-format-tools{flex:none;background:var(--sf-plane-1)}.sf-format-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sf-space-1);padding:var(--sf-space-2) var(--sf-space-3)}
-body .sf-app .sf-format-toolbar :is(button,select){--sf-control-size:var(--sf-control-sm);font-size:var(--sf-font-xs);max-width:150px;padding:0 var(--sf-space-2);border-color:transparent;background:transparent}
-.sf-format-toolbar button{display:inline-flex;align-items:center;gap:var(--sf-space-1)}.sf-format-toolbar .sf-format-settings{margin-left:auto;color:var(--sf-accent-text)}
+/* v1.20 (SF-186/SF-187): one line instead of three. The formatting controls stay left, everything
+   that belongs to the pane rather than the selection — typography, directory, reading ratio, save
+   — is pushed right by the settings button, and the row no longer wraps, so it costs a fixed
+   height at every window size. clip rather than hidden on the inline axis: it still stops the
+   row spilling sideways at 390px, but it does not turn the bar into a scroll box, so the directory
+   panel hanging below the row survives. hidden there silently ate it. */
+.sf-format-tools{flex:none;background:var(--sf-plane-1)}
+.sf-format-toolbar{display:flex;align-items:center;flex-wrap:nowrap;gap:var(--sf-space-1);padding:var(--sf-space-1) var(--sf-space-3);min-width:0;overflow-x:clip;overflow-y:visible}
+body .sf-app .sf-format-toolbar :is(button,select){--sf-control-size:var(--sf-control-sm);font-size:var(--sf-font-xs);max-width:150px;padding:0 var(--sf-space-2);border-color:transparent;background:transparent;flex-shrink:1;min-width:0}
+.sf-format-toolbar button{display:inline-flex;align-items:center;gap:var(--sf-space-1)}
+.sf-format-toolbar .sf-format-settings{margin-left:auto;color:var(--sf-accent-text);flex:none}
+.sf-format-toolbar .sf-chapter-nav{flex:none}
+.sf-format-toolbar .sf-pane-zoom{flex:none;margin-left:var(--sf-space-1)}
+.sf-format-narrow-only{display:none}
+@container sf-workbench (max-width:560px){.sf-format-toolbar .sf-format-wide-only{display:none}.sf-format-narrow-only{display:flex}}
 .sf-format-popover{max-height:60vh;overflow:auto}.sf-format-popover .sf-formatting-panel{max-height:none;overflow:visible}.sf-formatting-panel{padding:var(--sf-space-3) var(--sf-space-4);max-height:320px;overflow:auto;background:var(--sf-surface);border-block:1px solid var(--sf-border-soft)}.sf-formatting-panel>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sf-space-3)}
 .sf-formatting-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:var(--sf-space-3)}.sf-formatting-fields label{display:flex;flex-direction:column;gap:var(--sf-space-1);margin:0;color:var(--sf-muted);font-size:var(--sf-font-xs)}
 .sf-formatting-fields label.sf-check{flex-direction:row;align-items:center}.sf-formatting-fields :is(input,select){width:100%;min-width:0}.sf-formatting-fields .sf-check input{width:auto}.sf-formatting-panel>footer{display:flex;align-items:center;justify-content:space-between;gap:var(--sf-space-3);margin-top:var(--sf-space-3)}

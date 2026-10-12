@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { chromium, expect } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile, symlink } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile, symlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { creationSpec, writingTaskSchema } from '../../src/shared/writing-task.ts'
 
@@ -39,14 +39,21 @@ const rpc = (method, args) => page.evaluate(async ({ method, args }) => {
   return result.value?.data ?? result.value
 }, { method, args })
 const dismiss = async () => {
-  // The Host replaces the preview dialog with the key dialog asynchronously.
-  // Bind each action to its own dialog rather than a live first-dialog locator.
-  const preview = page.getByRole('dialog').filter({ hasText: '预览版说明' })
-  const key = page.getByRole('dialog').filter({ hasText: '添加一个 API Key' })
-  await page.waitForTimeout(1000)
-  if (await preview.count()) await preview.getByRole('button', { name: '继续', exact: true }).click({ timeout: 30000 })
-  if (await key.count() || !await nav.count()) {
-    await key.getByRole('button', { name: '稍后配置', exact: true }).click({ timeout: 10000 })
+  // Both onboarding dialogs are optional, and a dismissal is asynchronous: the host keeps the node
+  // mounted with its button disabled until it finishes taking it away. So wait for a dialog to
+  // appear, click only while the button is enabled, then wait for the node to actually go.
+  // Checking once and clicking blind raced the mount (the dialog arrived after the shell painted
+  // and covered the sidebar); re-clicking the closing node only burned the click timeout.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const dialog = page.getByRole('dialog').first()
+    const appeared = await dialog.waitFor({ state: 'visible', timeout: attempt === 0 ? 5000 : 3000 }).then(() => true).catch(() => false)
+    if (!appeared) return
+    const text = (await dialog.innerText().catch(() => '')).trimStart()
+    const name = text.startsWith('预览版说明') ? '继续' : text.startsWith('添加一个 API Key') ? '稍后配置' : undefined
+    if (!name) throw new Error('unexpected dialog: ' + text.slice(0, 80))
+    const button = dialog.getByRole('button', { name, exact: true })
+    if (await button.isEnabled()) await button.click({ timeout: 15000 })
+    await button.waitFor({ state: 'hidden', timeout: 45000 }).catch(() => {})
   }
   await expect(page.getByRole('dialog')).toHaveCount(0)
 }
@@ -113,7 +120,12 @@ try {
     assert.equal((await inspect()).document.contentHash, before.document.contentHash); assert.equal(mutations.length, start)
     await record('five navigation targets, directory sync and unsaved editor survive without executing tasks')
     await source.fill(before.document.text); await page.locator('.sf-paper-views button').last().click()
-    await page.locator('.sf-paper-actions').getByRole('button', { name: '资料', exact: true }).click(); await expect(button('materials')).toHaveAttribute('aria-current', 'page')
+    // v1.16 moved 资料 and the checks out of the more menu, leaving the three project-level entries.
+    await page.locator('summary[aria-label="更多论文选项"]').click()
+    const menuEntries = await page.locator('.sf-paper-menu-popover button').allTextContents()
+    assert(menuEntries.includes('写作要求') && menuEntries.includes('项目设置') && menuEntries.includes('版本历史'))
+    assert(!menuEntries.some(text => text === '资料' || text === 'AI检查'), 'v1.16 moved these out of the more menu')
+    await page.getByRole('button', { name: '项目设置', exact: true }).click(); await expect(page.locator('#sf-panel-Settings')).toBeVisible()
     await page.locator('.sf-tool-back').getByRole('button', { name: '返回正文', exact: true }).click(); await expect(button('draft')).toHaveAttribute('aria-current', 'page')
     await button('requirements').focus(); await page.keyboard.press('Enter'); await expect(page.locator('.sf-requirements-panel')).toBeVisible()
     await record('existing navigation and keyboard use the same current-page highlight')
@@ -132,6 +144,25 @@ try {
     await saveTask({ stage: 'completed', status: 'completed' }); await expect(state('draft')).toHaveAttribute('data-state', 'completed'); await expect(state('review')).not.toHaveAttribute('data-state', 'completed')
     await page.unroute('**/api/scholarflow.v1/writingTask.inspect')
     await record('pause, stop and first-draft completion remain separate from review completion')
+    // v1.20 (SF-185): the same report is a pill in the work bar, so its actions live one disclosure
+    // deeper. Nothing is hidden that the pill does not already announce: a problem turns the state
+    // amber and says 需处理 instead of waiting behind the caret. A task persisted as running is
+    // reported as interrupted once its process is gone, so the running controls use the same live
+    // inspect seam this phase already relies on rather than a status the host will normalise away.
+    const pill = page.locator('.sf-progress-details')
+    await button('draft').click()
+    await saveTask({ stage: 'drafting', status: 'paused' })
+    await page.route('**/api/scholarflow.v1/writingTask.inspect', async route => { const response = await route.fetch(), envelope = await response.json(), value = envelope.result.value.data; if (value.task) value.task.status = 'running'; await route.fulfill({ response, json: envelope }) })
+    await pill.locator(':scope>summary').click()
+    await expect(pill.getByRole('button', { name: '暂停', exact: true })).toBeVisible({ timeout: 10000 })
+    await expect(pill.getByRole('button', { name: '停止', exact: true })).toBeVisible()
+    await page.unroute('**/api/scholarflow.v1/writingTask.inspect')
+    await expect(pill.getByRole('button', { name: '继续生成', exact: true })).toBeVisible({ timeout: 10000 })
+    await saveTask({ stage: 'completed', status: 'completed' })
+    await expect(pill.locator('.sf-review-checklist')).toBeVisible({ timeout: 10000 })
+    await pill.getByRole('button', { name: '运行记录', exact: true }).click()
+    await expect(page.getByRole('tab', { name: '运行与恢复' })).toHaveAttribute('aria-selected', 'true')
+    await record('the pill keeps pause, stop, continue, the checklist and the run history reachable')
   }
   if (['all', 'review'].includes(phase)) {
     let releaseModel, startedModel
@@ -199,16 +230,51 @@ try {
   }
   if (['all', 'layout'].includes(phase)) {
     await button('draft').click(); await page.locator('.sf-paper-views button').last().click()
-    const positions = () => page.locator('.sf-paper-toolbar').evaluate(toolbar => { const rect = selector => { const r = toolbar.querySelector(selector).getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, center: r.y + r.height / 2 } }; return { views: rect('.sf-paper-views'), flow: rect('.sf-flow-nav'), actions: rect('.sf-paper-actions'), more: rect('.sf-paper-menu>summary'), width: toolbar.clientWidth, scrollWidth: toolbar.scrollWidth } })
-    const wide = await positions(); assert(wide.flow.x > wide.views.right && wide.flow.right <= wide.actions.x + 1); assert(Math.abs(wide.actions.center - wide.more.center) < 1); assert(wide.more.x - wide.actions.right <= 12); assert(wide.scrollWidth <= wide.width + 1)
+    // v1.20 (SF-185/SF-188): the chrome above the manuscript is two bands at every width, and the
+    // five nodes scroll sideways instead of claiming a second row.
+    const bands = () => page.locator('.sf-paper-project').evaluate(node => [...node.children]
+      .filter(child => child.getBoundingClientRect().height > 0)
+      .filter(child => !child.classList.contains('sf-paper-content') && !child.id.startsWith('sf-panel-'))
+      .map(child => ({ className: child.className, height: Math.round(child.getBoundingClientRect().height) })))
+    const positions = () => page.locator('.sf-paper-toolbar').evaluate(toolbar => {
+      const rect = selector => { const node = toolbar.querySelector(selector); if (!node) return null
+        const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, center: r.y + r.height / 2 } }
+      const nav = toolbar.querySelector('.sf-flow-nav'), list = nav?.querySelector('ol')
+      return { views: rect('.sf-paper-views'), flow: rect('.sf-flow-nav'), more: rect('.sf-paper-menu>summary'),
+        navScroll: nav ? { client: nav.clientWidth, scroll: list.scrollWidth } : null,
+        width: toolbar.clientWidth, scrollWidth: toolbar.scrollWidth } })
+    const wide = await positions(); assert(wide.flow.x > wide.views.right); assert(wide.scrollWidth <= wide.width + 1)
     await page.screenshot({ path: join(root, 'flow-wide.png') })
     await page.locator('.sf-paper-project').evaluate(node => { node.style.width = '740px'; node.style.flex = 'none' })
-    const narrow = await positions(); assert(narrow.flow.y > narrow.views.y); assert(narrow.scrollWidth <= narrow.width + 1); assert(Math.abs(narrow.actions.center - narrow.more.center) < 1)
+    const narrow = await positions()
+    assert(Math.abs(narrow.flow.center - narrow.views.center) < 1, 'five nodes must stay on the views row')
+    assert(narrow.scrollWidth <= narrow.width + 1)
+    assert(narrow.navScroll.scroll > narrow.navScroll.client, '740px has to scroll the nodes sideways')
     await expect(nav.locator('button')).toHaveCount(5); await page.screenshot({ path: join(root, 'flow-narrow.png') })
     await page.locator('.sf-paper-project').evaluate(node => { node.style.width = '390px' })
-    const compact = await positions(); assert(compact.scrollWidth <= compact.width + 1); await page.screenshot({ path: join(root, 'flow-compact.png') })
-    await page.evaluate(() => document.body.setAttribute('data-ds-dark-theme', '')); await page.screenshot({ path: join(root, 'flow-dark.png') })
-    await record('wide inline toolbar and 740px/390px wrapped flow preserve right tools without overflow', { wide, narrow, compact })
+    const compact = await positions()
+    assert(Math.abs(compact.flow.center - compact.views.center) < 1); assert(compact.scrollWidth <= compact.width + 1)
+    await page.screenshot({ path: join(root, 'flow-compact.png') })
+    await page.locator('.sf-paper-project').evaluate(node => { node.style.width = ''; node.style.flex = '' })
+    const chrome = await bands(); assert.equal(chrome.length, 2, 'exactly two bands above the manuscript')
+    await record('two chrome bands at every width, nodes scroll sideways, more-tools stay reachable', { wide, narrow, compact, chrome })
+    // v1.20 (SF-189): the notice bar is one row instead of one band per notice. That state is
+    // reachable without a model call — an external write to the manuscript is exactly what the
+    // version notice reports — so the merged bar is exercised for real rather than read off the CSS.
+    const manuscriptDir = join(workspacePath, (await inspect()).config.paths.manuscriptDir)
+    const manuscriptName = (await readdir(manuscriptDir)).find(name => name.endsWith('.md'))
+    const manuscriptPath = join(manuscriptDir, manuscriptName)
+    await writeFile(manuscriptPath, (await readFile(manuscriptPath, 'utf8')) + '\nTEST_ONLY 外部写入。\n')
+    await page.reload(); await dismiss(); await nav.waitFor(); await button('draft').click()
+    const notices = page.locator('.sf-editor-notices')
+    await expect(notices).toBeVisible({ timeout: 15000 })
+    const noticeBar = await notices.evaluate(node => ({ height: Math.round(node.getBoundingClientRect().height),
+      text: node.innerText.replace(/\s+/g, ' ').trim(), actions: [...node.querySelectorAll('button')].map(button => button.textContent.trim()) }))
+    assert(/正文版本发生变化|有暂存编辑可恢复/.test(noticeBar.text), 'the merged bar must still state the notice')
+    assert(noticeBar.actions.includes('查看与处理'), 'the merged bar must keep the notice action')
+    // Three separate notice bands measured ~40px each; one shared row has to stay well inside two.
+    assert(noticeBar.height <= 64, 'one notice must not grow a band of its own: ' + JSON.stringify(noticeBar))
+    await record('one notice row replaces one band per notice', { noticeBar })
   }
   assert.deepEqual(errors, []); await report()
 } catch (error) {

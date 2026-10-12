@@ -56,15 +56,21 @@ try {
   if (!nativeDesktop) await page.goto(await url)
   await page.getByRole('button', { name: '新建会话', exact: true }).first().waitFor({ timeout: 45000 })
   const dismissOnboarding = async () => {
-    await page.waitForTimeout(800)
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Both onboarding dialogs are optional, and a dismissal is asynchronous: the host keeps the node
+    // mounted with its button disabled until it finishes taking it away. So wait for a dialog to
+    // appear, click only while the button is enabled, then wait for the node to actually go.
+    // Checking once and clicking blind raced the mount (the dialog arrived after the shell painted
+    // and covered the sidebar); re-clicking the closing node only burned the click timeout.
+    for (let attempt = 0; attempt < 6; attempt++) {
       const dialog = page.getByRole('dialog').first()
-      if (!await dialog.count()) break
-      const text = await dialog.innerText()
-      if (text.startsWith('预览版说明')) await dialog.getByRole('button', { name: '继续', exact: true }).click()
-      else if (text.startsWith('添加一个 API Key')) await dialog.getByRole('button', { name: '稍后配置', exact: true }).click()
-      else break
-      await page.waitForTimeout(700)
+      const appeared = await dialog.waitFor({ state: 'visible', timeout: attempt === 0 ? 5000 : 3000 }).then(() => true).catch(() => false)
+      if (!appeared) return
+      const text = (await dialog.innerText().catch(() => '')).trimStart()
+      const name = text.startsWith('预览版说明') ? '继续' : text.startsWith('添加一个 API Key') ? '稍后配置' : undefined
+      if (!name) throw new Error('unexpected dialog: ' + text.slice(0, 80))
+      const button = dialog.getByRole('button', { name, exact: true })
+      if (await button.isEnabled()) await button.click({ timeout: 15000 })
+      await button.waitFor({ state: 'hidden', timeout: 45000 }).catch(() => {})
     }
   }
   await dismissOnboarding()
@@ -170,7 +176,9 @@ try {
   await page.reload();await dismissOnboarding();await expect(page.locator('.sf-paper-page .sf-prose>p').nth(1).locator('strong').first()).toContainText('另一段正文')
   record('cross-paragraph formatting saves and reopens without literal stars or changed citations',true,{})
 
-  await page.getByRole('button',{name:'资料',exact:true}).click()
+  // v1.16 moved 资料 out of the 更多论文选项 menu; it is a flow-nav target now.
+  await page.locator('.sf-flow-nav [data-node="materials"]').click()
+  await expect(page.locator('#sf-panel-Research')).toBeVisible()
   await expect(page.locator('.sf-reference-row[data-sf-source-id]')).toHaveCount(3)
   await page.getByRole('button',{name:'确认是同一篇论文',exact:true}).click()
   await expect(page.locator('.sf-reference-row[data-sf-source-id]')).toHaveCount(1)
@@ -206,7 +214,8 @@ try {
     if(method==='scholarflow.v1/review.startModel'){modelCalls.push('start');const current=await rpc('scholarflow.v1/review.inspect',{request:{context}});const response=await route.fetch(),envelope=await response.json();envelope.result={ok:true,value:{ok:true,data:{run:{status:'completed'},report:current.report}}};await route.fulfill({response,json:envelope});return}
     await route.continue()
   })
-  await page.getByRole('button',{name:'检查',exact:true}).click()
+  // v1.16 removed the direct 检查 entry from the toolbar; the flow node opens the AI检查 page now.
+  await page.locator('.sf-flow-nav [data-node="review"]').click()
   await page.getByRole('button',{name:'检查全文',exact:true}).click()
   await expect(page.locator('.sf-review-action')).toContainText('全文检查已完成')
   assert.deepEqual(modelCalls,['prepare','start'])

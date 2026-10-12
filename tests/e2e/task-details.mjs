@@ -48,15 +48,21 @@ try {
   await page.goto(await url)
   await page.getByRole('button', { name: '新建会话', exact: true }).first().waitFor({ timeout: 45000 })
   const dismissOnboarding = async () => {
-    await page.waitForTimeout(800)
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Both onboarding dialogs are optional, and a dismissal is asynchronous: the host keeps the node
+    // mounted with its button disabled until it finishes taking it away. So wait for a dialog to
+    // appear, click only while the button is enabled, then wait for the node to actually go.
+    // Checking once and clicking blind raced the mount (the dialog arrived after the shell painted
+    // and covered the sidebar); re-clicking the closing node only burned the click timeout.
+    for (let attempt = 0; attempt < 6; attempt++) {
       const dialog = page.getByRole('dialog').first()
-      if (!await dialog.count()) break
-      const text = await dialog.innerText()
-      if (text.startsWith('预览版说明')) await dialog.getByRole('button', { name: '继续', exact: true }).click()
-      else if (text.startsWith('添加一个 API Key')) await dialog.getByRole('button', { name: '稍后配置', exact: true }).click()
-      else break
-      await page.waitForTimeout(700)
+      const appeared = await dialog.waitFor({ state: 'visible', timeout: attempt === 0 ? 5000 : 3000 }).then(() => true).catch(() => false)
+      if (!appeared) return
+      const text = (await dialog.innerText().catch(() => '')).trimStart()
+      const name = text.startsWith('预览版说明') ? '继续' : text.startsWith('添加一个 API Key') ? '稍后配置' : undefined
+      if (!name) throw new Error('unexpected dialog: ' + text.slice(0, 80))
+      const button = dialog.getByRole('button', { name, exact: true })
+      if (await button.isEnabled()) await button.click({ timeout: 15000 })
+      await button.waitFor({ state: 'hidden', timeout: 45000 }).catch(() => {})
     }
   }
   await dismissOnboarding()
@@ -110,7 +116,10 @@ try {
   await writeFile(join(workspacePath,'.scholarflow/writing/current.json'),JSON.stringify({taskId:task.id,projectId:task.projectId}))
   await writeFile(join(workspacePath,'.scholarflow/writing/requirements.json'),JSON.stringify({schemaVersion:1,projectId:task.projectId,spec}))
   await page.reload();await dismissOnboarding();await page.locator('.sf-middle-column').waitFor()
-  const openDetails=async()=>{const summary=page.locator('.sf-writing-controls>details>summary');if(!await summary.evaluate(el=>el.parentElement.open))await summary.click()}
+  // v1.20 (SF-185): the report is a pill in the work bar; pause/stop/continue, the checklist and
+  // every issue action moved one disclosure deeper, so the pill is opened before the row is.
+  const openDetails=async()=>{const pill=page.locator('.sf-progress-details');if(!await pill.evaluate(node=>node.open))await pill.locator(':scope>summary').click()
+    const summary=page.locator('.sf-writing-controls>details>summary');if(!await summary.evaluate(el=>el.parentElement.open))await summary.click()}
   await openDetails()
   await page.getByRole('button',{name:'补充要求文字',exact:true}).first().click()
   await expect(page.locator('#sf-panel-Overview')).toBeVisible()

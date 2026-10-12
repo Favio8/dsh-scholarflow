@@ -558,6 +558,11 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   const marked = rewriteTarget(candidate)
   const sourceMark: MarkRange | undefined = marked && { ...marked, start: textareaOffset(marked.start), end: textareaOffset(marked.end) }
   const previewMark = marked && { start: marked.start, end: marked.end, flowing: marked.state === 'generating' }
+  const notices: React.ReactNode[] = []
+  if (cowrite.message) notices.push(cowrite.message)
+  if (candidate?.pendingDecision) notices.push(<>{candidate.note}<button disabled={busy} onClick={syncDecision}>重试保存决定</button></>)
+  if (recoverable || baseHash !== project.document.contentHash || project.document.externalChange)
+    notices.push(<>{recoverable ? '有暂存编辑可恢复' : '正文版本发生变化，当前编辑已保留'}<button onClick={onTool}>查看与处理</button></>)
   return <section className="sf-draft" aria-label="正文编辑"><style>{FORMAT_TOOLBAR_CSS+DISCLOSURE_CSS}</style>
     {stream.error && generationMode==='first-draft' && <p role="alert" className="sf-stream-status">预览连接未完成：{stream.error}<button onClick={stream.reconnect}>重新连接预览</button></p>}
     {stream.task?.mode==='first-draft' && generating && <div className="sf-stream-status" role="status">
@@ -574,23 +579,28 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     <div className="sf-editor-surface sf-editor-scroll" hidden={!!tool}>
       {cowrite.briefsView}{cowrite.generatedView}
       {/* Chapter navigation is its own entry; the fixed 选区／要求／AI 修改 bar is gone. */}
-    {!generating&&<FormatToolbar range={formatRange} formatting={formatting} typography={typography} disabled={busy||saving||generating} onMarkdown={formatMarkdown} onCharacters={(style:any)=>applyFormat('characters',style)} onParagraph={(style:any)=>applyFormat('paragraphs',style)} dirty={dirty} onSave={()=>run(save)} api={api} context={context} refresh={refresh} onTypography={setTypographyOverride} />}
-    <div className="sf-cowrite-bar">
+    {/* v1.20 (SF-186/SF-187): formatting, typography, directory, reading ratio and save share one
+        row. The directory keeps its own entry here — it used to sit on a band of its own. */}
+    {!generating&&<FormatToolbar range={formatRange} formatting={formatting} typography={typography} disabled={busy||saving||generating} onMarkdown={formatMarkdown} onCharacters={(style:any)=>applyFormat('characters',style)} onParagraph={(style:any)=>applyFormat('paragraphs',style)} dirty={dirty} onSave={()=>run(save)} api={api} context={context} refresh={refresh} onTypography={setTypographyOverride} canSave={baseHash === project.document.contentHash} saving={saving} trailing={<>
       <details className="sf-chapter-nav"><summary><WorkbenchIcon kind="down" />目录</summary><div>{headings.map(node => <button key={node.position!.start.offset} onClick={e => {
         const offset = node.position!.start.offset!; setCursor(offset); e.currentTarget.closest('details')?.removeAttribute('open')
         if (view === 'preview') root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${offset}"]`)?.scrollIntoView({ block: 'start' })
         else { const area = sourceArea.current!; area.focus(); area.setSelectionRange(offset, offset); revealSourceOffset(area, offset, 40) }
       }}>{textOf(node)}</button>)}<button onClick={e=>{e.currentTarget.closest('details')?.removeAttribute('open');setOutlineOpen(true)}}>调整章节结构</button></div></details>
-    </div>
+      {view === 'edit' ? <ZoomControls label="编辑" {...editorZoom} /> : <ZoomControls label="预览" {...previewZoom} />}
+    </>} />}
     <section hidden={!outlineOpen} className="sf-outline-panel"><header className="sf-page-heading"><h2>章节结构</h2><button onClick={()=>setOutlineOpen(false)}>返回正文</button></header><OutlineEditor project={project} context={context} api={api} refresh={refresh} run={run} busy={busy}/></section>
-    {cowrite.message && <p className="sf-editor-notice" role="status">{cowrite.message}</p>}
-    {candidate?.pendingDecision && <div className="sf-editor-notice" role="status">{candidate.note}<button disabled={busy} onClick={syncDecision}>重试保存决定</button></div>}
-      {(recoverable || baseHash !== project.document.contentHash || project.document.externalChange) && <div className="sf-editor-notice" role="status">
-        {recoverable ? '有暂存编辑可恢复' : '正文版本发生变化，当前编辑已保留'}<button onClick={onTool}>查看与处理</button>
-      </div>}
+    {/* v1.20 (SF-189): up to three notices could stack here, each with its own band. They share
+        one row now, and the rest open in place rather than in a floating panel: this bar sits inside
+        .sf-editor-surface, which clips its overflow, so a panel hanging below it would be cut off. */}
+    {notices.length > 0 && <div className="sf-editor-notices" role="status">
+      <span className="sf-notice-first">{notices[0]}</span>
+      {notices.length > 1 && <details className="sf-notice-more"><summary>另有 {notices.length - 1} 条提示<WorkbenchIcon kind="down" /></summary>
+        <div className="sf-notice-rest">{notices.slice(1).map((row, index) => <div className="sf-notice-row" key={index}>{row}</div>)}</div>
+      </details>}
+    </div>}
       <div className="sf-editor-grid" data-view={view}>
-        <div className="sf-source-pane" hidden={view === 'preview'} style={{ '--sf-editor-font': `${13 * editorZoom.zoom}px`, '--sf-editor-line': `${24 * editorZoom.zoom}px` } as React.CSSProperties}><div className="sf-pane-caption"><span>Markdown</span><ZoomControls label="编辑" {...editorZoom} />
-          <button disabled={busy || saving || !dirty || baseHash !== project.document.contentHash} onClick={() => run(save)}>{saving ? '保存中…' : '保存'}</button></div>
+        <div className="sf-source-pane" hidden={view === 'preview'} style={{ '--sf-editor-font': `${13 * editorZoom.zoom}px`, '--sf-editor-line': `${24 * editorZoom.zoom}px` } as React.CSSProperties}><div className="sf-pane-caption"><span>Markdown</span></div>
           <div className="sf-source-editor" ref={sourceEditor} data-candidate={!!sourceCandidate}><SourceRangeMark area={sourceArea} host={sourceEditor} range={sourceMark} text={text} zoom={editorZoom.zoom} /><div className="sf-line-gutter" aria-hidden="true"><div ref={gutter}>{Array.from({ length: text.split(/\r\n|\r|\n/).length }, (_, index) => <div key={index}>{index + 1}</div>)}</div></div>
             <textarea ref={sourceArea} className="sf-source-input" aria-label="Markdown 手工编辑" spellCheck={false} disabled={busy || saving || generating} value={text}
               onScroll={e => { const area = e.currentTarget; if (area.selectionStart !== area.selectionEnd) setSelectionAnchor(sourceSelectionRect(area)); if (gutter.current) gutter.current.style.transform = `translateY(${-area.scrollTop}px)` }}
@@ -624,7 +634,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
               }} />
           </div>
         </div>
-        <div className="sf-preview-pane" hidden={view === 'edit'}><div className="sf-pane-caption"><span>预览</span><ZoomControls label="预览" {...previewZoom} /></div>
+        <div className="sf-preview-pane" hidden={view === 'edit'}><div className="sf-pane-caption"><span>预览</span></div>
           <div className="sf-paper-scroll" ref={previewScroll} onScroll={event=>{
             const node=event.currentTarget
             if(generating && node.scrollTop < previousScroll.current-8){followStream.current=false;setShowReturnToStream(true)}

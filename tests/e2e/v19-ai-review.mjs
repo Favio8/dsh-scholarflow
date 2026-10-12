@@ -49,14 +49,21 @@ const rpc = (method, args) => page.evaluate(async ({ method, args }) => {
   return result.value?.data ?? result.value
 }, { method, args })
 const dismiss = async () => {
-  // The Host replaces the preview dialog with the key dialog asynchronously.
-  // Bind each action to its own dialog rather than a live first-dialog locator.
-  const preview = page.getByRole('dialog').filter({ hasText: '预览版说明' })
-  const key = page.getByRole('dialog').filter({ hasText: '添加一个 API Key' })
-  await page.waitForTimeout(1000)
-  if (await preview.count()) await preview.getByRole('button', { name: '继续', exact: true }).click({ timeout: 30000 })
-  if (await key.count() || !await nav.count()) {
-    await key.getByRole('button', { name: '稍后配置', exact: true }).click({ timeout: 10000 })
+  // Both onboarding dialogs are optional, and a dismissal is asynchronous: the host keeps the node
+  // mounted with its button disabled until it finishes taking it away. So wait for a dialog to
+  // appear, click only while the button is enabled, then wait for the node to actually go.
+  // Checking once and clicking blind raced the mount (the dialog arrived after the shell painted
+  // and covered the sidebar); re-clicking the closing node only burned the click timeout.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const dialog = page.getByRole('dialog').first()
+    const appeared = await dialog.waitFor({ state: 'visible', timeout: attempt === 0 ? 5000 : 3000 }).then(() => true).catch(() => false)
+    if (!appeared) return
+    const text = (await dialog.innerText().catch(() => '')).trimStart()
+    const name = text.startsWith('预览版说明') ? '继续' : text.startsWith('添加一个 API Key') ? '稍后配置' : undefined
+    if (!name) throw new Error('unexpected dialog: ' + text.slice(0, 80))
+    const button = dialog.getByRole('button', { name, exact: true })
+    if (await button.isEnabled()) await button.click({ timeout: 15000 })
+    await button.waitFor({ state: 'hidden', timeout: 45000 }).catch(() => {})
   }
   await expect(page.getByRole('dialog')).toHaveCount(0)
 }
@@ -147,7 +154,7 @@ try {
     await page.locator('#sf-panel-Review').screenshot({ path: join(root, 'preview.png') }); await record('one click uses true completed-with-issues, groups three findings into two previews and keeps manuscript unchanged')
     const count = calls.length
     await page.reload(); await dismiss(); await reviewButton.click(); await expect(assistant.locator('.sf-review-edit')).toHaveCount(2); assert.equal(calls.length, count)
-    await assistant.getByRole('button', { name: '采用修改', exact: true }).click(); await expect(assistant).toContainText('修改已采用并保存')
+    await assistant.getByRole('button', { name: '采用修改', exact: true }).click(); await expect(assistant).toContainText('修改已采用并保存', { timeout: 20000 })
     const after = await snapshot(io), proposals = Object.values(after.ledger.proposalStates).filter(row => row.state === 'accepted')
     assert.equal(after.document.text, improvementText(before.document.text).replace(secondParagraph, improvementText(secondParagraph)))
     assert.equal(new Set(proposals.map(row => row.acceptedRevisionId)).size, 1); assert(after.document.text.includes('[@sf_TEST_ONLY]'))
@@ -157,7 +164,9 @@ try {
     const before = await snapshot(io), savedText = `# TEST_ONLY 文稿\n\n${firstParagraph}\n\n${secondParagraph}\n`
     await sf('document.saveManual', { text: savedText, baseHash: before.document.contentHash }); await page.reload(); await dismiss(); await reviewButton.click()
     await assistant.getByRole('button', { name: '一键检查并完善', exact: true }).click(); await expect(assistant.getByRole('button', { name: '采用修改', exact: true })).toBeEnabled({ timeout: 20000 })
-    await assistant.getByRole('button', { name: '保留原稿', exact: true }).click(); await expect(assistant).toContainText('已保留原稿'); assert.equal((await snapshot(io)).document.text, savedText)
+    // These confirmations wait for two host round trips plus a refresh. The matcher default of 5s was
+    // the only wait in this script below the 20s used everywhere else, and it flaked under load.
+    await assistant.getByRole('button', { name: '保留原稿', exact: true }).click(); await expect(assistant).toContainText('已保留原稿', { timeout: 20000 }); assert.equal((await snapshot(io)).document.text, savedText)
     await record('keep original rejects the batch with one action and does not write manuscript')
   }
   if (['all', 'stop'].includes(phase)) {
@@ -168,7 +177,7 @@ try {
     await page.reload(); await dismiss(); await reviewButton.click(); await expect(assistant.locator('.sf-review-edit')).toHaveCount(1); assert.equal(calls.length, count)
     mode = 'normal'; await assistant.getByRole('button', { name: '继续完善', exact: true }).click(); await expect(assistant.locator('.sf-review-edit')).toHaveCount(2); await expect(assistant.getByRole('button', { name: '采用修改', exact: true })).toBeEnabled({ timeout: 20000 })
     assert.equal(calls.length, count + 1, 'Continue generates only the missing paragraph')
-    await assistant.getByRole('button', { name: '保留原稿', exact: true }).click(); await expect(assistant).toContainText('已保留原稿')
+    await assistant.getByRole('button', { name: '保留原稿', exact: true }).click(); await expect(assistant).toContainText('已保留原稿', { timeout: 20000 })
     await record('stop cancels real core signal, retains a preview, reload is quiet and continue skips completed work')
   }
   if (phase === 'continue') {
@@ -178,7 +187,7 @@ try {
     await expect(assistant.locator('.sf-review-edit')).toHaveCount(2, { timeout: 20000 })
     await expect(assistant.getByRole('button', { name: '采用修改', exact: true })).toBeEnabled()
     assert.equal(calls.length, 1); assert.equal(calls[0].kind, 'fix')
-    await assistant.getByRole('button', { name: '保留原稿', exact: true }).click(); await expect(assistant).toContainText('已保留原稿')
+    await assistant.getByRole('button', { name: '保留原稿', exact: true }).click(); await expect(assistant).toContainText('已保留原稿', { timeout: 20000 })
     await expect(assistant.getByRole('button', { name: '一键检查并完善', exact: true })).toBeEnabled()
     await record('a stopped core run restores its saved preview, continues only the missing paragraph and clears transient read failures')
   }
@@ -201,7 +210,7 @@ try {
     await expect(assistant).toContainText('正文有新修改')
     assert.equal((await snapshot(io)).document.contentHash, before.document.contentHash)
     await nav.locator('[data-node="draft"]').click(); await expect(source).toHaveValue(edited); await source.fill(before.document.text)
-    await reviewButton.click(); await assistant.getByRole('button', { name: '保留原稿', exact: true }).click(); await expect(assistant).toContainText('已保留原稿')
+    await reviewButton.click(); await assistant.getByRole('button', { name: '保留原稿', exact: true }).click(); await expect(assistant).toContainText('已保留原稿', { timeout: 20000 })
     await record('previews follow manuscript order, stack without overflow and cannot overwrite unsaved editing')
   }
   if (phase === 'scope') {

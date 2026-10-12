@@ -56,15 +56,21 @@ try {
   if (!nativeDesktop) await page.goto(await url)
   await page.getByRole('button', { name: '新建会话', exact: true }).first().waitFor({ timeout: 45000 })
   const dismissOnboarding = async () => {
-    await page.waitForTimeout(800)
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Both onboarding dialogs are optional, and a dismissal is asynchronous: the host keeps the node
+    // mounted with its button disabled until it finishes taking it away. So wait for a dialog to
+    // appear, click only while the button is enabled, then wait for the node to actually go.
+    // Checking once and clicking blind raced the mount (the dialog arrived after the shell painted
+    // and covered the sidebar); re-clicking the closing node only burned the click timeout.
+    for (let attempt = 0; attempt < 6; attempt++) {
       const dialog = page.getByRole('dialog').first()
-      if (!await dialog.count()) break
-      const text = await dialog.innerText()
-      if (text.startsWith('预览版说明')) await dialog.getByRole('button', { name: '继续', exact: true }).click()
-      else if (text.startsWith('添加一个 API Key')) await dialog.getByRole('button', { name: '稍后配置', exact: true }).click()
-      else break
-      await page.waitForTimeout(700)
+      const appeared = await dialog.waitFor({ state: 'visible', timeout: attempt === 0 ? 5000 : 3000 }).then(() => true).catch(() => false)
+      if (!appeared) return
+      const text = (await dialog.innerText().catch(() => '')).trimStart()
+      const name = text.startsWith('预览版说明') ? '继续' : text.startsWith('添加一个 API Key') ? '稍后配置' : undefined
+      if (!name) throw new Error('unexpected dialog: ' + text.slice(0, 80))
+      const button = dialog.getByRole('button', { name, exact: true })
+      if (await button.isEnabled()) await button.click({ timeout: 15000 })
+      await button.waitFor({ state: 'hidden', timeout: 45000 }).catch(() => {})
     }
   }
   await dismissOnboarding()
@@ -107,24 +113,41 @@ try {
   if(!process.argv.includes('--delivery-only')){
   await expect(page.locator('.sf-preview-pane')).toBeVisible()
   record('preview is default and split is absent from the primary toolbar',await page.locator('.sf-paper-views').getByRole('button').count()===2,{views:await page.locator('.sf-paper-views').innerText()})
+  // v1.20 (SF-185): the report is a pill in the work bar now, so the checklist lives one
+  // disclosure deeper and has to be opened before it can be read or toggled. The pill's panel hangs
+  // over the editor bar, so it is closed again before the next toolbar click.
+  const pillDetails=page.locator('.sf-progress-details')
+  const setPill=async open=>{if(await pillDetails.evaluate(node=>node.open)!==open)await pillDetails.locator(':scope>summary').click()}
+  await setPill(true)
   await page.locator('.sf-review-checklist>summary').click()
   const progressText=await page.locator('.sf-writing-progress').innerText()
   assert(!/66|本次执行未完成|技术详情|src_/.test(progressText));record('completed first draft shows current checks without old logs',true,{text:progressText})
   await page.locator('.sf-review-checklist>summary').click()
+  await setPill(false)
   const prose=page.locator('.sf-paper-page .sf-prose>p').first()
-  await prose.scrollIntoViewIfNeeded()
-  const points=await prose.evaluate(node=>{const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),texts=[];for(let t=walker.nextNode();t;t=walker.nextNode())texts.push(t)
-    const rect=(t,i)=>{const r=new Range();r.setStart(t,i);r.setEnd(t,i+1);const box=r.getBoundingClientRect();return {x:box.x+box.width/2,y:box.y+box.height/2}}
-    return {from:rect(texts[0],0),to:rect(texts[2],8)}
-  })
+  // Picking a value from the toolbar's own <select> collapses the DOM selection, and the
+  // selectionchange handler then drops the edit range — so each field needs its own selection, the
+  // same as a reader choosing a font and then a size by hand.
+  const selectAcrossEmphasis=async()=>{await prose.scrollIntoViewIfNeeded()
+    const points=await prose.evaluate(node=>{const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),texts=[];for(let t=walker.nextNode();t;t=walker.nextNode())texts.push(t)
+      // Applying a style rewrites the paragraph, so a later call sees shorter text nodes; clamp or the
+      // second selection throws IndexSizeError instead of selecting.
+      const rect=(t,i)=>{const at=Math.min(Math.max(0,i),Math.max(0,t.length-1));const r=new Range();r.setStart(t,at);r.setEnd(t,at+1);const box=r.getBoundingClientRect();return {x:box.x+box.width/2,y:box.y+box.height/2}}
+      return {from:rect(texts[0],0),to:rect(texts[Math.min(2,texts.length-1)],8)}})
+    await page.mouse.move(points.from.x,points.from.y);await page.mouse.down();await page.mouse.move(points.to.x,points.to.y,{steps:12});await page.mouse.up();await page.waitForTimeout(150)}
+  await selectAcrossEmphasis()
   assert.equal(await prose.evaluate(node=>getComputedStyle(node).userSelect),'text');
-  await page.mouse.move(points.from.x,points.from.y);await page.mouse.down();await page.mouse.move(points.to.x,points.to.y,{steps:12});await page.mouse.up()
-  await page.waitForTimeout(150)
   let selection=await page.evaluate(()=>window.getSelection()?.toString())
   assert(selection&&selection.includes('强调文字'));assert(!await page.locator('.sf-draft-status').innerText().then(text=>text.includes('映射')))
   assert.equal(await page.locator('.sf-mark-inline').count(),0)
   record('continuous mouse selection crosses emphasis without mixed colours or mapping errors',true,{selection})
+  // v1.16 moved the per-selection typography fields behind the 排版 entry; v1.20 kept them there and
+  // only lifted the entry onto the editor bar, so the panel still has to be opened first.
+  await page.locator('.sf-format-toolbar').getByRole('button',{name:'排版',exact:true}).click()
   await page.getByLabel('选中文字中文字体',{exact:true}).selectOption('楷体')
+  await selectAcrossEmphasis()
+  await page.getByLabel('选中文字中文字体',{exact:true}).selectOption('楷体')
+  await selectAcrossEmphasis()
   await page.getByLabel('选中文字字号',{exact:true}).selectOption('14')
   await page.locator('.sf-format-toolbar').getByRole('button',{name:'保存',exact:true}).click()
   await expect(page.locator('.sf-draft-status')).toContainText('已保存')

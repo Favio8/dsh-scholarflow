@@ -56,15 +56,21 @@ try {
   if (!nativeDesktop) await page.goto(await url)
   await page.getByRole('button', { name: '新建会话', exact: true }).first().waitFor({ timeout: 45000 })
   const dismissOnboarding = async () => {
-    await page.waitForTimeout(800)
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Both onboarding dialogs are optional, and a dismissal is asynchronous: the host keeps the node
+    // mounted with its button disabled until it finishes taking it away. So wait for a dialog to
+    // appear, click only while the button is enabled, then wait for the node to actually go.
+    // Checking once and clicking blind raced the mount (the dialog arrived after the shell painted
+    // and covered the sidebar); re-clicking the closing node only burned the click timeout.
+    for (let attempt = 0; attempt < 6; attempt++) {
       const dialog = page.getByRole('dialog').first()
-      if (!await dialog.count()) break
-      const text = await dialog.innerText()
-      if (text.startsWith('预览版说明')) await dialog.getByRole('button', { name: '继续', exact: true }).click()
-      else if (text.startsWith('添加一个 API Key')) await dialog.getByRole('button', { name: '稍后配置', exact: true }).click()
-      else break
-      await page.waitForTimeout(700)
+      const appeared = await dialog.waitFor({ state: 'visible', timeout: attempt === 0 ? 5000 : 3000 }).then(() => true).catch(() => false)
+      if (!appeared) return
+      const text = (await dialog.innerText().catch(() => '')).trimStart()
+      const name = text.startsWith('预览版说明') ? '继续' : text.startsWith('添加一个 API Key') ? '稍后配置' : undefined
+      if (!name) throw new Error('unexpected dialog: ' + text.slice(0, 80))
+      const button = dialog.getByRole('button', { name, exact: true })
+      if (await button.isEnabled()) await button.click({ timeout: 15000 })
+      await button.waitFor({ state: 'hidden', timeout: 45000 }).catch(() => {})
     }
   }
   await dismissOnboarding()
@@ -130,12 +136,42 @@ try {
     record('440px content uses one field column while preserving horizontal choices and long-name wrapping',true,{form,choices:choices.length})
   }else{
   if(!process.argv.includes('--remaining-only')){
-  const navigation=await page.locator('.sf-paper-toolbar').evaluate(node=>{const box=element=>{const rect=element.getBoundingClientRect();return {left:rect.left,right:rect.right,center:rect.y+rect.height/2}};return {toolbar:box(node),actions:box(node.querySelector('.sf-paper-actions')),check:box(node.querySelector('.sf-paper-actions button:last-child')),more:box(node.querySelector('.sf-paper-menu>summary'))}})
-  assert(navigation.actions.left>navigation.toolbar.left+(navigation.toolbar.right-navigation.toolbar.left)*.7)
-  assert(navigation.more.left-navigation.check.right<=20)
-  assert(Math.abs(navigation.more.center-navigation.check.center)<=1)
+  // v1.19 moved the redundant right-hand entries into the more menu; v1.20 turned the progress report
+  // into a pill beside it. What still matters here is that the trailing controls hug the right edge
+  // on one line and that the five nodes sit between the view switcher and that group. The pill
+  // collapses to a zero-width grid column when no task is running, so it is only asserted when it
+  // actually has a box — asserting against a 0,0,0 rect would fail on a healthy layout.
+  const navigation=await page.locator('.sf-paper-toolbar').evaluate(node=>{const box=element=>{const rect=element.getBoundingClientRect();return {left:rect.left,right:rect.right,width:rect.width,center:rect.y+rect.height/2}};const pill=node.querySelector('.sf-toolbar-progress');return {toolbar:box(node),views:box(node.querySelector('.sf-paper-views')),flow:box(node.querySelector('.sf-flow-nav')),more:box(node.querySelector('.sf-paper-menu>summary')),pillHasBox:!!pill&&pill.getBoundingClientRect().width>0,pillRight:pill?pill.getBoundingClientRect().right:0}})
+  assert(navigation.more.left>navigation.toolbar.left+(navigation.toolbar.right-navigation.toolbar.left)*.7)
+  assert(navigation.flow.left>navigation.views.right)
+  assert(!navigation.pillHasBox||navigation.flow.right<=navigation.pillRight+1)
+  assert(Math.abs(navigation.more.center-navigation.toolbar.center)<=1)
   record('manuscript tools are contiguous at the right edge',true,navigation)
   await page.screenshot({path:join(root,'navigation.png'),fullPage:true})
+  // v1.20 (SF-186/SF-187): formatting, typography, the directory and the reading ratio share the one
+  // editor bar, and a single view no longer pays for a pane caption band.
+  const editorBar=page.locator('.sf-format-toolbar')
+  const editorRow=await editorBar.evaluate(node=>{const rects=[...node.children].map(child=>child.getBoundingClientRect())
+    const centers=rects.map(rect=>rect.top+rect.height/2)
+    return {wrap:getComputedStyle(node).flexWrap,centerSpread:centers.length?Math.round(Math.max(...centers)-Math.min(...centers)):0,
+    overflow:node.scrollWidth-node.clientWidth,
+    controls:{bold:!!node.querySelector('[aria-label="加粗"]'),typography:!!node.querySelector('.sf-format-settings'),directory:!!node.querySelector('.sf-chapter-nav>summary'),zoom:!!node.querySelector('.sf-pane-zoom')}}})
+  // align-items:center makes equal tops the wrong test for "one row" — a shorter control sits lower.
+  // The vertical centre of every control is what has to line up.
+  assert.equal(editorRow.wrap,'nowrap');assert(editorRow.centerSpread<=2);assert(editorRow.overflow<=1)
+  assert(Object.values(editorRow.controls).every(Boolean))
+  for(const view of ['编辑','预览']){
+    await page.locator('.sf-paper-views').getByRole('button',{name:view,exact:true}).click()
+    assert.equal(await page.locator('.sf-pane-caption').evaluateAll(nodes=>Math.max(...nodes.map(node=>Math.round(node.getBoundingClientRect().height)))),0)
+  }
+  await page.locator('.sf-paper-views').getByRole('button',{name:'编辑',exact:true}).click()
+  await editorBar.locator('.sf-chapter-nav>summary').click()
+  const chapters=await editorBar.locator('.sf-chapter-nav button').allTextContents()
+  assert(chapters.some(text=>text.trim()==='调整章节结构'),'the directory entry must stay in the editor bar')
+  await editorBar.getByRole('button',{name:'调整章节结构',exact:true}).click()
+  await expect(page.locator('.sf-outline-panel')).toBeVisible()
+  await page.locator('.sf-outline-panel').getByRole('button',{name:'返回正文',exact:true}).click()
+  record('one editor bar keeps formatting, typography, directory, reading ratio on a single row',true,{editorRow,chapters:chapters.length})
   }
   await page.locator('summary[aria-label="更多论文选项"]').click();await page.getByRole('button',{name:'写作要求',exact:true}).click()
   const panel=page.locator('.sf-requirements-panel')
