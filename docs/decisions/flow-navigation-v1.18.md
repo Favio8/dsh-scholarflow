@@ -26,6 +26,8 @@
 
 首次完整浏览器检查完成 7 项后在窄栏发现末节点因 flex:0 被压成零宽，连接线把按钮挤出边界；将末节点改为保持自身宽度后，仅恢复布局阶段并通过。新增检查失败／暂停／停止测试和切换项目后的迟到响应各另运行一次。各报告合计 10 个不同的浏览器检查通过，页面错误为 0；没有重复已成功的导航／编辑／阶段检查或运行无关全量测试。
 
+推送后的 GitHub CI 构建与类型检查通过，650 项中 647 项通过，3 个 client-boot 合同因 VM 缺少 TextEncoder／TextDecoder 失败。核对上一提交的 CI 后确认相同失败已存在；真实浏览器本来提供这两个标准 API。为测试 VM 提供实际 UTF-8 编解码器，保持 CommonJS／Node builtin 外部依赖拒绝规则，生产代码不加兼容垫片。`node --test tests/contracts/client-boot.test.js` 的启动及 Web／Windows Slot 三项通过。
+
 ## 安装与当前窗口
 
 Desktop profile 的 `node_modules/dsh-scholarflow` junction 指向本仓库，生产 dist 已更新，隔离真实 Host 已加载并验证当前构建。当前正在运行的用户 Desktop 未被强制关闭或重启；重新启动 DSH 后载入新客户端。没有改写用户论文、资料或 profile 配置。

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
+import { TextEncoder, TextDecoder } from 'node:util'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 const source = readFileSync(new URL('../../dist/client.js', import.meta.url), 'utf8')
@@ -35,6 +36,9 @@ function loadClient(platform) {
     queueMicrotask: handler => { Promise.resolve().then(handler) },
     setTimeout: (handler, ms) => setTimeout(handler, ms),
     clearTimeout: handle => clearTimeout(handle),
+    // Citation-JS's browser fetch adapter initializes a UTF-8 encoder during import.
+    // These are standard browser APIs, not Node module globals or Host externals.
+    TextEncoder, TextDecoder,
   }, { filename: 'dist/client.js' })
   assert.equal(handoff.id, 'dsh-scholarflow')
   const plugin = handoff.factory((specifier) => {
