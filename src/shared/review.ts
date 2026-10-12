@@ -24,12 +24,28 @@ export const pendingModelReviewDetails = {
   summary_body_consistency:'本轮未将摘要和结论与实际已保存正文比较；缺项、待补实验和超出证据的总结保持未知。',
 } as const
 export const modelReviewRequest = z.object({ context: requestContext, assessmentScope: z.enum(['cross-section', 'argument-style']).default('cross-section') }).strict()
+/* The key names live here once, and both the schema and the prompts are built from them. The two
+   drifted apart once already: the prompts said "旧 issueId", the model returned `oldIssueId`, and
+   `.strict()` threw away two complete model runs over a field it had guessed correctly everywhere
+   else. A single source removes the class of bug rather than this one instance. */
+const recheckFields = {
+  issueId: id, status: semanticStatus, reason: z.string().min(10).max(4000), blockId: id, quote: z.string().min(1).max(4000),
+}
+const findingFields = {
+  category: z.enum(['citation', 'evidence', 'logic', 'structure', 'requirement', 'style', 'integrity']), severity: z.enum(['B0', 'B1', 'B2']),
+  assessmentId: z.enum(semanticReviewChecks).optional(),
+  title: z.string().min(1).max(500), explanation: z.string().min(10).max(4000), suggestedFix: z.string().min(1).max(4000), blockId: id, quote: z.string().min(1).max(4000),
+  claimIds: z.array(id).max(100), evidenceIds: z.array(id).max(100), requirementIds: z.array(id).max(100),
+}
+/** Key names as the model must spell them. Never retyped by hand into a prompt. */
+export const modelReviewKeys = {
+  check: Object.keys({ id: z.enum(semanticReviewChecks), status: semanticStatus, detail: z.string().min(10).max(4000) }),
+  finding: Object.keys(findingFields),
+  recheck: Object.keys(recheckFields),
+} as const
 export const modelReviewOutputSchema = z.object({ checks: z.array(z.object({ id: z.enum(semanticReviewChecks), status: semanticStatus,
-  detail: z.string().min(10).max(4000) }).strict()).min(2).max(5),
-  findings: z.array(z.object({ category: z.enum(['citation', 'evidence', 'logic', 'structure', 'requirement', 'style', 'integrity']), severity: z.enum(['B0', 'B1', 'B2']),
-    assessmentId: z.enum(semanticReviewChecks).optional(),
-    title: z.string().min(1).max(500), explanation: z.string().min(10).max(4000), suggestedFix: z.string().min(1).max(4000), blockId: id, quote: z.string().min(1).max(4000),
-    claimIds: z.array(id).max(100), evidenceIds: z.array(id).max(100), requirementIds: z.array(id).max(100) }).strict()).max(100),
-  rechecks: z.array(z.object({ issueId: id, status: semanticStatus, reason: z.string().min(10).max(4000), blockId: id, quote: z.string().min(1).max(4000) }).strict()).max(100),
+    detail: z.string().min(10).max(4000) }).strict()).min(2).max(5),
+  findings: z.array(z.object(findingFields).strict()).max(100),
+  rechecks: z.array(z.object(recheckFields).strict()).max(100),
   limitations: z.array(z.string().min(1).max(4000)).max(50) }).strict()
 export type ModelReviewOutput = z.infer<typeof modelReviewOutputSchema>

@@ -116,7 +116,16 @@ test('old two-check frozen scope resumes its exact output without invented consi
   delete (basic.input as any).assessmentScope
   const { contentHash: _old, ...body } = basic; basic.contentHash = digest(json(body))
   let calls = 0, pause = false
-  const first = await execute(io, basic, async request => { calls++; assert.match(request.system, /checks 恰好含 argument_assessment 和 style_assessment/u); pause = true; return json(output(basic, false)) }, () => pause)
+  // The assertion is about which prompt this scope gets, not about its wording. It used to match a
+  // literal sentence that SF-186 rewrote; binding the test to prose meant any prompt improvement
+  // looked like a regression. Naming both checks and excluding the three cross-section-only ones
+  // states the same intent more strictly than the sentence it replaced.
+  const first = await execute(io, basic, async request => {
+    calls++; assert.match(request.system, /argument_assessment/u); assert.match(request.system, /style_assessment/u)
+    assert.doesNotMatch(request.system, /summary_body_consistency|terminology_consistency|contribution_consistency/u,
+      'the legacy two-check scope must not be handed the five-check prompt')
+    pause = true; return json(output(basic, false))
+  }, () => pause)
   const action = await prepareModelReviewAction(io, first.run.runId, 'resume', () => true)
   const resumed = await executeModelReview(io, action.frozen, owner, new AbortController().signal, async () => { calls++; throw new Error('TEST_ONLY no replay') }, () => true,
     { pauseRequested: () => false, resume: action })

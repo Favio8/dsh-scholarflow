@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { id, hash, projectType, outlineSchema, claimSchema, evidenceSchema, sourceSchema, requirementSchema, issueSchema } from '../../shared/schema.ts'
 import { skillMetadataSchema } from '../../shared/skills.ts'
-import { modelReviewRequest, modelReviewOutputSchema, reviewReportSchema } from '../../shared/review.ts'
+import { modelReviewRequest, modelReviewOutputSchema, reviewReportSchema, modelReviewKeys } from '../../shared/review.ts'
 import { runSnapshotSchema, runStateSchema, type RunState } from '../../shared/runs.ts'
 import { invariant, ScholarError, parseStored } from '../../shared/errors.ts'
 import { digest, json, newId, type FileStore } from '../store/files.ts'
@@ -35,6 +35,10 @@ const frozenSchema = z.object({ kind: z.literal('model-review'), id, reportId: i
 }).strict()
 const checkpointSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('model-review'), runId: id, projectId: id, planHash: hash,
   formatAttempts: z.number().int().min(0).max(2), pendingCall: z.boolean(), repair: z.string().max(2000).optional(),
+  // Field paths and parser messages only — never the provider response and never the manuscript.
+  // Without it the user is told "仍不满足合同" and has to read the checkpoint off disk to find out
+  // which key the model misspelled.
+  contractFailure: z.string().max(700).optional(),
   transientRetries: z.number().int().min(0).max(2), retryNotBefore: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(), lastTransientCode: z.string().max(64).optional(),
   output: modelReviewOutputSchema.optional(), published: z.object({ reviewId: id, reportHash: hash }).strict().optional() }).strict()
 type Checkpoint = z.infer<typeof checkpointSchema>
@@ -184,13 +188,25 @@ export async function executeModelReview(io: FileStore, plan: ModelReviewPlan, o
           ? `具体违反合同：${error.code}：${error.message}。` : error instanceof z.ZodError
             ? `字段合同错误：${error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ').slice(0, 700)}。`
             : '输出不是合法 JSON；仅返回 JSON 对象。'
-        checkpoint.repair = `${cause}返回严格 JSON。checks 恰好包含以下不同检查名的数组，status 必须按实际依据填写 pass/fail/unknown，不能是以检查名为键的对象：${JSON.stringify((plan.context.semanticScope ? semanticReviewChecks : semanticReviewChecks.slice(0, 2)).map(id => ({ id, status: 'unknown', detail: '实际检查依据或无法判定的原因，至少10字符。' })))}。findings、rechecks、limitations 必须是数组；问题和复查使用给定身份、实际源码块及其唯一连续原样 quote，关联 ID 只取本次范围。${plan.context.semanticScope ? '每项 finding 必须有对应 assessmentId，该检查不能 pass。只要有非 style finding（包括 structure、requirement、integrity），argument_assessment 也不能 pass；有 style finding 时 style_assessment 不能 pass。重新依依据填写 fail 或 unknown，不得删除真实问题来维持 pass。' : ''}detail/explanation/reason 至少10字符。不能重复位置、制造引用或同时宣称有问题且通过。没有问题／复查时返回空数组，无法判断明确 unknown。`
+        if (error instanceof z.ZodError) checkpoint.contractFailure = error.issues
+          .map(issue => `${issue.path.join('.')}：${issue.message}`).join('；').slice(0, 700)
+        else if (error instanceof ScholarError) checkpoint.contractFailure = `${error.code}：${error.message}`.slice(0, 700)
+        // "Unrecognized key" is the strict() failure mode, and it is the one the model cannot fix by
+        // re-reading a field list: it invented a name. Say it plainly, and name the allowed keys.
+        const invented = error instanceof z.ZodError
+          ? [...new Set(error.issues.filter(issue => issue.code === 'unrecognized_keys').flatMap(issue => (issue as { keys?: string[] }).keys ?? []))]
+          : []
+        const dropped = invented.length
+          ? `你多写了字段 ${invented.map(key => `"${key}"`).join('、')}，这些字段名不存在，必须删除。允许的字段名只有：checks 每项 ${modelReviewKeys.check.join('、')}；findings 每项 ${modelReviewKeys.finding.join('、')}；rechecks 每项 ${modelReviewKeys.recheck.join('、')}；rechecks 里旧问题的键名是 issueId。`
+          : ''
+        checkpoint.repair = `${cause}${dropped}返回严格 JSON。checks 恰好包含以下不同检查名的数组，status 必须按实际依据填写 pass/fail/unknown，不能是以检查名为键的对象：${JSON.stringify((plan.context.semanticScope ? semanticReviewChecks : semanticReviewChecks.slice(0, 2)).map(id => ({ id, status: 'unknown', detail: '实际检查依据或无法判定的原因，至少10字符。' })))}。findings、rechecks、limitations 必须是数组；问题和复查使用给定身份、实际源码块及其唯一连续原样 quote，关联 ID 只取本次范围。${plan.context.semanticScope ? '每项 finding 必须有对应 assessmentId，该检查不能 pass。只要有非 style finding（包括 structure、requirement、integrity），argument_assessment 也不能 pass；有 style finding 时 style_assessment 不能 pass。重新依依据填写 fail 或 unknown，不得删除真实问题来维持 pass。' : ''}detail/explanation/reason 至少10字符。不能重复位置、制造引用或同时宣称有问题且通过。没有问题／复查时返回空数组，无法判断明确 unknown。`
       }
       await save()
       await syncWorkflowDuration(io, plan.snapshot.workflowId, state.runId, state.activeDurationMs ?? 0)
     }
     if (control.pauseRequested()) return await pause()
-    invariant(checkpoint.output, 'MODEL_REVIEW_INVALID', '一次格式修复后审查输出仍不满足合同，未更新报告。')
+    invariant(checkpoint.output, 'MODEL_REVIEW_INVALID',
+      `一次格式修复后审查输出仍不满足合同，未更新报告。${checkpoint.contractFailure ? `最后未通过的字段：${checkpoint.contractFailure}` : ''}`)
     bounded.throwIfAborted(); await checkInputs()
     const result = await publishModelReview(io, plan, checkpoint.output)
     state.reviewId = result.report.id; state.status = result.report.issues.length || result.report.checks.some(check => check.status !== 'pass') ? 'completed-with-issues' : 'succeeded'
