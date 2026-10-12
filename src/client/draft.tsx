@@ -39,12 +39,13 @@ function readLocalBuffer(key: string) {
     return readScratch(window.localStorage, key, 8 * 1024 * 1024)
   } catch { /* Host temporary buffer remains available when browser storage fails. */ }
 }
-export function Draft({ project, context, api, refresh, run, busy, issueLocation, view: preferredView = 'preview', format = 'markdown', tool, suggestionsOnly=false, visible = true, onController, onTool, onReview, onReturnEditor, onAttachSelection, captureChatInsertion, onGenerationState, generationMode }: Props & {
+export function Draft({ project, context, api, refresh, run, busy, issueLocation, view: preferredView = 'preview', format = 'markdown', tool, suggestionsOnly=false, visible = true, onController, onTool, onReview, onReturnEditor, onAttachSelection, captureChatInsertion, onGenerationState, generationMode, outlineOpen: controlledOutlineOpen, onOutlineOpen }: Props & {
   issueLocation?: any; view?: PaperView; format?: ExportFormat; tool?: 'Changes' | 'History'; visible?: boolean;suggestionsOnly?:boolean;
   onController?: (value: DraftController) => void; onTool?: () => void; onReview?: () => void; onReturnEditor?: () => void
   onAttachSelection?: (card: SelectionContext, ask: boolean, insertion: any) => void; captureChatInsertion?: () => any
   onGenerationState?: (active: boolean) => void
   generationMode?: string
+  outlineOpen?: boolean; onOutlineOpen?: (open: boolean) => void
 }) {
   const projectId = project.binding.projectId
   const bufferKey = scratchKey(project.binding, 'paper')
@@ -194,7 +195,9 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     finally { setAnswerBusy(false) }
   }
   const [editRange, setEditRange] = useState<{ start: number; end: number }>(), [rewriteScope, setRewriteScope] = useState('selection'), [rewriteInstruction, setRewriteInstruction] = useState('')
-  const pendingFormatRange=useRef<{start:number;end:number}|undefined>(undefined),[outlineOpen,setOutlineOpen]=useState(false)
+  const pendingFormatRange=useRef<{start:number;end:number}|undefined>(undefined),[localOutlineOpen,setLocalOutlineOpen]=useState(false)
+  const outlineOpen=controlledOutlineOpen??localOutlineOpen
+  const setOutlineOpen=onOutlineOpen??setLocalOutlineOpen
   useEffect(() => {
     if (!rewriteRestored.current) return
     try {

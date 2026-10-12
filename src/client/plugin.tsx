@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef, useSyncExternalStore, useCallback } from 'react'
 import { PaperVersions } from './paper-versions.tsx'
 import { PaperMaterials, MATERIALS_CSS } from './paper-materials.tsx'
 import { MOTION_CSS } from './motion/tokens.ts'
@@ -10,6 +10,9 @@ import { RANGE_MARK_CSS } from './range-mark.tsx'
 import { SELECTION_MENU_CSS } from './selection-menu.tsx'
 import { CreationWizard, WIZARD_CSS } from './creation-wizard.tsx'
 import { WritingProgress, PROGRESS_CSS } from './writing-progress.tsx'
+import { FlowNavigation, FLOW_CSS } from './flow-navigation.tsx'
+import { flowNodes, type FlowNodeId, type FlowReview, type ReviewActivity } from './flow-status.ts'
+import type { CreationSpec, WritingTask } from '../shared/writing-task.ts'
 import { WritingRequirements } from './writing-requirements.tsx'
 import { Draft } from './draft.tsx'
 import { ReviewExport } from './review-export.tsx'
@@ -159,7 +162,7 @@ export function apply(ctx: Host) {
       window.addEventListener('blur', blur); window.addEventListener('focus', sync)
       return () => { document.removeEventListener('visibilitychange', sync); window.removeEventListener('blur', blur); window.removeEventListener('focus', sync) }
     }, [])
-    return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{THEME_CSS + CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS + RANGE_MARK_CSS}</style>
+    return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{THEME_CSS + CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS + RANGE_MARK_CSS + FLOW_CSS}</style>
       <SelectionReferenceDetails sessionId={props.sessionId} />
       <main className="sf-body">{props.renderSlot('scholarflow.project', {
         renderNativeTools: (extra: React.ReactNode) => <NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} extra={extra} />,
@@ -182,6 +185,17 @@ export function apply(ctx: Host) {
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
     const [tab, setTab] = useState<(typeof TABS)[number]>('Draft')
+    const [outlineOpen, setOutlineOpen] = useState(false)
+    const [flowTask, setFlowTask] = useState<{task?: WritingTask; spec?: CreationSpec}>({})
+    const [flowReview, setFlowReview] = useState<FlowReview>()
+    const [reviewActivity, setReviewActivity] = useState<ReviewActivity>()
+    const navigateTab = (next: (typeof TABS)[number]) => { setOutlineOpen(false); setTab(next) }
+    const navigateFlow = (node: FlowNodeId) => {
+      if (node === 'outline') { setTab('Draft'); setOutlineOpen(true) }
+      else navigateTab(({requirements:'Overview',materials:'Research',draft:'Draft',review:'Review'} as const)[node])
+    }
+    const flowCurrent: FlowNodeId | undefined = tab === 'Draft' ? outlineOpen ? 'outline' : 'draft' :
+      tab === 'Overview' ? 'requirements' : tab === 'Research' ? 'materials' : tab === 'Review' ? 'review' : undefined
     const [historyView,setHistoryView]=useState<'versions'|'runs'|'deliveries'>('versions')
     const [registrationError, setRegistrationError] = useState('')
     const [registering, setRegistering] = useState(false)
@@ -194,6 +208,12 @@ export function apply(ctx: Host) {
     const liveBinding = useRef(bindingKey), readSequence = useRef(0)
     const latest = useRef({ busy, project })
     liveBinding.current = bindingKey; latest.current = { busy, project }
+    const publishFlowReview = useCallback((value: FlowReview | undefined) => {
+      if (bindingKey === liveBinding.current) setFlowReview(value)
+    }, [bindingKey])
+    const publishReviewActivity = useCallback((value: ReviewActivity | undefined) => {
+      if (bindingKey === liveBinding.current) setReviewActivity(value)
+    }, [bindingKey])
     const context = () => ({ requestId: `req_${crypto.randomUUID()}`, workspaceId: workspace?.workspaceId, sessionId: props.sessionId,
       ...(latest.current.project?.ledger && { expectedLedgerRevision: latest.current.project.ledger.revision }),
       ...(latest.current.project?.binding?.projectId && latest.current.project.binding.workspaceId === workspace?.workspaceId && latest.current.project.binding.sessionId === props.sessionId
@@ -222,6 +242,7 @@ export function apply(ctx: Host) {
     useEffect(() => {
       let live = true
       setProject(undefined); setError(''); setTab('Draft');setHistoryView('versions'); setView('preview'); setFormat('markdown'); setExportPrompt(false); setExportTrigger(0); setEditor(undefined); setIssueLocation(undefined); setGenerating(false); setGenerationMode(undefined)
+      setOutlineOpen(false); setFlowTask({}); setFlowReview(undefined); setReviewActivity(undefined)
       if (workspace && props.sessionId) refresh().catch(e => live && setError(e.message))
       return () => { live = false }
     }, [workspace?.workspaceId, props.sessionId])
@@ -273,7 +294,7 @@ export function apply(ctx: Host) {
     const closeMenu = (element: HTMLElement) => element.closest('details')?.removeAttribute('open')
     return <section ref={confirmationRoot} className="sf-project sf-paper-project" aria-label="ScholarFlow 项目" data-sf-session-id={props.sessionId} aria-busy={busy}>
       <header className="sf-paper-header"><strong className="sf-paper-title" title={ready ? project.config.project.title : 'ScholarFlow'}>{ready ? project.config.project.title : 'ScholarFlow'}</strong>
-        {ready && <><button className="sf-type-chip" title="写作要求" onClick={() => setTab('Overview')}>{TYPE_LABELS[project.config.project.type]} <WorkbenchIcon kind="down" /></button>
+        {ready && <><button className="sf-type-chip" title="写作要求" onClick={() => navigateTab('Overview')}>{TYPE_LABELS[project.config.project.type]} <WorkbenchIcon kind="down" /></button>
           <select aria-label="排版与导出格式" title="排版与导出格式" value={format} onChange={e => changeFormat(e.target.value as ExportFormat)}>
             {Object.entries(FORMAT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></>}
         {props.renderNativeTools?.(ready && <div className="sf-export-split"><button disabled={busy} onClick={() => requestExport(format)}>导出<span className="sf-export-format-label"> {FORMAT_LABELS[format]}</span></button><details className="sf-paper-menu sf-paper-export"><summary aria-label="更多导出选项"><WorkbenchIcon kind="down" /></summary><div className="sf-paper-menu-popover">
@@ -294,24 +315,26 @@ export function apply(ctx: Host) {
       </div>}
       {ready && <>
         <div className="sf-paper-toolbar"><nav className="sf-paper-views" aria-label="正文视图">
-          {(['edit', 'preview'] as const).map((name, index) => <button className="sf-ghost" key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && view === name} onClick={() => { setTab('Draft'); setView(name) }}>{['编辑', '预览'][index]}</button>)}
-        </nav><nav className="sf-paper-actions" aria-label="论文工具"><button className="sf-ghost" aria-pressed={tab==='Research'} onClick={()=>setTab('Research')}>资料</button><button className="sf-ghost" aria-pressed={tab==='Review'} onClick={()=>setTab('Review')}>检查</button></nav><details className="sf-paper-menu"><summary aria-label="更多论文选项"><WorkbenchIcon kind="more" /></summary><div className="sf-paper-menu-popover">
-          {(['Overview','Settings','History'] as const).map(name=><button key={name} onClick={e=>{closeMenu(e.currentTarget);if(name==='History')setHistoryView('versions');setTab(name)}}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
+          {(['edit', 'preview'] as const).map((name, index) => <button className="sf-ghost" key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && !outlineOpen && view === name} onClick={() => { navigateTab('Draft'); setView(name) }}>{['编辑', '预览'][index]}</button>)}
+        </nav><FlowNavigation nodes={flowNodes(project,{...flowTask,review:flowReview,dirty:editor?.dirty,reviewActivity})} current={flowCurrent} onNavigate={navigateFlow} />
+        <nav className="sf-paper-actions" aria-label="论文工具"><button className="sf-ghost" aria-pressed={tab==='Research'} onClick={()=>navigateTab('Research')}>资料</button><button className="sf-ghost" aria-pressed={tab==='Review'} onClick={()=>navigateTab('Review')}>检查</button></nav><details className="sf-paper-menu"><summary aria-label="更多论文选项"><WorkbenchIcon kind="more" /></summary><div className="sf-paper-menu-popover">
+          {(['Overview','Settings','History'] as const).map(name=><button key={name} onClick={e=>{closeMenu(e.currentTarget);if(name==='History')setHistoryView('versions');navigateTab(name)}}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
         </div></details></div>
-        {tab !== 'Draft' && <div className="sf-tool-back"><button className="sf-ghost" onClick={() => setTab('Draft')}><WorkbenchIcon kind="back" /> 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
-        <div hidden={tab!=='Draft'}><WritingProgress project={project} api={api} context={context} refresh={refresh} onManage={setTab} onRecords={()=>{setHistoryView('runs');setTab('History')}} onCheck={(row:any)=>{setTab(row.page);if(row.page==='Draft')setView('preview');requestAnimationFrame(()=>{const selector=row.page==='Draft'?`[data-sf-block="${window.CSS.escape(row.key)}"]`:row.page==='Review'?`[data-sf-review-id="${window.CSS.escape(row.key)}"]`:undefined;if(selector)confirmationRoot.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({block:'center'})})}} onTask={(result:any)=>setGenerationMode(result.task?.mode)} /></div>
+        {tab !== 'Draft' && <div className="sf-tool-back"><button className="sf-ghost" onClick={() => navigateTab('Draft')}><WorkbenchIcon kind="back" /> 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
+        <div hidden={tab!=='Draft'||outlineOpen}><WritingProgress key={`progress_${bindingKey}_${project.binding.projectId}`} project={project} api={api} context={context} refresh={refresh} onManage={navigateTab} onRecords={()=>{setHistoryView('runs');navigateTab('History')}} onCheck={(row:any)=>{navigateTab(row.page);if(row.page==='Draft')setView('preview');requestAnimationFrame(()=>{const selector=row.page==='Draft'?`[data-sf-block="${window.CSS.escape(row.key)}"]`:row.page==='Review'?`[data-sf-review-id="${window.CSS.escape(row.key)}"]`:undefined;if(selector)confirmationRoot.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({block:'center'})})}} onTask={(result:any)=>{if(bindingKey!==liveBinding.current)return;setGenerationMode(result.task?.mode);setFlowTask(previous=>({task:result.task,spec:result.spec??previous.spec??result.task?.spec}))}} /></div>
         <div className="sf-paper-content" data-page={tab}>
           <div id="sf-panel-Overview" role="tabpanel" aria-label="写作要求" hidden={tab !== 'Overview'}><WritingRequirements key={`requirements_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} onFormat={setFormat} /></div>
           <div id="sf-panel-Research" role="tabpanel" aria-label="资料与研究" hidden={tab !== 'Research'}><PaperMaterials key={`research_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} /></div>
           <div hidden={tab!=='History'} className="sf-history-tabs" role="tablist" aria-label="历史类型">{([['versions','稿件版本'],['runs','运行与恢复'],['deliveries','导出记录']] as const).map(([name,label])=><button role="tab" aria-selected={historyView===name} key={name} onClick={()=>setHistoryView(name)}>{label}</button>)}</div>
           <div id="sf-panel-History" role="tabpanel" aria-label="版本历史" hidden={tab !== 'History' || historyView !== 'versions'}><PaperVersions project={project} api={api} context={context} refresh={refresh} /></div>
           <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} mode={tab==='History'?historyView==='deliveries'?'Export':historyView==='runs'?'ReviewHistory':tab:tab} format={format} exportTrigger={exportTrigger} editor={editor}
-            onSources={()=>setTab('Research')} onLocate={location => { setIssueLocation({ ...location, request: crypto.randomUUID() }); setView('preview'); setTab('Draft') }} />
+            onReviewState={publishFlowReview} onReviewActivity={publishReviewActivity}
+            onSources={()=>navigateTab('Research')} onLocate={location => { setIssueLocation({ ...location, request: crypto.randomUUID() }); setView('preview'); navigateTab('Draft') }} />
           <div id="sf-panel-Draft" data-sf-tool={draftTool} role="tabpanel" aria-label={draftTool ? TAB_LABELS[TABS.indexOf(draftTool)] : '正文'} hidden={tab !== 'Draft' && !draftTool}>
             <Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} issueLocation={issueLocation}
-              view={view} format={format} tool={draftTool} suggestionsOnly={tab==='Review'} visible={tab === 'Draft'} onController={setEditor} captureChatInsertion={() => props.inputActions.captureInsertion()}
+              view={view} format={format} tool={draftTool} suggestionsOnly={tab==='Review'} visible={tab === 'Draft'} onController={setEditor} captureChatInsertion={() => props.inputActions.captureInsertion()} outlineOpen={outlineOpen} onOutlineOpen={setOutlineOpen}
               generationMode={generationMode} onGenerationState={active=>{setGenerating(active);if(active)setView('preview')}}
-              onAttachSelection={attachSelection} onReview={() => setTab('Review')} onTool={() => setTab('Review')} onReturnEditor={() => { setView('preview'); setTab('Draft') }} />
+              onAttachSelection={attachSelection} onReview={() => navigateTab('Review')} onTool={() => navigateTab('Review')} onReturnEditor={() => { setView('preview'); navigateTab('Draft') }} />
           </div>
           <div id="sf-panel-Settings" role="tabpanel" aria-label="项目设置" hidden={tab !== 'Settings'}><ProjectSettings key={project.binding.projectId} project={project} diagnostics={() => call('diagnostics')} api={api} context={context} refresh={refresh} run={act} busy={busy} /></div>
         </div>

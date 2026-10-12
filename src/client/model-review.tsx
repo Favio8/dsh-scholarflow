@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
+import type { ReviewActivity } from './flow-status.ts'
 
-type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean; onReview: (value: any) => void; historyOnly?:boolean; editor?:any }
-export function ModelReview({ project, context, api, refresh, run, busy, onReview, historyOnly=false,editor }: Props) {
+type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean; onReview: (value: any) => void; historyOnly?:boolean; editor?:any; onActivity?: (value: ReviewActivity | undefined) => void }
+export function ModelReview({ project, context, api, refresh, run, busy, onReview, historyOnly=false,editor,onActivity }: Props) {
   const [actionPlan,setActionPlan]=useState<any>(),[history,setHistory]=useState<any>(),[version,setVersion]=useState(0)
   const [active,setActive]=useState<any>(),[progress,setProgress]=useState<any>(),[message,setMessage]=useState('')
   const binding=project.binding.projectId+':'+project.binding.sessionId,liveBinding=useRef(binding);liveBinding.current=binding
@@ -22,25 +23,30 @@ export function ModelReview({ project, context, api, refresh, run, busy, onRevie
   const execute=async(preview:any,captured:any,action=false)=>{
     const scope=binding
     setActive({context:captured,runId:preview.runId});setProgress(undefined);setActionPlan(undefined);setMessage('正在检查全文…')
+    onActivity?.('running')
     try{
       const result=await api(action?'review.confirmAction':'review.startModel',{context:captured,planId:preview.planId,planHash:preview.planHash})
       if(liveBinding.current===scope){
         if(result.report)onReview({report:result.report,stale:false})
         setMessage(result.paused?'检查已暂停，可在历史中继续。':result.run.status==='completed'?'全文检查已完成。':'检查尚未完成，可在历史中查看原因。')
+        onActivity?.(result.paused||['paused','interrupted'].includes(result.run.status)?'paused':result.run.status==='cancelled'?'stopped':result.run.status==='completed'&&result.report?undefined:'failed')
         await refresh()
       }
+    }catch(error){if(liveBinding.current===scope)onActivity?.('failed');throw error
     }finally{if(liveBinding.current===scope){setActive(undefined);setVersion(value=>value+1)}}
   }
   const check=()=>run(async()=>{
+    onActivity?.('running')
     setMessage('正在检查结构与引用…')
-    if(editor?.dirty)await editor.save()
-    const captured=context(),rules=await api('review.run',{context:captured})
-    onReview(rules);await refresh()
-    const current={...captured,expectedLedgerRevision:rules.revision}
+    let rulesDone=false
     try{
+      if(editor?.dirty)await editor.save()
+      const captured=context(),rules=await api('review.run',{context:captured})
+      onReview(rules);rulesDone=true;await refresh()
+      const current={...captured,expectedLedgerRevision:rules.revision}
       const preview=await api('review.prepareModel',{context:current})
       await execute(preview,current)
-    }catch(error){setMessage('规则检查已完成；AI 检查未完成：'+(error as Error).message);await refresh()}
+    }catch(error){onActivity?.('failed');if(!rulesDone)throw error;setMessage('规则检查已完成；AI 检查未完成：'+(error as Error).message);await refresh()}
   })
   const rows=history?.runs.filter((row:any)=>row.stage==='review')??[]
   return <section className={historyOnly?'sf-review-history':'sf-review-action'} aria-label={historyOnly?'检查运行历史':'检查全文'}>
