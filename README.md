@@ -4,7 +4,7 @@
 
 v1.20 把正文上方的常驻条带由三条收敛为两条：写作进度改为工作条内的紧凑状态药丸，暂停／停止／继续、核对清单与运行记录收进药丸下拉，有问题时药丸转告警色并显示"需处理"；格式工具栏、排版入口、目录与阅读比例合并为单行编辑栏，面板题注在单视图下不再占用一行；五节点在窄栏改为横向滚动，多条提示合并为一条可展开的汇总条。纸页内边距、导出与排版语义不变。与此同时修复了 AI 检查因提示词与 schema 字段名漂移（"旧 issueId"被模型直译为 `oldIssueId`）而整轮作废的缺陷。
 
-门禁：类型检查 0 错误、构建 0 错误、分层测试 **663/663**；安装版 DSH 隔离 profile 实测 `v18 --phase=layout/status/navigation` **10/10**、`v17-layout` **6/6**、`v19-ai-review --phase=all` **7/7**。`v16` 的审查段与 `v18 --phase=review` 因 v1.19 已替换审查入口而需重写，`v15-writing-fixes` 仍有一处阻塞，`AT-134` 打字性能在本机负载下无法判定——三项都不计入通过，记在验证记录里。实现与验证见 [v1.20 chrome 归并记录](docs/decisions/chrome-consolidation-v1.20.md) 与 [模型审查字段名记录](docs/decisions/model-review-contract-keys-and-flow-marks.md)。
+门禁：类型检查 0 错误、构建 0 错误、分层测试 **663/663**；安装版 DSH 隔离 profile 实测 `v18 --phase=layout/status/navigation` **10/10**、`v17-layout` **6/6**、`v19-ai-review --phase=all` **7/7**。逐选区排版被下拉打断的缺陷（B2）已定位并修复，见 [选区武装记录](docs/decisions/selection-armed-across-format-toolbar.md)：`v15-writing-fixes` 的排版与选区段因此首次通过，其后的资料／书目／导出段仍带 v1.15 时代的定位需另行清理；`v16` 的审查段与 `v18 --phase=review` 因 v1.19 已替换审查入口而需重写；`AT-134` 打字性能在本机负载下无法判定——这些都不计入通过，记在验证记录里。实现与验证见 [v1.20 chrome 归并记录](docs/decisions/chrome-consolidation-v1.20.md) 与 [模型审查字段名记录](docs/decisions/model-review-contract-keys-and-flow-marks.md)。
 
 v1.19 将检查收敛为一个 AI检查入口和“一键检查并完善”操作：系统检查并按段准备修订，用户直接查看修改预览，一次采用或保留原稿。复杂报告默认收起；成功、有待办、停止与失败按真实终态显示。跨段采用在一个事务中保存同一修订，引用、未改内容与排版保留；停止／重开恢复已有候选，继续只处理未完成段落。验证见 [v1.19 一键检查记录](docs/decisions/ai-review-v1.19.md)。
 

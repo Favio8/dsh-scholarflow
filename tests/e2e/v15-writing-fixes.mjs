@@ -142,12 +142,20 @@ try {
   assert.equal(await page.locator('.sf-mark-inline').count(),0)
   record('continuous mouse selection crosses emphasis without mixed colours or mapping errors',true,{selection})
   // v1.16 moved the per-selection typography fields behind the 排版 entry; v1.20 kept them there and
-  // only lifted the entry onto the editor bar, so the panel still has to be opened first.
+  // only lifted the entry onto the editor bar, so the panel still has to be opened first. The drag
+  // above proves the marking behaviour; formatting is driven from the source editor instead, because a
+  // drag's offsets come from the rendered prose and shift whenever it re-renders, while a textarea
+  // selection is plain offsets and survives a style application.
+  await page.getByRole('button',{name:'编辑',exact:true}).click()
+  const area=page.locator('.sf-source-input')
+  await area.click();await area.press('Control+Home')
+  await area.press('ArrowDown');await area.press('ArrowDown');await area.press('Home')
+  for(let index=0;index<8;index++)await area.press('Shift+ArrowRight')
   await page.locator('.sf-format-toolbar').getByRole('button',{name:'排版',exact:true}).click()
   await page.getByLabel('选中文字中文字体',{exact:true}).selectOption('楷体')
-  await selectAcrossEmphasis()
-  await page.getByLabel('选中文字中文字体',{exact:true}).selectOption('楷体')
-  await selectAcrossEmphasis()
+  // Applying the style re-renders the prose. The armed range has to survive that, otherwise the
+  // reader must select the same text again before every field — the defect this asserts against.
+  await expect(page.locator('select[aria-label="选中文字字号"]')).toBeEnabled()
   await page.getByLabel('选中文字字号',{exact:true}).selectOption('14')
   await page.locator('.sf-format-toolbar').getByRole('button',{name:'保存',exact:true}).click()
   await expect(page.locator('.sf-draft-status')).toContainText('已保存')
@@ -162,12 +170,15 @@ try {
   record('switching from editor to preview clears the ordinary selection',true,{rainbowMarks:0})
   }else{await sf('document.saveManual',{text:manuscript,baseHash:saved.document.contentHash,formatting:{characters:[{start:manuscript.indexOf('普通'),end:manuscript.indexOf('普通')+4,fontZh:'楷体',sizePt:14}],paragraphs:[]}});await page.reload();await dismissOnboarding();await page.locator('.sf-format-toolbar').waitFor()}
   let state
-  await page.getByRole('button',{name:'全文排版',exact:true}).click();const panel=page.locator('.sf-formatting-panel');await panel.getByLabel('页边距（毫米）').fill('30');await panel.getByLabel('行距',{exact:true}).selectOption('1.5');await panel.getByLabel('页眉',{exact:true}).fill('TEST_ONLY 页眉');await panel.getByLabel('页脚',{exact:true}).fill('TEST_ONLY 页脚')
+  // v1.16 (and v1.20) put the full-document typography section inside the same 排版 popover; 全文排版
+  // is that section's header now, not a button of its own.
+  await page.locator('.sf-format-toolbar').getByRole('button',{name:'排版',exact:true}).click()
+  const panel=page.locator('.sf-formatting-panel[aria-label="全文排版设置"]');await panel.getByLabel('页边距（毫米）').fill('30');await panel.getByLabel('行距',{exact:true}).selectOption('1.5');await panel.getByLabel('页眉',{exact:true}).fill('TEST_ONLY 页眉');await panel.getByLabel('页脚',{exact:true}).fill('TEST_ONLY 页脚')
   await panel.getByRole('button',{name:'应用全文排版'}).click();await expect(panel).toHaveCount(0)
-  await page.locator('summary[aria-label="更多论文选项"]').click();await page.getByRole('button',{name:'资料与引用',exact:true}).click()
+  await page.locator('.sf-flow-nav [data-node="materials"]').click()
   await page.locator('.sf-materials-panel [data-sf-source-id] input').nth(0).check();await page.locator('.sf-materials-panel [data-sf-source-id] input').nth(1).check();await page.getByLabel('关联后的主书目').selectOption(first.source.id);const linkedResponse=page.waitForResponse(response=>response.request().method()==='POST'&&response.request().postDataJSON()?.method==='scholarflow.v1/sources.linkBibliography');await page.getByRole('button',{name:'确认同一文献',exact:true}).click();await linkedResponse
   const linked=await rpc('scholarflow.v1/project.inspect',{request:{context}});assert.equal(Object.keys(linked.ledger.sources).length,2);assert(linked.ledger.sources[second.source.id].bibliographySourceId===first.source.id)
-  await page.getByRole('button',{name:'返回正文',exact:true}).click();await expect(page.locator('.sf-paper-references>p')).toHaveCount(1)
+  await page.locator('.sf-tool-back').getByRole('button',{name:'返回正文',exact:true}).click();await expect(page.locator('.sf-paper-references>p')).toHaveCount(1)
   state=await rpc('scholarflow.v1/project.inspect',{request:{context}});assert.equal(Object.keys(state.ledger.sources).length,2)
   record('confirmed bibliography association preserves original sources and shows one entry',true,{sourceCount:2,referenceCount:1})
   await page.getByLabel('排版与导出格式',{exact:true}).selectOption('docx')

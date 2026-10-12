@@ -526,7 +526,11 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
   useEffect(() => {
     const sync = () => {
       const { origin, range } = liveLatest.current()
-      if (!range) {if(!document.activeElement?.closest('.sf-format-tools'))setEditRange(undefined);return}
+      // An unmappable selection is not a deselect. Applying a character style re-renders the prose,
+      // and the mapping can then fail while the reader's selection is still on screen and they are
+      // still working in the format toolbar — dropping the armed range there disarmed the selects
+      // mid-edit and forced a re-selection between every two fields.
+      if (!range) {if(!document.activeElement?.closest('.sf-format-tools')&&!window.getSelection()?.toString())setEditRange(undefined);return}
       selectionOrigin.current = origin
       setEditRange(previous => previous && previous.start === range.start && previous.end === range.end ? previous : range)
     }
