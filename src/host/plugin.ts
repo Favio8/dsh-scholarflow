@@ -18,7 +18,8 @@ import { parseRegisteredMaterial } from '../core/materials/parse.ts'
 import { parseMaterialBytes } from './parsers/parse.ts'
 import { registerSource, confirmEvidence, upsertClaim, confirmOutline, saveOutline } from '../core/evidence/evidence.ts'
 import type { RequestContext } from '../shared/schema.ts'
-import { saveDocumentRequest, proposalRequest, applyProposalRequest, undoDocumentRequest, proposalRevisionRequest } from '../shared/document-api.ts'
+import { saveDocumentRequest, proposalRequest, applyProposalRequest, undoDocumentRequest, proposalRevisionRequest, reviewImprovementApplyRequest } from '../shared/document-api.ts'
+import { inspectImprovements, acceptImprovementsAndRecheck } from '../core/review/improvements.ts'
 import { prepareProposalRevision, publishProposalRevision, type ProposalRevisionPlan } from '../core/editing/proposal-revision.ts'
 import { saveManual, rejectProposal, undoRevision, proposalImage } from '../core/editing/proposals.ts'
 import { inspectManuscriptSource, prepareManuscriptAdoption, applyManuscriptAdoption, type ManuscriptAdoptionPlan } from '../core/editing/manuscript-adoption.ts'
@@ -1395,6 +1396,19 @@ export class ScholarFlowRemote extends TypertRemoteService {
         } catch { diagnostics.push('一个建议快照不可用，未采用其问题关联。') }
       }
       return { fixes, diagnostics } })
+  }
+
+  @Remote('review.improvements')
+  async reviewImprovements(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const { context } = inspectRequest.parse(request)
+      const { io } = await resolveStore(this.ctx, context, signal); return inspectImprovements(io) })
+  }
+
+  @Remote('review.applyImprovements')
+  async reviewApplyImprovements(request: unknown, signal: AbortSignal) {
+    return applicationResult(async () => { this.requireOperator(); const input = reviewImprovementApplyRequest.parse(request)
+      const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
+      return acceptImprovementsAndRecheck(io, input.proposals, revision) })
   }
 
   @Remote('anchors.upsert')

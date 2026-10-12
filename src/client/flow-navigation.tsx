@@ -13,7 +13,7 @@ export function FlowNavigation({ nodes, current, onNavigate }: { nodes: FlowNode
 
 export const FLOW_CSS = `
 .sf-paper-project{container-name:sf-workbench}
-.sf-paper-project .sf-paper-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;height:auto;min-height:48px;gap:var(--sf-space-2);padding-block:var(--sf-space-1)}
+.sf-paper-project .sf-paper-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;height:auto;min-height:48px;gap:var(--sf-space-2);padding-block:var(--sf-space-1)}
 .sf-paper-project .sf-paper-actions{margin-left:0}
 .sf-flow-nav{min-width:0;width:100%;max-width:720px;justify-self:center;padding-inline:var(--sf-space-3);box-sizing:border-box}
 .sf-flow-nav ol{display:flex;align-items:center;list-style:none;margin:0;padding:0}
@@ -30,6 +30,6 @@ body .sf-app .sf-flow-node:hover{background:var(--sf-fill)}
 .sf-flow-nav :is([data-state=attention],[data-state=stale],[data-state=paused]) .sf-flow-mark{background:var(--sf-warn-soft);border-color:var(--sf-warn-border);color:var(--sf-warn-text)}
 .sf-flow-nav :is([data-state=attention],[data-state=stale],[data-state=paused]) small{color:var(--sf-warn-text)}
 .sf-flow-node[aria-current=page] .sf-flow-title{color:var(--sf-accent-text);font-weight:600;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:4px}
-@container sf-workbench (max-width:850px){.sf-paper-project .sf-paper-toolbar{grid-template-columns:1fr auto auto}.sf-flow-nav{grid-column:1/-1;grid-row:2;padding:var(--sf-space-1) 0;max-width:640px}.sf-paper-views{justify-self:start}}
+@container sf-workbench (max-width:850px){.sf-paper-project .sf-paper-toolbar{grid-template-columns:1fr auto}.sf-flow-nav{grid-column:1/-1;grid-row:2;padding:var(--sf-space-1) 0;max-width:640px}.sf-paper-views{justify-self:start}}
 @container sf-workbench (max-width:440px){body .sf-app .sf-flow-node{gap:3px;padding-inline:0;font-size:11px}.sf-flow-nav li:not(:last-child)::after{min-width:3px;margin-inline:3px}.sf-flow-mark{width:12px;height:12px;font-size:9px}.sf-flow-text small{font-size:9px}}
 `

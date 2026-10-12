@@ -12,6 +12,7 @@ import { CreationWizard, WIZARD_CSS } from './creation-wizard.tsx'
 import { WritingProgress, PROGRESS_CSS } from './writing-progress.tsx'
 import { FlowNavigation, FLOW_CSS } from './flow-navigation.tsx'
 import { flowNodes, type FlowNodeId, type FlowReview, type ReviewActivity } from './flow-status.ts'
+import { REVIEW_ASSISTANT_CSS } from './review-assistant.tsx'
 import type { CreationSpec, WritingTask } from '../shared/writing-task.ts'
 import { WritingRequirements } from './writing-requirements.tsx'
 import { Draft } from './draft.tsx'
@@ -34,7 +35,7 @@ import { SfState } from './sf-state.tsx'
 
 type Host = any
 const TABS = ['Overview', 'Research', 'Outline', 'Draft', 'Review', 'Export', 'Settings', 'Changes', 'History'] as const
-const TAB_LABELS = ['写作要求', '资料与引用', '章节结构', '正文', '检查与修改', '交付历史', '项目设置', '修改建议', '版本历史']
+const TAB_LABELS = ['写作要求', '资料与引用', '章节结构', '正文', 'AI检查', '交付历史', '项目设置', '修改建议', '版本历史']
 const CSS = `.sf-app{height:100%;display:flex;flex-direction:column;color:inherit;font-family:inherit}.sf-header{padding:var(--sf-space-4);border-bottom:1px solid var(--sf-border-strong)}.sf-columns{display:flex;min-height:0;flex:1}.sf-body{flex:1;min-width:0;padding:var(--sf-space-5);overflow:auto}.sf-agent{width:360px;min-width:300px;border-left:1px solid var(--sf-border-strong);display:flex;flex-direction:column;overflow:hidden}.sf-error{color:var(--sf-danger);white-space:pre-wrap}.sf-app pre{white-space:pre-wrap}.sf-app label{display:block;margin:var(--sf-space-3) 0}.sf-settings{padding:var(--sf-space-5);max-width:760px}@media(max-width:1000px){.sf-agent{width:310px}}@media(max-width:760px){.sf-columns{flex-direction:column}.sf-agent{width:100%;height:380px;border-left:0;border-top:1px solid var(--sf-border-strong);flex-shrink:0}}`
 export const inject = ['slots', 'connection', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'layout', 'sidebarRight', 'sidebarRightTabs', 'inputTriggers', 'conversation']
 // A validation refusal carries the fields that failed; without them the message is a dead
@@ -162,7 +163,7 @@ export function apply(ctx: Host) {
       window.addEventListener('blur', blur); window.addEventListener('focus', sync)
       return () => { document.removeEventListener('visibilitychange', sync); window.removeEventListener('blur', blur); window.removeEventListener('focus', sync) }
     }, [])
-    return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{THEME_CSS + CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS + RANGE_MARK_CSS + FLOW_CSS}</style>
+    return <div ref={visualRoot} className="sf-app sf-native-workspace"><style>{THEME_CSS + CSS + EXTRA_CSS + LAYOUT_CSS + NATIVE_DOCK_CSS + PAPER_CSS + MATH_CSS + SELECTION_CSS + WIZARD_CSS + PROGRESS_CSS + MATERIALS_CSS + SURFACE_BOUNDARY_CSS + MOTION_CSS + OVERLAY_CSS + REWRITE_CSS + SELECTION_MENU_CSS + SOURCE_CANDIDATE_CSS + RANGE_MARK_CSS + FLOW_CSS + REVIEW_ASSISTANT_CSS}</style>
       <SelectionReferenceDetails sessionId={props.sessionId} />
       <main className="sf-body">{props.renderSlot('scholarflow.project', {
         renderNativeTools: (extra: React.ReactNode) => <NativeTools source={nativeHeader} sessionId={props.sessionId} renderFactorySlot={props.renderFactorySlot} extra={extra} />,
@@ -317,10 +318,10 @@ export function apply(ctx: Host) {
         <div className="sf-paper-toolbar"><nav className="sf-paper-views" aria-label="正文视图">
           {(['edit', 'preview'] as const).map((name, index) => <button className="sf-ghost" key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && !outlineOpen && view === name} onClick={() => { navigateTab('Draft'); setView(name) }}>{['编辑', '预览'][index]}</button>)}
         </nav><FlowNavigation nodes={flowNodes(project,{...flowTask,review:flowReview,dirty:editor?.dirty,reviewActivity})} current={flowCurrent} onNavigate={navigateFlow} />
-        <nav className="sf-paper-actions" aria-label="论文工具"><button className="sf-ghost" aria-pressed={tab==='Research'} onClick={()=>navigateTab('Research')}>资料</button><button className="sf-ghost" aria-pressed={tab==='Review'} onClick={()=>navigateTab('Review')}>检查</button></nav><details className="sf-paper-menu"><summary aria-label="更多论文选项"><WorkbenchIcon kind="more" /></summary><div className="sf-paper-menu-popover">
+        <details className="sf-paper-menu"><summary aria-label="更多论文选项"><WorkbenchIcon kind="more" /></summary><div className="sf-paper-menu-popover">
           {(['Overview','Settings','History'] as const).map(name=><button key={name} onClick={e=>{closeMenu(e.currentTarget);if(name==='History')setHistoryView('versions');navigateTab(name)}}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
         </div></details></div>
-        {tab !== 'Draft' && <div className="sf-tool-back"><button className="sf-ghost" onClick={() => navigateTab('Draft')}><WorkbenchIcon kind="back" /> 返回正文</button><strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong></div>}
+        {tab !== 'Draft' && <div className="sf-tool-back"><button className="sf-ghost" onClick={() => navigateTab('Draft')}><WorkbenchIcon kind="back" /> 返回正文</button>{tab!=='Review'&&<strong>{TAB_LABELS[TABS.indexOf(tab)]}</strong>}</div>}
         <div hidden={tab!=='Draft'||outlineOpen}><WritingProgress key={`progress_${bindingKey}_${project.binding.projectId}`} project={project} api={api} context={context} refresh={refresh} onManage={navigateTab} onRecords={()=>{setHistoryView('runs');navigateTab('History')}} onCheck={(row:any)=>{navigateTab(row.page);if(row.page==='Draft')setView('preview');requestAnimationFrame(()=>{const selector=row.page==='Draft'?`[data-sf-block="${window.CSS.escape(row.key)}"]`:row.page==='Review'?`[data-sf-review-id="${window.CSS.escape(row.key)}"]`:undefined;if(selector)confirmationRoot.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({block:'center'})})}} onTask={(result:any)=>{if(bindingKey!==liveBinding.current)return;setGenerationMode(result.task?.mode);setFlowTask(previous=>({task:result.task,spec:result.spec??previous.spec??result.task?.spec}))}} /></div>
         <div className="sf-paper-content" data-page={tab}>
           <div id="sf-panel-Overview" role="tabpanel" aria-label="写作要求" hidden={tab !== 'Overview'}><WritingRequirements key={`requirements_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} onFormat={setFormat} /></div>

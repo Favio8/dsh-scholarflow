@@ -6,11 +6,13 @@ import { ModelReview } from './model-review.tsx'
 import { ReviewFixes } from './review-fixes.tsx'
 import {reviewItems} from './review-presentation.ts'
 import type { FlowReview, ReviewActivity } from './flow-status.ts'
+import { ReviewAssistant } from './review-assistant.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
 export function ReviewExport({ project, context, api, refresh, run, busy, mode, onLocate, format = 'markdown', exportTrigger = 0, editor, onSources, onReviewState, onReviewActivity }: Props & { mode: string; format?: ExportFormat; exportTrigger?: number; onLocate: (location: any) => void; editor?:any; onSources?:()=>void; onReviewState?: (value: FlowReview | undefined) => void; onReviewActivity?: (value: ReviewActivity | undefined) => void }) {
   const [review, setReview] = useState<any>(), [message, setMessage] = useState('')
-  useEffect(() => { onReviewState?.(review) }, [review, onReviewState])
+  const [suggestionCount, setSuggestionCount] = useState(0)
+  useEffect(() => { onReviewState?.(review ? { ...review, hasSuggestions: suggestionCount > 0 } : undefined) }, [review, suggestionCount, onReviewState])
   const [lastDelivery,setLastDelivery]=useState<any>()
   const handledTrigger = useRef(0)
   const download = (data: BlobPart, filename: string, type: string) => {
@@ -47,17 +49,18 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode, 
     })
   }, [exportTrigger])
   const [reasons,setReasons]=useState<Record<string,string>>({}),[fixRequest,setFixRequest]=useState<{issueId:string;request:string}>()
-  useEffect(()=>{let live=true
+  useEffect(()=>{if(busy)return;let live=true
     setReview((value:any)=>value?{...value,stale:true}:value)
     api('review.inspect',{context:context()}).then(value=>live&&setReview(value)).catch(error=>{if(live){setMessage(error.message);setReview({error:'检查报告读取未完成，请打开检查页面重试。'})}})
     return()=>{live=false}
-  },[project.ledger.revision,project.document.contentHash,project.document.externalChange])
+  },[project.ledger.revision,project.document.contentHash,project.document.externalChange,busy])
   const items=reviewItems(project),passed=review?.report?.checks.filter((check:any)=>check.status==='pass').length??0
   return <>
     {message&&mode!=='Export'&&<div className="sf-editor-notice" role="status">{message}{lastDelivery&&<><button disabled={busy} onClick={()=>run(()=>downloadBundle(lastDelivery.id))}>下载完整交付包</button><button disabled={busy} onClick={()=>run(async()=>{const result=await api('export.read',{context:context(),deliveryId:lastDelivery.id}),file=result.files.find((row:any)=>row.relativePath==='quality-report.md');download(file.text,'quality-report.md','text/markdown;charset=utf-8')})}>下载检查报告</button></>}</div>}
-    <section id="sf-panel-Review" className="sf-review-panel" role="tabpanel" hidden={mode!=='Review'} aria-label="检查与修改">
-      <header className="sf-page-heading"><h2>检查与修改</h2></header>
-      <ModelReview project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} onReview={setReview} editor={editor} onActivity={onReviewActivity}/>
+    <section id="sf-panel-Review" className="sf-review-panel" role="tabpanel" hidden={mode!=='Review'} aria-label="AI检查">
+      <ReviewAssistant key={project.binding.projectId+':'+project.binding.sessionId} project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} editor={editor}
+        onReview={setReview} onActivity={onReviewActivity} onSuggestions={setSuggestionCount} onSources={onSources}/>
+      <details className="sf-detail sf-review-details"><summary>查看详情</summary>
       <p className="sf-review-summary" role="status">{review?.stale?'正文或资料已更新，请重新检查。':review?.report?items.length?'发现 '+items.length+' 项需要处理或确认的问题。':'当前没有待处理问题。':'点击检查全文，查看问题与修改建议。'}</p>
       {!!passed&&!review?.stale&&<p className="sf-muted">{passed} 项检查已通过。</p>}
       {items.map(item=><article className="sf-review-item" data-sf-review-id={item.issue.id} key={item.key}>
@@ -74,6 +77,8 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode, 
           <button disabled={busy||!reasons[item.key]?.trim()} onClick={()=>run(async()=>{const current=context();for(const issueId of item.issueIds){const result=await api('review.decideIssue',{context:current,issueId,state:'accepted-risk',reason:reasons[item.key]});current.expectedLedgerRevision=result.revision}await refresh()})}>保留问题并记录原因</button></details>
       </article>)}
       <ReviewFixes project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} request={fixRequest}/>
+      <ModelReview project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} onReview={setReview} historyOnly/>
+      </details>
     </section>
     {mode==='ReviewHistory'&&<ModelReview project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} onReview={setReview} onActivity={onReviewActivity} historyOnly/>}
     <section id="sf-panel-Export" className="sf-history-panel" role="tabpanel" hidden={mode!=='Export'} aria-label="导出记录"><header className="sf-page-heading"><h2>导出记录</h2></header>

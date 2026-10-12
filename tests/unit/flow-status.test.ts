@@ -82,7 +82,7 @@ test('real rules-only review stays unresolved, and a later manuscript invalidate
   await runReview(io, saved.ledger.revision)
   saved = await snapshot(io)
   const review = await inspectReview(io)
-  assert.equal(node(saved, 'review', { review }).state, 'attention', 'Rules do not complete unperformed semantic checks')
+  assert.equal(node(saved, 'review', { review }).state, 'pending', 'Rules do not complete unperformed semantic checks')
   await saveManual(io, saved.document.text + '\nTEST_ONLY 新内容。', saved.document.contentHash, saved.ledger.revision)
   saved = await snapshot(io)
   assert.equal(node(saved, 'review', { review }).state, 'stale')
@@ -95,7 +95,7 @@ test('all-pass report is current only for saved input; unknown, dirty and failed
   const review = await inspectReview(io), report = { ...review.report!, checks: [{ id: 'TEST_ONLY', status: 'pass' as const, method: 'deterministic' as const, detail: 'TEST_ONLY' }] }
   assert.equal(node(project, 'review', { review: { report, stale: false } }).state, 'completed')
   assert.equal(node(project, 'review', { review: { report, stale: false }, dirty: true }).state, 'stale')
-  assert.equal(node(project, 'review', { review: { report: { ...report, checks: [{ ...report.checks[0], status: 'unknown' }] }, stale: false } }).state, 'attention')
+  assert.equal(node(project, 'review', { review: { report: { ...report, modelRunId: 'run_TEST_ONLY', checks: [{ ...report.checks[0], status: 'unknown' }] }, stale: false } }).state, 'attention')
   for (const reviewActivity of ['running', 'paused', 'stopped', 'failed'] as const)
     assert.equal(node(project, 'review', { review: { report, stale: false }, reviewActivity }).state, reviewActivity === 'running' ? 'running' : reviewActivity === 'failed' ? 'attention' : 'paused')
 })

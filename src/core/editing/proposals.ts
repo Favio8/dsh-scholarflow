@@ -278,6 +278,60 @@ export async function rejectProposal(io: FileStore, proposalId: string, revision
     return { revision: await publishLedger(io, current, ledger, []), alreadyRejected: false }
   })
 }
+
+/** Accept the displayed paragraph fixes as one revision, with no intermediate manuscript. */
+export async function applyReviewImprovements(io: FileStore, refs: Array<{ proposalId: string; proposalHash: string }>, revision: number) {
+  invariant(refs.length > 0 && new Set(refs.map(row => row.proposalId)).size === refs.length, 'PROPOSAL_INVALID', '请选择不重复的修改建议。')
+  return io.lock(async () => {
+    const current = await writable(io), images = await Promise.all(refs.map(row => proposalImage(io, row.proposalId)))
+    for (const [index, image] of images.entries()) {
+      invariant(image.contentHash === refs[index].proposalHash, 'PROPOSAL_CHANGED', '修改预览已改变，请重新查看。')
+      invariant(image.proposal.projectId === current.ledger.projectId && current.ledger.proposalStates[image.proposal.id], 'PROPOSAL_NOT_FOUND', '修改建议不属于当前项目。')
+    }
+    const states = images.map(image => current.ledger.proposalStates[image.proposal.id])
+    if (states.every(state => state.state === 'accepted')) {
+      const revisionId = states[0].acceptedRevisionId
+      invariant(states.every(state => state.acceptedRevisionId === revisionId), 'PROPOSAL_NOT_PENDING', '这些修改没有在同一次采用中保存。')
+      const manifest = await io.read(`.scholarflow/drafts/${revisionId}/manifest.json`)
+      invariant(manifest, 'REVISION_NOT_FOUND', '已采用修改的版本快照缺失。')
+      return { revisionId: revisionId!, documentHash: JSON.parse(manifest.text).contentHash as string, alreadyApplied: true }
+    }
+    invariant(current.ledger.revision === revision, 'STALE_LEDGER_REVISION', '项目已更新，请重新查看修改预览。')
+    const records = []
+    for (const image of images) {
+      const proposal = image.proposal, selection = proposal.selection, edit = proposal.edits[0]
+      invariant(current.ledger.proposalStates[proposal.id].state === 'pending', 'PROPOSAL_NOT_PENDING', '修改建议已处理或过期。')
+      invariant(proposal.baseDocumentHash === current.document.contentHash && proposal.baseRevisionId === current.document.revisionId && !current.document.externalChange,
+        'STALE_DOCUMENT_VERSION', '正文已改变，请重新检查后采用。')
+      invariant(proposal.reviewIssue && selection?.scope === 'paragraph' && proposal.scope === 'selection' && proposal.edits.length === 1 &&
+        edit.startUtf16 === selection.sourceRange.startUtf16 && edit.endUtf16 === selection.sourceRange.endUtf16 && edit.expectedText === selection.sourceText,
+        'ISSUE_FIX_SCOPE_INVALID', '一次采用只包含已展示的完整段落修订。')
+      const issue = validateIssueFix(current, proposal.reviewIssue.issueId, selection)
+      invariant(!proposal.citationChanges.added.length && !proposal.citationChanges.removed.length && sameCitationTokens(edit.expectedText, edit.replacementText),
+        'CITATION_CHANGE_REQUIRES_CONFIRMATION', '段落修订必须保留已有引用。')
+      for (const evidenceId of proposal.dependentEvidenceIds) {
+        const evidence = current.ledger.evidence[evidenceId], source = current.ledger.sources[evidence?.sourceId], material = current.ledger.materials[source?.materialId ?? '']
+        invariant(evidence?.validation === 'located' && source?.contentHash === evidence.sourceContentHash && material &&
+          current.config.materials.include.includes(material.projectRelativePath) && !sensitivePath(material.projectRelativePath), 'EVIDENCE_NOT_CURRENT', '建议依赖的原始资料已更新或移除。')
+        invariant(digest(await io.readBytes(material.projectRelativePath, MAX_MATERIAL_BYTES)) === evidence.sourceContentHash, 'STALE_MATERIAL_VERSION', '原始资料已经更新。')
+      }
+      const file = await io.read(`.scholarflow/reviews/fixes/${proposal.id}.json`)
+      invariant(file, 'ISSUE_FIX_CHANGED', '修订依据缺失，请重新生成。')
+      const original = JSON.parse(file.text), { state: _state, ...currentIssue } = issue, { state: _oldState, ...originalIssue } = original.originalIssue
+      invariant(issue.state === 'proposed-fix' && original.projectId === proposal.projectId && original.proposalId === proposal.id && original.proposalHash === image.contentHash &&
+        digest(json(original.originalIssue)) === proposal.reviewIssue.issueHash && json(currentIssue) === json(originalIssue), 'ISSUE_FIX_CHANGED', '修订依据已改变。')
+      records.push({ proposal, issue })
+    }
+    const edits = images.flatMap(image => image.proposal.edits), text = applyEdits(current.document.text, edits)
+    const ledger = structuredClone(current.ledger), change = await documentMutation(io, current, ledger, text, `review-batch:${digest(json(refs))}`, edits)
+    for (const { proposal, issue } of records) {
+      ledger.proposalStates[proposal.id] = { ...ledger.proposalStates[proposal.id], state: 'accepted', acceptedRevisionId: change.revisionId, updatedAt: now() }
+      change.mutations.push({ path: `.scholarflow/reviews/fixes/${proposal.id}-recheck.json`, before: undefined,
+        after: json({ schemaVersion: 1, projectId: proposal.projectId, proposalId: proposal.id, issueId: issue.id, documentHash: change.documentHash, revisionId: change.revisionId, state: 'pending' }) })
+    }
+    return { revisionId: change.revisionId, documentHash: change.documentHash, revision: await publishLedger(io, current, ledger, change.mutations), alreadyApplied: false }
+  })
+}
 export async function undoRevision(io: FileStore, revisionId: string, baseHash: string, revision: number) {
   id.parse(revisionId)
   return io.lock(async () => {

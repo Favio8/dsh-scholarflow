@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import type { ReviewActivity } from './flow-status.ts'
+import { reviewRunFinished } from './review-run-ui.ts'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean; onReview: (value: any) => void; historyOnly?:boolean; editor?:any; onActivity?: (value: ReviewActivity | undefined) => void }
 export function ModelReview({ project, context, api, refresh, run, busy, onReview, historyOnly=false,editor,onActivity }: Props) {
@@ -28,8 +29,8 @@ export function ModelReview({ project, context, api, refresh, run, busy, onRevie
       const result=await api(action?'review.confirmAction':'review.startModel',{context:captured,planId:preview.planId,planHash:preview.planHash})
       if(liveBinding.current===scope){
         if(result.report)onReview({report:result.report,stale:false})
-        setMessage(result.paused?'检查已暂停，可在历史中继续。':result.run.status==='completed'?'全文检查已完成。':'检查尚未完成，可在历史中查看原因。')
-        onActivity?.(result.paused||['paused','interrupted'].includes(result.run.status)?'paused':result.run.status==='cancelled'?'stopped':result.run.status==='completed'&&result.report?undefined:'failed')
+        setMessage(result.paused?'检查已暂停，可在历史中继续。':reviewRunFinished(result.run.status)?'本轮检查完成。':'检查中断，可点击重试。')
+        onActivity?.(result.paused||['paused','interrupted'].includes(result.run.status)?'paused':result.run.status==='cancelled'?'stopped':reviewRunFinished(result.run.status)&&result.report?undefined:'failed')
         await refresh()
       }
     }catch(error){if(liveBinding.current===scope)onActivity?.('failed');throw error
@@ -56,7 +57,7 @@ export function ModelReview({ project, context, api, refresh, run, busy, onRevie
       <button onClick={()=>api('runs.pause',{context:active.context,runId:active.runId}).then(()=>setMessage('已请求暂停。')).catch(error=>setMessage(error.message))}>暂停</button>
       <button onClick={()=>api('runs.cancel',{context:active.context,runId:active.runId}).then(()=>setMessage('已请求停止。')).catch(error=>setMessage(error.message))}>停止</button></div>}
     {historyOnly&&<><header className="sf-page-heading"><h3>检查运行</h3><button disabled={busy} onClick={()=>setVersion(value=>value+1)}>刷新</button></header>
-      {rows.map((row:any)=><article className="sf-reference-row" key={row.runId}><strong>{new Date(row.startedAt).toLocaleString()} · {({completed:'已完成',paused:'已暂停',failed:'未完成',cancelled:'已停止',interrupted:'已中断',running:'进行中',queued:'准备中'} as Record<string,string>)[row.status]??'等待处理'}</strong>
+      {rows.map((row:any)=><article className="sf-reference-row" key={row.runId}><strong>{new Date(row.startedAt).toLocaleString()} · {({succeeded:'已检查','completed-with-issues':'已检查，有待办',paused:'已暂停',failed:'检查中断',cancelled:'已停止',interrupted:'已中断',running:'进行中',queued:'准备中'} as Record<string,string>)[row.status]??'等待处理'}</strong>
         {!row.inheritedArchive&&['paused','interrupted','running','queued','waiting-input','failed','cancelled'].includes(row.status)&&<button disabled={busy||!!actionPlan} onClick={()=>run(async()=>setActionPlan(await api('review.prepareAction',{context:context(),runId:row.runId,action:['failed','cancelled'].includes(row.status)?'retry':'resume'})))}>继续检查</button>}
         <details className="sf-detail"><summary>运行详情</summary><p>{row.runId} · 模型调用 {row.usedModelCalls} 次{row.errorCode?' · '+row.errorCode:''}</p></details>
       </article>)}

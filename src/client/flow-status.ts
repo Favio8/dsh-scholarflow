@@ -7,7 +7,7 @@ export type FlowNodeId = 'requirements' | 'materials' | 'outline' | 'draft' | 'r
 export type FlowState = 'pending' | 'completed' | 'running' | 'paused' | 'attention' | 'stale'
 export type ReviewActivity = 'running' | 'paused' | 'stopped' | 'failed'
 export type FlowNode = { id: FlowNodeId; title: string; state: FlowState; label: string; detail: string }
-export type FlowReview = { report?: ReviewReport; stale?: boolean; error?: string }
+export type FlowReview = { report?: ReviewReport; stale?: boolean; error?: string; hasSuggestions?: boolean }
 type Project = { ledger: Ledger; config: ProjectConfig; document: { contentHash: string; initialPlaceholder: boolean; externalChange: boolean } }
 const taskNode: Record<WritingTask['stage'], FlowNodeId> = {
   materials: 'materials', research: 'materials', evidence: 'materials', outline: 'outline', drafting: 'draft', review: 'review', completed: 'draft',
@@ -21,7 +21,7 @@ export function flowNodes(project: Project, options: { task?: WritingTask; spec?
     { id: 'materials', title: '资料', state: 'pending', label: '未添加', detail: '查看本次选用的资料与引用。' },
     { id: 'outline', title: '大纲', state: 'pending', label: '待规划', detail: '规划并确认论文的章节结构。' },
     { id: 'draft', title: '正文', state: 'pending', label: '待开始', detail: '当前尚无已保存的正文。' },
-    { id: 'review', title: '检查', state: 'pending', label: '待检查', detail: '检查当前正文、资料与引用。' },
+    { id: 'review', title: 'AI检查', state: 'pending', label: '待检查', detail: '让 AI 检查论文并准备修改建议。' },
   ]
   const update = (id: FlowNodeId, state: FlowState, label: string, detail: string) => Object.assign(nodes.find(node => node.id === id)!, { state, label, detail })
   const requirements = Object.values(ledger.requirements)
@@ -52,8 +52,12 @@ export function flowNodes(project: Project, options: { task?: WritingTask; spec?
     else {
       const issues = reviewItems(project), unknown = review.report.checks.some(check => check.status === 'unknown')
       const failed = review.report.checks.some(check => check.status === 'fail')
-      if (issues.length || failed || unknown || !review.report.checks.length)
-        update('review', 'attention', failed || issues.length ? '待处理' : '待核对', '检查仍有未解决问题或尚未判断的项目。')
+      if (review.hasSuggestions) update('review', 'attention', '有修改建议', '打开 AI检查，查看修改预览并决定是否采用。')
+      else if (Object.values(ledger.proposalStates).some(state => state.state === 'accepted' && state.acceptedRevisionId === ledger.documents.paper.revisionId))
+        update('review', 'completed', '已采用', '修改已经采用并保存，可返回正文查看或导出。')
+      else if (issues.length || failed || unknown || !review.report.checks.length)
+        update('review', review.report.modelRunId ? 'attention' : 'pending', review.report.modelRunId ? '已检查' : '待检查',
+          review.report.modelRunId ? '本轮检查结束，结果可在详情中查看。' : '点击 AI检查，让 AI 检查并准备修改建议。')
       else update('review', 'completed', '已检查', '当前版本已完成本次检查，没有待处理检查项。')
     }
   }
@@ -67,6 +71,6 @@ export function flowNodes(project: Project, options: { task?: WritingTask; spec?
       '查看对应页面或运行记录，继续处理当前任务。')
   }
   if (reviewActivity) update('review', reviewActivity === 'running' ? 'running' : reviewActivity === 'failed' ? 'attention' : 'paused',
-    ({ running: '检查中', paused: '已暂停', stopped: '已停止', failed: '未完成' })[reviewActivity], '查看检查页面中的当前结果与操作。')
+    ({ running: '检查中', paused: '已暂停', stopped: '已停止', failed: '可重试' })[reviewActivity], '打开 AI检查查看当前结果，或直接重试。')
   return nodes
 }
