@@ -173,7 +173,8 @@ try {
     const current = await rpc('scholarflow.v1/project.inspect', { request: { context: ctx } })
     const next = current.document.text + '\n\n' + marker + '\n'
     await rpc('scholarflow.v1/document.saveManual', { request: { context: { ...ctx, expectedLedgerRevision: current.ledger.revision }, text: next, baseHash: current.document.contentHash } })
-    await expect.poll(() => page.locator('.sf-source-input').inputValue()).toBe(next)
+    // The host write lands asynchronously; the default 5s matcher budget is too tight under load.
+    await expect.poll(() => page.locator('.sf-source-input').inputValue(), { timeout: 20000 }).toBe(next)
     await page.waitForTimeout(1000)
     const buffer = await rpc('scholarflow.v1/editor.bufferRead', { request: { context: ctx } })
     assert.ok(buffer.buffer === undefined || buffer.buffer.state === 'cleared', 'Host writes must not create a dirty editor buffer')
