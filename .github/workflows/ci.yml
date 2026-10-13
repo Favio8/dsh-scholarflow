@@ -8,7 +8,8 @@ name: CI
 #   - tests/e2e/**: they drive an installed DeepSeek Harness desktop app with a private DSH_HOME and
 #     the operator's own credentials, and some make paid model requests.
 #   - pnpm audit:appearance: it measures the real client under a real host theme.
-#   - pnpm render:surfaces: its screenshots are review material, not a gate.
+# (pnpm render:surfaces was withdrawn on 2026-10-13: its mark capture still asserted the pre-SF-163
+#  mirrored-text design, so the run aborted. See docs/decisions/mark-surface-contract-obsolete.md.)
 on:
   push:
     branches: [main]

@@ -2,6 +2,13 @@
 // pane's own text, does the gradient stay readable at every zoom and in both themes, does the flow
 // stop when it should, and does the input method keep its characters visible.
 //
+// WITHDRAWN 2026-10-13: this suite asserts the pre-SF-163 mark design (a `.sf-source-mirror` copy of
+// the pane's text with a gradient middle node, and a mirror that hides during a composition).
+// SF-163 paints measured chips over the native textarea instead — no text copy, no `dataset.mirrored`
+// — so the locators here and three of the seven records no longer describe the shipped behaviour.
+// It is kept for the record and is not part of any gate; re-deriving the mark contract first is a
+// product decision, see docs/decisions/mark-surface-contract-obsolete.md.
+//
 // TEST_ONLY manuscript and isolated profile; no model request is ever made — the one rewrite is
 // answered by a route, and everything else is a selection, a zoom, a scroll or a key.
 // Usage: node tests/e2e/draft-mark.mjs [--desktop]

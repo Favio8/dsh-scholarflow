@@ -144,18 +144,24 @@ Overview 的七阶段引导目标可整体预览／取消，按已保存事实�
 `pnpm typecheck` 现在同时检查 `src/**` 与 `tests/**/*.ts`；6 个 `.js` 测试仍在检查范围外，
 原因写在 `tsconfig.json` 的 `include` 旁。
 **CI 不含** `tests/e2e/**`（需要装好的 DSH Desktop、私有 `DSH_HOME` 与操作者凭据，部分会产生
-真实费用）、`pnpm audit:appearance`（需要真实客户端与主题）与 `pnpm render:surfaces`（产物是
-给人看的截图，不是门禁）——这些仍需按下面的命令手动执行。
+真实费用）与 `pnpm audit:appearance`（需要真实客户端与主题）——这些仍需按下面的命令手动执行。
+`pnpm render:surfaces` 已于 2026-10-13 从 `package.json` 撤回：它的标注截图段仍在断言 SF-163 之前的
+"镜像文字 + 三段分割"契约，而现在的标注是覆盖在原生 textarea 上的定位芯片、没有文字副本，整轮运行会在该段
+崩溃。该段的现状与复通前提见 [标注截图契约记录](docs/decisions/mark-surface-contract-obsolete.md)。
 
 ```powershell
 pnpm install --frozen-lockfile
 pnpm build
 pnpm typecheck
 pnpm test
+# 仅 Chromium，不启动宿主：隐藏预览的渲染合同（隐藏不重渲染、返回即追上当前正文）
+node tests/e2e/preview-rendering.mjs
 # 可选：真实安装环境，独立 DSH_HOME，不改 desktop profile
 node tests/e2e/installed-host-smoke.mjs
 # G0 与验收项的宿主层检查：隔离 profile、不调用模型、不产生费用
 node tests/e2e/g0-probe.mjs
+# 安装版 DSH 隔离 profile：检查问题处置与宿主连续写入
+node tests/e2e/task-details.mjs
 # 可选：使用现有 Host 凭据服务发起有限真实模型测试（会产生提供方费用）
 node tests/e2e/installed-host-smoke.mjs --live-model
 # 可选：三类 TEST_ONLY 教学论文，真实模型、每目标最多8次调用、模型会话重启恢复

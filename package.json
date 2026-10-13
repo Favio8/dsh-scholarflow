@@ -90,7 +90,6 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && node --test tests/unit/*.test.* tests/contracts/*.test.* tests/integration/*.test.* tests/fault-injection/*.test.*",
-    "render:surfaces": "node scripts/render-surfaces.mjs",
     "audit:appearance": "node scripts/audit-appearance.mjs",
     "acceptance:ui": "node tests/e2e/ui-acceptance.mjs",
     "prepack": "pnpm build",

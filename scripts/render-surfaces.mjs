@@ -10,6 +10,15 @@
 // single-colour image fails the run, because a screenshot that silently renders nothing is
 // exactly the failure this script exists to catch. The wrap surface is measured against the real
 // implementation — its module is bundled for the page rather than re-implemented here.
+//
+// WITHDRAWN 2026-10-13: `renderSurfaces()` is not runnable any more. Its mark capture (checkDraftMark
+// and auditMark) still asserts the pre-SF-163 design — a mirrored text copy with a gradient middle
+// node and a mirror that retreats during a composition — while SF-163 replaced it with measured
+// chips painted over the native textarea. The crash is at line 569, and the run aborts there, so
+// the script no longer produces reviewable output and the `render:surfaces` package script was
+// removed rather than left as a command that always fails. Re-deriving the mark contract is a
+// product decision; see docs/decisions/mark-surface-contract-obsolete.md. audit-appearance.mjs only
+// imports extractCss/pageHtml/prepareSurfaceMarkup and does not go through this path.
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
