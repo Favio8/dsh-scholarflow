@@ -89,9 +89,11 @@ try {
   await page.locator('[class*="_item_"]').filter({ hasText: /^ScholarFlow/ }).click()
   await page.locator('.sf-wizard').waitFor()
   await page.locator('#sf-field-requirements').fill('TEST_ONLY 资料选择与问题处理验收')
-  await page.getByRole('button',{name:'下一步 →',exact:true}).click()
+  await page.getByRole('button',{name:'下一步',exact:true}).click()
   await expect(page.locator('.sf-material-count')).toContainText('已选 0')
-  record('new tasks discover files without selecting reference materials', await page.locator('.sf-material-list input:checked').count()===0,{})
+  const materialChoices = page.locator('.sf-material-checklist input[type=checkbox]')
+  await expect(materialChoices).toHaveCount(2)
+  record('new tasks discover files without selecting reference materials', await page.locator('.sf-material-checklist input:checked').count()===0,{discovered:2})
   assert.equal(await page.locator('.sf-project').getAttribute('data-sf-session-id'), sessionId)
   console.log('Setup: ScholarFlow fixture session is open')
   const context = { requestId: 'req_scroll_TEST_ONLY', workspaceId, sessionId }
@@ -118,21 +120,36 @@ try {
   await page.reload();await dismissOnboarding();await page.locator('.sf-middle-column').waitFor()
   // v1.20 (SF-185): the report is a pill in the work bar; pause/stop/continue, the checklist and
   // every issue action moved one disclosure deeper, so the pill is opened before the row is.
-  const openDetails=async()=>{const pill=page.locator('.sf-progress-details');if(!await pill.evaluate(node=>node.open))await pill.locator(':scope>summary').click()
-    const summary=page.locator('.sf-writing-controls>details>summary');if(!await summary.evaluate(el=>el.parentElement.open))await summary.click()}
+  // This is deliberately a legacy guided task, not a first-draft checklist (SF-162).
+  const pill=page.locator('.sf-progress-details')
+  const needs= pill.locator('.sf-issue-group[data-tone="needs"]')
+  const issueRow=object=>needs.locator('.sf-issue-row').filter({hasText:object})
+  const inspectTask=async()=>(await rpc('scholarflow.v1/writingTask.inspect',{request:{context:ctx}})).task
+  const returnToDraft=()=>page.locator('.sf-tool-back').getByRole('button',{name:'返回正文',exact:true}).click()
+  const openDetails=async()=>{await pill.waitFor();if(!await pill.evaluate(node=>node.open))await pill.locator(':scope>summary').click()
+    const summary=pill.locator('.sf-writing-controls>details>summary');if(!await summary.evaluate(el=>el.parentElement.open))await summary.click()}
   await openDetails()
-  await page.getByRole('button',{name:'补充要求文字',exact:true}).first().click()
+  await expect(needs.locator('.sf-issue-row')).toHaveCount(5)
+  await issueRow('TEST_ONLY.txt').getByRole('button',{name:'补充要求文字',exact:true}).click()
   await expect(page.locator('#sf-panel-Overview')).toBeVisible()
+  await expect(page.locator('.sf-requirements-panel textarea').first()).toBeEditable()
   record('paste requirement action opens editable requirements',true,{})
-  await page.getByRole('button',{name:'← 返回正文',exact:true}).click();await openDetails()
-  await page.getByRole('button',{name:'重新读取',exact:true}).first().click()
-  await expect(page.locator('.sf-issue-group[data-tone="needs"]')).not.toContainText('TEST_ONLY.txt 的扫描页')
+  await returnToDraft();await openDetails()
+  const beforeRetry=await inspectTask()
+  await issueRow('TEST_ONLY.txt').getByRole('button',{name:'重新读取',exact:true}).click()
+  await expect(issueRow('TEST_ONLY.txt')).toHaveCount(0)
+  await expect(needs.locator('.sf-issue-row')).toHaveCount(4)
   await expect.poll(async()=>{const state=(await rpc('scholarflow.v1/writingTask.inspect',{request:{context:ctx}})).task;return state.issues.find(row=>row.object==='TEST_ONLY.txt').group}).toBe('handled')
   const projectAfter=await rpc('scholarflow.v1/project.inspect',{request:{context:ctx}})
   assert.equal(Object.values(projectAfter.ledger.materials).find(row=>row.projectRelativePath==='TEST_ONLY.txt').parseStatus,'ready')
+  assert.deepEqual((await inspectTask()).issues.filter(row=>row.object!=='TEST_ONLY.txt'),beforeRetry.issues.filter(row=>row.object!=='TEST_ONLY.txt'))
   record('retry action really parses a member and moves only that issue to handled',true,{})
   await openDetails();await page.getByRole('button',{name:'重试获取全文',exact:true}).click()
-  await expect(page.locator('.sf-writing-progress [role=alert]')).toContainText('开启联网补充')
+  await expect(pill.locator('[role=alert]')).toBeVisible()
+  await expect(pill.locator('[role=alert]')).toContainText('开启联网补充')
+  await pill.locator(':scope>summary').click()
+  await expect(pill.locator(':scope>summary')).toHaveText('需处理')
+  await expect(page.locator('.sf-progress-pill')).toHaveAttribute('data-alert','true')
   const still=(await rpc('scholarflow.v1/writingTask.inspect',{request:{context:ctx}})).task
   assert.equal(still.issues.find(row=>row.object==='TEST_ONLY metadata').group,'needs-action')
   record('fulltext retry respects offline selection and preserves unresolved status',true,{})
@@ -142,11 +159,16 @@ try {
   record('remove action deselects the member without deleting the original',true,{})
   await openDetails();await page.getByRole('button',{name:'稍后处理',exact:true}).click()
   await expect.poll(async()=>{const state=(await rpc('scholarflow.v1/writingTask.inspect',{request:{context:ctx}})).task;return state.issues.find(row=>row.object==='TEST_ONLY conflict').group}).toBe('handled')
+  assert.match((await inspectTask()).issues.find(row=>row.object==='TEST_ONLY conflict').impact,/不视为通过/)
+  assert.equal((await rpc('scholarflow.v1/document.read',{request:{context:ctx}})).document.text,manuscript)
   record('defer action preserves draft and records the unresolved quality impact',true,{})
   await openDetails();await page.getByRole('button',{name:'查看检查结果',exact:true}).click()
-  await expect(page.locator('.sf-tool-back strong')).toHaveText('审查')
+  await expect(page.locator('#sf-panel-Review')).toBeVisible()
+  await expect(page.locator('#sf-panel-Review').getByRole('heading',{name:'AI检查',exact:true})).toBeVisible()
+  await expect(page.getByRole('button',{name:'一键检查并完善',exact:true})).toBeEnabled()
   record('review action opens the actual review workspace',true,{})
-  await page.getByRole('button',{name:'← 返回正文',exact:true}).click()
+  await returnToDraft()
+  await page.getByRole('button',{name:'编辑',exact:true}).click()
   for (const marker of ['TEST_ONLY host revision one', 'TEST_ONLY host revision two']) {
     const current = await rpc('scholarflow.v1/project.inspect', { request: { context: ctx } })
     const next = current.document.text + '\n\n' + marker + '\n'
@@ -154,7 +176,9 @@ try {
     await expect.poll(() => page.locator('.sf-source-input').inputValue()).toBe(next)
     await page.waitForTimeout(1000)
     const buffer = await rpc('scholarflow.v1/editor.bufferRead', { request: { context: ctx } })
-    assert.notEqual(buffer.buffer?.state, 'dirty')
+    assert.ok(buffer.buffer === undefined || buffer.buffer.state === 'cleared', 'Host writes must not create a dirty editor buffer')
+    await expect(page.locator('.sf-draft-status')).toContainText('已保存')
+    await expect(page.locator('.sf-format-toolbar').getByRole('button',{name:'保存',exact:true})).toHaveCount(0)
   }
   record('consecutive host writes are adopted without creating a false human edit buffer',true,{})
   record('detail actions cause no client exception',errors.length===0,errors)
@@ -164,6 +188,7 @@ try {
 } catch (error) {
   record('run', false, error.message)
   await page?.screenshot({ path: join(root, 'failure.png') }).catch(() => undefined)
+  await writeFile(join(root,'failure-page.txt'),await page?.locator('body').innerText().catch(()=> '') ?? '')
   throw error
 } finally {
   await writeFile(join(root, 'journal.json'), JSON.stringify(rows, null, 2))

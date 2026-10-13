@@ -72,9 +72,9 @@
 1. **≥2 条提示同时出现的情况在本机无法触达。** 另外两个来源（会话改写消息、待保存决定）各需一次模型调用，因此「三条合并成一条」只验到单条形态与它的一行高度；`.sf-notice-more` 的折叠与展开未在真实 DOM 上执行过。
 2. **分栏视图不可达。** v1.15 起「分屏」已不在正文工具栏，`view` 只取 `edit`／`preview`，所以 `.sf-editor-grid:not([data-view=edit]):not([data-view=preview]) .sf-pane-caption{display:flex}` 目前是死分支——题注在可达范围内恒为隐藏。这不是本版引入的，保留该规则是为了分栏回归时标签仍在。
 3. **启动对话框的关闭是异步的。** 点完「继续」后节点会保持挂载、按钮转为 disabled，直到宿主真正把它移除（本机实测关闭窗口最长约 30 秒）。三个脚本与它们共用的 `dismissOnboarding` 因此改为「轮询等出现 → 仅在 enabled 时点击 → 等按钮真正消失」；原写法会点在关闭中的节点上白等整个 click 超时，或在对话框挂载前就判定 shell 已就绪而让遮罩吞掉下一次点击。
-4. **AT-134 打字性能未能取得可信结果。** `workbench-performance --desktop` 实测 p95 **902ms**（限值 26.5ms），但脚本自身的输入节拍同时被拖慢——30 秒的输入实测用了 **72.3 秒**——测量期间机器上有 28 个属于用户浏览器的 chrome 进程与 6 个 Harness 进程（合计 3 GB 以上）。同一检查在本机 10-11 曾通过 **19.4ms**、也失败过 **36.2ms**。该数字既不能支持也不能反驳 v1.20 的输入性能，需要在一台安静的机器上重跑。
-5. **该脚本自身的收尾保存没有执行到。** AT-134 的断言排在收尾之前（`assert.ok(rows.every(...))`，`workbench-performance.mjs:341`），失败即中止，所以脚本里被本版替换的保存定位（`.sf-pane-caption` → `.sf-format-toolbar`）未在运行中走到；同一个定位已由 v15／v16 的运行覆盖（两处都点编辑栏里的保存并断言「已保存」）。中止还留下脏正文，清理时触发 beforeunload 并抛 `ProtocolError`——那是中止的后果，不是保存定位的问题。
-6. **`task-details.mjs` 未参与本轮验证。** 它在向导「下一步」按钮处就中断（脚本写的是含箭头的文字 `下一步 →`，而按钮现在用 SVG 图标），与 v1.20 无关，是 v1.13 时代留下的。它的启动对话框处理与药丸下拉定位已按代码同步，但未经运行验证。
+4. **AT-134 打字性能：2026-10-13 复测不通过。** 原 902ms／72.3 秒结果因环境干扰未采信，作为历史保留；用户关闭浏览器并确认测量窗口后，三次串行桌面 p95 为 **20.4／30.9／31.6ms**，后两次超过 **26.51ms**。本机门禁未稳定达标，不能计为通过；根因尚未定位，不能据此宣称已证实 v1.20 产品代码回归。完整耗时与环境见末节。
+5. **收尾保存已验证，包括性能失败路径。** 汇总断言移到保存与主题截图之后，失败仍非零退出。保存使用 `.sf-format-toolbar`，完成时断言「已保存」且保存按钮消失；已移除的「分屏」改为当前「预览」。三轮保存与两主题截图均成功，退出码依次为 **0／1／1**，无清理 `ProtocolError`。
+6. **`task-details.mjs` 已通过 9/9。** 2026-10-13 按当前合同修复向导、返回正文、药丸、检查页标题与已保存状态定位；保留旧 guided 问题动作语义，不冒充新版首稿核对清单或模型检查。逐条合同映射与本机 journal 见末节。
 7. **工具栏下拉打断逐选区排版（B2，本版后续已修）。** 逐选区的「中文字体／字号」绑定活的 edit range；`sync()` 在选区映射失败时会把它当成取消选择而清掉，两个下拉随即 disabled，表现为「设完字体再设字号必须重新选一次文字」，与 SF-168／AT-168 的「连续操作作用于当前真实选区」冲突。已在缺陷修复记录 [逐选区排版在重渲染后不再失去武装](selection-armed-across-format-toolbar.md) 中定位（含探针否证）并修复。
 
 ## 验证时同步修掉的测试脚本缺陷
@@ -100,3 +100,53 @@
 ### 桩要绕开的一个连接层约束
 
 `route.fulfill` 只填 `result` 不够：DSH 的连接层校验整个信封，实测先报 `invalid server-response envelope`，补上真实 status／headers 后又报 `rpcId mismatch for …: sent …, got …`。因此两个脚本的模型桩改成：先用一次**便宜的**真实调用（`project.inspect`）抓下 status／headers 与信封自身字段当骨架，再回填该请求自己的 `rpcId`／`method` 并替换 `result`——这样就不必 `route.fetch()` 那个会真的去够模型端点的请求。
+
+## 2026-10-13 两项收尾复测
+
+本次只修改 `tests/e2e/task-details.mjs`、`tests/e2e/workbench-performance.mjs` 及验证记录，`src/**` 无修改。先执行 `pnpm build` 成功，两份脚本 `node --check` 成功。此次产物 `dist/client.js` 为 **4,538,300 字节**，SHA-256 `c944b8c7809c03015f7c461c301375cc3af019f9576458701b6f19196c494c72`；与上节历史产物分开记录。没有新增产品实现、真实模型调用、费用或包发布。CI 不执行以下 e2e。
+
+### task-details：9/9 PASS 与合同对应
+
+脚本刻意构造没有 mode 的历史任务，schema 默认 guided。[PRD v1.10](../../../docs/ScholarFlow_PRD_v1.10.md)／[SPEC v1.10](../../../docs/ScholarFlow_Design_SPEC_v1.10.md) 明确保留该路径；SF-162 的新版首稿清单不能替代它。SF-185 仅改变药丸呈现。此前 `.sf-material-list` 是失效选择器，零选中会空过；「不含 TEST_ONLY.txt 的扫描页」也是从未出现的文本，现改为目标行确实移除、计数 5→4 和其他问题完全不变。
+
+| PASS 项 | 当前合同与实际断言 |
+|---|---|
+| new tasks discover files without selecting reference materials | 显式选择资料、原文件只读；向导确实发现两份 TEST_ONLY 文件，复选框数为 2 且选中数为 0。使用 `.sf-material-checklist`，不允许空列表冒充通过 |
+| paste requirement action opens editable requirements | SF-153／AT-153 与旧 guided 补文动作：指定文件的「补充要求文字」打开写作要求，文本框真实可编辑 |
+| retry action really parses a member and moves only that issue to handled | PRD v1.2 §4.3／SPEC v1.2 §9、SF-152：宿主重新解析为 ready；目标行从 needs 移除、任务中变 handled；其他问题逐项不变 |
+| fulltext retry respects offline selection and preserves unresolved status | 原网络显式授权合同与 SF-185：真实宿主拒绝离线取全文；错误实际可见；折叠后仍显示「需处理」和告警标记；问题仍 needs-action |
+| remove action deselects the member without deleting the original | SF-148／152／153：任务选用中移除该文件；原文件全文字节内容仍与夹具一致 |
+| defer action preserves draft and records the unresolved quality impact | SF-055／056 的 guided 兼容：问题 handled，但 impact 明确「不视为通过」；主稿与原夹具全文相同 |
+| review action opens the actual review workspace | SF-180／181：打开真实 AI检查页，标题与「一键检查并完善」可见可用；只验导航，不点击模型动作、不声称模型检查通过 |
+| consecutive host writes are adopted without creating a false human edit buffer | PRD v1.2 §4.3 的宿主写入不误判人工编辑、SF-177／187：两次宿主保存后编辑器逐字一致；`editor.bufferRead` 为无缓冲或 cleared；显示已保存且没有脏稿保存按钮 |
+| detail actions cause no client exception | 上述全部当前入口操作的 pageerror 数为 0 |
+
+来源：[PRD v1.2](../../../docs/ScholarFlow_PRD_v1.2.md)、[SPEC v1.2](../../../docs/ScholarFlow_Design_SPEC_v1.2.md)、[PRD v1.14](../../../docs/ScholarFlow_PRD_v1.14.md)、[PRD v1.18](../../../docs/ScholarFlow_PRD_v1.18.md)、[PRD v1.19](../../../docs/ScholarFlow_PRD_v1.19.md)、[PRD v1.20](../../../docs/ScholarFlow_PRD_v1.20.md)。实现核对：`src/client/writing-progress.tsx:39–141`、`src/host/bridge/writing-controller.ts:407–450`、`src/core/editing/buffer.ts:8–14`。
+
+本机证据：`.dsh-tmp/task-details/1791865777290/journal.json`，9 项均 `ok:true`。修订中两次失败 journal（`1791865697129`／`1791865733694`）保留：分别是旧返回栏标题和误以为保存后按钮 disabled 的测试假设，均已改成真实当前语义，不计为通过。启动对话框沿用已修复 helper；本脚本不调用模型，因此无需添加模型桩。
+
+### AT-134：不通过，三次原始测量全部保留
+
+复现：同一次构建，逐次执行 `node tests/e2e/workbench-performance.mjs --desktop`，等上一轮 Electron 退出后才开始下一轮。Windows 11、Core Ultra 5 336H（12 逻辑处理器）、约 32 GiB 内存、Node 24.15.0、安装版 Harness。用户确认安静窗口并关闭浏览器；测量期间无 Chrome，无并发构建或其他测试。仍有 5 个既存用户 Harness 进程（未擅自终止），加本轮测试的 5 个进程。前后 PID／CPU 秒／内存保留在 journal；既存进程三轮合计增量约 4.2／4.7／5.0 CPU 秒，整机平均 CPU 忙碌度约 34.2%／38.7%／40.2%，不能描述为绝对空闲机器。
+
+| 轮次／本机目录 | p95 ms | 输入耗时 s | 脚本至清理前 s | 长任务数／帧间隔 >100ms | AT-134／退出码 |
+|---|---:|---:|---:|---:|---|
+| `1791865817517` | 20.4 | 53.147 | 92.846 | 0／0 | 通过／0 |
+| `1791865917912` | 30.9 | 60.203 | 102.042 | 3／1 | 不通过／1 |
+| `1791866029110` | 31.6 | 58.927 | 99.855 | 4／3 | 不通过／1 |
+
+每轮均在 14,400 汉字稿件末尾输入 744 字符，保留原 43ms 延迟参数（名义延迟合计 31.992 秒）；744 个 input→requestAnimationFrame 样本全部收到，输入完整、pageerror 为 0，采样后窗口可见且有焦点。脚本总耗时包含启动、导航、输入、交互与截图，计至清理前。新增 CPU／进程采集在输入窗口前后执行，没有在按键热路径启动采样进程；等待最后一帧后再收集全部输入样本。p95 算法和 **24.1×1.1 = 26.51ms** 阈值未变。
+
+三轮只有第一轮达标；后两轮超过阈值约 16.6%／19.2%。结论是**本机 AT-134 门禁不通过**，不以第一轮通过覆盖失败，也不再仅用“输入超过30秒”排除数据：该驱动还包含逐键协议往返，名义延迟并不是总耗时上限。尚未隔离宿主、编辑器、自动化驱动与系统调度的贡献，**未确认产品根因或归因于 v1.20**；后续产品诊断／修复需另行授权，本轮未修改源码或放宽阈值。
+
+三个 journal 均位于 `.dsh-tmp/workbench-performance/<上述目录>/journal.json`，SHA-256 依次为：
+
+- `54fb670628112c4075905867602ff747660a0cd060925f5dd410c5fc3be6293d`
+- `2d48d1676341164c3a353d1dfcb88fdb969151d913229e7c28b7b7cbd474c17c`
+- `39b48c850dc47e75bb12dba2a0a699a15ff11fe698aef7681bef542d68e9a09b`
+
+### 收尾与非计时布局
+
+汇总断言移至收尾保存和两主题截图之后；失败仍抛错并非零退出，三轮均确认保存后显示「已保存」、保存按钮消失，两主题截图完成。`分屏` 自 SF-170 已删除，因此截图及布局准备改用 `预览`；不把已隐藏的 `.sf-pane-caption` 当作当前可见工具条做几何断言。正文编辑栏的独立验证沿用上表 v15／v16／v18，本次 layout-only 明确只验证项目条。
+
+`node tests/e2e/workbench-performance.mjs --layout-only`：**8/8 布局检查通过**，浅／深主题 × 320／420／720／1440px，横向溢出均为 0、被裁控件均为空、格式文本可用宽 71px ≥ 最大文字宽 66.60px，选择框高度 44／44／44／34px。journal：`.dsh-tmp/workbench-performance/1791866138505/journal.json`（另含产物大小与耗时两条观测，共 10 条 `ok:true`），耗时 23.876 秒，不含 AT-134 阈值。未重复既有 v15～v19 全部回归；本 ADR 第 1、2 项边界仍保留，未做包发布或真人观感验收。

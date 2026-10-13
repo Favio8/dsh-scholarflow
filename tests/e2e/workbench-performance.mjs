@@ -4,13 +4,19 @@
 // Usage: node tests/e2e/workbench-performance.mjs [--desktop] [--interaction-only | --layout-only | --materials-only | --live-visual-only]
 import assert from 'node:assert/strict'
 import { chromium, _electron as electron, expect } from '@playwright/test'
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
+import { cpus } from 'node:os'
 import { mkdir, readFile, writeFile, symlink, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { geometryInPage } from '../../scripts/visual-language-contracts.mjs'
 
 const install = join(process.env.LOCALAPPDATA, 'Programs/DeepSeek Harness')
 const root = resolve('.dsh-tmp/workbench-performance', String(Date.now()))
+const scriptStarted=performance.now()
+const cpuTimes=()=>cpus().reduce((sum,cpu)=>({idle:sum.idle+cpu.times.idle,total:sum.total+Object.values(cpu.times).reduce((a,b)=>a+b,0)}),{idle:0,total:0})
+// Collect outside the input window; do not start a competing sampler during typing.
+const processSnapshot=()=>JSON.parse(execFileSync('powershell.exe',['-NoProfile','-Command',
+  "@(Get-Process chrome,'DeepSeek Harness' -ErrorAction SilentlyContinue | Select-Object ProcessName,Id,CPU,WorkingSet64) | ConvertTo-Json -Compress"],{encoding:'utf8',windowsHide:true}).trim()||'[]')
 const nativeDesktop = process.argv.includes('--desktop')
 const layoutOnly = process.argv.includes('--layout-only')
 const materialsOnly = process.argv.includes('--materials-only')
@@ -166,7 +172,8 @@ try {
     assert.ok(!nativeDesktop, 'Layout viewport checks use the installed Host in Chromium')
     const closePanel = page.getByRole('button', { name: '收起右侧边栏', exact: true })
     if (await closePanel.isVisible()) await closePanel.click()
-    await page.getByRole('button', { name: '分屏', exact: true }).click()
+    // SF-170 removed split view; header geometry is checked in the current preview view.
+    await page.getByRole('button', { name: '预览', exact: true }).click()
     for (const preference of ['light', 'dark']) {
       await rpc('settings/update', { ns: 'ui-theme', patch: { preference } })
       await page.waitForFunction(dark => document.body.hasAttribute('data-ds-dark-theme') === dark, preference === 'dark')
@@ -182,7 +189,7 @@ try {
           const textWidth = Math.max(...formatWidths.map(option => option.width))
           const available = selectBox.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
             - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth)
-          const clippedControls = [...document.querySelectorAll('.sf-paper-header,.sf-pane-caption')].flatMap(container => {
+          const clippedControls = [header].flatMap(container => {
             const parentBox = container.getBoundingClientRect()
             return [...container.querySelectorAll('button,select')].filter(el => {
               const r = el.getBoundingClientRect()
@@ -203,15 +210,19 @@ try {
   await page.getByRole('button',{name:'编辑',exact:true}).click()
   const area=page.locator('.sf-source-input');await area.click();await page.keyboard.press('Control+End')
   if (!process.argv.includes('--interaction-only') && !process.argv.includes('--live-visual-only')) {
+  const processesBefore=processSnapshot()
   await page.evaluate(()=>{
     window.sfPerf={inputs:[],frames:[],longTasks:[]};let prev=performance.now()
     window.sfFrame=requestAnimationFrame(function tick(now){window.sfPerf.frames.push(now-prev);prev=now;window.sfFrame=requestAnimationFrame(tick)})
     document.querySelector('.sf-source-input').addEventListener('input',()=>{const t=performance.now();requestAnimationFrame(()=>window.sfPerf.inputs.push(performance.now()-t))})
     new PerformanceObserver(list=>window.sfPerf.longTasks.push(...list.getEntries().map(x=>x.duration))).observe({entryTypes:['longtask']})
   })
-  const start=Date.now();await page.keyboard.type('TEST_ONLY steady typing '.repeat(31),{delay:43});const durationMs=Date.now()-start
+  const cpuBefore=cpuTimes(),start=performance.now();await page.keyboard.type('TEST_ONLY steady typing '.repeat(31),{delay:43});const durationMs=performance.now()-start,cpuAfter=cpuTimes()
+  // Include the final input's paint callback rather than dropping the last sample.
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
   const measured=await page.evaluate(()=>{cancelAnimationFrame(window.sfFrame);const p=window.sfPerf,sort=p.inputs.toSorted((a,b)=>a-b);return {samples:sort.length,inputP95Ms:sort[Math.floor(sort.length*.95)],inputMaxMs:Math.max(...sort),longTasks:p.longTasks,frameOver100ms:p.frames.filter(x=>x>100).length}})
-  record('30 seconds of input in a manuscript over 8000 Chinese characters',durationMs>=30000&&manuscript.match(/[\p{Script=Han}]/gu).length>=8000,{durationMs,chineseCharacters:manuscript.match(/[\p{Script=Han}]/gu).length,...measured})
+  const environment={processesBefore,processesAfter:processSnapshot(),systemCpuBusyPercent:100*(1-(cpuAfter.idle-cpuBefore.idle)/(cpuAfter.total-cpuBefore.total)),visibility:await page.evaluate(()=>({hidden:document.hidden,focused:document.hasFocus()}))}
+  record('30 seconds of input in a manuscript over 8000 Chinese characters',durationMs>=30000&&manuscript.match(/[\p{Script=Han}]/gu).length>=8000,{durationMs,expectedDelayMs:'TEST_ONLY steady typing '.repeat(31).length*43,chineseCharacters:manuscript.match(/[\p{Script=Han}]/gu).length,...measured,environment})
   record('AT-134 typing p95 within the approved performance limit', measured.samples > 0 && measured.inputP95Ms <= 24.1 * 1.1,
     { measuredP95Ms: measured.inputP95Ms, limitMs: 24.1 * 1.1, nativeDesktop })
   record('typing preserves all input with no client failure',(await area.inputValue()).endsWith('TEST_ONLY steady typing '.repeat(31))&&errors.length===0,{errors})
@@ -338,18 +349,17 @@ try {
   }
   }
   await page.screenshot({path:join(root,'performance.png')})
-  assert.ok(rows.every(row=>row.ok),'See performance journal')
   if (nativeDesktop && !materialsOnly) {
     // Save only this isolated TEST_ONLY manuscript before closing Electron. A dirty
     // beforeunload dialog racing renderer shutdown otherwise makes cleanup fail.
     // v1.20 (SF-187): saving moved out of the pane caption into the single editor bar.
-    const save = page.locator('.sf-format-toolbar').getByRole('button', { name: '保存', exact: true })
-    if (await save.count() && await save.isEnabled()) { await save.click(); await expect(save).toBeDisabled() }
     await page.evaluate(() => { document.documentElement.style.zoom = '1' })
     await page.emulateMedia({ reducedMotion: 'no-preference' })
+    const save = page.locator('.sf-format-toolbar').getByRole('button', { name: '保存', exact: true })
+    if (await save.count()) { await save.click(); await expect(page.locator('.sf-draft-status')).toContainText('已保存',{timeout:20000}); await expect(save).toHaveCount(0) }
     const collapse = page.getByRole('button', { name: '收起输入', exact: true })
     if (await collapse.isVisible()) await collapse.click()
-    await page.getByRole('button', { name: '分屏', exact: true }).click()
+    await page.getByRole('button', { name: '预览', exact: true }).click()
     for (const preference of ['light', 'dark']) {
       await rpc('settings/update', { ns: 'ui-theme', patch: { preference } })
       await page.waitForFunction(dark => document.body.hasAttribute('data-ds-dark-theme') === dark, preference === 'dark')
@@ -357,11 +367,15 @@ try {
     }
     record('native Desktop review surfaces captured after saving TEST_ONLY edits', true, { themes: ['light','dark'] })
   }
+  // Preserve evidence and save isolated edits even when AT-134 fails; still exit nonzero.
+  assert.ok(rows.every(row=>row.ok),'See performance journal')
 } catch (error) {
   record('run', false, error.message)
   await page?.screenshot({ path: join(root, 'failure.png') }).catch(() => undefined)
+  await writeFile(join(root,'failure-page.txt'),await page?.locator('body').innerText().catch(()=> '') ?? '')
   throw error
 } finally {
+  record('script elapsed time before cleanup',true,{durationMs:performance.now()-scriptStarted,nativeDesktop})
   await writeFile(join(root, 'journal.json'), JSON.stringify(rows, null, 2))
   console.log('Journal:', join(root, 'journal.json'))
   host?.kill()
