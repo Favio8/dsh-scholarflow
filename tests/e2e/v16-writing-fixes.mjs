@@ -206,26 +206,37 @@ try {
   await page.locator('.sf-outline-panel').getByRole('button',{name:'返回正文',exact:true}).click()
   record('chapter structure is available from the manuscript directory',true,{})
 
-  // Only the model seam is synthetic. Rules, source grouping, persistence and export use the real Host.
-  const modelCalls=[]
-  await page.route('**/api/**',async route=>{
-    const method=route.request().method()==='POST'?route.request().postDataJSON()?.method:''
-    if(method==='scholarflow.v1/review.prepareModel'){modelCalls.push('prepare');const response=await route.fetch(),envelope=await response.json();envelope.result={ok:true,value:{ok:true,data:{planId:'plan_TEST_ONLY',planHash:'sha256:'+'1'.repeat(64),runId:'run_TEST_ONLY'}}};await route.fulfill({response,json:envelope});return}
-    if(method==='scholarflow.v1/review.startModel'){modelCalls.push('start');const current=await rpc('scholarflow.v1/review.inspect',{request:{context}});const response=await route.fetch(),envelope=await response.json();envelope.result={ok:true,value:{ok:true,data:{run:{status:'completed'},report:current.report}}};await route.fulfill({response,json:envelope});return}
-    await route.continue()
-  })
-  // v1.16 removed the direct 检查 entry from the toolbar; the flow node opens the AI检查 page now.
+  // The model half cannot run in this profile (no provider credential), and letting the Host try makes
+  // the wait depend on the provider timeout — one run sat in 正在检查 for over a minute. So the seam
+  // controls exactly two things: a plan id and an interrupted run. Everything asserted below is the real
+  // Host's: the rules check it ran (SF-167) and the readable result with no internal fields or selects
+  // (SF-171). The successful model path is covered by v19-ai-review with the in-process seam.
+  const reviewCalls=[]
+  page.on('request',request=>{try{const method=request.postDataJSON?.()?.method;if(typeof method==='string'&&method.startsWith('scholarflow.v1/review.'))reviewCalls.push(method.replace('scholarflow.v1/review.',''))}catch{/* not a JSON body */}})
+  // The two stubs have to answer without touching the model path, and the connection layer validates the
+  // whole envelope, not just `result` — so the skeleton (status, headers, the envelope's own fields) comes
+  // from one cheap real call and only `result` is replaced.
+  const skeleton=await page.evaluate(async request=>{const response=await fetch('api/scholarflow.v1/project.inspect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type:'client-request',rpcId:crypto.randomUUID(),method:'scholarflow.v1/project.inspect',payload:{args:{request}}})})
+    const headers=Object.fromEntries([...response.headers.entries()].filter(([name])=>!/^(content-length|transfer-encoding|content-encoding)$/i.test(name)))
+    return {status:response.status,headers,body:await response.json()}},{context})
+  const answer=(route,data)=>{const sent=route.request().postDataJSON()??{};return route.fulfill({status:skeleton.status,headers:skeleton.headers,body:JSON.stringify({...skeleton.body,rpcId:sent.rpcId,method:sent.method,result:{ok:true,value:{ok:true,data}}})})}
+  await page.route('**/api/scholarflow.v1/review.prepareModel',route=>answer(route,{planId:'plan_TEST_ONLY',planHash:'sha256:'+'1'.repeat(64),runId:'run_TEST_ONLY'}))
+  await page.route('**/api/scholarflow.v1/review.startModel',async route=>{const current=await rpc('scholarflow.v1/review.inspect',{request:{context}});await answer(route,{run:{status:'failed'},report:current.report})})
   await page.locator('.sf-flow-nav [data-node="review"]').click()
-  await page.getByRole('button',{name:'检查全文',exact:true}).click()
-  await expect(page.locator('.sf-review-action')).toContainText('全文检查已完成')
-  assert.deepEqual(modelCalls,['prepare','start'])
+  await page.getByRole('button',{name:'一键检查并完善',exact:true}).click()
+  await expect(page.locator('.sf-review-assistant')).toContainText('检查中断，已有结果已保留',{timeout:30000})
+  for(const method of ['run','prepareModel','startModel'])assert(reviewCalls.includes(method),`${method} was never requested`)
+  assert(reviewCalls.indexOf('run')<reviewCalls.indexOf('prepareModel')&&reviewCalls.indexOf('prepareModel')<reviewCalls.indexOf('startModel'),'the rules check has to precede the model review')
+  await page.locator('.sf-review-details>summary').click()
   const checkText=await page.locator('#sf-panel-Review').innerText();assert(!/src_|review_|deterministic|人工复核|人工判断项|pass ·/.test(checkText))
-  assert.equal(await page.locator('.sf-review-item').filter({hasText:'参考文献出版信息待核对'}).count(),1)
+  const issues=await page.locator('.sf-review-item').allTextContents()
+  assert(issues.some(text=>text.includes('参考文献')),'the bibliography issue has to be listed once the rules ran')
+  assert.equal(issues.filter(text=>text.includes('参考文献')).length,1)
   assert.equal(await page.locator('#sf-panel-Review select').count(),0)
   await expect(page.locator('.sf-writing-progress')).toBeHidden()
   await page.screenshot({path:join(root,'checks.png'),fullPage:true})
-  record('one check action runs rules and the model seam and displays a single readable bibliography issue',true,{modelSeam:modelCalls})
-  await page.unroute('**/api/**')
+  record('one check action runs the rules in the Host and keeps a single readable bibliography issue',true,{reviewCalls})
+  await page.unroute('**/api/scholarflow.v1/review.prepareModel'); await page.unroute('**/api/scholarflow.v1/review.startModel')
 
   await page.getByRole('button',{name:'返回正文',exact:true}).click()
   await page.getByLabel('排版与导出格式',{exact:true}).selectOption('docx')

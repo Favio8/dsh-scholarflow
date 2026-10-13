@@ -84,12 +84,19 @@
 - **启动对话框**（`v15`／`v16`／`v17`／`v18`／`v19`／`task-details`／`workbench-performance` 共用）。原写法在 shell 刚绘出时只检查一次就点击，或点完立刻重读；探针（`.dsh-tmp/probe-dialog2.mjs`／`probe-dialog3.mjs`，不入库）实测「继续」约 1 秒出现且可用，点击后节点保持挂载、按钮转 disabled 最长约 30 秒才被移除。现改为「轮询等出现 → 仅在 enabled 时点击 → 等按钮真正消失」。
 - **`v18 --phase=navigation` 的「更多菜单 → 资料」**：资料自 v1.16 起不在更多菜单里。改为断言该菜单仍含写作要求／项目设置／版本历史、不再含资料与 AI检查，并实地打开项目设置页。
 - **`v16` 的两处入口**：`资料`（v1.16 移出更多菜单）与 `检查`（v1.16 移除，现由五节点进入）改用流程节点。
-- **`v15` 的两处排版字段**：v1.16 把逐选区字段收进「排版」面板，需先展开。但这些字段绑定的是**活的 edit range**：鼠标拖选能建立它，而把指针放到原生 `<select>` 上会折叠文档选区，`capture()`（`src/client/draft.tsx:306`）随即把 edit range 丢掉，下一个字段就变成 disabled。探针（临时 `PROBE` 行）实测：拖选后面板标题是「选中文字与段落」、两个下拉可用；选完字体后变成「当前段落」、两者都 disabled；再拖一次立刻恢复；而在紧接着的 `selectOption` 落点前又会掉一次——所以它同时是「两次操作必须各拖一次」和「时序上仍可能掉」。这不是本版引入的（`capture` 与 3 秒读者轮询都早于 v1.20），本轮**未通过**，也未改产品行为。若要修，候选有二：工具栏容器的 `onMouseDown` 从 `button` 扩到 `button,select`（对原生 select 做 `preventDefault` 可能连带阻止下拉展开，需实测），或在 `capture()` 里区分「焦点落到工具栏控件」的中性塌陷——两者都会动到共享的选区语义，留给下一轮决定。
+- **`v15` 的排版字段**：v1.16 把逐选区字段收进「排版」面板，需先展开，脚本据此先点「排版」（`全文排版` 如今是面板标题而非按钮）。面板里的字段绑定活的 edit range，而拖选的偏移来自渲染后的 prose，样式一应用就可能映射失败——产品侧「映射失败被当成取消选择」已在 [选区武装记录](selection-armed-across-format-toolbar.md) 修复；测试侧改为**从源码窗格用键盘选中**（偏移是纯数字，不受重渲染影响），并把「设完字体后字号仍可用」写成断言。
 - **`v15`／`task-details` 的药丸定位**：核对清单与详情现在在 `.sf-progress-details` 之下，需先展开药丸；v15 另需在读完后收起，因为药丸面板悬在编辑栏上会拦截后续点击。
 - **`v19` 的确认文案等待时间**：`保留原稿`／`采用修改` 的确认要等两次宿主往返加一次刷新，而这里用的是 matcher 默认 **5 秒**，是全脚本唯一低于其它步骤 20 秒的地方；高负载下偶发失败（本次复现一次，随后同一构建连跑两次均通过）。已对齐到 20 秒。
 
-### 仍跑不通的两个脚本（根因在 v1.19，不在本版）
+### 三个曾跑不通的段落（根因都在 v1.16／v1.19 的界面迁移，已按当前入口重写）
 
-- **`v16-writing-fixes.mjs`**：审查段点 `检查全文` 并断言 `.sf-review-action`。而 `ModelReview` 的实时分支现在**只以 `historyOnly` 渲染**（`src/client/review-export.tsx:80`、`:83`）——v1.19 把 AI检查页的主入口换成 `ReviewAssistant` 的「一键检查并完善」后，带 `检查全文` 按钮和 `.sf-review-action` 的那个实时分支已无任何入口可达。该段要按新入口重写而不是换定位，本轮未动。
-- **`v18 --phase=review`**：同一根因（同样点 `检查全文`）。它想验的「检查在后台运行时五节点保持运行态、切到别的页仍可见」已由 v19 的 AI检查流程覆盖，本版 status 阶段另覆盖了药丸一侧。
-- 顺带记录：`ModelReview` 的实时分支（按钮、`.sf-review-action`、暂停／停止）目前是**不可达 UI**。它不影响「一键检查并完善」仍会真实跑规则与模型检查（v19 断言 `calls` 同时含 `review` 与 `fix`），但把这段当作可复用组件的读者需要知道它只以历史形态被渲染。
+`ModelReview` 的实时分支（`检查全文` 按钮、`.sf-review-action`、暂停／停止）自 v1.19 起**只以 `historyOnly` 渲染**（`src/client/review-export.tsx:80`、`:83`），实时入口是 AI检查页的「一键检查并完善」。也就是说那套入口已经不存在，两个脚本的审查段不是换定位能修的，已按当前入口重写：
+
+- **`v16-writing-fixes`**（现 **7/7**）：一个 AI检查动作 → 宿主先跑规则再准备并启动一次模型审查；实测调用序列为 `inspect → improvements → run → prepareModel → startModel → inspect → improvements`，顺序也在断言里（SF-167）。模型那一半在本 profile 没有凭据，而**让宿主自然失败会让等待取决于提供方超时**（实测一次停在「正在检查」超过一分钟），所以桩只提供两件事；被断言的都是真实那半——规则结果留在页面上、只有一条参考文献问题、没有内部字段也没有下拉（SF-171）。
+- **`v18 --phase=all`**（现 **10/10**）：审查阶段的桩有三处要对齐当前实现——run 状态必须是真实终态（`reviewRunFinished` 只认 `succeeded`／`completed-with-issues`，写 `completed` 会被判「未完成」，节点因此挂上「可重试」并覆盖后面要验的报告驱动状态）；`review.improvements` 也要桩（否则助手会真的去跑修订建议生成，本 profile 下失败并把 `reviewActivity` 钉在 `failed`）；释放后的节点状态按**宿主自己的**报告断言（`src/client/review-export.tsx:52` 会用 `review.inspect` 覆盖客户端状态，而本 profile 的宿主没跑模型，所以落到「待检查」——伪造的 run 不该给导航化妆）。`review-failure` 阶段（`--phase=review-failure`，单独 **2/2**）的触发标签用 `.or()` 兼容「一键检查并完善」／「重试」，终态标签按 `src/client/flow-status.ts:73` 取「可重试／已暂停／已停止」。
+- **`v15-writing-fixes`**（现 **7/7**）：「资料与引用」已移出更多菜单，资料页改由五节点进入；原本「手动关联两条来源 → 一条书目」的段落改为断言当前合同——两条不同来源保持两条书目、不发生误合并，导出各出现一次。（同 DOI 或相似题名的第二次登记会被 `SOURCE_ALREADY_REGISTERED` 拒绝，手动关联 UI 已随 v1.16 取消。）
+- 顺带记录：`ModelReview` 的实时分支仍是**不可达 UI**。它不影响「一键检查并完善」真实跑规则与模型检查，但把这段当作可复用组件的读者需要知道它只以历史形态被渲染。
+
+### 桩要绕开的一个连接层约束
+
+`route.fulfill` 只填 `result` 不够：DSH 的连接层校验整个信封，实测先报 `invalid server-response envelope`，补上真实 status／headers 后又报 `rpcId mismatch for …: sent …, got …`。因此两个脚本的模型桩改成：先用一次**便宜的**真实调用（`project.inspect`）抓下 status／headers 与信封自身字段当骨架，再回填该请求自己的 `rpcId`／`method` 并替换 `result`——这样就不必 `route.fetch()` 那个会真的去够模型端点的请求。

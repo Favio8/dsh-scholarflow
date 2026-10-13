@@ -99,6 +99,9 @@ try {
   const project = await rpc('scholarflow.v1/project.inspect', { request: { context } })
   const sf=async(method,data={})=>{const live=await rpc('scholarflow.v1/project.inspect',{request:{context}});return rpc('scholarflow.v1/'+method,{request:{context:{...context,projectId:live.binding.projectId,expectedLedgerRevision:live.ledger.revision},...data}})}
   const first=await sf('sources.register',{source:{title:'TEST_ONLY Alpha Study',authors:[{literal:'TEST_ONLY Author'}],kind:'paper',year:2025,identifiers:{}}})
+  // Registering a second source with the same DOI or a similar title is refused by design
+  // (SOURCE_ALREADY_REGISTERED), so these two stay genuinely distinct: the check below is that they keep
+  // two entries instead of being merged.
   const second=await sf('sources.register',{source:{title:'TEST_ONLY Beta Study',authors:[{literal:'TEST_ONLY Author'}],kind:'paper',year:2025,identifiers:{}}})
   const paragraph='普通文字开始，**强调文字**和正常文字连在一起，中文阅读需要清晰而稳定的选择。'
   const manuscript=`# TEST_ONLY 文稿\n\n## 第一章\n\n${paragraph}引用[@${first.source.citeKey}]。\n\n另一段正文引用[@${second.source.citeKey}]。\n\n### 小节\n\n最后一段。\n`
@@ -176,17 +179,20 @@ try {
   const panel=page.locator('.sf-formatting-panel[aria-label="全文排版设置"]');await panel.getByLabel('页边距（毫米）').fill('30');await panel.getByLabel('行距',{exact:true}).selectOption('1.5');await panel.getByLabel('页眉',{exact:true}).fill('TEST_ONLY 页眉');await panel.getByLabel('页脚',{exact:true}).fill('TEST_ONLY 页脚')
   await panel.getByRole('button',{name:'应用全文排版'}).click();await expect(panel).toHaveCount(0)
   await page.locator('.sf-flow-nav [data-node="materials"]').click()
-  await page.locator('.sf-materials-panel [data-sf-source-id] input').nth(0).check();await page.locator('.sf-materials-panel [data-sf-source-id] input').nth(1).check();await page.getByLabel('关联后的主书目').selectOption(first.source.id);const linkedResponse=page.waitForResponse(response=>response.request().method()==='POST'&&response.request().postDataJSON()?.method==='scholarflow.v1/sources.linkBibliography');await page.getByRole('button',{name:'确认同一文献',exact:true}).click();await linkedResponse
-  const linked=await rpc('scholarflow.v1/project.inspect',{request:{context}});assert.equal(Object.keys(linked.ledger.sources).length,2);assert(linked.ledger.sources[second.source.id].bibliographySourceId===first.source.id)
-  await page.locator('.sf-tool-back').getByRole('button',{name:'返回正文',exact:true}).click();await expect(page.locator('.sf-paper-references>p')).toHaveCount(1)
+  // v1.16 replaced the manual association (checkboxes + a chosen primary) with identity grouping: two
+  // different works stay two entries, and no confirmation is asked for a pair that is not a duplicate.
+  await expect(page.locator('.sf-reference-row[data-sf-source-id]')).toHaveCount(2)
+  await expect(page.locator('.sf-duplicate-notice')).toHaveCount(0)
+  const linked=await rpc('scholarflow.v1/project.inspect',{request:{context}});assert.equal(Object.keys(linked.ledger.sources).length,2)
+  await page.locator('.sf-tool-back').getByRole('button',{name:'返回正文',exact:true}).click();await expect(page.locator('.sf-paper-references>p')).toHaveCount(2)
   state=await rpc('scholarflow.v1/project.inspect',{request:{context}});assert.equal(Object.keys(state.ledger.sources).length,2)
-  record('confirmed bibliography association preserves original sources and shows one entry',true,{sourceCount:2,referenceCount:1})
+  record('two distinct sources keep two bibliography entries without a false merge',true,{sourceCount:2,referenceCount:2})
   await page.getByLabel('排版与导出格式',{exact:true}).selectOption('docx')
   const downloaded=page.waitForEvent('download');await page.getByRole('button',{name:'导出 Word',exact:true}).click();const download=await downloaded;const path=join(root,'verified-paper.docx');await download.saveAs(path)
   const zip=await JSZip.loadAsync(await readFile(path)),xml=await zip.file('word/document.xml').async('string'),styles=await zip.file('word/styles.xml').async('string')
   assert(xml.includes('TEST_ONLY 文稿'));assert(/w:top="1701"/.test(xml));assert(/w:line="360"/.test(xml));assert(xml.includes('楷体'));assert(!styles.includes('2E74B5'));assert(xml.includes('w:ilvl w:val="0"'))
-  assert.equal((xml.match(/TEST_ONLY Alpha Study/g)||[]).length,1);assert(!xml.includes('TEST_ONLY Beta Study'))
-  record('normal Word export includes title, black styles, selected formatting, margin and shared references',true,{path})
+  assert.equal((xml.match(/TEST_ONLY Alpha Study/g)||[]).length,1);assert.equal((xml.match(/TEST_ONLY Beta Study/g)||[]).length,1)
+  record('normal Word export includes title, black styles, selected formatting, margin and both references',true,{path})
   await page.screenshot({path:join(root,'workbench.png'),fullPage:true})
   assert.equal(errors.length,0)
   await writeFile(join(root,'report.json'),JSON.stringify({checks:rows,pageErrors:errors,paidModelCalls:0,root},null,2))

@@ -88,6 +88,18 @@ try {
   }
   const inspect = () => rpc('scholarflow.v1/project.inspect', { request: { context } })
   const sf = async (method, data = {}) => { const current = await inspect(); return rpc('scholarflow.v1/' + method, { request: { context: { ...context, projectId: current.binding.projectId, expectedLedgerRevision: current.ledger.revision }, ...data } }) }
+  // Model stubs have to answer without reaching for the Host: fetching the request would run the real
+  // provider attempt (measured to sit for over a minute on this machine), and the connection layer
+  // validates the whole envelope — status, headers and the request's own rpcId — so one cheap real call
+  // supplies the skeleton and only `result` is replaced.
+  let skeleton
+  const answer = async (route, data) => {
+    skeleton ??= await page.evaluate(async request => { const response = await fetch('api/scholarflow.v1/project.inspect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'client-request', rpcId: crypto.randomUUID(), method: 'scholarflow.v1/project.inspect', payload: { args: { request } } }) })
+      const headers = Object.fromEntries([...response.headers.entries()].filter(([name]) => !/^(content-length|transfer-encoding|content-encoding)$/i.test(name)))
+      return { status: response.status, headers, body: await response.json() } }, { context })
+    const sent = route.request().postDataJSON() ?? {}
+    return route.fulfill({ status: skeleton.status, headers: skeleton.headers, body: JSON.stringify({ ...skeleton.body, rpcId: sent.rpcId, method: sent.method, result: { ok: true, value: { ok: true, data } } }) })
+  }
   const writing = join(workspacePath, '.scholarflow/writing')
   const saveTask = async (change) => { Object.assign(task, change); task.revision++; await writeFile(join(writing, 'tasks', task.id + '.json'), JSON.stringify(task)) }
   if (!resume) {
@@ -168,14 +180,22 @@ try {
     let releaseModel, startedModel
     const modelStarted = new Promise(done => { startedModel = done })
     const heldModel = new Promise(done => { releaseModel = done })
-    await page.route('**/api/scholarflow.v1/review.prepareModel', async route => { const response = await route.fetch(), envelope = await response.json(); envelope.result = { ok: true, value: { ok: true, data: { planId: 'plan_TEST_ONLY', planHash: 'sha256:' + '1'.repeat(64), runId: 'run_TEST_ONLY' } } }; await route.fulfill({ response, json: envelope }) })
-    await page.route('**/api/scholarflow.v1/review.startModel', async route => { startedModel(); await heldModel; const current = await sf('review.inspect'), response = await route.fetch(), envelope = await response.json(); envelope.result = { ok: true, value: { ok: true, data: { run: { status: 'completed' }, report: current.report } } }; await route.fulfill({ response, json: envelope }) })
-    await button('review').click(); await page.getByRole('button', { name: '检查全文', exact: true }).click(); await modelStarted
+    await page.route('**/api/scholarflow.v1/review.prepareModel', route => answer(route, { planId: 'plan_TEST_ONLY', planHash: 'sha256:' + '1'.repeat(64), runId: 'run_TEST_ONLY' }))
+    await page.route('**/api/scholarflow.v1/review.startModel', async route => { startedModel(); await heldModel; const current = await sf('review.inspect'); await answer(route, { run: { status: 'completed-with-issues' }, report: { ...current.report, modelRunId: 'run_TEST_ONLY' } }) })
+    // Fix suggestions are not this phase's subject, and the Host cannot generate them here (no provider
+    // credential): an unstubbed attempt fails and leaves reviewActivity at 'failed', whose 可重试 label
+    // would then override the report-driven 需复查 that the staleness check below is about.
+    await page.route('**/api/scholarflow.v1/review.improvements', async route => { const response = await route.fetch(), envelope = await response.json(), data = envelope.result.value.data; await route.fulfill({ response, json: { ...envelope, result: { ok: true, value: { ok: true, data: { ...data, proposals: [], groups: [] } } } } }) })
+    await button('review').click(); await page.getByRole('button', { name: '一键检查并完善', exact: true }).click(); await modelStarted
     await expect(state('review')).toHaveAttribute('data-state', 'running')
     await button('materials').click(); await expect(state('review')).toHaveAttribute('data-state', 'running')
-    releaseModel(); await expect(state('review')).toHaveAttribute('data-state', 'attention', { timeout: 10000 })
-    await record('checking runs in the background and actual unresolved rule checks stay amber')
-    await page.unroute('**/api/scholarflow.v1/review.prepareModel'); await page.unroute('**/api/scholarflow.v1/review.startModel')
+    releaseModel(); await expect(state('review')).toHaveAttribute('data-state', 'pending', { timeout: 10000 })
+    // The nav follows the Host's own report (review-export.tsx:52 re-reads review.inspect whenever the
+    // ledger moves), and this profile's Host never ran the model, so its report carries no modelRunId and
+    // the node honestly falls back to 待检查 — the fabricated run does not get to decorate the nav. The
+    // real model path is v19's subject; the staleness half below is this phase's.
+    await record('checking runs in the background and the node follows the Host report, not the stub')
+    await page.unroute('**/api/scholarflow.v1/review.prepareModel'); await page.unroute('**/api/scholarflow.v1/review.startModel'); await page.unroute('**/api/scholarflow.v1/review.improvements')
     await button('draft').click(); await page.locator('.sf-paper-views button').first().click()
     const source = page.locator('textarea.sf-source-input'), saved = await inspect()
     await source.fill(saved.document.text + '\nTEST_ONLY 新增内容。'); await expect(button('review')).toContainText('需复查')
@@ -201,9 +221,9 @@ try {
     await page.reload(); await dismiss(); await openSession(context); await nav.waitFor()
     let release, started
     const pending = new Promise(done => { release = done }), begun = new Promise(done => { started = done })
-    await page.route('**/api/scholarflow.v1/review.prepareModel', async route => { const response = await route.fetch(), envelope = await response.json(); envelope.result = { ok: true, value: { ok: true, data: { planId: 'plan_TEST_ONLY', planHash: 'sha256:' + '1'.repeat(64), runId: 'run_TEST_ONLY' } } }; await route.fulfill({ response, json: envelope }) })
-    await page.route('**/api/scholarflow.v1/review.startModel', async route => { started(); const current = await sf('review.inspect'); await pending; const response = await route.fetch(), envelope = await response.json(); envelope.result = { ok: true, value: { ok: true, data: { run: { status: 'failed' }, report: current.report } } }; await route.fulfill({ response, json: envelope }) })
-    await button('review').click(); await page.getByRole('button', { name: '检查全文', exact: true }).click(); await begun
+    await page.route('**/api/scholarflow.v1/review.prepareModel', route => answer(route, { planId: 'plan_TEST_ONLY', planHash: 'sha256:' + '1'.repeat(64), runId: 'run_TEST_ONLY' }))
+    await page.route('**/api/scholarflow.v1/review.startModel', async route => { started(); const current = await sf('review.inspect'); await pending; await answer(route, { run: { status: 'failed' }, report: current.report }) })
+    await button('review').click(); await page.getByRole('button', { name: '一键检查并完善', exact: true }).click(); await begun
     await openSession(otherContext)
     await expect(page.locator('.sf-paper-project')).toHaveAttribute('data-sf-session-id', sessionId)
     await expect(state('review')).toHaveAttribute('data-state', 'pending')
@@ -217,14 +237,19 @@ try {
   }
   if (phase === 'review-failure') {
     let outcome = 'failed'
-    await page.route('**/api/scholarflow.v1/review.prepareModel', async route => { const response = await route.fetch(), envelope = await response.json(); envelope.result = { ok: true, value: { ok: true, data: { planId: 'plan_TEST_ONLY', planHash: 'sha256:' + '1'.repeat(64), runId: 'run_TEST_ONLY' } } }; await route.fulfill({ response, json: envelope }) })
-    await page.route('**/api/scholarflow.v1/review.startModel', async route => { const current = await sf('review.inspect'), response = await route.fetch(), envelope = await response.json(); envelope.result = { ok: true, value: { ok: true, data: { run: { status: outcome }, report: current.report } } }; await route.fulfill({ response, json: envelope }) })
+    await page.route('**/api/scholarflow.v1/review.prepareModel', route => answer(route, { planId: 'plan_TEST_ONLY', planHash: 'sha256:' + '1'.repeat(64), runId: 'run_TEST_ONLY' }))
+    await page.route('**/api/scholarflow.v1/review.startModel', async route => { const current = await sf('review.inspect'); await answer(route, { run: { status: outcome }, report: current.report }) })
     await button('review').click()
-    for (const [status, label] of [['failed', '未完成'], ['paused', '已暂停'], ['cancelled', '已停止']]) {
+    // v1.19 replaced the standalone 检查全文 entry with one AI检查 action that becomes 重试 after a
+    // failure; the point here is that the node's terminal status survives a report either way.
+    // v1.19's one-action entry reports through reviewActivity, whose labels are 可重试／已暂停／已停止
+    // (src/client/flow-status.ts:73) rather than the old run-status wording.
+    const reviewTrigger = page.getByRole('button', { name: '一键检查并完善', exact: true }).or(page.getByRole('button', { name: '重试', exact: true }))
+    for (const [status, label] of [['failed', '可重试'], ['paused', '已暂停'], ['cancelled', '已停止']]) {
       outcome = status
-      await page.getByRole('button', { name: '检查全文', exact: true }).click()
+      await reviewTrigger.click()
       await expect(button('review')).toContainText(label)
-      await expect(page.getByRole('button', { name: '检查全文', exact: true })).toBeEnabled()
+      await expect(reviewTrigger).toBeEnabled()
     }
     await record('failed, paused and cancelled checks retain their terminal status even with a report')
   }
@@ -278,6 +303,6 @@ try {
   }
   assert.deepEqual(errors, []); await report()
 } catch (error) {
-  await report(); await writeFile(join(root, 'failure.txt'), String(error.stack)); await page.screenshot({ path: join(root, 'failure.png') }).catch(() => {}); await writeFile(join(root, 'failure-page.txt'), await page.locator('body').innerText().catch(() => '')); throw error
+  await report(); await writeFile(join(root, 'failure.txt'), String(error.stack)); await writeFile(join(root, 'failure-errors.txt'), JSON.stringify(errors, null, 2)).catch(() => {}); await page.screenshot({ path: join(root, 'failure.png') }).catch(() => {}); await writeFile(join(root, 'failure-page.txt'), await page.locator('body').innerText().catch(() => '')); await writeFile(join(root, 'failure-review.txt'), await page.locator('.sf-review-assistant').innerText().catch(() => '')).catch(() => {}); throw error
 } finally { await browser.close(); host.kill() }
 console.log(JSON.stringify({ checks: checks.length, root, phase }))
