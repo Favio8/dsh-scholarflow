@@ -67,7 +67,7 @@
 | AT-187 面板题注 | 编辑与预览两种单视图下题注高度均为 **0px** |
 | AT-189 提示条 | 「正文版本发生变化，当前编辑已保留」合并为 **51px** 一行，操作「查看与处理」保留 |
 
-三处已知边界，都不当作已通过：
+以下边界与未验项都不当作已通过：
 
 1. **≥2 条提示同时出现的情况在本机无法触达。** 另外两个来源（会话改写消息、待保存决定）各需一次模型调用，因此「三条合并成一条」只验到单条形态与它的一行高度；`.sf-notice-more` 的折叠与展开未在真实 DOM 上执行过。
 2. **分栏视图不可达。** v1.15 起「分屏」已不在正文工具栏，`view` 只取 `edit`／`preview`，所以 `.sf-editor-grid:not([data-view=edit]):not([data-view=preview]) .sf-pane-caption{display:flex}` 目前是死分支——题注在可达范围内恒为隐藏。这不是本版引入的，保留该规则是为了分栏回归时标签仍在。
@@ -90,7 +90,7 @@
 
 ### 三个曾跑不通的段落（根因都在 v1.16／v1.19 的界面迁移，已按当前入口重写）
 
-`ModelReview` 的实时分支（`检查全文` 按钮、`.sf-review-action`、暂停／停止）自 v1.19 起**只以 `historyOnly` 渲染**（`src/client/review-export.tsx:80`、`:83`），实时入口是 AI检查页的「一键检查并完善」。也就是说那套入口已经不存在，两个脚本的审查段不是换定位能修的，已按当前入口重写：
+`ModelReview` 的实时分支（`检查全文` 按钮、`.sf-review-action`、暂停／停止）自 v1.19 起**只以 `historyOnly` 渲染**（`src/client/review-export.tsx:80`、`:83`），实时入口是 AI检查页的「一键检查并完善」。也就是说那套入口已经不存在，两个脚本的审查段，加上 `v15` 的资料段，都不是换定位能修的，已按当前入口重写：
 
 - **`v16-writing-fixes`**（现 **7/7**）：一个 AI检查动作 → 宿主先跑规则再准备并启动一次模型审查；实测调用序列为 `inspect → improvements → run → prepareModel → startModel → inspect → improvements`，顺序也在断言里（SF-167）。模型那一半在本 profile 没有凭据，而**让宿主自然失败会让等待取决于提供方超时**（实测一次停在「正在检查」超过一分钟），所以桩只提供两件事；被断言的都是真实那半——规则结果留在页面上、只有一条参考文献问题、没有内部字段也没有下拉（SF-171）。
 - **`v18 --phase=all`**（现 **10/10**）：审查阶段的桩有三处要对齐当前实现——run 状态必须是真实终态（`reviewRunFinished` 只认 `succeeded`／`completed-with-issues`，写 `completed` 会被判「未完成」，节点因此挂上「可重试」并覆盖后面要验的报告驱动状态）；`review.improvements` 也要桩（否则助手会真的去跑修订建议生成，本 profile 下失败并把 `reviewActivity` 钉在 `failed`）；释放后的节点状态按**宿主自己的**报告断言（`src/client/review-export.tsx:52` 会用 `review.inspect` 覆盖客户端状态，而本 profile 的宿主没跑模型，所以落到「待检查」——伪造的 run 不该给导航化妆）。`review-failure` 阶段（`--phase=review-failure`，单独 **2/2**）的触发标签用 `.or()` 兼容「一键检查并完善」／「重试」，终态标签按 `src/client/flow-status.ts:73` 取「可重试／已暂停／已停止」。
