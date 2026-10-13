@@ -2,6 +2,7 @@
 // TEST_ONLY manuscript and isolated profile; original assignment files are unchanged.
 // Only --live-visual-only starts a real model request, then cancels it to verify native lifecycle.
 // Usage: node tests/e2e/workbench-performance.mjs [--desktop] [--interaction-only | --layout-only | --materials-only | --live-visual-only]
+// Diagnostic only: add --profile-typing to collect a renderer CPU profile (not acceptance evidence).
 import assert from 'node:assert/strict'
 import { chromium, _electron as electron, expect } from '@playwright/test'
 import { spawn, execFileSync } from 'node:child_process'
@@ -211,6 +212,9 @@ try {
   const area=page.locator('.sf-source-input');await area.click();await page.keyboard.press('Control+End')
   if (!process.argv.includes('--interaction-only') && !process.argv.includes('--live-visual-only')) {
   const processesBefore=processSnapshot()
+  const hiddenPreview=await page.locator('.sf-paper-page .sf-prose').textContent()
+  const profiler=process.argv.includes('--profile-typing')?await page.context().newCDPSession(page):undefined
+  if(profiler){await profiler.send('Profiler.enable');await profiler.send('Profiler.start')}
   await page.evaluate(()=>{
     window.sfPerf={inputs:[],frames:[],longTasks:[]};let prev=performance.now()
     window.sfFrame=requestAnimationFrame(function tick(now){window.sfPerf.frames.push(now-prev);prev=now;window.sfFrame=requestAnimationFrame(tick)})
@@ -221,11 +225,13 @@ try {
   // Include the final input's paint callback rather than dropping the last sample.
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
   const measured=await page.evaluate(()=>{cancelAnimationFrame(window.sfFrame);const p=window.sfPerf,sort=p.inputs.toSorted((a,b)=>a-b);return {samples:sort.length,inputP95Ms:sort[Math.floor(sort.length*.95)],inputMaxMs:Math.max(...sort),longTasks:p.longTasks,frameOver100ms:p.frames.filter(x=>x>100).length}})
+  if(profiler){const {profile}=await profiler.send('Profiler.stop');await writeFile(join(root,'typing.cpuprofile'),JSON.stringify(profile));await profiler.detach();console.log('Diagnostic CPU profile:',join(root,'typing.cpuprofile'))}
   const environment={processesBefore,processesAfter:processSnapshot(),systemCpuBusyPercent:100*(1-(cpuAfter.idle-cpuBefore.idle)/(cpuAfter.total-cpuBefore.total)),visibility:await page.evaluate(()=>({hidden:document.hidden,focused:document.hasFocus()}))}
   record('30 seconds of input in a manuscript over 8000 Chinese characters',durationMs>=30000&&manuscript.match(/[\p{Script=Han}]/gu).length>=8000,{durationMs,expectedDelayMs:'TEST_ONLY steady typing '.repeat(31).length*43,chineseCharacters:manuscript.match(/[\p{Script=Han}]/gu).length,...measured,environment})
   record('AT-134 typing p95 within the approved performance limit', measured.samples > 0 && measured.inputP95Ms <= 24.1 * 1.1,
-    { measuredP95Ms: measured.inputP95Ms, limitMs: 24.1 * 1.1, nativeDesktop })
+    { measuredP95Ms: measured.inputP95Ms, limitMs: 24.1 * 1.1, nativeDesktop, acceptanceEligible: !profiler })
   record('typing preserves all input with no client failure',(await area.inputValue()).endsWith('TEST_ONLY steady typing '.repeat(31))&&errors.length===0,{errors})
+  record('source typing does not rerender the hidden preview',await page.locator('.sf-paper-page .sf-prose').textContent()===hiddenPreview,{})
   const rect=await area.boundingBox();await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2)
   const offsets=[];for(let i=0;i<30;i++){await page.mouse.wheel(0,-1200);await page.waitForTimeout(35);offsets.push(await area.evaluate(el=>el.scrollTop))}
   record('continuous long-document wheel input moves monotonically without an empty editor',offsets.every((x,i)=>!i||x<=offsets[i-1])&&await area.inputValue()!==''&&offsets.at(-1)<offsets[0],{from:offsets[0],to:offsets.at(-1),samples:offsets.length})
@@ -359,7 +365,9 @@ try {
     if (await save.count()) { await save.click(); await expect(page.locator('.sf-draft-status')).toContainText('已保存',{timeout:20000}); await expect(save).toHaveCount(0) }
     const collapse = page.getByRole('button', { name: '收起输入', exact: true })
     if (await collapse.isVisible()) await collapse.click()
+    const expectedTail=(await page.locator('.sf-source-input').inputValue()).trim().split(/\n\s*\n/).at(-1)
     await page.getByRole('button', { name: '预览', exact: true }).click()
+    await expect(page.locator('.sf-paper-page .sf-prose>p').last()).toHaveText(expectedTail)
     for (const preference of ['light', 'dark']) {
       await rpc('settings/update', { ns: 'ui-theme', patch: { preference } })
       await page.waitForFunction(dark => document.body.hasAttribute('data-ds-dark-theme') === dark, preference === 'dark')

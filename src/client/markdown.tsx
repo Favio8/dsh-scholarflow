@@ -25,8 +25,8 @@ export function markedSlice(leaf: Leaf, range: { start: number; end: number }) {
   return { start: first.renderedStart, end: last.renderedEnd }
 }
 
-export function MarkdownView({ projection, annotations, afterBlock, markRange,origins,formatting,typography,interactiveSelection=false }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode;
-  afterBlock?: (start: number, end: number) => React.ReactNode; markRange?: { start: number; end: number; flowing: boolean };origins?:Array<{start:number;end:number;proposalId:string}>;formatting?:DocumentFormatting;typography?:TypographySpec;interactiveSelection?:boolean }) {
+export const MarkdownView = React.memo(function MarkdownView({ projection, annotations, afterBlock, markRange,origins,formatting,typography,interactiveSelection=false }: { projection: Projection; annotations?: (start: number, end: number) => React.ReactNode;
+  afterBlock?: (start: number, end: number) => React.ReactNode; markRange?: { start: number; end: number; flowing: boolean };origins?:Array<{start:number;end:number;proposalId:string}>;formatting?:DocumentFormatting;typography?:TypographySpec;interactiveSelection?:boolean;active?:boolean }) {
   const article=useRef<HTMLElement>(null)
   useLayoutEffect(()=>{
     if(!interactiveSelection||!article.current)return
@@ -69,7 +69,9 @@ export function MarkdownView({ projection, annotations, afterBlock, markRange,or
   const noIndent=new Set<string>();let special=false
   for(const node of projection.tree.children??[]){if(node.type==='heading')special=/^(?:摘要|abstract|关键词|keywords|参考文献|references|bibliography)$/iu.test((node.children??[]).map(child=>child.value??'').join('').trim());if(special&&node.blockId)noIndent.add(node.blockId)}
   const render = (node: AstNode, key: string): React.ReactNode => {
-    const children = node.children?.map((child, index) => render(child, `${key}_${index}`))
+    // Root children are rendered below with their annotations. Traversing them here as well
+    // doubled all paragraph work and invoked afterBlock twice for every paragraph.
+    const children = node.type === 'root' ? undefined : node.children?.map((child, index) => render(child, `${key}_${index}`))
     if (node.type === 'text') return <React.Fragment key={key}>{node.leafIds?.map(id => {
       const leaf = leaves.get(id)!
       const title = leaf.citationKeys ? leaf.citationKeys.map(key => `[@${key}]`).join('; ') : undefined
@@ -109,7 +111,9 @@ export function MarkdownView({ projection, annotations, afterBlock, markRange,or
     return <span key={key}>{children ?? node.value}</span>
   }
   return <article ref={article} className="sf-prose" aria-label="渲染正文">{render(projection.tree, 'root')}</article>
-}
+// Keep the hidden pane mounted, including its DOM/scroll position. Only hidden-to-hidden
+// updates are skipped; returning to the pane always renders every current prop.
+}, (previous, next) => previous.active === false && next.active === false)
 
 function point(root: HTMLElement, node: Node, offset: number, edge: 'start' | 'end') {
   if (node.nodeType !== Node.TEXT_NODE) {
