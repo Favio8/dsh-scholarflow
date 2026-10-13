@@ -733,8 +733,12 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     })}>重读冲突暂存缓冲</button>
     <p>{statistics?.chineseCharacters ?? 0} 汉字 · {statistics?.westernWords ?? 0} 西文词元。{statistics?.detail}</p>
     <nav aria-label="正文标题导航">{projection.tree.children?.filter(node => node.type === 'heading').map(node => <button key={node.position!.start.offset} onClick={() => {
-      const heading = root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${node.position!.start.offset}"]`)
-      onReturnEditor?.(); window.requestAnimationFrame(() => { heading?.scrollIntoView({ block: 'nearest' }); heading?.focus() })
+      onReturnEditor?.(); window.requestAnimationFrame(() => {
+        // The preview render is frozen while it is not the active pane, so a node captured before the
+        // view switch can be one the hidden DOM no longer has.
+        const heading = root.current?.querySelector<HTMLElement>(`[data-sf-heading-offset="${node.position!.start.offset}"]`)
+        heading?.scrollIntoView({ block: 'nearest' }); heading?.focus()
+      })
     }}>{textOf(node) || '无文字标题'}</button>)}</nav>
     <section aria-label="章节正文状态"><h4>大纲与已保存正文</h4><p>以下状态仅说明正文是否已保存；有正文不等于已完成研究或通过审查。</p>
       {project.ledger.outline.sections.map((section: any) => {
