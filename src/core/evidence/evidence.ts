@@ -40,18 +40,31 @@ export async function registerSource(io: FileStore, input: z.infer<typeof source
 }
 
 export async function confirmEvidence(io: FileStore, input: Omit<z.infer<typeof confirmEvidenceRequest>, 'context'>, revision: number) {
+  const { context: _context, ...validated } = confirmEvidenceRequest.parse({ context: { requestId: 'core', workspaceId: 'core', sessionId: 'core' }, ...input })
+  input = validated
   const evidenceId = newId('ev')
-  const result = await mutateLedger(io, revision, async ledger => {
+  const result = await mutateLedger(io, revision, async (ledger, config) => {
     const source = ledger.sources[input.sourceId]
     invariant(source?.materialId && source.contentHash === input.sourceContentHash, 'EVIDENCE_NEEDS_FULLTEXT', '元数据不能证明正文论点；请选择有真实定位的资料文本。')
+    invariant(config.materials.include.includes(ledger.materials[source.materialId]?.projectRelativePath), 'MATERIAL_ACCESS_DENIED', '当前来源资料未选用于写作。')
+    invariant(!input.measurement || input.measurement.origin !== 'user-supplied' || source.kind === 'user-result', 'MEASUREMENT_ORIGIN_INVALID', '作者供给测量必须来自当前项目的用户结果，不能转换外部论文结果。')
     const parsed = await readParsed(io, source.materialId)
     invariant(parsed.sourceContentHash === input.sourceContentHash, 'STALE_MATERIAL_VERSION', '资料版本不同，请重新定位摘录。')
     const block = parsed.blocks.find(block => JSON.stringify(block.locator) === JSON.stringify(input.locator))
     invariant(block && block.text.includes(input.excerpt), 'EVIDENCE_NOT_LOCATED', '摘录不在指定位置的真实解析文本中，禁止作为已定位证据。')
+    if (input.measurement) {
+      const value = input.measurement.value
+      const tokens = [...input.excerpt.matchAll(/(?<![\p{L}\p{N}_.])[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?(?![\p{L}\p{N}_.])/gu)].map(match => match[0])
+      const numericText = typeof value === 'string' && /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(value.trim())
+      invariant(typeof value === 'number' ? tokens.some(token=>Number(token)===value) : numericText ? tokens.includes(value.trim()) : input.excerpt.includes(value), 'MEASUREMENT_NOT_LOCATED', '测量原值不在已定位的原文中；换算与推导须另行保存，不能替换原值。')
+    }
     invariant(digest(await io.readBytes(ledger.materials[source.materialId].projectRelativePath, MAX_MATERIAL_BYTES)) === input.sourceContentHash,
       'STALE_MATERIAL_VERSION', '确认前资料发生外部修改。')
     ledger.evidence[evidenceId] = evidenceSchema.parse({ ...input, id: evidenceId, acquisition: 'user-confirmed', validation: 'located' })
     invalidateReviews(ledger, ['evidence', 'integrity'])
+    if (input.measurement) return [{ path: `.scholarflow/research/result-confirmations/${evidenceId}.json`, before: undefined,
+      after: json({ schemaVersion: 1, projectId: ledger.projectId, evidenceId, sourceId: source.id, sourceContentHash: input.sourceContentHash,
+        confirmedAt: new Date().toISOString(), statement: '由作者提供并确认映射；工具核对原文定位及版本，未复现作者实验。' }) }]
   })
   return { evidence: result.ledger.evidence[evidenceId], revision: result.revision }
 }

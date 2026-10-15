@@ -26,6 +26,8 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
   const [relation, setRelation] = useState('background')
   const [rationale, setRationale] = useState('')
   const [limitations, setLimitations] = useState('')
+  const [metric, setMetric] = useState(''), [value, setValue] = useState(''), [unit, setUnit] = useState(''), [conditions, setConditions] = useState('')
+  const ownResult = project.ledger.sources[sourceId]?.kind === 'user-result'
   const materials = Object.values(project.ledger.materials) as any[]
   const sources = Object.values(project.ledger.sources) as any[]
   const evidence = Object.values(project.ledger.evidence) as any[]
@@ -89,6 +91,17 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
       <button disabled={busy} onClick={() => run(async () => { await api('sources.dismissRegistration', { planId: sourcePlan.planId }); setSourcePlan(undefined) })}>取消来源登记预览</button></section>}
     <label>来源<select aria-label="来源" value={sourceId} onChange={e => setSourceId(e.target.value)}><option value="">请选择</option>{sources.map(source => <option key={source.id} value={source.id}>{source.title} · {source.identity.status} · [@{source.citeKey}]</option>)}</select></label>
     <OnlineResearch project={project} sourceId={sourceId} context={context} api={api} refresh={refresh} run={run} busy={busy} />
+    {ownResult && <section aria-label="登记研究测量"><h4>记录当前原文中的结果</h4>
+      <div className="sf-form"><label>指标<input aria-label="测量指标" value={metric} onChange={e=>setMetric(e.target.value)}/></label>
+        <label>原值<input aria-label="测量原值" value={value} onChange={e=>setValue(e.target.value)}/></label>
+        <label>单位<input aria-label="测量单位" value={unit} onChange={e=>setUnit(e.target.value)}/></label>
+        <label>实验条件<textarea aria-label="测量实验条件" value={conditions} onChange={e=>setConditions(e.target.value)}/></label></div>
+      <p className="sf-muted">确认这些记录属于你的研究，映射与原文一致。工具未重新执行实验。</p>
+      <button disabled={busy || !block || !metric.trim() || !value.trim() || !conditions.trim() || project.ledger.sources[sourceId]?.materialId !== materialId} onClick={()=>run(async()=>{
+        const result=await api('evidence.confirm',{context:context(),sourceId,sourceContentHash:parsed.sourceContentHash,locator:block.locator,excerpt:block.text,kind:'user-measurement',
+          measurement:{metric:metric.trim(),value, ...(unit.trim()&&{unit:unit.trim()}),conditions:conditions.trim(),origin:'user-supplied'}})
+        setEvidenceId(result.evidence.id);await refresh()
+      })}>确认登记这项作者结果</button></section>}
     <button disabled={busy || !block || !sourceId || project.ledger.sources[sourceId]?.materialId !== materialId} onClick={() => run(async () => {
       const result = await api('evidence.confirm', { context: context(), sourceId, sourceContentHash: parsed.sourceContentHash, locator: block.locator, excerpt: block.text, kind: 'quotation' })
       setEvidenceId(result.evidence.id); await refresh()
@@ -101,7 +114,7 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
     <label>关系理由与限定条件<textarea aria-label="证据关系理由" value={rationale} onChange={e => setRationale(e.target.value)} /></label>
     <label>局限（每行一条）<textarea aria-label="论点局限" value={limitations} onChange={e => setLimitations(e.target.value)} /></label>
     <button disabled={busy || !claimText.trim() || !scope.trim() || !evidenceId} onClick={() => run(async () => {
-      await api('claims.upsert', { context: context(), claim: { text: claimText, kind: 'external-fact', scope, evidenceLinks: [{ evidenceId, relation, rationale }], limitations: limitations.split('\n').filter(Boolean) } }); setClaimText(''); await refresh()
+      await api('claims.upsert', { context: context(), claim: { text: claimText, kind: project.ledger.evidence[evidenceId]?.measurement?.origin === 'user-supplied' ? 'user-observation' : 'external-fact', scope, evidenceLinks: [{ evidenceId, relation, rationale }], limitations: limitations.split('\n').filter(Boolean) } }); setClaimText(''); await refresh()
     })}>确认保存论点</button>
     <ul>{(Object.values(project.ledger.claims) as any[]).map(claim => <li key={claim.id}>{claim.text} · {claim.scope} · {claim.status}</li>)}</ul>
   </section>

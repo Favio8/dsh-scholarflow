@@ -26,7 +26,7 @@ export async function reviewInput(io: FileStore) {
     const image = await io.read(path); contextHashes[path] = image ? digest(image.text) : 'missing'
   }
   const { requirements, materials, sources, evidence, claims, outline, claimAnchors } = current.ledger
-  return { current, materialHashes, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v5-bibliography-groups', configHash: current.configHash, documentHash: current.document.contentHash,
+  return { current, materialHashes, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v6-current-user-results', configHash: current.configHash, documentHash: current.document.contentHash,
     revisionId: current.document.revisionId, requirements, materials, sources, evidence, claims, outline, claimAnchors,
     materialHashes, contextHashes, reviewProfileHash: profile ? digest(profile.text) : 'missing' })) }
 }
@@ -120,7 +120,9 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
     check(`requirement_${requirement.id}`, status, `要求 ${requirement.id}：${requirement.confirmation}；${status === 'unknown' ? '当前自动检查无法判定，需确认口径或人工审查' : '已按保存的约束检查'}。${['length', 'references'].includes(requirement.kind) ? ` ${counted.detail}${counted.actual === undefined ? '' : ` 实际计数／比例：${Number(counted.actual.toFixed(4))}${constraint?.unit === 'percent' ? '%' : ''}。`}` : ''}`, 'requirement', 'B1', { requirementIds: [requirement.id] })
   }
   if (current.config.project.type === 'research-paper') {
-    const results = Object.values(ledger.evidence).filter(evidence => evidence.kind === 'user-measurement' && evidence.validation === 'located' && evidence.measurement?.origin === 'user-supplied')
+    const results = Object.values(ledger.evidence).filter(evidence => { const source = ledger.sources[evidence.sourceId]
+      return evidence.kind === 'user-measurement' && evidence.validation === 'located' && evidence.measurement?.origin === 'user-supplied' &&
+        source?.kind === 'user-result' && source.contentHash === evidence.sourceContentHash && source.materialId && materialHashes[source.materialId] === evidence.sourceContentHash })
     check('own_research_results', results.length ? 'unknown' : 'fail', results.length ? '已登记用户测量；完整实验设置、记录与正文对应仍需人工核验。' : '本项目没有已登记的真实实验结果；其他论文结果不能替代本项目实验。', 'integrity', 'B0', { evidenceIds: results.map(item => item.id) }, 'manual')
   }
   check('argument_assessment', 'unknown', pendingModelReviewDetails.argument_assessment, 'logic', 'B1', {}, 'model-assisted')
