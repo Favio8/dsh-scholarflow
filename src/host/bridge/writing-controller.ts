@@ -76,7 +76,7 @@ function summarizeParsed(body: { blocks: { text: string }[]; ranges: { kind: str
 
 type Host = any
 export class WritingController {
-  private plans = new Map<string, { plan: Awaited<ReturnType<typeof prepareInit>>; spec: CreationSpec; context: z.infer<typeof requestContext>; operator: string }>()
+  private plans = new Map<string, { plan: Awaited<ReturnType<typeof prepareInit>>; spec: CreationSpec; context: z.infer<typeof requestContext>; operator: string;deliveryGoal:'quick-draft'|'course-delivery'|'research-results';allowTaskStructure:boolean;researchKind:z.infer<typeof creationPrepareRequest>['researchKind'] }>()
   private active = new Map<string, { controller: AbortController; pause: boolean; task: WritingTask; promise?: Promise<void> }>()
   private streams = new DraftStreamCache()
   private taskStates = new Map<string, WritingTask>()
@@ -524,7 +524,7 @@ export class WritingController {
         if (files.length >= 500) { truncated = true; return }
         if (row.path === output || row.path.startsWith(output + '/') || sensitivePath(row.path) || row.path.split('/').some(part => part.startsWith('.') || ['node_modules', 'vendor', 'dist', 'build', 'manuscript'].includes(part))) continue
         if (row.type === 'directory') await visit(row.path)
-        else if (row.type === 'file') files.push({ relativePath: row.path, size: row.size, supported: /\.(pdf|docx|md|markdown|txt|html?)$/i.test(row.path) })
+        else if (row.type === 'file') files.push({ relativePath: row.path, size: row.size, supported: /\.(pdf|docx|md|markdown|txt|html?|csv|json|png|jpe?g)$/i.test(row.path) })
       }
     }
     await visit(''); return { files, truncated }
@@ -581,10 +581,16 @@ export class WritingController {
       questions: [], notes: [], onlineSources: [], createdAt: time, updatedAt: time })
     plan.files.push({ path: taskPath(task.id), text: json(task) }, { path: '.scholarflow/writing/current.json', text: json({ taskId: task.id, projectId: task.projectId }) })
     plan.contentHash = digest(json(plan.files))
-    this.plans.set(plan.id, { plan, spec: input.spec, context: input.context, operator })
+    plan.files.push({path:'.scholarflow/task-delivery/creation-goal.json',text:json({schemaVersion:1,projectId:plan.config.project.id,sessionId:input.context.sessionId,goal:input.deliveryGoal,allowTaskStructure:input.allowTaskStructure,researchKind:input.researchKind})})
+    if(input.deliveryGoal==='research-results'){
+      invariant(new Set(input.researchInputs.map(row=>row.path)).size===input.researchInputs.length&&input.researchInputs.every(row=>input.spec.materials.includes(row.path)),'RESEARCH_INPUTS_INVALID','研究资料用途须属于本次明确选用的文件，且每份文件只有一种用途。')
+      plan.files.push({path:'.scholarflow/research/material-roles.json',text:json({schemaVersion:1,projectId:plan.config.project.id,roles:input.researchInputs,confirmedBy:input.context.sessionId,confirmedAt:time})})
+    }
+    plan.contentHash=digest(json(plan.files))
+    this.plans.set(plan.id, { plan, spec: input.spec, context: input.context, operator,deliveryGoal:input.deliveryGoal,allowTaskStructure:input.allowTaskStructure,researchKind:input.researchKind })
     return { planId: plan.id, planHash: plan.contentHash, paths: [input.spec.manuscriptDir, '.scholarflow'] }
   }
-  async create(request: unknown, operator: string, signal: AbortSignal) {
+  async create(request: unknown, operator: string, signal: AbortSignal,beforeLaunch?:(context:z.infer<typeof requestContext>,goal:{deliveryGoal:'quick-draft'|'course-delivery'|'research-results';allowTaskStructure:boolean;researchKind:z.infer<typeof creationPrepareRequest>['researchKind']})=>Promise<void>) {
     const input = z.object({ context: requestContext, planId: id, planHash: hash }).parse(request), row = this.plans.get(input.planId)
     invariant(row && row.operator === operator && row.plan.contentHash === input.planHash && row.context.sessionId === input.context.sessionId && row.context.workspaceId === input.context.workspaceId,
       'INVALID_APPROVAL', '创建内容已改变，请重新确认。')
@@ -592,10 +598,15 @@ export class WritingController {
     const { io } = await resolveStore(this.ctx, row.context, signal, row.spec.manuscriptDir)
     await initialize(io, row.plan); this.plans.delete(input.planId)
     const current = await snapshot(io)
-    await saveWritingSpec(io, row.spec, current.ledger.revision)
+    await saveWritingSpec(io, row.spec, current.ledger.revision,true)
     const task = (await readWritingTask(io)) ?? await createWritingTask(io, row.spec, row.context.sessionId, this.owner)
-    await this.launch({ ...row.context, projectId: task.projectId }, task)
-    return { taskId: task.id, projectId: task.projectId }
+    if(row.deliveryGoal==='research-results'){
+      for(const path of task.spec.materials){const state=await snapshot(io);if(!Object.values(state.ledger.materials).some(material=>material.projectRelativePath===path))await registerMaterial(io,{relativePath:path,role:/\.(csv|json)$/iu.test(path)?'data':/\.pdf$/iu.test(path)?'paper':'notes',confirmExcludedFile:false},state.ledger.revision)}
+      task.status='paused';await saveWritingTask(io,task)
+    }
+    await beforeLaunch?.({...row.context,projectId:task.projectId},{deliveryGoal:row.deliveryGoal,allowTaskStructure:row.allowTaskStructure,researchKind:row.researchKind})
+    if(row.deliveryGoal!=='research-results')await this.launch({ ...row.context, projectId: task.projectId }, task)
+    return { taskId: task.id, projectId: task.projectId,deliveryGoal:row.deliveryGoal,allowTaskStructure:row.allowTaskStructure,researchKind:row.researchKind }
   }
   private streamFrame(taskId: string) {
     const task = this.active.get(taskId)?.task ?? this.taskStates.get(taskId)
@@ -764,6 +775,14 @@ export class WritingController {
     await saveWritingTask(io, task); await this.launch(input.context, task)
     return { task }
   }
+  async waitForDelivery(context:z.infer<typeof requestContext>,taskId:string|undefined,signal:AbortSignal){
+    const {io}=await resolveStore(this.ctx,context,new AbortController().signal)
+    if(!taskId)return undefined
+    const active=this.active.get(taskId)
+    if(active?.promise){await new Promise<void>((resolve,reject)=>{const abort=()=>reject(signal.reason??new Error('Cancelled'));signal.addEventListener('abort',abort,{once:true});active.promise!.then(()=>resolve(),reject).finally(()=>signal.removeEventListener('abort',abort));if(signal.aborted)abort()})}
+    return readWritingTask(io,taskId)
+  }
+  async searchForDelivery(io:FileStore,task:WritingTask,query:string,signal:AbortSignal){return this.retrieveSources(io,task,query,signal)}
   private async launch(context: z.infer<typeof requestContext>, task: WritingTask) {
     invariant(!this.active.has(task.id), 'WRITING_IN_PROGRESS', '任务已启动。')
     const controller = new AbortController(), active = { controller, pause: false, task, promise: undefined as Promise<void> | undefined }

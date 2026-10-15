@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import type { ExportFormat } from '../shared/presentation.ts'
 
 export type PaperView = 'edit' | 'preview' | 'split'
-export type DraftController = { dirty: boolean; canSave: boolean; save: () => Promise<void> }
+export type DraftController = { dirty: boolean; canSave: boolean; save: () => Promise<void>;adoptionHash?:()=>Promise<string> }
 export const FORMAT_LABELS: Record<ExportFormat, string> = { markdown: 'Markdown', latex: 'LaTeX', docx: 'Word' }
 export const TYPE_LABELS: Record<string, string> = { 'course-paper': '课程论文', 'literature-review': '文献综述', 'research-paper': '研究论文' }
 declare const __SF_KATEX_CSS__: string

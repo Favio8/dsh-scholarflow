@@ -17,6 +17,7 @@ import { workflowCall, syncWorkflowDuration } from '../pipeline/workflow-budget.
 import { isDetachedProjectPointer } from '../project/identity.ts'
 import { ensureNoAutomaticExecuting } from '../pipeline/automatic-lease.ts'
 import type { AutomaticChildGrant } from '../../shared/workflow-automatic.ts'
+import {experimentRecordSchema,researchGoalProfileSchema} from '../../shared/results.ts'
 
 const frozenSchema = z.object({ kind: z.literal('model-review'), id, reportId: id, contentHash: hash, input: modelReviewRequest,
   snapshot: runSnapshotSchema.refine(value => value.stage === 'review'), dependencyHash: hash, ledgerHash: hash, inputBytes: z.number().int().min(0).max(20 * 1024 * 1024),
@@ -25,7 +26,7 @@ const frozenSchema = z.object({ kind: z.literal('model-review'), id, reportId: i
     blocks: z.array(z.object({ id, sourceRange: z.object({ startUtf16: z.number().int().nonnegative(), endUtf16: z.number().int().nonnegative() }).strict(), sourceText: z.string() }).strict()).max(2000),
     project: z.object({ id, title: z.string(), type: projectType, language: z.enum(['zh-CN', 'en']) }).strict(),
     requirements: z.array(requirementSchema.pick({ id: true, kind: true, description: true, confirmation: true, constraint: true, verificationMethod: true })),
-    outline: outlineSchema, claims: z.array(claimSchema), evidence: z.array(evidenceSchema),
+    outline: outlineSchema, claims: z.array(claimSchema), evidence: z.array(evidenceSchema),experiments:z.array(experimentRecordSchema).optional(),claimChanges:z.array(z.object({before:claimSchema,after:claimSchema}).strict()).max(500).optional(),basis:z.object({documentHash:hash,text:z.string().max(2*1024*1024)}).strict().optional(),resultComparisons:z.array(z.record(z.string(),z.unknown())).optional(),resultFigures:z.array(z.record(z.string(),z.unknown())).optional(),researchApplicability:researchGoalProfileSchema.optional(),
     sources: z.array(sourceSchema.pick({ id: true, kind: true, title: true, authors: true, year: true, identifiers: true, citeKey: true, identity: true, textAccess: true })),
     priorIssues: z.array(issueSchema).max(100), writingProfile: z.string().max(65536), reviewProfile: z.string().max(65536),
     approvedMemory: z.partialRecord(z.enum(['decisions', 'terminology', 'writing-memory']), z.string().max(65536)),

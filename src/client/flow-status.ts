@@ -14,7 +14,7 @@ const taskNode: Record<WritingTask['stage'], FlowNodeId> = {
 }
 
 /** A read-only projection of current artifacts. Visiting a page never completes a step. */
-export function flowNodes(project: Project, options: { task?: WritingTask; spec?: CreationSpec; review?: FlowReview; dirty?: boolean; reviewActivity?: ReviewActivity } = {}): FlowNode[] {
+export function flowNodes(project: Project, options: { task?: WritingTask; spec?: CreationSpec; review?: FlowReview; dirty?: boolean; reviewActivity?: ReviewActivity;delivery?:{task?:{projectId:string;phase:string;status:string;goal?:string};readiness?:{state:string}} } = {}): FlowNode[] {
   const { ledger, config, document } = project, { task, spec, review, dirty, reviewActivity } = options
   const nodes: FlowNode[] = [
     { id: 'requirements', title: '写作要求', state: 'pending', label: '待填写', detail: '填写并保存本次写作要求。' },
@@ -62,7 +62,8 @@ export function flowNodes(project: Project, options: { task?: WritingTask; spec?
     }
   }
 
-  if (task && task.status !== 'completed') {
+  const delivery=options.delivery,usesLegacyTask=delivery?.task?.projectId!==ledger.projectId||delivery.task.phase==='first-draft'&&delivery.task.goal!=='research-results'
+  if (task && task.status !== 'completed' && usesLegacyTask) {
     const node = taskNode[task.stage]
     if (['running', 'queued'].includes(task.status)) update(node, 'running', task.status === 'queued' ? '准备中' : '进行中',
       ({ materials: '正在读取资料。', research: '正在检索公开文献。', evidence: '正在整理证据与引用。', outline: '正在规划章节内容。', drafting: '正在撰写正文。', review: '正在检查全文。', completed: '正在保存任务结果。' })[task.stage])
@@ -72,5 +73,10 @@ export function flowNodes(project: Project, options: { task?: WritingTask; spec?
   }
   if (reviewActivity) update('review', reviewActivity === 'running' ? 'running' : reviewActivity === 'failed' ? 'attention' : 'paused',
     ({ running: '检查中', paused: '已暂停', stopped: '已停止', failed: '可重试' })[reviewActivity], '打开 AI检查查看当前结果，或直接重试。')
+  if(delivery?.task?.projectId===ledger.projectId&&delivery.task.phase!=='first-draft'){
+    const running=['queued','running'].includes(delivery.task.status),state=dirty||document.externalChange?'needs-check':delivery.readiness?.state
+    update('review',running?'running':state==='ready'?'completed':state==='needs-check'?'pending':'attention',
+      running?'检查与完善中':state==='needs-adoption'?'待采用':state==='needs-materials'?'缺材料':state==='ready'?'已核对':'待核对','任务目标依据实际保存稿、当前检查与交付文件判定。')
+  }
   return nodes
 }

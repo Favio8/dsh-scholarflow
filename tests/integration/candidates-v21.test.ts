@@ -4,11 +4,12 @@ import { MemoryStore } from '../fixtures/memory-store.ts'
 import { initialize,prepareInit,snapshot } from '../../src/core/project/project.ts'
 import { saveManual } from '../../src/core/editing/proposals.ts'
 import { writeEditorBuffer } from '../../src/core/editing/buffer.ts'
-import { createCandidate,checkCandidate,prepareCandidateAdoption,adoptCandidate,recheckAdoptedCandidate,prepareCandidateModelReview } from '../../src/core/pipeline/candidates.ts'
+import { createCandidate,checkCandidate,prepareCandidateAdoption,adoptCandidate,recheckAdoptedCandidate,prepareCandidateModelReview,committedCandidateAdoption } from '../../src/core/pipeline/candidates.ts'
 import { runReview } from '../../src/core/review/review.ts'
-import { semanticReviewChecks } from '../../src/shared/review.ts'
+import { semanticReviewChecks,modelReviewOutputSchema } from '../../src/shared/review.ts'
 import { digest,json } from '../../src/core/store/files.ts'
 import { runFile,inputFile } from '../../src/core/pipeline/run-store.ts'
+import {confirmOutline} from '../../src/core/evidence/evidence.ts'
 const taskId='delivery_TEST_ONLY'
 async function setup(){const io=new MemoryStore();await initialize(io,await prepareInit(io,{title:'TEST_ONLY candidates',type:'course-paper'}));let current=await snapshot(io)
   await saveManual(io,'# TEST_ONLY\n\n## Body\n\nOriginal paragraph.\n',current.document.contentHash,0)
@@ -24,15 +25,20 @@ test('AT-196: two immutable revisions are checked at their actual positions, ado
   const modelPlan=await prepareCandidateModelReview(io,await context(),taskId,second.candidate.id,second.candidateHash,{providerId:'TEST_ONLY',modelId:'TEST_ONLY'})
   assert.equal(modelPlan.context.manuscript,second.candidate.text)
   // An explicit controlled TEST_ONLY call record. This is not a live model quality claim.
-  await io.write(runFile(modelPlan.snapshot.runId),json({schemaVersion:1,runId:modelPlan.snapshot.runId,projectId:modelPlan.snapshot.projectId,sessionId:modelPlan.snapshot.sessionId,status:'running',usedModelCalls:1,startedAt:'TEST_ONLY',updatedAt:'TEST_ONLY',planHash:modelPlan.contentHash,stage:'review',owner:{pid:process.pid,bootInstance:'TEST_ONLY'}}),undefined)
+  await io.write(runFile(modelPlan.snapshot.runId),json({schemaVersion:1,runId:modelPlan.snapshot.runId,projectId:modelPlan.snapshot.projectId,sessionId:modelPlan.snapshot.sessionId,status:'succeeded',usedModelCalls:1,startedAt:'TEST_ONLY',updatedAt:'TEST_ONLY',planHash:modelPlan.contentHash,stage:'review',owner:{pid:process.pid,bootInstance:'TEST_ONLY'}}),undefined)
   await io.write(inputFile(modelPlan.snapshot.runId),json(modelPlan.snapshot),undefined)
-  const checked=await checkCandidate(io,await context(),taskId,second.candidate.id,second.candidateHash,{plan:modelPlan,output:{checks:semanticReviewChecks.map(id=>({id,status:'pass',detail:'TEST_ONLY controlled semantic evidence'})),findings:[],rechecks:[],limitations:['TEST_ONLY controlled model, not live quality']}})
+  const output=modelReviewOutputSchema.parse({checks:semanticReviewChecks.map(id=>({id,status:'pass',detail:'TEST_ONLY controlled semantic evidence'})),findings:[],rechecks:[],limitations:['TEST_ONLY controlled model, not live quality']})
+  await io.write(`.scholarflow/task-delivery/${taskId}/calls/${modelPlan.snapshot.runId}-plan.json`,json(modelPlan),undefined)
+  await io.write(`.scholarflow/task-delivery/${taskId}/calls/${modelPlan.snapshot.runId}.json`,json({schemaVersion:1,projectId:modelPlan.snapshot.projectId,planHash:modelPlan.contentHash,status:'succeeded',output:JSON.stringify(output)}),undefined)
+  const checked=await checkCandidate(io,await context(),taskId,second.candidate.id,second.candidateHash,{plan:modelPlan,output})
   assert.equal((await snapshot(io)).document.text,original)
   assert.equal(JSON.parse((await io.read('.scholarflow/reviews/current.json'))!.text).reviewId,mainReview.report.id)
   const plan=await prepareCandidateAdoption(io,await context(),taskId,second.candidate.id,second.candidateHash,checked.check.id),captured=await context()
   const accepted=await adoptCandidate(io,captured,plan,digest(original))
   assert.equal((await snapshot(io)).document.text,second.candidate.text)
   const retry=await adoptCandidate(io,captured,plan,digest(original));assert.equal(retry.alreadyApplied,true);assert.equal(retry.revisionId,accepted.revisionId)
+  const cold=new MemoryStore(Object.fromEntries([...io.files].map(([path,file])=>[path,file.text]))),recovered=await committedCandidateAdoption(cold,await context(),taskId,second.candidate.id,plan.id)
+  assert.equal(recovered?.accepted.revisionId,accepted.revisionId);assert.equal(recovered?.plan.planHash,plan.planHash)
   const recheck=await recheckAdoptedCandidate(io,await context(),plan)
   assert.equal(recheck.semanticInherited,true)
   assert.equal((await io.read(`.scholarflow/drafts/${accepted.revisionId}/preimage.md`))!.text,original)
@@ -66,4 +72,30 @@ test('AT-196: changed review dependencies after adoption require actual semantic
   io.externalEdit('.scholarflow/profiles/review.md','changed TEST_ONLY reviewer')
   const result=await recheckAdoptedCandidate(io,await context(),plan)
   assert.equal(result.semanticInherited,false);assert.equal(result.needsSemanticCheck,true)
+})
+test('AT-192/193/196: mapped heading adjustments are reviewed in the candidate and publish with the final manuscript, preserving original coverage and outline history',async()=>{
+  const {io,context}=await setup(),outline={version:0,title:'TEST_ONLY',researchQuestion:'TEST_ONLY question',thesis:'TEST_ONLY scoped statement',confirmation:'draft' as const,sections:[{id:'section_TEST_ONLY',title:'Body',purpose:'TEST_ONLY content coverage',claimIds:[],missingEvidence:[]}]}
+  await confirmOutline(io,outline,(await context()).expectedLedgerRevision,0)
+  const current=await snapshot(io),text=current.document.text.replace('## Body','## Revised analysis')
+  const candidate=await createCandidate(io,await context(),{taskId,text,scope:'document',reason:'TEST_ONLY explicit scoped heading adjustment',outlineSections:[{id:'section_TEST_ONLY',title:'Revised analysis'}]})
+  assert.equal((await snapshot(io)).ledger.outline.sections[0].title,'Body')
+  const checked=await checkCandidate(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash)
+  assert.equal(checked.check.report.checks.find(check=>check.id==='section_section_TEST_ONLY')?.status,'pass')
+  await assert.rejects(createCandidate(io,await context(),{taskId,text,scope:'document',reason:'TEST_ONLY attempted coverage removal',outlineSections:[]}),{code:'CANDIDATE_OUTLINE_INVALID'})
+  const plan=await prepareCandidateAdoption(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash,checked.check.id)
+  await adoptCandidate(io,await context(),plan,current.document.contentHash)
+  assert.equal((await snapshot(io)).ledger.outline.sections[0].title,'Revised analysis');assert.equal((await snapshot(io)).document.text,text)
+  const history=JSON.parse((await io.read(`.scholarflow/planning/outline-history/${plan.id}.json`))!.text);assert.equal(history.previous.sections[0].title,'Body')
+  const recheck=await recheckAdoptedCandidate(io,await context(),plan);assert.equal(recheck.report.checks.find(check=>check.id==='section_section_TEST_ONLY')?.status,'pass')
+})
+test('AT-196/197: a charged unanswered Run cannot certify a check, and changed saved output blocks adoption',async()=>{
+  const {io,context}=await setup(),original=(await snapshot(io)).document.text,candidate=await createCandidate(io,await context(),{taskId,text:original+'\nTEST_ONLY correction.\n',reason:'TEST_ONLY',scope:'document'}),model=await prepareCandidateModelReview(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash,{providerId:'TEST_ONLY',modelId:'TEST_ONLY'}),output=modelReviewOutputSchema.parse({checks:semanticReviewChecks.map(id=>({id,status:'pass',detail:'TEST_ONLY controlled output against the actual candidate'})),findings:[],rechecks:[],limitations:['TEST_ONLY not a real quality result']})
+  const state={schemaVersion:1,runId:model.snapshot.runId,projectId:model.snapshot.projectId,sessionId:model.snapshot.sessionId,status:'running',usedModelCalls:1,startedAt:'TEST_ONLY',updatedAt:'TEST_ONLY',planHash:model.contentHash,stage:'review',owner:{pid:process.pid,bootInstance:'TEST_ONLY'}}
+  await io.write(runFile(state.runId),json(state),undefined);await io.write(inputFile(state.runId),json(model.snapshot),undefined)
+  await assert.rejects(checkCandidate(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash,{plan:model,output}),{code:'CANDIDATE_CALL_UNVERIFIED'})
+  io.externalEdit(runFile(state.runId),json({...state,status:'succeeded'}));const receiptPath=`.scholarflow/task-delivery/${taskId}/calls/${state.runId}.json`,receipt=json({schemaVersion:1,projectId:state.projectId,planHash:model.contentHash,status:'succeeded',output:JSON.stringify(output)});await io.write(receiptPath,receipt,undefined);await io.write(`.scholarflow/task-delivery/${taskId}/calls/${state.runId}-plan.json`,json(model),undefined)
+  await assert.rejects(checkCandidate(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash,{plan:model,output:{...output,limitations:['TEST_ONLY invented replacement output']}}),{code:'CANDIDATE_OUTPUT_UNVERIFIED'})
+  const checked=await checkCandidate(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash,{plan:model,output}),plan=await prepareCandidateAdoption(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash,checked.check.id)
+  io.externalEdit(receiptPath,receipt+'\n')
+  await assert.rejects(adoptCandidate(io,await context(),plan,digest(original)),{code:'CANDIDATE_CALL_UNVERIFIED'});assert.equal((await snapshot(io)).document.text,original)
 })

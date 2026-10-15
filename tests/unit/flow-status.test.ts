@@ -28,6 +28,15 @@ test('empty projects do not turn the placeholder or unstarted checks into comple
   assert.equal(JSON.stringify(project), before, 'Displaying status cannot mutate authoritative state')
 })
 
+test('AT-208: research delivery does not present its unused legacy writing task as paused materials',async()=>{
+  const {project,task}=await fixture(),delivery={task:{projectId:project.ledger.projectId,phase:'finished',status:'completed-with-issues',goal:'research-results'},readiness:{state:'ready'}}
+  const legacy={...task,stage:'materials' as const,status:'paused' as const}
+  assert.equal(node(project,'materials',{task:legacy,delivery}).state,'pending')
+  assert.equal(node(project,'review',{task:legacy,delivery}).label,'已核对')
+  assert.equal(node(project,'review',{task:legacy,delivery,dirty:true}).state,'pending')
+  assert.equal(node(project,'materials',{task:legacy}).state,'paused','legacy standalone tasks keep their original behavior')
+})
+
 test('saved requirements and confirmed outline are independent of running and paused drafting', async () => {
   const { project, spec, task } = await fixture()
   project.ledger.outline = { ...project.ledger.outline, confirmation: 'confirmed', sections: [{ id: 'sec_TEST_ONLY', title: '正文', purpose: '', claimIds: [], missingEvidence: [] }] }

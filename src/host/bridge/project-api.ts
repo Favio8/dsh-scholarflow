@@ -153,8 +153,9 @@ export async function resolveStore(ctx: Host, context: RequestContext, signal: A
   const io = new HostFileStore(ctx, { canonicalRoot: root, manuscriptDir, sessionId: context.sessionId, revalidate, readOnly: readonlyFuture }, signal)
   if (!readonlyFuture && projectId) for (const path of ['.scholarflow/data/ledger.json', '.scholarflow/resources.lock.json'])
     invariant((schemaVersionOf((await io.read(path))?.text) ?? 1) <= 1, 'PROJECT_SCHEMA_TOO_NEW', '项目记录或资源锁版本过新；请只读查看原文件，当前操作已停止。')
-  if (!readonlyFuture && projectId && !(await inspectRecovery(io, manuscriptDir)).pending.length) {
-    const current = await snapshot(io); await readBindings(io, current.config)
+  if (!readonlyFuture && projectId) {
+    const validate=async()=>{if(!(await inspectRecovery(io,manuscriptDir)).pending.length){const current=await snapshot(io);await readBindings(io,current.config)}}
+    if(io.observe)await io.observe(validate);else await validate()
   }
   return { io, binding, manuscriptDir, bindingDiagnostic, identityCopies }
 }

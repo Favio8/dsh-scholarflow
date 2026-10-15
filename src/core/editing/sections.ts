@@ -5,6 +5,7 @@ import type { Outline } from '../../shared/schema.ts'
 import type { z } from 'zod'
 
 const titleKey = (title: string) => title.normalize('NFC').trim().replace(/\s+/gu, ' ')
+export function documentHeadings(source:string){return (parseMarkdown(source).children??[]).filter(node=>node.type==='heading').map(node=>({title:titleKey(textOf(node)),depth:node.depth!,start:node.position!.start.offset!,end:node.position!.end.offset!}))}
 export function outlineOrder(outline: Outline) {
   const ordered: Outline['sections'] = [], seen = new Set<string>()
   const visit = (parentId?: string) => {
@@ -29,9 +30,7 @@ export function sectionTarget(source: string, outline: Outline, sectionId: strin
   invariant(depth <= 6, 'SECTION_SCOPE_UNSUPPORTED', '章节层级超过 Markdown 六级标题，不能安全生成。')
   const title = titleKey(section.title)
   invariant(ordered.filter(row => titleKey(row.title) === title).length === 1, 'SECTION_TARGET_AMBIGUOUS', '大纲存在相同章节标题；请先明确标题，不能猜测目标章节。')
-  const headings = (parseMarkdown(source).children ?? []).filter(node => node.type === 'heading').map(node => ({
-    title: titleKey(textOf(node)), depth: node.depth!, start: node.position!.start.offset!, end: node.position!.end.offset!,
-  }))
+  const headings = documentHeadings(source)
   const matches = headings.filter(heading => heading.title === title)
   invariant(matches.length <= 1, 'SECTION_TARGET_AMBIGUOUS', '正文存在多个相同章节标题；未猜测修改目标。')
   const heading = matches[0]

@@ -7,6 +7,8 @@ import { projectMarkdown, unicodeBoundary } from '../editing/markdown.ts'
 import { approvedMemory } from '../project/memory.ts'
 import { resolveStageSkills, type SkillReader } from '../skills/bindings.ts'
 import { workflowAssociation } from '../pipeline/workflow-budget.ts'
+import { inspectResults } from '../research/results.ts'
+import {claimSchema,hash} from '../../shared/schema.ts'
 
 const K = modelReviewKeys
 /* Field names are interpolated from the schema, never retyped. "旧 issueId" in the earlier prompts
@@ -40,7 +42,10 @@ export const CROSS_SECTION_REVIEW_SYSTEM = '你是 ScholarFlow 的有限学术�
     rechecks: [{ issueId: 'iss_给定旧问题ID', status: 'unknown', reason: '针对当前文字复查后仍无法判定是否已修复的具体原因。', blockId: 'blk_当前实际源码块ID', quote: '该块源码中连续原样的一段引文' }], limitations: ['实际限制'] })}`
 
 export function modelReviewSystem(plan: { context: { semanticScope?: string } }) {
-  return plan.context.semanticScope === 'sf-cross-section-v1' ? CROSS_SECTION_REVIEW_SYSTEM : MODEL_REVIEW_SYSTEM
+  return (plan.context.semanticScope === 'sf-cross-section-v1' ? CROSS_SECTION_REVIEW_SYSTEM : MODEL_REVIEW_SYSTEM)+
+    '\n如有 basis，请对照原已保存主稿核对候选，保留未涉及内容和人工编辑；不要靠删除原论点、研究缺项或要求制造通过。必要修正须有实际依据，无法定位被删除内容时可明确报告检查 fail 和实际限制，不编造当前正文位置。'+
+    '\n另外返回 requirementAssessments 数组，逐项评估给定 confirmation=confirmed 且 verificationMethod=model-assisted 的要求；每项仅有 requirementId、status、detail、quotes。quotes 每项仅有 blockId、quote，引用当前主体实际源码块内唯一连续原样正文。pass 必须有实际实质正文引文，只有标题或规划不能通过。不能改写规则／人工验证项，页数、真实执行实验和最终提交不能由模型宣布通过。无适用要求返回空数组。'+
+    '\n有 experiments 和 user-supplied measurement 时，核对实验条件、单位、指标方向、数据集与划分，不能跨协议直接比较。缺消融不能宣称模块贡献已证实，无真实重复运行或统计依据不能声称标准差或统计显著；摘要、贡献、讨论和结论须限定实际研究范围。作者供给确认不表示工具复现实验。计划与未完成部分只影响依赖段落；理论研究不强制实验字段。claimChanges 记录候选论点的原版本与拟更新版本，须核对原贡献是否保留、限定或因新结果修正；旧数字与过期证据只作版本对照，不能当作当前事实。'
 }
 
 export async function prepareModelReview(io: FileStore, request: unknown, model: { providerId: string; modelId: string; reasoningEffort?: string; maxOutputTokens?: number }, skillReader?: SkillReader) {
@@ -49,7 +54,9 @@ export async function prepareModelReview(io: FileStore, request: unknown, model:
     'STALE_LEDGER_REVISION', '模型审查需要当前项目与数据版本。')
   invariant(!current.document.externalChange, 'STALE_DOCUMENT_VERSION', '先明确采用外部正文再审查。')
   const projection = projectMarkdown(current.document.text), cited = new Set(projection.citationOrder)
-  const sources = Object.values(current.ledger.sources).filter(source => cited.has(source.citeKey)).map(source => ({ id: source.id, kind: source.kind, title: source.title,
+  const ownSourceIds=new Set(Object.values(current.ledger.evidence).filter(item=>item.measurement?.origin==='user-supplied'||current.ledger.sources[item.sourceId]?.kind==='user-result').map(item=>item.sourceId))
+  const experiments=Object.values((await inspectResults(io)).experiments.records).filter(record=>record.status==='current')
+  const sources = Object.values(current.ledger.sources).filter(source => cited.has(source.citeKey)||ownSourceIds.has(source.id)).map(source => ({ id: source.id, kind: source.kind, title: source.title,
     authors: source.authors, year: source.year, identifiers: source.identifiers, citeKey: source.citeKey, identity: source.identity, textAccess: source.textAccess }))
   const relevantClaims = new Set([...current.ledger.outline.sections.flatMap(section => section.claimIds), ...Object.values(current.ledger.claimAnchors)
     .filter(anchor => anchor.status === 'current' && anchor.documentHash === current.document.contentHash).flatMap(anchor => anchor.claimIds)])
@@ -66,11 +73,15 @@ export async function prepareModelReview(io: FileStore, request: unknown, model:
   const baseReport = previous.report && !previous.stale ? previous.report : evaluateReview(policy)
   const priorIssues = Object.values(current.ledger.reviewIssues).filter(issue => issue.checkMethod === 'model-assisted' && issue.location && issue.state !== 'resolved')
   invariant(priorIssues.length <= 100 && projection.blocks.length <= 2000, 'REVIEW_SCOPE_TOO_LARGE', '审查问题或段落超过本阶段限额，请缩小稿件范围。')
+  const changesFile=await io.read('.scholarflow/research/candidate-claim-changes.json'),claimChanges=changesFile?(JSON.parse(changesFile.text) as Array<{before:unknown;after:unknown}>).map(row=>({before:claimSchema.parse(row.before),after:claimSchema.parse(row.after)})):[]
+  const basisFile=await io.read('.scholarflow/research/candidate-basis.json'),basis=basisFile?JSON.parse(basisFile.text) as {documentHash:string;text:string}:undefined
+  invariant(!basis||hash.safeParse(basis.documentHash).success&&typeof basis.text==='string'&&digest(basis.text)===basis.documentHash,'CANDIDATE_BASIS_INVALID','候选原稿对照记录不完整。')
+  invariant(claimChanges.length<=500,'REVIEW_SCOPE_TOO_LARGE','待核对论点更新超过当前范围。')
   const context = { manuscript: current.document.text, blocks: projection.blocks.map(block => ({ id: block.id, sourceRange: { startUtf16: block.start, endUtf16: block.end },
     sourceText: current.document.text.slice(block.start, block.end) })), project: current.config.project,
     requirements: Object.values(current.ledger.requirements).map(requirement => ({ id: requirement.id, kind: requirement.kind, description: requirement.description,
       confirmation: requirement.confirmation, constraint: requirement.constraint, verificationMethod: requirement.verificationMethod })),
-    outline: current.ledger.outline, claims, evidence, sources, priorIssues, writingProfile: writing.text, reviewProfile: reviewer.text,
+    outline: current.ledger.outline, claims, evidence, sources,experiments,claimChanges,...(basis&&{basis}),resultComparisons:policy.results.comparisons.filter(row=>row.current).map(row=>row.record),resultFigures:policy.results.figures,researchApplicability:policy.goalProfile, priorIssues, writingProfile: writing.text, reviewProfile: reviewer.text,
     approvedMemory: current.config.writing.useApprovedProjectMemory ? await approvedMemory(io, current.ledger.projectId) : {}, academicSkills: skills.resources,
     scope: '当前全部已保存主稿、已确认项目事实、当前有效且已选材料的定位证据和本阶段固定说明；未选材料、原始资料全文和聊天历史不进入该请求。',
     knownLimitations: baseReport.checks.filter(check => check.status !== 'pass').map(check => ({ id: check.id, status: check.status, detail: check.detail })),
@@ -138,6 +149,14 @@ export function validateModelReview(plan: ModelReviewPlan, candidate: unknown): 
   for (const recheck of output.rechecks) { modelLocation(plan, recheck.blockId, recheck.quote)
     invariant(recheck.status !== 'pass' || !findingIds.has(recheck.issueId), 'MODEL_REVIEW_INVALID', '同一问题不能同时通过复查并再次发现。')
     invariant(plan.context.priorIssues.some(issue => issue.id === recheck.issueId), 'MODEL_REVIEW_REFERENCES_INVALID', '复查身份不属于本次旧模型问题范围。') }
+  const assessments=output.requirementAssessments??[]
+  invariant(new Set(assessments.map(row=>row.requirementId)).size===assessments.length,'MODEL_REVIEW_INVALID','要求检查身份不得重复。')
+  for(const assessment of assessments){const requirement=plan.context.requirements.find(row=>row.id===assessment.requirementId)
+    invariant(requirement?.confirmation==='confirmed'&&requirement.verificationMethod==='model-assisted','MODEL_REVIEW_REFERENCES_INVALID','模型只能评估当前已确认的语义要求，不能改写规则或人工条件。')
+    invariant(assessment.status!=='pass'||assessment.quotes.length>0,'MODEL_REVIEW_INVALID','要求通过必须引用实际实质正文。')
+    for(const quote of assessment.quotes){modelLocation(plan,quote.blockId,quote.quote);const block=projectMarkdown(plan.context.manuscript).blocks.find(row=>row.id===quote.blockId)
+      invariant(block&&block.node.type!=='heading','MODEL_REVIEW_INVALID','标题不能代替要求的实质正文。')}
+  }
   return output
 }
 
@@ -180,6 +199,11 @@ export function buildModelReviewReport(plan: ModelReviewPlan, candidate: ModelRe
   }
   report.limitations = [...report.limitations.filter(line => !line.startsWith('本轮只执行')), ...output.limitations,
     '本次模型辅助审查使用列出的当前主稿、有效定位证据和固定说明；模型判断不替代人工核对、出版身份验证或真实实验。未关闭旧问题不因本轮未提及而消失。']
+  for(const assessment of output.requirementAssessments??[]){const key=`requirement_${assessment.requirementId}`,issueId=`issue_${digest(key).slice(7,31)}`
+    report.checks=report.checks.map(check=>check.id===key?{id:key,status:assessment.status,method:'model-assisted' as const,detail:assessment.detail}:check)
+    if(assessment.status==='pass')report.issues=report.issues.filter(issue=>issue.id!==issueId)
+    else{const existing=report.issues.find(issue=>issue.id===issueId);if(existing){existing.title=assessment.detail;existing.explanation=assessment.detail;existing.checkMethod='model-assisted';if(assessment.quotes[0])existing.location=modelLocation(plan,assessment.quotes[0].blockId,assessment.quotes[0].quote)}}
+  }
   return { report: reviewReportSchema.parse(report), output, passedIds }
 }
 export async function existingModelReview(io: FileStore, plan: ModelReviewPlan, candidate: ModelReviewOutput) {

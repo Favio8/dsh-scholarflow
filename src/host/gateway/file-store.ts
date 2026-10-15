@@ -24,6 +24,7 @@ export class HostFileStore implements FileStore {
   private binding: GatewayBinding
   private signal: AbortSignal
   private insideLock = false
+  private insideObservation=false
   constructor(ctx: Host, binding: GatewayBinding, signal: AbortSignal) { this.ctx = ctx; this.binding = binding; this.signal = signal }
   private async target(path: string, write = false, signal: AbortSignal = this.signal) {
     if (path !== '') relativePath.parse(path)
@@ -42,7 +43,7 @@ export class HostFileStore implements FileStore {
     return target
   }
   async read(path: string): Promise<FileImage | undefined> {
-    if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
+    if (!this.insideLock && !this.insideObservation) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
     const target = await this.target(path)
     const before = await this.ctx.fs.stat(target, this.signal)
     if (!before) return undefined
@@ -105,14 +106,14 @@ export class HostFileStore implements FileStore {
     return target
   }
   async resourceStat(path: string): Promise<FileEntry | undefined> {
-    if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
+    if (!this.insideLock && !this.insideObservation) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
     const target = await this.resourceTarget(path)
     if (!target) return undefined
     const row = await this.ctx.fs.stat(target, this.signal)
     return row ? { path, type: row.type === 'file' || row.type === 'directory' ? row.type : 'other', size: row.size } : undefined
   }
   async readResourceBytes(path: string, maxBytes: number) {
-    if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
+    if (!this.insideLock && !this.insideObservation) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
     invariant(path.split('/').length >= 5 && path.startsWith('.scholarflow/skills/'), 'SKILL_RESOURCE_PATH_INVALID', '资源内容必须位于命名空间与具体 Skill 目录下，不能读取阶段控制文件。')
     invariant(Number.isInteger(maxBytes) && maxBytes > 0 && maxBytes <= 20 * 1024 * 1024, 'CONTENT_TOO_LARGE', '资源读取最多 20 MiB。')
     const target = await this.resourceTarget(path)
@@ -126,7 +127,7 @@ export class HostFileStore implements FileStore {
     return bytes
   }
   async stat(path: string): Promise<FileEntry | undefined> {
-    if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
+    if (!this.insideLock && !this.insideObservation) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
     const result = await this.ctx.fs.stat(await this.target(path), this.signal)
     return result ? { path, type: result.type === 'file' || result.type === 'directory' ? result.type : 'other', size: result.size } : undefined
   }
@@ -184,7 +185,7 @@ export class HostFileStore implements FileStore {
     invariant(digest(await this.readResourceBytes(path, Math.max(1, frozen.byteLength))) === digest(frozen), 'SKILL_SOURCE_CHANGED', '新资源字节未通过复核，副本未启用。')
   }
   async list(path: string): Promise<FileEntry[]> {
-    if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
+    if (!this.insideLock && !this.insideObservation) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
     const entries = await this.ctx.fs.listDir(await this.target(path), this.signal)
     return entries.map((entry: Host) => ({ path: path ? `${path}/${entry.name}` : entry.name,
       type: ['file', 'directory'].includes(entry.type) ? entry.type : 'other', size: entry.size ?? 0 }))
@@ -196,7 +197,7 @@ export class HostFileStore implements FileStore {
   }
   async readExportBytes(path: string) {
     this.exportPath(path)
-    if (!this.insideLock) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
+    if (!this.insideLock && !this.insideObservation) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
     const target = await this.target(path), before = await this.ctx.fs.stat(target, this.signal)
     if (!before) return undefined
     invariant(before.type === 'file' && before.size <= 32 * 1024 * 1024, 'CONTENT_TOO_LARGE', 'Word 交付不是限额内的普通文件。')
@@ -234,7 +235,14 @@ export class HostFileStore implements FileStore {
     invariant(image && digest(image.bytes) === digest(bytes), 'DELIVERY_CHANGED', 'Word 交付字节不一致。')
     return { version: image.version }
   }
+  async observe<T>(operation:()=>Promise<T>):Promise<T>{
+    invariant(!this.insideObservation&&!this.insideLock,'PROJECT_LOCKED','不允许嵌套一致性观察。')
+    const key=this.binding.canonicalRoot,previous=queues.get(key)??Promise.resolve()
+    const pending=previous.catch(()=>undefined).then(async()=>{this.insideObservation=true;try{await this.binding.revalidate();return await operation()}finally{this.insideObservation=false}})
+    queues.set(key,pending);try{return await pending}finally{if(queues.get(key)===pending)queues.delete(key)}
+  }
   async write(path: string, text: string, expected: FileImage | undefined): Promise<FileImage> {
+    invariant(!this.insideObservation,'PROJECT_READONLY','一致性读取不能写入项目。')
     invariant(!this.binding.readOnly, 'PROJECT_READONLY', '诊断读取通道不允许写入。')
     await this.binding.revalidate()
     const target = await this.target(path, true)
@@ -245,6 +253,7 @@ export class HostFileStore implements FileStore {
     return { text, version: outcome.version }
   }
   async lock<T>(operation: () => Promise<T>): Promise<T> {
+    invariant(!this.insideObservation,'PROJECT_READONLY','一致性读取不能取得写权限。')
     invariant(!this.binding.readOnly, 'PROJECT_READONLY', '诊断读取通道不创建写锁或恢复元数据。')
     const key = this.binding.canonicalRoot
     const previous = queues.get(key) ?? Promise.resolve()

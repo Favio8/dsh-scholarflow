@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useSyncExternalStore, useCallback } from 'react'
 import { PaperVersions } from './paper-versions.tsx'
 import { PaperMaterials, MATERIALS_CSS } from './paper-materials.tsx'
+import {DeliveryProgress} from './task-delivery.tsx'
 import { MOTION_CSS } from './motion/tokens.ts'
 import { THEME_CSS } from './theme/tokens.ts'
 import { OVERLAY_CSS } from './middle-overlay.tsx'
@@ -189,6 +190,7 @@ export function apply(ctx: Host) {
     const [outlineOpen, setOutlineOpen] = useState(false)
     const [flowTask, setFlowTask] = useState<{task?: WritingTask; spec?: CreationSpec}>({})
     const [flowReview, setFlowReview] = useState<FlowReview>()
+    const [deliveryValue,setDeliveryValue]=useState<any>()
     const [reviewActivity, setReviewActivity] = useState<ReviewActivity>()
     const navigateTab = (next: (typeof TABS)[number]) => { setOutlineOpen(false); setTab(next) }
     const navigateFlow = (node: FlowNodeId) => {
@@ -317,10 +319,10 @@ export function apply(ctx: Host) {
       {ready && <>
         <div className="sf-paper-toolbar"><nav className="sf-paper-views" aria-label="正文视图">
           {(['edit', 'preview'] as const).map((name, index) => <button className="sf-ghost" key={name} disabled={generating && name!=='preview'} aria-pressed={tab === 'Draft' && !outlineOpen && view === name} onClick={() => { navigateTab('Draft'); setView(name) }}>{['编辑', '预览'][index]}</button>)}
-        </nav><FlowNavigation nodes={flowNodes(project,{...flowTask,review:flowReview,dirty:editor?.dirty,reviewActivity})} current={flowCurrent} onNavigate={navigateFlow} />
+        </nav><FlowNavigation nodes={flowNodes(project,{...flowTask,review:flowReview,dirty:editor?.dirty,reviewActivity,delivery:deliveryValue})} current={flowCurrent} onNavigate={navigateFlow} />
         {/* v1.20: the progress report joins the work bar as a pill instead of a band of its own, so
             the run stays readable while the manuscript gets the height back (SF-185). */}
-        <div className="sf-toolbar-progress" hidden={tab!=='Draft'||outlineOpen}><WritingProgress key={`progress_${bindingKey}_${project.binding.projectId}`} variant="pill" project={project} api={api} context={context} refresh={refresh} onManage={navigateTab} onRecords={()=>{setHistoryView('runs');navigateTab('History')}} onCheck={(row:any)=>{navigateTab(row.page);if(row.page==='Draft')setView('preview');requestAnimationFrame(()=>{const selector=row.page==='Draft'?`[data-sf-block="${window.CSS.escape(row.key)}"]`:row.page==='Review'?`[data-sf-review-id="${window.CSS.escape(row.key)}"]`:undefined;if(selector)confirmationRoot.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({block:'center'})})}} onTask={(result:any)=>{if(bindingKey!==liveBinding.current)return;setGenerationMode(result.task?.mode);setFlowTask(previous=>({task:result.task,spec:result.spec??previous.spec??result.task?.spec}))}} /></div>
+        <div className="sf-toolbar-progress" hidden={tab!=='Draft'||outlineOpen}><DeliveryProgress key={`delivery_${bindingKey}`} project={project} dirty={editor?.dirty} api={api} context={context} refresh={refresh} onState={setDeliveryValue} onOpen={()=>navigateTab("Review")}/><WritingProgress key={`progress_${bindingKey}_${project.binding.projectId}`} variant="pill" project={project} api={api} context={context} refresh={refresh} onManage={navigateTab} onRecords={()=>{setHistoryView('runs');navigateTab('History')}} onCheck={(row:any)=>{navigateTab(row.page);if(row.page==='Draft')setView('preview');requestAnimationFrame(()=>{const selector=row.page==='Draft'?`[data-sf-block="${window.CSS.escape(row.key)}"]`:row.page==='Review'?`[data-sf-review-id="${window.CSS.escape(row.key)}"]`:undefined;if(selector)confirmationRoot.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({block:'center'})})}} onTask={(result:any)=>{if(bindingKey!==liveBinding.current)return;setGenerationMode(result.task?.mode);setFlowTask(previous=>({task:result.task,spec:result.spec??previous.spec??result.task?.spec}))}} /></div>
         <details className="sf-paper-menu"><summary aria-label="更多论文选项"><WorkbenchIcon kind="more" /></summary><div className="sf-paper-menu-popover">
           {(['Overview','Settings','History'] as const).map(name=><button key={name} onClick={e=>{closeMenu(e.currentTarget);if(name==='History')setHistoryView('versions');navigateTab(name)}}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
         </div></details></div>
@@ -331,7 +333,7 @@ export function apply(ctx: Host) {
           <div hidden={tab!=='History'} className="sf-history-tabs" role="tablist" aria-label="历史类型">{([['versions','稿件版本'],['runs','运行与恢复'],['deliveries','导出记录']] as const).map(([name,label])=><button role="tab" aria-selected={historyView===name} key={name} onClick={()=>setHistoryView(name)}>{label}</button>)}</div>
           <div id="sf-panel-History" role="tabpanel" aria-label="版本历史" hidden={tab !== 'History' || historyView !== 'versions'}><PaperVersions project={project} api={api} context={context} refresh={refresh} /></div>
           <ReviewExport key={`review_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} mode={tab==='History'?historyView==='deliveries'?'Export':historyView==='runs'?'ReviewHistory':tab:tab} format={format} exportTrigger={exportTrigger} editor={editor}
-            onReviewState={publishFlowReview} onReviewActivity={publishReviewActivity}
+            onReviewState={publishFlowReview} onReviewActivity={publishReviewActivity} deliveryValue={deliveryValue?.task?.projectId===project.binding.projectId?deliveryValue:undefined}
             onSources={()=>navigateTab('Research')} onLocate={location => { setIssueLocation({ ...location, request: crypto.randomUUID() }); setView('preview'); navigateTab('Draft') }} />
           <div id="sf-panel-Draft" data-sf-tool={draftTool} role="tabpanel" aria-label={draftTool ? TAB_LABELS[TABS.indexOf(draftTool)] : '正文'} hidden={tab !== 'Draft' && !draftTool}>
             <Draft key={`draft_${project.binding.projectId}`} project={project} context={context} api={api} refresh={refresh} run={act} busy={busy} issueLocation={issueLocation}

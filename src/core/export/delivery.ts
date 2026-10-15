@@ -45,7 +45,7 @@ export async function prepareDelivery(io: FileStore, format: ExportFormat = 'mar
     ledgerRevision: current.ledger.revision, ledgerHash: current.ledgerHash, configHash: current.configHash, dependencyHash: input.dependencyHash,
     reviewId: review.report?.id, reviewState, sourceIds, unresolvedIssueIds: issues.filter(issue => issue.state !== 'resolved').map(issue => issue.id),
     reviewedAllowed: reviewed,referenceCount:grouped.sources.length, limitations: review.report?.limitations ?? ['当前稿件尚未执行审查；只能导出工作草稿。'],
-    format,imageHash:assets.hash,imageCount:assets.images.length,formats: [...(format === 'markdown' ? [] : [format]), 'markdown', 'bibtex', 'quality-report'],
+    format,alsoLatex:input.goalProfile?.goal==='research-results',imageHash:assets.hash,imageCount:assets.images.length,formats: [...new Set([...(format === 'markdown' ? [] : [format]),...(input.goalProfile?.goal==='research-results'?['latex']:[]), 'markdown', 'bibtex', 'quality-report'])],
     // The scan runs here so the delivery states what the layout did and did not do, rather
     // than leaving the reader to find out in Word.
     formatNotes: format === 'docx' ? [...scanDocument(projectMarkdown(current.document.text)).formatNotes,
@@ -76,8 +76,8 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
     const sources=citationGroups(assets.text,ledger).sources,apa=writingSpec?.typography?.referenceStyle==='apa7'
     const labels=apa?citationPresentation(assets.text,ledger,'apa7').labels:undefined
     const exportedMarkdown=apa&&sources.length?publicationMarkdown(assets.text,labels)+(scanDocument(projectMarkdown(assets.text)).hasReferencesHeading?'\n\n':'\n\n## '+(config.project.language==='en'?'References':'参考文献')+'\n\n')+apaReferences(sources).map(([,entry])=>entry).join('\n\n')+'\n':canonicalCitationText(assets.text,citationGroups(assets.text,ledger).keyMap)
-    const mixedLength = ledger.requirements.writing_length?.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1'
-    const statistics=wordStats(current.document.text,{bodyOnly:true,sectionKinds:ledger.outline.sections}),words=ledger.requirements.writing_length?.constraint?.unit==='words'||!ledger.requirements.writing_length?.constraint?.unit&&(writingSpec?.countingPolicy.unit??writingSpec?.language)==='en'
+    const lengthRule=ledger.requirements.writing_length??ledger.requirements.writing_length_max,mixedLength = lengthRule?.constraint?.countingPolicyId === 'sf-body-han-plus-western-v1'
+    const statistics=wordStats(current.document.text,{bodyOnly:true,sectionKinds:ledger.outline.sections}),words=lengthRule?.constraint?.unit==='words'||!lengthRule?.constraint?.unit&&(writingSpec?.countingPolicy.unit??writingSpec?.language)==='en'
     const lengthUnit = mixedLength ? '字词合计' : words ? '词' : '汉字'
     const actualLength = mixedLength ? statistics.chineseCharacters + statistics.westernWords:words?statistics.westernWords:statistics.chineseCharacters
     const lengthDifference = actualLength !== undefined && writingSpec ? actualLength - writingSpec.targetLength : undefined
@@ -97,8 +97,14 @@ export async function createDelivery(io: FileStore, plan: DeliveryPlan, delivery
       '- 本报告不提供课程成绩、接收概率或学术真实性保证。', '' ].join('\n')
     const root = `${config.paths.manuscriptDir}/exports/${deliveryId}`
     const files: Array<{ relativePath: string; text: string; encoding?: 'base64' }> = [{ relativePath: 'paper.md', text: exportedMarkdown }, { relativePath: 'references.bib', text: bibliography(current.document.text, ledger,true) }, { relativePath: 'quality-report.md', text: report }]
+    if(plan.alsoLatex){const support=await reviewInput(io)
+      files.push({relativePath:'research-support.json',text:json({schemaVersion:1,documentHash:plan.documentHash,revisionId:plan.revisionId,scope:'内部作者结果与正文依据；未复现实验，原始日志未包含。',
+        experiments:Object.values(support.results.experiments?.records??{}).filter(row=>row.status==='current').map(row=>({id:row.id,version:row.version,title:row.title,conditions:row.conditions,sourceHash:row.sourceHash,links:row.links,
+          measurements:row.measurementEvidenceIds.map(id=>({id,measurement:ledger.evidence[id]?.measurement,locator:ledger.evidence[id]?.locator,validation:ledger.evidence[id]?.validation}))})),
+        figures:support.results.figures,comparisons:support.results.comparisons.map(row=>({id:row.id,evidenceIds:row.evidenceIds,current:row.current,comparison:row.record.comparison})),
+        paragraphLinks:Object.values(ledger.claimAnchors).filter(row=>row.status==='current'&&row.documentHash===plan.documentHash).map(row=>({blockId:row.blockId,claimIds:row.claimIds})),limitations:plan.limitations})})}
     for(const image of assets.images)if(!files.some(file=>file.relativePath===image.relativePath))files.push({relativePath:image.relativePath,text:Buffer.from(image.bytes).toString('base64'),encoding:'base64'})
-    if (plan.format === 'latex') files.unshift({ relativePath: 'paper.tex',
+    if (plan.format === 'latex'||plan.alsoLatex) files.unshift({ relativePath: 'paper.tex',
       text: latexDocument(assets.text, config, current.ledger, writingSpec?.typography,assets.images) })
     // 排版 is read from the confirmed spec, not from prose: the requirement's own fields are
     // what actually shapes the exported page (SPEC v1.2 §16.1).

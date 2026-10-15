@@ -193,6 +193,10 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const [spec, setSpec] = useState<CreationSpec>(() => saved?.spec ? restoreCreationDraft(saved.spec) : initial), [step, setStep] = useState(saved?.step ?? 0)
   const [attemptedOutline, setAttemptedOutline] = useState<string>(() => restoreOutlineInputKey(saved?.attemptedOutline ?? ''))
   const [acceptedOutline, setAcceptedOutline] = useState<string>(() => restoreOutlineInputKey(saved?.acceptedOutline ?? ''))
+  const [deliveryGoal,setDeliveryGoal]=useState<'quick-draft'|'course-delivery'|'research-results'>(saved?.deliveryGoal??'quick-draft'),[allowTaskStructure,setAllowTaskStructure]=useState(saved?.allowTaskStructure??false)
+  const [researchKind,setResearchKind]=useState<'ai-method'|'systems'|'benchmark'|'theoretical'>(saved?.researchKind??'ai-method')
+  const [researchInputs,setResearchInputs]=useState<Record<string,string>>(saved?.researchInputs??{})
+  const researchRole=(path:string)=>researchInputs[path]??(/\.(csv|json)$/iu.test(path)?'results':/\.(png|jpe?g)$/iu.test(path)?'figure':'literature')
   const inputKey = outlineInputKey(spec)
   const latestSpec = useRef(spec); latestSpec.current = spec
   // The direction the user actually moved in, so going back does not look like going forward.
@@ -225,7 +229,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
   const changeOutput = (manuscriptDir: string) => {
     update({ manuscriptDir }); setOutputConflict(undefined); setError(''); setErrorInfo(undefined)
   }
-  useEffect(() => { try { localStorage.setItem(key, JSON.stringify({ spec, step, attemptedOutline, acceptedOutline })) } catch { setError('创建信息暂未保存，请保留当前页面。') } }, [spec, step, key, attemptedOutline, acceptedOutline])
+  useEffect(() => { try { localStorage.setItem(key, JSON.stringify({ spec, step, attemptedOutline, acceptedOutline,deliveryGoal,allowTaskStructure,researchKind,researchInputs })) } catch { setError('创建信息暂未保存，请保留当前页面。') } }, [spec, step, key, attemptedOutline, acceptedOutline,deliveryGoal,allowTaskStructure,researchKind,researchInputs])
   const loadFiles = async (selectAll: boolean) => {
     setScanning(true)
     try {
@@ -639,6 +643,9 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
             <details className="sf-detail"><summary>引用样式说明</summary>
               <p>作者—年份、学校或期刊的引用标准尚未实现，可以写进下面的写作要求作为要求记录，不会被当成已支持。</p></details></div>
         </div>
+        <div className="sf-form"><div className="sf-field"><span className="sf-field-label">本次目标</span><div className="sf-field-control"><select aria-label="本次目标" value={deliveryGoal} onChange={e=>setDeliveryGoal(e.target.value as typeof deliveryGoal)}><option value="quick-draft">快速生成初稿</option><option value="course-delivery">完成课程论文</option><option value="research-results">用已有研究结果写初稿</option></select></div></div></div>
+        {deliveryGoal!=='quick-draft'&&<label className="sf-option-row"><input type="checkbox" checked={allowTaskStructure} onChange={e=>setAllowTaskStructure(e.target.checked)}/>本次允许按要求调整选题与章节，最终集中审阅采用</label>}
+        {deliveryGoal==='research-results'&&<label>研究类型<select aria-label="研究类型" value={researchKind} onChange={e=>setResearchKind(e.target.value as typeof researchKind)}><option value="ai-method">AI 方法研究</option><option value="systems">系统研究</option><option value="benchmark">数据集／基准研究</option><option value="theoretical">理论研究（沿用现有写作，实验条款不适用）</option></select></label>}
         <div className="sf-form">
           <div className="sf-field"><span className="sf-field-label">写作要求</span>
             <div className="sf-field-control"><textarea id="sf-field-requirements" rows={6} placeholder="例如：机器学习课程论文，约4000字，结合课件和笔记讨论实际应用，需要参考文献。也可以粘贴老师的要求。" value={spec.requirements} maxLength={12000} onChange={e => update({ requirements: e.target.value })} /></div></div>
@@ -688,6 +695,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           {!visibleFiles.length && <p className="sf-picker-blank">{files.length ? '没有匹配的文件。' : '工作区中还没有文件，可以开启联网补充，或先继续确定结构。'}</p>}
         </div>
         <label className="sf-online-choice"><input type="checkbox" checked={spec.online} onChange={e => update({ online: e.target.checked })} /><span><strong>联网补充文献</strong><small>检索相关文献，获取公开可读取的全文。</small></span></label>
+        {deliveryGoal==='research-results'&&<details className="sf-detail" open><summary>本次研究资料的用途与归属</summary><p>方法、设置和结果标记为作者已有研究；相关工作保持外部文献。确认后先清点事实与结果，再准备成稿。不会执行实验代码或配置。</p>{spec.materials.map(path=><label key={path}>{path}<select aria-label={`${path}的研究用途`} value={researchRole(path)} onChange={e=>setResearchInputs({...researchInputs,[path]:e.target.value})}><option value="method">作者方法与实现说明</option><option value="results">作者结果与运行记录</option><option value="settings">作者实验设置</option><option value="figure">作者已有图像</option><option value="literature">外部相关工作</option></select></label>)}<p>数值记录仍需在资料页预览映射并确认，未提供的实验不写成已完成。</p></details>}
       </>}
       {step === 2 && <>
         <div className="sf-outline-heading"><div><span className="sf-wizard-eyebrow">第 3 步 · 确认后开始写作</span><h3>行文结构</h3></div>
@@ -791,7 +799,7 @@ export function CreationWizard({ scope, api, context, onCreated, workspaceTitle,
           setIssues([])
           void act(async () => {
             const value = creationSpec.parse(readySpec())
-            try { const plan = await api('creation.prepare', { context: context(), spec: value, mode: 'first-draft' }); await api('creation.start', { context: context(), planId: plan.planId, planHash: plan.planHash }) }
+            try { const plan = await api('creation.prepare', { context: context(), spec: value, mode: 'first-draft',deliveryGoal,allowTaskStructure,researchKind,researchInputs:deliveryGoal==='research-results'?value.materials.map(path=>({path,role:researchRole(path)})):[] }); await api('creation.start', { context: context(), planId: plan.planId, planHash: plan.planHash }) }
             catch (error) {
               const failure = error as Error & { code?: string; details?: { outputDir?: string; suggestedDir?: string; reason?: string } }
               if (failure.code === 'OUTPUT_PATH_CONFLICT' || failure.message.includes('OUTPUT_PATH_CONFLICT')) {

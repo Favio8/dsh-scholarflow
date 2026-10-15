@@ -37,7 +37,7 @@ export function Research({ project, context, api, refresh, run, busy }: Props) {
     setFiles(result.files); setCursor(result.nextCursor); setSelected('')
   })
   const load = (id: string) => run(async () => { setMaterialId(id); setParsed(undefined); setBlockIndex(0); setParsed(await api('materials.read', { context: context(), materialId: id })) })
-  const locate = (locator: any) => locator.kind === 'text' ? `第 ${locator.lineStart}–${locator.lineEnd} 行` : locator.kind === 'pdf' ? `物理页 ${locator.pageNumber}` : `段落 ${locator.paragraphIndex}`
+  const locate = (locator: any) => locator.kind === 'text' ? `第 ${locator.lineStart}–${locator.lineEnd} 行` : locator.kind === 'pdf' ? `物理页 ${locator.pageNumber}` : locator.kind==='data'?`${locator.rowRange??''} · ${locator.field??''}`:`段落 ${locator.paragraphIndex}`
   return <section aria-label="资料与证据"><h3>资料、来源与证据</h3>
     <BibliographyImport api={api} context={context} refresh={refresh} run={run} busy={busy}/>
     <p>文件清单只读取路径、类型与大小。确认登记后逐份解析；资料文字作为研究数据，不构成插件操作指令。</p>

@@ -7,9 +7,10 @@ import { ReviewFixes } from './review-fixes.tsx'
 import {reviewItems} from './review-presentation.ts'
 import type { FlowReview, ReviewActivity } from './flow-status.ts'
 import { ReviewAssistant } from './review-assistant.tsx'
+import {DeliveryCandidate,DeliveryStart} from './task-delivery.tsx'
 
 type Props = { project: any; context: () => any; api: (method: string, request: any) => Promise<any>; refresh: () => Promise<void>; run: (fn: () => Promise<unknown>) => void; busy: boolean }
-export function ReviewExport({ project, context, api, refresh, run, busy, mode, onLocate, format = 'markdown', exportTrigger = 0, editor, onSources, onReviewState, onReviewActivity }: Props & { mode: string; format?: ExportFormat; exportTrigger?: number; onLocate: (location: any) => void; editor?:any; onSources?:()=>void; onReviewState?: (value: FlowReview | undefined) => void; onReviewActivity?: (value: ReviewActivity | undefined) => void }) {
+export function ReviewExport({ project, context, api, refresh, run, busy, mode, onLocate, format = 'markdown', exportTrigger = 0, editor, onSources, onReviewState, onReviewActivity,deliveryValue }: Props & { mode: string; format?: ExportFormat; exportTrigger?: number; onLocate: (location: any) => void; editor?:any; onSources?:()=>void; onReviewState?: (value: FlowReview | undefined) => void; onReviewActivity?: (value: ReviewActivity | undefined) => void;deliveryValue?:any }) {
   const [review, setReview] = useState<any>(), [message, setMessage] = useState('')
   const [suggestionCount, setSuggestionCount] = useState(0)
   useEffect(() => { onReviewState?.(review ? { ...review, hasSuggestions: suggestionCount > 0 } : undefined) }, [review, suggestionCount, onReviewState])
@@ -58,8 +59,9 @@ export function ReviewExport({ project, context, api, refresh, run, busy, mode, 
   return <>
     {message&&mode!=='Export'&&<div className="sf-editor-notice" role="status">{message}{lastDelivery&&<><button disabled={busy} onClick={()=>run(()=>downloadBundle(lastDelivery.id))}>下载完整交付包</button><button disabled={busy} onClick={()=>run(async()=>{const result=await api('export.read',{context:context(),deliveryId:lastDelivery.id}),file=result.files.find((row:any)=>row.relativePath==='quality-report.md');download(file.text,'quality-report.md','text/markdown;charset=utf-8')})}>下载检查报告</button></>}</div>}
     <section id="sf-panel-Review" className="sf-review-panel" role="tabpanel" hidden={mode!=='Review'} aria-label="AI检查">
-      <ReviewAssistant key={project.binding.projectId+':'+project.binding.sessionId} project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} editor={editor}
-        onReview={setReview} onActivity={onReviewActivity} onSuggestions={setSuggestionCount} onSources={onSources}/>
+      {deliveryValue?.task?<DeliveryCandidate value={deliveryValue} project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} editor={editor} onSources={onSources}/>:<ReviewAssistant key={project.binding.projectId+':'+project.binding.sessionId} project={project} context={context} api={api} refresh={refresh} run={run} busy={busy} editor={editor}
+        onReview={setReview} onActivity={onReviewActivity} onSuggestions={setSuggestionCount} onSources={onSources}/>}
+      {(!deliveryValue?.task||['succeeded','completed-with-issues','failed','cancelled'].includes(deliveryValue.task.status))&&<DeliveryStart {...{project,context,api,refresh,run,busy,editor}}/>}
       <details className="sf-detail sf-review-details"><summary>查看详情</summary>
       <p className="sf-review-summary" role="status">{review?.stale?'正文或资料已更新，请重新检查。':review?.report?items.length?'发现 '+items.length+' 项需要处理或确认的问题。':'当前没有待处理问题。':'点击检查全文，查看问题与修改建议。'}</p>
       {!!passed&&!review?.stale&&<p className="sf-muted">{passed} 项检查已通过。</p>}

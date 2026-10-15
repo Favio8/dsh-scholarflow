@@ -28,4 +28,6 @@ export interface FileStore {
   list(path: string): Promise<FileEntry[]>
   write(path: string, text: string, expected: FileImage | undefined): Promise<FileImage>
   lock<T>(operation: () => Promise<T>): Promise<T>
+  /** A coherent committed read, excluding this Host's writers without filesystem lock metadata. */
+  observe?<T>(operation:()=>Promise<T>):Promise<T>
 }

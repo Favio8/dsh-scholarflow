@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import {researchKindSchema,researchMaterialRole} from './results.ts'
 import { id, hash, requestContext, projectType, relativePath } from './schema.ts'
 import { exportFormat } from './presentation.ts'
 import { presetId, presetSource, supplementalPart } from './presets.ts'
@@ -250,7 +251,8 @@ export function writingReadPaths(spec: CreationSpec) {
   }
   return [...paths]
 }
-export const creationPrepareRequest = z.object({ context: requestContext, spec: creationSpec, mode: z.enum(['guided', 'first-draft']).default('guided') }).strict()
+export const creationPrepareRequest = z.object({ context: requestContext, spec: creationSpec, mode: z.enum(['guided', 'first-draft']).default('guided'),
+  deliveryGoal:z.enum(['quick-draft','course-delivery','research-results']).default('quick-draft'),allowTaskStructure:z.boolean().default(false),researchKind:researchKindSchema.default('ai-method'),researchInputs:z.array(researchMaterialRole).max(500).default([]) }).strict()
 export const writingTaskRequest = z.object({ context: requestContext, taskId: id.optional() }).strict()
 export const writingRequirementsRequest = z.object({ context: requestContext }).strict()
 export const writingPreferencesRequest = z.object({ context: requestContext, spec: creationSpec, baseSpecHash: hash.nullable().optional(),baseRequirementsHash:hash.nullable().optional() }).strict()

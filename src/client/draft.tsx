@@ -244,6 +244,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     return () => { live = false }
   }, [project.ledger.revision, historySequence])
   const dirty = text !== project.document.text || baseHash !== project.document.contentHash || formatDirty
+  const liveDirty=useRef(dirty);liveDirty.current=dirty
   useEffect(() => { setSelectionAnchor(undefined); setSelectionDetail(undefined); setSelection(undefined);setEditRange(undefined);selectionRequest.current++;window.getSelection()?.removeAllRanges() }, [view, tool, visible, project.document.contentHash])
   useEffect(() => () => { selectionRequest.current++ }, [])
   const projection = useMemo(() => projectMarkdown(project.document.text), [project.document.contentHash])
@@ -438,7 +439,7 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
     } finally { setSaving(false) }
   }
   useEffect(() => {
-    onController?.({ dirty, canSave: dirty && !busy && !saving && !generating && baseHash === project.document.contentHash && !project.document.externalChange, save })
+    onController?.({ dirty, canSave: dirty && !busy && !saving && !generating && baseHash === project.document.contentHash && !project.document.externalChange, save,adoptionHash:async()=>{if(liveDirty.current)throw new Error('有未保存正文或排版，请先保存再采用。');const hash=await textHash(liveText.current);if(liveDirty.current)throw new Error('编辑内容已变化，请先保存再采用。');return hash} })
   }, [text,formatting,formatDirty, baseHash, project.document.contentHash, project.ledger.revision, busy, saving, generating])
   const formatRange=editRange??{start:cursor,end:cursor}
   const applyFormat=(kind:'characters'|'paragraphs',values:Partial<CharacterFormat>|Partial<ParagraphFormat>)=>{

@@ -14,8 +14,11 @@ import { invariant } from '../shared/errors.ts'
 import { scanRequest, registerMaterialRequest, parseMaterialRequest, readMaterialRequest } from '../shared/materials.ts'
 import { registerSourceRequest, confirmEvidenceRequest, upsertClaimRequest, confirmOutlineRequest } from '../shared/research.ts'
 import { resultPrepareRequest,resultConfirmRequest } from '../shared/results.ts'
-import { prepareResultImport,confirmResultImport,inspectResults,type ResultImportPlan } from '../core/research/results.ts'
+import { prepareResultImport,confirmResultImport,inspectResults,associateResults,prepareResultComparison,confirmResultComparison,resultTable,type ResultImportPlan,type ResultComparisonPlan } from '../core/research/results.ts'
+import {layoutVerificationRequest,recordLayoutVerification,inspectArtifactReview} from '../core/export/artifact-review.ts'
+import {researchMaterialRoles,confirmResearchMaterialRoles} from '../core/research/research-inputs.ts'
 import { parseResultBytes,RESULT_MAX_BYTES } from '../core/research/result-parser.ts'
+import { DeliveryController } from './bridge/delivery-controller.ts'
 import { scanMaterials, registerMaterial, readParsed,selectMaterial } from '../core/materials/materials.ts'
 import { parseRegisteredMaterial } from '../core/materials/parse.ts'
 import { parseMaterialBytes } from './parsers/parse.ts'
@@ -120,6 +123,7 @@ const mutationRevision = (context: RequestContext) => {
 
 export class ScholarFlowRemote extends TypertRemoteService {
   private writingController: WritingController
+  private deliveryController:DeliveryController
   private sessionRegistration: SessionRegistration
   private initPlans = new Map<string, StoredInitPlan>()
   private workflowPlans = new Map<string, { plan: WorkflowStartPlan | WorkflowActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
@@ -148,6 +152,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private sourceRegistrationPlans = new Map<string, { plan: SourceRegistrationPlan; peerId: string; expires: number }>()
   private bibliographyPlans=new Map<string,{plan:BibliographyImportPlan;context:RequestContext;peerId:string;expires:number}>()
   private resultPlans=new Map<string,{plan:ResultImportPlan;peerId:string;expires:number}>()
+  private comparisonPlans=new Map<string,{plan:ResultComparisonPlan;peerId:string;expires:number}>()
   private researchBatchPlans = new Map<string, { plan: ResearchBatchPlan; action?: ResearchBatchAction; context: RequestContext; peerId: string; expires: number }>()
   private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
   private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
@@ -162,6 +167,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     super(ctx, 'scholarflow', { namespace: 'scholarflow.v1' })
     this.sessionRegistration = new SessionRegistration(ctx)
     this.writingController = new WritingController(ctx, this.bootInstance, (context, signal) => this.sessionRegistration.sync(context, signal))
+    this.deliveryController=new DeliveryController(ctx,this.writingController,this.bootInstance)
     this.researchProvider = crossrefProvider(ctx.web)
     this.githubProvider = githubSkills(ctx.web)
     ctx.effect(() => () => this.proposalRevisionPlans.clear(), 'scholarflow: clear operator candidate previews')
@@ -171,7 +177,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => () => this.skillCopyPlans.clear(), 'scholarflow: clear project Skill copy previews')
     ctx.effect(() => () => this.manuscriptPlans.clear(), 'scholarflow: clear manuscript import previews')
     ctx.effect(() => () => this.identityPlans.clear(), 'scholarflow: clear project identity previews')
-    ctx.effect(() => () => this.resultPlans.clear(), 'scholarflow: clear result mapping previews')
+    ctx.effect(() => () => {this.resultPlans.clear();this.comparisonPlans.clear()}, 'scholarflow: clear result mapping previews')
     ctx.effect(() => () => this.automaticPlans.clear(), 'scholarflow: clear automatic previews')
     ctx.effect(() => () => { this.draftSequencePlans.clear(); this.generationPlans.clear() }, 'scholarflow: clear draft previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
@@ -1248,7 +1254,29 @@ export class ScholarFlowRemote extends TypertRemoteService {
   @Remote('creation.prepare')
   async creationPrepare(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.prepare(request, this.requireOperator(), signal, this.projectDefaults())) }
   @Remote('creation.start')
-  async creationStart(request: unknown, signal: AbortSignal) { return applicationResult(async () => this.writingController.create(request, this.requireOperator(), signal)) }
+  async creationStart(request: unknown, signal: AbortSignal) { return applicationResult(async () => {
+    const peer=this.requireOperator();let delivery:Awaited<ReturnType<DeliveryController['start']>>|undefined
+    const result=await this.writingController.create(request,peer,signal,async(context,goal)=>{
+      if(goal.deliveryGoal==='quick-draft')return
+      const {io}=await resolveStore(this.ctx,context,signal),plan=await this.deliveryController.prepare({context:{...context,expectedLedgerRevision:(await snapshot(io)).ledger.revision},goal:goal.deliveryGoal,allowStructure:goal.allowTaskStructure,researchKind:goal.researchKind},peer,signal)
+      delivery=await this.deliveryController.start({context,planId:plan.planId,planHash:plan.planHash},peer,signal,true)
+    })
+    delivery?.activate?.();return {...result,...(delivery&&{deliveryTaskId:delivery.task.id})}
+  }) }
+  @Remote('deliveryTask.prepare')
+  async deliveryPrepare(request:unknown,signal:AbortSignal){return applicationResult(async()=>this.deliveryController.prepare(request,this.requireOperator(),signal))}
+  @Remote('deliveryTask.start')
+  async deliveryStart(request:unknown,signal:AbortSignal){return applicationResult(async()=>this.deliveryController.start(request,this.requireOperator(),signal))}
+  @Remote('deliveryTask.inspect')
+  async deliveryInspect(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();return this.deliveryController.inspect(request,signal)})}
+  @Remote('deliveryTask.action')
+  async deliveryAction(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();return this.deliveryController.action(request,signal)})}
+  @Remote('candidate.inspect')
+  async deliveryCandidate(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();return this.deliveryController.candidate(request,signal)})}
+  @Remote('candidate.prepareAdoption')
+  async candidatePrepareAdoption(request:unknown,signal:AbortSignal){return applicationResult(async()=>this.deliveryController.prepareAdoption(request,this.requireOperator(),signal))}
+  @Remote('candidate.adopt')
+  async candidateAdopt(request:unknown,signal:AbortSignal){return applicationResult(async()=>this.deliveryController.adopt(request,this.requireOperator(),signal))}
   // v1.2 requirement chain: read every member, structure what was read, propose an outline,
   // and adopt field by field. Reads are jobs, so the wizard sees real per-member progress.
   @Remote('creation.readRequirements')
@@ -2105,7 +2133,27 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async sourcesDismissBibliography(request:unknown){return applicationResult(async()=>{const peerId=this.requireOperator(),input=z.object({planId:id}).strict().parse(request),row=this.bibliographyPlans.get(input.planId);if(row?.peerId===peerId)this.bibliographyPlans.delete(input.planId);return {dismissed:true}})}
 
   @Remote('results.inspect')
-  async resultsInspect(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();const {context}=inspectRequest.parse(request),{io}=await resolveStore(this.ctx,context,signal);return inspectResults(io)})}
+  async resultsInspect(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();const {context}=inspectRequest.parse(request),{io}=await resolveStore(this.ctx,context,signal);return {...await inspectResults(io),materialRoles:await researchMaterialRoles(io)}})}
+  @Remote('results.confirmInputs')
+  async resultsConfirmInputs(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();const {context}=inspectRequest.passthrough().parse(request),{io}=await resolveStore(this.ctx,context,signal),active=await this.deliveryController.inspect({context},signal)
+    invariant(!active.task||!['queued','running'].includes(active.task.status),'DELIVERY_ALREADY_RUNNING','请先暂停当前后台任务，再调整研究资料用途。');return confirmResearchMaterialRoles(io,request)})}
+  @Remote('results.associate')
+  async resultsAssociate(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();const {context}=inspectRequest.passthrough().parse(request),{io}=await resolveStore(this.ctx,context,signal);return associateResults(io,request)})}
+  @Remote('results.table')
+  async resultsTable(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();const input=z.object({context:requestContext,experimentId:id}).strict().parse(request),{io}=await resolveStore(this.ctx,input.context,signal);return resultTable(io,input.experimentId)})}
+  @Remote('results.compare')
+  async resultsCompare(request:unknown,signal:AbortSignal){return applicationResult(async()=>{const peerId=this.requireOperator(),{context}=inspectRequest.passthrough().parse(request),{io}=await resolveStore(this.ctx,context,signal)
+    for(const [key,row]of this.comparisonPlans)if(row.expires<Date.now())this.comparisonPlans.delete(key)
+    invariant(this.comparisonPlans.size<8,'TOO_MANY_PENDING_PLANS','请先处理已有比较预览。')
+    const plan=await prepareResultComparison(io,request);this.comparisonPlans.set(plan.id,{plan,peerId,expires:Date.now()+600000});return plan})}
+  @Remote('results.confirmComparison')
+  async resultsConfirmComparison(request:unknown,signal:AbortSignal){return applicationResult(async()=>{const peerId=this.requireOperator(),input=z.object({context:requestContext,planId:id,planHash:hash}).strict().parse(request),row=this.comparisonPlans.get(input.planId)
+    invariant(row&&row.peerId===peerId&&row.expires>Date.now()&&row.plan.planHash===input.planHash,'INVALID_APPROVAL','请重新预览实际结果比较。')
+    const {io}=await resolveStore(this.ctx,input.context,signal);return confirmResultComparison(io,input.context,row.plan)})}
+  @Remote('export.inspectArtifacts')
+  async exportInspectArtifacts(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();const input=z.object({context:requestContext,deliveryId:id}).strict().parse(request),{io}=await resolveStore(this.ctx,input.context,signal);return inspectArtifactReview(io,input.deliveryId)})}
+  @Remote('export.confirmLayout')
+  async exportConfirmLayout(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();const input=layoutVerificationRequest.parse(request),{io}=await resolveStore(this.ctx,input.context,signal);return recordLayoutVerification(io,input)})}
   @Remote('results.inspectFile')
   async resultsInspectFile(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
     this.requireOperator();const input=z.object({context:requestContext,materialId:id,recordsPointer:z.string().max(1000).default('')}).strict().parse(request),{io}=await resolveStore(this.ctx,input.context,signal),current=await snapshot(io),material=current.ledger.materials[input.materialId]
@@ -2123,11 +2171,17 @@ export class ScholarFlowRemote extends TypertRemoteService {
   @Remote('results.confirmImport')
   async resultsConfirmImport(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
     const peerId=this.requireOperator(),input=resultConfirmRequest.parse(request),row=this.resultPlans.get(input.planId)
-    invariant(row&&row.peerId===peerId&&row.expires>Date.now()&&row.plan.planHash===input.planHash,'INVALID_APPROVAL','请重新预览当前结果映射。')
-    const {io}=await resolveStore(this.ctx,input.context,signal);return confirmResultImport(io,input.context,row.plan,input.authorConfirmed)
+    const {io}=await resolveStore(this.ctx,input.context,signal)
+    if(!row){const receipt=await io.read(`.scholarflow/research/imports/${input.planId}.json`),stored=receipt&&JSON.parse(receipt.text);invariant(stored&&stored.projectId===input.context.projectId&&stored.confirmedBy===input.context.sessionId&&stored.planHash===input.planHash,'INVALID_APPROVAL','请重新预览当前结果映射。');return {...stored,alreadyImported:true}}
+    invariant(row.peerId===peerId&&row.expires>Date.now()&&row.plan.planHash===input.planHash,'INVALID_APPROVAL','请重新预览当前结果映射。')
+    return confirmResultImport(io,input.context,row.plan,input.authorConfirmed)
   })}
   @Remote('results.prepareUpdate')
-  async resultsPrepareUpdate(request:unknown,signal:AbortSignal){return applicationResult(async()=>{const input=resultPrepareRequest.parse(request);invariant(input.previousExperimentId,'EXPERIMENT_REQUIRED','更新须选择当前实验版本。');return this.resultsPrepareImport(input,signal)})}
+  async resultsPrepareUpdate(request:unknown,signal:AbortSignal){
+    const parsed=resultPrepareRequest.safeParse(request)
+    if(!parsed.success||!parsed.data.previousExperimentId)return applicationResult(async()=>{invariant(false,'EXPERIMENT_REQUIRED','更新须选择当前实验版本。')})
+    return this.resultsPrepareImport(parsed.data,signal)
+  }
   @Remote('results.confirmUpdate')
   async resultsConfirmUpdate(request:unknown,signal:AbortSignal){return this.resultsConfirmImport(request,signal)}
   @Remote('results.dismissImport')

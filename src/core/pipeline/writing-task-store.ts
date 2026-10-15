@@ -90,11 +90,15 @@ export async function saveWritingSpec(io: FileStore, spec: CreationSpec, revisio
     const now = new Date().toISOString()
     ledger.requirements.writing_brief = { id: 'writing_brief', kind: 'other', description: spec.requirements,
       origin: { type: 'user' }, confirmation: 'confirmed', verificationMethod: 'model-assisted', confirmedAt: now }
-    ledger.requirements.writing_length = { id: 'writing_length', kind: 'length', description: `目标篇幅约 ${spec.targetLength} ${spec.language === 'en' ? '词' : '汉字'}`,
-      origin: { type: 'user' }, confirmation: 'confirmed', verificationMethod: 'deterministic', confirmedAt: now,
-      constraint: { operator: 'min', value: Math.floor(spec.targetLength * .9), unit: spec.language === 'en' ? 'words' : 'zh-characters', countingPolicyId: 'sf-body-han-western-v1' } }
-    ledger.requirements.writing_length_max = { ...ledger.requirements.writing_length, id: 'writing_length_max',
-      constraint: { ...ledger.requirements.writing_length.constraint!, operator: 'max', value: Math.ceil(spec.targetLength * 1.1) } }
+    const length=spec.overrides.some(row=>row.field==='篇幅')?undefined:spec.brief?.length,hasBounds=length?.min!==undefined||length?.max!==undefined,
+      exact=length?.value!==undefined&&length.approximate===false,unit=(hasBounds||length?.value!==undefined)?length!.unit:(spec.language==='en'?'words':'zh-characters'),
+      minimum=hasBounds?length?.min:exact?length!.value:Math.floor(spec.targetLength*.9),maximum=hasBounds?length?.max:exact?length!.value:Math.ceil(spec.targetLength*1.1)
+    invariant(minimum===undefined||maximum===undefined||minimum<=maximum,'WRITING_LENGTH_CONFLICT','已确认篇幅的下限大于上限，请先澄清要求。')
+    for(const [key,operator,value]of [['writing_length','min',minimum],['writing_length_max','max',maximum]] as const){
+      if(value===undefined){delete ledger.requirements[key];continue}
+      ledger.requirements[key]={id:key,kind:'length',description:`目标篇幅：${spec.targetLength} ${unit==='words'?'词':'汉字'}；已确认正文${operator==='min'?'不少于':'不超过'} ${value} ${unit==='words'?'词':'汉字'}${!hasBounds&&!exact?'（约定目标的默认核对范围）':''}`,origin:{type:'user'},confirmation:'confirmed',verificationMethod:'deterministic',confirmedAt:now,
+        constraint:{operator,value,unit,countingPolicyId:'sf-body-han-western-v1'}}
+    }
     if (/(?:禁止|不允许|不得)\s*(?:使用\s*)?(?:AI|人工智能|生成式)/i.test(spec.requirements))
       ledger.requirements.writing_ai_policy = { id: 'writing_ai_policy', kind: 'ai-policy', description: spec.requirements, origin: { type: 'user' }, confirmation: 'confirmed', verificationMethod: 'manual', confirmedAt: now, constraint: { operator: 'equals', value: 'forbidden' } }
     else delete ledger.requirements.writing_ai_policy
@@ -109,7 +113,9 @@ export async function saveWritingSpec(io: FileStore, spec: CreationSpec, revisio
       for(const claim of Object.values(ledger.claims))if(claim.evidenceLinks.some(link=>ledger.evidence[link.evidenceId]?.validation==='stale'))claim.status='stale'
       invalidateReviews(ledger,['evidence','citation','integrity'])}
     yaml.setIn(['output', 'defaultFormat'], spec.format)
-    return [{ path: specPath, before: await io.read(specPath), after: json({ schemaVersion: 1, projectId: ledger.projectId, spec }) }, { path: CONFIG_PATH, before, after: yaml.toString() }]
+    const previous=previousSpec&&JSON.parse(previousSpec.text).spec,changed=previous&&json(previous)!==json(spec)
+    return [{ path: specPath, before: await io.read(specPath), after: json({ schemaVersion: 1, projectId: ledger.projectId, spec }) }, { path: CONFIG_PATH, before, after: yaml.toString() },
+      ...(changed?[{path:`.scholarflow/writing/requirement-history/${newId('requirements')}.json`,before:undefined,after:json({schemaVersion:1,projectId:ledger.projectId,previous,next:spec,confirmedAt:now,reason:spec.overrides.length?spec.overrides.map(row=>`${row.field}：用户明确采用 ${row.chosenValue}，来源要求 ${row.requirementValue} 另行保留。`).join('；'):'用户显式保存写作要求或所选输入；保留完整前后版本，不由模型删除要求。'})}]:[])]
   })
 }
 export async function dirtyWritingBuffers(io: FileStore) {

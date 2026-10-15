@@ -19,7 +19,7 @@ export function mediaType(path: string) {
   // Images carry their real type: the host's attachment service refuses `octet-stream`, so a
   // scanned requirement page would never reach the model without this.
   return ({ md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', html: 'text/html', htm: 'text/html',
-    pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',csv:'text/csv',json:'application/json',
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
     bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff' } as Record<string, string>)[ext ?? ''] ?? 'application/octet-stream'
 }

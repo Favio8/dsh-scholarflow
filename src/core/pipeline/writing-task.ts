@@ -19,6 +19,7 @@ import type { ParsedMaterial } from '../../shared/materials.ts'
 import type { ReviewReport } from '../../shared/review.ts'
 import { evidenceMaterials, prepareWritingSourceConflict, resolveWritingSourceConflict } from './source-conflict.ts'
 import { deferDraftIssue, recoverableDraftOutput, saveDraftGap } from './first-draft.ts'
+import {researchMaterialRolesSchema} from '../../shared/results.ts'
 
 /**
  * Drafting order, which is not document order: the body comes first because a summary can
@@ -51,11 +52,18 @@ export async function askWritingQuestion(io: FileStore, task: WritingTask, title
   task.questions.push(writingQuestion.parse({ id: newId('question'), title, options, kind }))
   task.status = 'waiting-input'; await saveWritingTask(io, task)
 }
-async function locateEvidence(io: FileStore, task: WritingTask, model: WritingServices['model'], signal: AbortSignal, pauseRequested: () => boolean) {
+export async function locateEvidence(io: FileStore, task: WritingTask, model: WritingServices['model'], signal: AbortSignal, pauseRequested: () => boolean) {
   const current = await snapshot(io), materials = evidenceMaterials(current, task)
+  const roleFile=await io.read('.scholarflow/research/material-roles.json'),roles=roleFile?parseStored(researchMaterialRolesSchema,roleFile.text,'RESEARCH_INPUTS_INVALID','writingTask.evidence'):undefined
+  invariant(!roles||roles.projectId===current.ledger.projectId,'PROJECT_ID_CONFLICT','研究资料用途不属于当前项目。')
   for (; task.evidenceMaterialIndex < materials.length; task.evidenceMaterialIndex++, task.evidenceBlockIndex = 0) {
     const material = materials[task.evidenceMaterialIndex]
-    let state = await snapshot(io), source = Object.values(state.ledger.sources).find(row => row.materialId === material.id)
+    let state = await snapshot(io), source = Object.values(state.ledger.sources).find(row => row.materialId === material.id&&row.contentHash===material.contentHash)
+    if(source?.kind==='user-result'&&Object.values(state.ledger.evidence).some(row=>row.sourceId===source!.id&&row.kind==='user-measurement'&&row.validation==='located'&&row.sourceContentHash===material.contentHash)){
+      // Author-confirmed mapped records already have exact locators and conditions.
+      // Do not turn their raw log into external quotation or re-summarize completed imports.
+      task.evidenceBlockIndex=0;await saveWritingTask(io,task);continue
+    }
     if (!source) {
       const sourceConflict = await prepareWritingSourceConflict(io, task)
       if (sourceConflict) {
@@ -71,7 +79,8 @@ async function locateEvidence(io: FileStore, task: WritingTask, model: WritingSe
         }
       }
     }
-    if (!source) source = (await registerSource(io, { title: material.projectRelativePath.split('/').at(-1)!, kind: material.role === 'paper' ? 'paper' : 'other',
+    const authorInput=roles?.roles.some(row=>row.path===material.projectRelativePath&&['method','settings','results'].includes(row.role))
+    if (!source) source = (await registerSource(io, { title: material.projectRelativePath.split('/').at(-1)!, kind:authorInput?'user-result':material.role === 'paper' ? 'paper' : 'other',
       authors: [], identifiers: {}, materialId: material.id }, state.ledger.revision)).source
     const parsed = await readParsed(io, material.id)
     if (parsed.coverage === 'partial') noteTask(task, material.projectRelativePath + '：资料含未读取或未核验部分，写作仅使用实际提取的文字。')
@@ -82,6 +91,10 @@ async function locateEvidence(io: FileStore, task: WritingTask, model: WritingSe
       let size = 0, end = start
       while (end < parsed.blocks.length && (size < 18000 || end === start)) {
         const block = parsed.blocks[end]; selected.push({ index: end, text: block.text, locator: block.locator }); size += block.text.length; end++
+      }
+      const existing=Object.values(state.ledger.evidence)
+      if(selected.every(block=>!block.text.trim()||existing.some(item=>item.sourceId===source!.id&&item.sourceContentHash===parsed.sourceContentHash&&item.validation==='located'&&item.excerpt===block.text&&JSON.stringify(item.locator)===JSON.stringify(block.locator)))){
+        task.evidenceBlockIndex=end;await saveWritingTask(io,task);continue
       }
       let result: {summary:string;bibliography?:{title?:string;authors:string[];year?:number;doi?:string;venue?:string}}
       try {
@@ -126,7 +139,7 @@ async function locateEvidence(io: FileStore, task: WritingTask, model: WritingSe
   }
   return true
 }
-async function prepareWritingOutline(io: FileStore, task: WritingTask, model: WritingServices['model']) {
+export async function prepareWritingOutline(io: FileStore, task: WritingTask, model: WritingServices['model']) {
   let current = await snapshot(io)
   const evidence = Object.values(current.ledger.evidence).filter(row => row.validation === 'located' && current.config.materials.include.includes(current.ledger.materials[current.ledger.sources[row.sourceId]?.materialId ?? '']?.projectRelativePath))
   const data = { project: current.config.project, requirements: task.spec.requirements, questions: task.questions.filter(row => row.kind !== 'budget'),
@@ -155,7 +168,8 @@ async function prepareWritingOutline(io: FileStore, task: WritingTask, model: Wr
     for (const link of links) invariant(evidence.some(row => row.id === link.evidenceId), 'EVIDENCE_NOT_LOCATED', '规划引用了不存在的证据。')
     current = await snapshot(io)
     const existing = Object.values(current.ledger.claims).find(row => row.reviewedBy === 'model' && row.text === claim.text && row.scope === claim.sectionId)
-    const saved = await upsertClaim(io, { ...(existing && { id: existing.id }), text: claim.text, kind: 'author-inference', scope: claim.sectionId, evidenceLinks: links, limitations: [claim.rationale] }, current.ledger.revision)
+    const own=links.length>0&&links.every(link=>evidence.find(row=>row.id===link.evidenceId)?.measurement?.origin==='user-supplied')
+    const saved = await upsertClaim(io, { ...(existing && { id: existing.id }), text: claim.text, kind: own?'user-observation':'author-inference', scope: claim.sectionId, evidenceLinks: links, limitations: [claim.rationale] }, current.ledger.revision)
     plannedClaims.push(saved.claim.id)
   }
   current = await snapshot(io)

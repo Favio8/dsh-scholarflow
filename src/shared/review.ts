@@ -47,5 +47,7 @@ export const modelReviewOutputSchema = z.object({ checks: z.array(z.object({ id:
     detail: z.string().min(10).max(4000) }).strict()).min(2).max(5),
   findings: z.array(z.object(findingFields).strict()).max(100),
   rechecks: z.array(z.object(recheckFields).strict()).max(100),
-  limitations: z.array(z.string().min(1).max(4000)).max(50) }).strict()
+  limitations: z.array(z.string().min(1).max(4000)).max(50),
+  requirementAssessments:z.array(z.object({requirementId:id,status:semanticStatus,detail:z.string().min(10).max(4000),
+    quotes:z.array(z.object({blockId:id,quote:z.string().min(1).max(4000)}).strict()).max(30)}).strict()).max(200).optional() }).strict()
 export type ModelReviewOutput = z.infer<typeof modelReviewOutputSchema>

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { sourceSchema, evidenceSchema, claimSchema, outlineSchema, type Claim, type Evidence } from '../../shared/schema.ts'
+import { sourceSchema, evidenceSchema, claimSchema, outlineSchema, type Claim, type Evidence,type Ledger } from '../../shared/schema.ts'
 import { proposalSchema } from '../../shared/editing.ts'
 import { sourceInput, duplicateSourceReview, confirmEvidenceRequest, upsertClaimRequest } from '../../shared/research.ts'
 import { normalizeArxiv, sourceMatches } from '../research/source-matching.ts'
@@ -81,20 +81,23 @@ export function claimStatus(claim: Pick<Claim, 'kind' | 'scope' | 'evidenceLinks
   return 'unsupported'
 }
 
-export async function upsertClaim(io: FileStore, input: z.infer<typeof upsertClaimRequest>['claim'], revision: number) {
-  const claimId = input.id ?? newId('cl')
-  const result = await mutateLedger(io, revision, ledger => {
+export function validatedClaim(ledger:Ledger,input:z.infer<typeof upsertClaimRequest>['claim'],reviewedBy:Claim['reviewedBy']='user'){
     invariant(!input.id || ledger.claims[input.id], 'CLAIM_NOT_FOUND', '要修改的论点不存在。')
     for (const link of input.evidenceLinks) {
       invariant(ledger.evidence[link.evidenceId], 'EVIDENCE_NOT_FOUND', '论点引用了不存在的证据。')
       invariant(!['supports', 'partial', 'contradicts'].includes(link.relation) || !!link.rationale?.trim(), 'CLAIM_SCOPE_REQUIRED', '请说明证据支持范围或相反结果的关系，不能仅靠引用数量判定支持。')
       invariant(ledger.evidence[link.evidenceId].validation === 'located', 'EVIDENCE_NOT_CURRENT', '过期或未定位证据不能建立当前支持关系。')
     }
-    ledger.claims[claimId] = claimSchema.parse({ ...input, id: claimId, status: claimStatus(input, ledger.evidence), reviewedBy: 'user' })
+    return claimSchema.parse({...input,id:input.id??newId('cl'),status:claimStatus(input,ledger.evidence),reviewedBy})
+}
+export async function upsertClaim(io: FileStore, input: z.infer<typeof upsertClaimRequest>['claim'], revision: number) {
+  let claimId = input.id
+  const result = await mutateLedger(io, revision, ledger => {
+    const claim=validatedClaim(ledger,input,'user');claimId=claim.id;ledger.claims[claim.id]=claim
     ledger.outline.confirmation = 'draft'
     invalidateReviews(ledger, ['evidence', 'logic', 'integrity'])
   })
-  return { claim: result.ledger.claims[claimId], revision: result.revision }
+  return { claim: result.ledger.claims[claimId!], revision: result.revision }
 }
 
 export function outlineProjection(outline: z.infer<typeof outlineSchema>) {
