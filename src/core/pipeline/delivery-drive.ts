@@ -1,4 +1,5 @@
 import {deliveryWritingOutputSchema,type DeliveryTask} from '../../shared/delivery-task.ts'
+import {ZodError} from 'zod'
 import {runStateSchema,type RunState,type RunSnapshot} from '../../shared/runs.ts'
 import type {RequestContext} from '../../shared/schema.ts'
 import {modelReviewOutputSchema,type ReviewReport} from '../../shared/review.ts'
@@ -21,8 +22,10 @@ import type {WritingTask} from '../../shared/writing-task.ts'
 export type DeliveryServices={owner:RunState['owner'];signal:AbortSignal;context:RequestContext;skills?:SkillReader;
   waitForWriting:(task:DeliveryTask)=>Promise<WritingTask|undefined>;model:(call:ModelCall)=>Promise<string>;
   searchGaps?:(task:DeliveryTask,report:ReviewReport)=>Promise<boolean>;prepareResearch?:(task:DeliveryTask)=>Promise<boolean>;validateModel:()=>Promise<void>}
-const progressHash=(report:ReviewReport)=>digest(json({checks:report.checks.filter(check=>check.status!=='pass').map(check=>({id:check.id,status:check.status,actual:check.id.startsWith('requirement_writing_length')?report.statistics:undefined})).sort((a,b)=>a.id.localeCompare(b.id)),
-  issues:report.issues.filter(issue=>issue.state!=='resolved').map(issue=>({severity:issue.severity,category:issue.category,quote:issue.location?.quote?.replace(/\s+/gu,' '),requirements:issue.requirementIds})).sort((a,b)=>json(a).localeCompare(json(b)))}))
+export const deliveryProgressHash=(report:ReviewReport)=>digest(json({checks:report.checks.filter(check=>check.status!=='pass').map(check=>({id:check.id.replace(/^result_value_anchor_.+$/u,'result_value').replace(/^result_unlinked_.+$/u,'result_unlinked'),status:check.status,actual:check.id.startsWith('requirement_writing_length')?report.statistics:undefined})).sort((a,b)=>json(a).localeCompare(json(b))),
+  issues:report.issues.filter(issue=>issue.state!=='resolved').map(issue=>({severity:issue.severity,category:issue.category,quote:issue.checkMethod==='model-assisted'?issue.location?.quote?.replace(/\s+/gu,' '):undefined,requirements:[...issue.requirementIds].sort()})).sort((a,b)=>json(a).localeCompare(json(b)))}))
+export function deliveryFactDebt(report:ReviewReport){const checks=report.checks,penalty=(id:string)=>{const check=checks.find(row=>row.id===id);return !check||check.status==='pass'?0:check.status==='fail'?2:1}
+  return [checks.filter(row=>row.id.startsWith('result_value_')&&row.status!=='pass').length,checks.filter(row=>row.id.startsWith('result_unlinked_')&&row.status!=='pass').length,penalty('own_result_numbers'),penalty('own_result_links'),penalty('own_result_units')]}
 
 export async function deliveryModelCall(io:FileStore,task:DeliveryTask,services:DeliveryServices,plan:{snapshot:RunSnapshot;contentHash:string;dependencyHash?:string},call:Omit<ModelCall,'signal'|'runId'>){
   services.signal.throwIfAborted();await services.validateModel();await verifyDeliveryInputs(io,task)
@@ -60,12 +63,16 @@ export async function deliveryJSON<T>(io:FileStore,task:DeliveryTask,services:De
     const raw=await deliveryModelCall(io,task,services,plan,{...call,...(repair&&{repair})})
     try{return validate(JSON.parse(raw))}catch(error){services.signal.throwIfAborted();if(attempt)throw error
       const code=error instanceof ScholarError?error.code:error instanceof SyntaxError?'JSON_SYNTAX':'OUTPUT_SCHEMA'
-      repair=`上一输出未满足 ${code} 合同。请对照同一上下文重新返回完整严格 JSON，保留真实事实、引用和定位；不把无法核对项改为通过。没有 Markdown 围栏或额外键。`}
+      const issues=error instanceof ZodError?error.issues.slice(0,12).map(issue=>({path:issue.path,code:issue.code,...('values' in issue&&{allowed:issue.values}),...('keys' in issue&&{unexpectedKeys:issue.keys})})):undefined
+      repair=`上一输出未满足 ${code} 合同。${issues?'实际字段校验：'+json(issues):''}请对照同一上下文重新返回完整严格 JSON，保留真实事实、引用和定位；不把无法核对项改为通过。没有 Markdown 围栏或额外键。`}
   }
   throw new ScholarError('MODEL_OUTPUT_INVALID','输出未满足阶段合同，未采用结果。')
 }
 export async function driveDelivery(io:FileStore,task:DeliveryTask,services:DeliveryServices){
   const context=async()=>({...services.context,projectId:task.projectId,expectedLedgerRevision:(await snapshot(io)).ledger.revision})
+  const checkSavedManuscript=async()=>{const plan=await prepareModelReview(io,{context:await context(),assessmentScope:'cross-section'},task.model,services.skills),
+    output=await deliveryJSON(io,task,services,plan,{system:modelReviewSystem(plan),instruction:'检查实际已经保存的主稿及其当前依赖。',context:plan.context,maxTokens:task.model.maxOutputTokens},value=>validateModelReview(plan,value))
+    await publishModelReview(io,plan,output)}
   const recoverPlan=async<T extends {snapshot:RunSnapshot;contentHash:string}>(stage:'review'|'revision',textHash:string):Promise<T|undefined>=>{
     const call=[...task.calls].reverse().find(row=>row.stage===stage&&row.status==='succeeded');if(!call)return undefined
     const file=await io.read(`${deliveryRoot(task.id)}/calls/${call.runId}-plan.json`);if(!file)return undefined
@@ -102,7 +109,7 @@ export async function driveDelivery(io:FileStore,task:DeliveryTask,services:Deli
       const recovered=await recoverPlan<typeof fresh>('review',candidate.textHash),plan=recovered&&recovered.dependencyHash===fresh.dependencyHash?recovered:fresh
       const output=await deliveryJSON(io,task,services,plan,{system:modelReviewSystem(plan),instruction:'检查当前候选及实际证据；位置只属于本候选。',context:plan.context,maxTokens:task.model.maxOutputTokens},value=>validateModelReview(plan,value)),checked=await checkCandidate(io,await context(),task.id,candidate.id,task.candidateHash!,{plan,output})
       task.checkId=checked.check.id;task.checkHash=checked.checkHash
-      const report=checked.check.report,signature=progressHash(report),requirements=(await snapshot(io)).ledger.requirements
+      const report=checked.check.report,signature=deliveryProgressHash(report),requirements=(await snapshot(io)).ledger.requirements
       const deferredFormat=(id:string)=>id.startsWith('requirement_')&&requirements[id.slice('requirement_'.length)]?.kind==='format'
       const validOwn=task.goal==='research-results'&&report.checks.some(check=>check.id==='own_result_links'&&check.status==='pass')&&report.checks.some(check=>check.id==='own_result_numbers'&&check.status==='pass')&&report.checks.some(check=>check.id==='own_result_units'&&check.status==='pass')
       const authorPendingId=`issue_${digest('own_research_results').slice(7,31)}`,pendingMarkerId=`issue_${digest('pending_markers').slice(7,31)}`
@@ -110,23 +117,31 @@ export async function driveDelivery(io:FileStore,task:DeliveryTask,services:Deli
       const required=report.checks.filter(check=>task.requiredCheckIds.includes(check.id)&&check.status!=='pass'&&!deferredFormat(check.id)&&!(allowedPartial&&check.id==='pending_markers')&&!(validOwn&&check.id==='own_research_results')),
         b0=report.issues.some(issue=>issue.severity==='B0'&&issue.state!=='resolved'&&!(validOwn&&issue.id===authorPendingId)&&!(allowedPartial&&issue.id===pendingMarkerId))
       task.advisoryCheckIds=report.checks.filter(check=>!task.requiredCheckIds.includes(check.id)&&!['cite_','identity_','evidence_','claim_'].some(prefix=>check.id.startsWith(prefix))).map(check=>check.id)
-      task.stalls=signature===task.lastProgressHash||task.progressHistory.includes(signature)?task.stalls+1:0;task.lastProgressHash=signature;task.progressHistory=[...task.progressHistory,signature].slice(-16);await saveDeliveryTask(io,task,services.owner)
+      const factDebt=deliveryFactDebt(report),previousDebt=task.bestFactDebt,improvedFacts=!previousDebt||factDebt.some((value,index)=>value<previousDebt[index]&&factDebt.slice(0,index).every((item,prior)=>item===previousDebt[prior]))
+      if(factDebt.some(value=>value>0)){task.stalls=improvedFacts?0:task.stalls+1;if(improvedFacts)task.bestFactDebt=factDebt}
+      else{task.bestFactDebt=undefined;task.stalls=signature===task.lastProgressHash||task.progressHistory.includes(signature)?task.stalls+1:0}
+      task.lastProgressHash=signature;task.progressHistory=[...task.progressHistory,signature].slice(-16);await saveDeliveryTask(io,task,services.owner)
       const sectionIssues=new Set(report.checks.filter(check=>check.status==='fail'&&check.id.startsWith('section_')).map(check=>`issue_${digest(check.id).slice(7,31)}`))
       const semanticFailures=new Set(report.checks.filter(check=>check.status==='fail'&&check.method==='model-assisted'&&task.requiredCheckIds.includes(check.id)).map(check=>`issue_${digest(check.id).slice(7,31)}`))
-      const actionable=report.issues.filter(issue=>issue.state!=='resolved'&&issue.category!=='style'&&(issue.location||sectionIssues.has(issue.id)||semanticFailures.has(issue.id)||issue.requirementIds.some(id=>requirements[id]?.kind==='length')))
+      const actionable=report.issues.filter(issue=>issue.state!=='resolved'&&(issue.category!=='style'||semanticFailures.has(issue.id))&&(issue.location||sectionIssues.has(issue.id)||semanticFailures.has(issue.id)||issue.requirementIds.some(id=>requirements[id]?.kind==='length')))
       if(!required.length&&!b0){
+        task.missingMaterials=[]
         if(allowedPartial&&report.checks.some(check=>check.id==='pending_markers'&&check.status==='fail')){const gaps:string[]=[];walk(projectMarkdown(candidate.text).tree,node=>{if(node.type==='text'&&/\[待补[：:]/u.test(node.value??''))gaps.push(node.value!)});task.missingMaterials=gaps.length?gaps:['科研初稿保留明确的未完成研究部分。']}
-        if(candidate.text===(await snapshot(io)).document.text&&!(validOwn&&report.checks.some(check=>check.id==='own_research_results'&&check.status!=='pass'))){const adoption=await prepareCandidateAdoption(io,await context(),task.id,candidate.id,task.candidateHash!,task.checkId);await recheckAdoptedCandidate(io,await context(),adoption);task.adoptionDecided=true;task.phase='export';break}
+        if(candidate.text===(await snapshot(io)).document.text&&!(validOwn&&report.checks.some(check=>check.id==='own_research_results'&&check.status!=='pass'))){const adoption=await prepareCandidateAdoption(io,await context(),task.id,candidate.id,task.candidateHash!,task.checkId),recheck=await recheckAdoptedCandidate(io,await context(),adoption);if(recheck.needsSemanticCheck)await checkSavedManuscript();task.adoptionDecided=true;task.phase='export';break}
         task.phase='awaiting-adoption';task.status='waiting-input';task.message='修改已准备好，可以集中查看并一次采用。';await saveDeliveryTask(io,task,services.owner);return task
       }
       if(task.stalls>=2){task.status='paused';task.message='连续工作未改善必需检查，候选已保留；请调整依据或处理缺口。';await saveDeliveryTask(io,task,services.owner);return task}
       if(report.checks.some(check=>check.id==='own_research_results'&&check.status==='fail')){task.missingMaterials=['缺少当前项目已确认的真实研究结果。'];task.status='waiting-input';task.message=task.missingMaterials[0];await saveDeliveryTask(io,task,services.owner);return task}
       const evidenceGap=report.checks.some(check=>check.status!=='pass'&&['evidence_','claim_','identity_'].some(prefix=>check.id.startsWith(prefix)))
-      if(!actionable.length||evidenceGap&&task.online){task.phase='evidence';task.message='正在根据缺口补充依据。';await saveDeliveryTask(io,task,services.owner)
+      const subject=await reviewInput(await candidateView(io,candidate)),linkedSources=new Set(subject.current.ledger.outline.sections.flatMap(section=>section.claimIds).flatMap(id=>subject.current.ledger.claims[id]?.evidenceLinks.map(link=>subject.current.ledger.evidence[link.evidenceId]?.sourceId)??[])),
+        newlyLocated=Object.values(subject.current.ledger.evidence).filter(row=>{const source=subject.current.ledger.sources[row.sourceId];return row.validation==='located'&&source?.materialId&&!linkedSources.has(source.id)&&source.contentHash===row.sourceContentHash&&subject.materialHashes[source.materialId]===row.sourceContentHash}),
+        gapEvidenceHash=newlyLocated.length?digest(json(newlyLocated)):undefined,
+        freshGapEvidence=task.queries.some(query=>query.outcome==='progress')&&gapEvidenceHash!==undefined&&gapEvidenceHash!==task.gapRevisionEvidenceHash
+      if(!actionable.length||evidenceGap&&task.online&&!freshGapEvidence){task.phase='evidence';task.message='正在根据缺口补充依据。';await saveDeliveryTask(io,task,services.owner)
         if(task.online&&services.searchGaps&&await services.searchGaps(task,report)){task.checkId=undefined;await saveDeliveryTask(io,task,services.owner);continue}
-        task.status='waiting-input';task.message='必需条件仍待核对，依据和候选已保留。';await saveDeliveryTask(io,task,services.owner);return task}
+        if(!actionable.length||!task.queries.some(query=>query.outcome==='progress')){task.status='waiting-input';task.message='必需条件仍待核对，依据和候选已保留。';await saveDeliveryTask(io,task,services.owner);return task}}
       task.phase='revision';task.message='正在根据候选检查准备修订。';await saveDeliveryTask(io,task,services.owner)
-      const freshGeneration=await prepareGeneration(await candidateView(io,candidate),{context:await context(),instruction:'修正实际候选问题并返回完整正文；保留其他内容、数字、引用、人工编辑和限定。若调整原章节标题或顺序，额外返回 outlineSections:[{id,title}]，按新文稿顺序一一映射全部原章节 ID，保留所有原论点和必需覆盖，不删除章节来制造达标。'+(task.structureChoice?.decision==='keep'?'作者已拒绝前一结构调整，本次须保持原有标题与顺序；拒绝记录 '+json(task.structureChoice):'')+(task.goal==='research-results'?'必须返回 paragraphClaims，paragraphIndex 按源顺序逐一映射全部实际 paragraph 及 table 节点（包括列表段落）的零起始编号和实际 claimIds；没有关联则空数组。':'')+'\n'+json(actionable)},task.model,services.skills,{allowInternalResults:task.goal==='research-results',includeOutlineMapping:true})
+      const freshGeneration=await prepareGeneration(await candidateView(io,candidate),{context:await context(),instruction:'修正实际候选问题并返回完整正文；保留其他内容、数字、引用、人工编辑和限定。若调整原章节标题或顺序，额外返回 outlineSections:[{id,title}]，按新文稿顺序一一映射全部原章节 ID，保留所有原论点和必需覆盖，不删除章节来制造达标。'+(task.queries.some(query=>query.outcome==='progress')?' 已补充的真实定位证据也在本次范围内；若原论点此前缺支持而当前证据足够，返回 claimUpdates 更新其实际证据关系与限定，保留原 ID。不凭元数据或仍缺失的全文制造支持。':'')+(task.structureChoice?.decision==='keep'?'作者已拒绝前一结构调整，本次须保持原有标题与顺序；拒绝记录 '+json(task.structureChoice):'')+(task.goal==='research-results'?'必须返回 paragraphClaims，paragraphIndex 按源顺序逐一映射全部实际 paragraph 及 table 节点（包括列表段落）的零起始编号和实际 claimIds；没有关联则空数组。':'')+'\n'+json(actionable)},task.model,services.skills,{allowInternalResults:task.goal==='research-results',includeOutlineMapping:true,includeGapEvidence:task.goal==='course-delivery'&&task.queries.some(query=>query.outcome==='progress')})
       const savedGeneration=await recoverPlan<typeof freshGeneration>('revision',candidate.textHash),generation=savedGeneration&&savedGeneration.input.instruction===freshGeneration.input.instruction&&json(savedGeneration.context)===json(freshGeneration.context)?savedGeneration:freshGeneration
       const generated=await deliveryJSON(io,task,services,generation,{system:generationSystem(generation),instruction:generation.input.instruction,context:generation.context,maxTokens:task.model.maxOutputTokens},value=>{const output=deliveryWritingOutputSchema.parse(value);validateModelReplacement(generation,output.replacementText);const titles=documentHeadings(output.replacementText).map(node=>node.title),outline=candidate.outline??(generation.context.outline as any);invariant(output.outlineSections||outline.sections.every((section:any)=>titles.includes(section.title.normalize('NFC').trim().replace(/\s+/gu,' '))),'STRUCTURE_MAPPING_REQUIRED','调整标题时须提供全部原章节 ID 与实际新标题的明确映射。');return output})
       const headings=(text:string)=>documentHeadings(text).map(({title,depth})=>({title,depth})),structureChanged=json(headings(candidate.text))!==json(headings(generated.replacementText))
@@ -134,6 +149,7 @@ export async function driveDelivery(io:FileStore,task:DeliveryTask,services:Deli
       if(task.goal==='research-results')invariant(generated.paragraphClaims?.length===paragraphs.length&&new Set(generated.paragraphClaims.map(row=>row.paragraphIndex)).size===paragraphs.length&&generated.paragraphClaims.every(row=>row.paragraphIndex<paragraphs.length),'RESULT_PARAGRAPH_MAPPING_REQUIRED','科研修订须逐段保留内部依据映射。')
       const revised=await createCandidate(io,await context(),{taskId:task.id,parentCandidateId:candidate.id,text:generated.replacementText,reason:'基于本候选检查准备下一版本；原章节与论点覆盖保留。',scope:'document',outlineSections:generated.outlineSections,claimUpdates:generated.claimUpdates,paragraphClaims:generated.paragraphClaims?.filter(row=>row.claimIds.length).map(row=>({blockId:paragraphs[row.paragraphIndex].id,claimIds:row.claimIds}))})
       task.candidateId=revised.candidate.id;task.candidateHash=revised.candidateHash
+      if(gapEvidenceHash)task.gapRevisionEvidenceHash=gapEvidenceHash
       if(structureChanged&&!task.allowStructure){task.pendingStructure=true;task.phase='inputs';task.status='waiting-input';task.message='结构调整候选已准备；请集中确认是否允许，再继续核对。';await saveDeliveryTask(io,task,services.owner);return task}
       await saveDeliveryTask(io,task,services.owner)
     }
@@ -141,10 +157,7 @@ export async function driveDelivery(io:FileStore,task:DeliveryTask,services:Deli
       const file=task.adoptionPlanId&&await io.read(`${deliveryRoot(task.id)}/adoptions/${task.adoptionPlanId}-plan.json`)
       invariant(file||task.keptOriginal,'ADOPTION_RECHECK_REQUIRED','采用已保存，复查计划尚未取得；不会再次采用。')
       const recheck=file?await recheckAdoptedCandidate(io,await context(),JSON.parse(file.text)):{needsSemanticCheck:true}
-      if(recheck.needsSemanticCheck){const plan=await prepareModelReview(io,{context:await context(),assessmentScope:'cross-section'},task.model,services.skills),
-        output=await deliveryJSON(io,task,services,plan,{system:modelReviewSystem(plan),instruction:'检查实际已经保存的主稿及其当前依赖。',context:plan.context,maxTokens:task.model.maxOutputTokens},value=>validateModelReview(plan,value))
-        await publishModelReview(io,plan,output)
-      }
+      if(recheck.needsSemanticCheck)await checkSavedManuscript()
       task.phase='export';await saveDeliveryTask(io,task,services.owner)
     }
     if(task.phase==='export'){

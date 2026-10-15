@@ -4,7 +4,9 @@ import {MemoryStore} from '../fixtures/memory-store.ts'
 import {initialize,prepareInit,snapshot} from '../../src/core/project/project.ts'
 import {registerMaterial} from '../../src/core/materials/materials.ts'
 import {prepareResultImport,confirmResultImport,inspectResults,prepareResultComparison,confirmResultComparison} from '../../src/core/research/results.ts'
-import {upsertClaim,confirmOutline} from '../../src/core/evidence/evidence.ts'
+import {upsertClaim,confirmOutline,registerSource,confirmEvidence} from '../../src/core/evidence/evidence.ts'
+import {parseRegisteredMaterial} from '../../src/core/materials/parse.ts'
+import {parseMaterialBytes} from '../../src/host/parsers/parse.ts'
 import {createCandidate,checkCandidate,prepareCandidateModelReview,prepareCandidateAdoption,adoptCandidate,recheckAdoptedCandidate} from '../../src/core/pipeline/candidates.ts'
 import {runFile,inputFile} from '../../src/core/pipeline/run-store.ts'
 import {json,digest} from '../../src/core/store/files.ts'
@@ -57,6 +59,21 @@ test('AT-201/204: distinct large integer results do not collapse through floatin
   assert.equal(checked.check.report.checks.find(row=>row.id==='own_result_numbers')?.status,'fail')
   const correct=await createCandidate(io,await context(),{taskId,parentCandidateId:candidate.candidate.id,text:candidate.candidate.text.replace('9007199254740992','9007199254740993'),scope:'document',reason:'TEST_ONLY exact raw integer',paragraphClaims:[{blockId:projectMarkdown(candidate.candidate.text.replace('9007199254740992','9007199254740993')).blocks.find(row=>row.node.type==='paragraph')!.id,claimIds:[Object.keys((await snapshot(io)).ledger.claims)[0]]}]})
   assert.equal((await checkCandidate(io,await context(),taskId,correct.candidate.id,correct.candidateHash)).check.report.checks.find(row=>row.id==='own_result_numbers')?.status,'pass')
+})
+
+test('AT-201: grouped thousands retain the actual count rather than splitting into unrelated numbers',async()=>{
+  for(const [value,status]of [['20,000','pass'],['20,001','fail']]){const {io,context,candidate}=await setup(value,' rows','The observed count was ','metric,value,unit\nrows,20000,rows\n'),checked=await checkCandidate(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash);assert.equal(checked.check.report.checks.find(row=>row.id==='own_result_numbers')?.status,status)}
+})
+
+test('AT-201: the declared top1 metric cutoff is supported while a wrong measured percentage remains blocked',async()=>{
+  for(const [value,status]of [['85.0','pass'],['1','fail']]){const {io,context,candidate}=await setup(value,'%','The top-1 accuracy was ','metric,value,unit\ntop1_accuracy,85.0,%\n'),checked=await checkCandidate(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash);assert.equal(checked.check.report.checks.find(row=>row.id==='own_result_numbers')?.status,status)}
+})
+
+test('AT-201/202: linked current author settings support actual counts without certifying a conflicting measured percentage',async()=>{
+  const {io,context,claim,evidence}=await setup();io.externalEdit('settings.txt','TEST_ONLY supplied protocol: 12 labeled queries; previous illustrative accuracy 86%.')
+  const material=await registerMaterial(io,{relativePath:'settings.txt',role:'notes',confirmExcludedFile:false},(await context()).expectedLedgerRevision),signal=new AbortController().signal,parsed=await parseRegisteredMaterial(io,material.material.id,material.revision,signal,(bytes,type)=>parseMaterialBytes(bytes,type,signal)),source=await registerSource(io,{kind:'user-result',title:'TEST_ONLY own settings',authors:[],identifiers:{},materialId:material.material.id},parsed.revision),located=await confirmEvidence(io,{sourceId:source.source.id,sourceContentHash:parsed.parsed.sourceContentHash,locator:parsed.parsed.blocks[0].locator,excerpt:parsed.parsed.blocks[0].text,kind:'quotation'},source.revision)
+  await upsertClaim(io,{...claim,evidenceLinks:[{evidenceId:evidence.id,relation:'supports',rationale:'TEST_ONLY actual measured percentage'},{evidenceId:located.evidence.id,relation:'supports',rationale:'TEST_ONLY exact protocol count'}]},(await context()).expectedLedgerRevision)
+  for(const [value,status]of [['85.0','pass'],['86','fail']]){const text=`# TEST_ONLY\n\n## Results\n\nThe supplied accuracy was ${value}% over 12 labeled queries.\n`,block=projectMarkdown(text).blocks.find(row=>row.node.type==='paragraph')!,candidate=await createCandidate(io,await context(),{taskId,text,scope:'document',reason:'TEST_ONLY actual count provenance',paragraphClaims:[{blockId:block.id,claimIds:[claim.id]}]}),checked=await checkCandidate(io,await context(),taskId,candidate.candidate.id,candidate.candidateHash);assert.equal(checked.check.report.checks.find(row=>row.id==='own_result_numbers')?.status,status)}
 })
 test('AT-201/202: confirmed 5 percentage points and 6.25 percent remain distinct in the actual manuscript',async()=>{
   const {io,context,claim}=await setup('80','%','The accuracy was ','metric,value,unit\naccuracy,80.00,%\naccuracy,85.0,%\n'),results=(await inspectResults(io)).measurements

@@ -168,18 +168,18 @@ export function Draft({ project, context, api, refresh, run, busy, issueLocation
    */
   const [question, setQuestion] = useState<any>()
   useEffect(() => {
-    let live = true
+    let live = true,timer:number|undefined
     const read = async () => {
       try {
+        if(document.hidden)return
         const result = await api('writingTask.inspect', { context: context() })
         if (live) {
           setQuestion(activeWritingQuestion(result.task, answeredQuestions.current))
         }
-      } catch { /* a project without a task simply has no question */ }
+      } catch { /* a project without a task simply has no question */ }finally{if(live)timer=window.setTimeout(read,3000)}
     }
     read()
-    const timer = window.setInterval(read, 3000)
-    return () => { live = false; clearInterval(timer) }
+    return () => { live = false; clearTimeout(timer) }
   }, [context().sessionId, project.binding.projectId])
   useEffect(() => { if (question) setOverlayTask(true) }, [question?.id])
   const answerQuestion = async (value: string) => {

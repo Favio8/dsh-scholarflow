@@ -4,8 +4,10 @@ export const digest = (bytes: string | Uint8Array): string => `sha256:${createHa
 export const newId = (prefix: string): string => `${prefix}_${randomUUID().replaceAll('-', '')}`
 export const json = (value: unknown): string => JSON.stringify(value, null, 2) + '\n'
 export interface FileImage { text: string; version: string }
-export interface FileEntry { path: string; type: 'file' | 'directory' | 'other'; size: number }
+export interface FileEntry { path: string; type: 'file' | 'directory' | 'other'; size: number; version?: string }
 export interface FileStore {
+  /** Stable identity for adapter instances observing the same project and file-version namespace. */
+  readonly cacheScope?: object
   read(path: string): Promise<FileImage | undefined>
   /**
    * Reads raw bytes. `signal` is the caller's own cancellation, distinct from the store's

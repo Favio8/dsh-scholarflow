@@ -99,6 +99,7 @@ export function compareIdentity(source: Source, found: SourceCandidate | null): 
   if (doi.parse(source.identifiers.doi) !== found.recordId) differs.push('DOI')
   if (comparable(source.title) !== comparable(found.title)) differs.push('标题')
   if (source.year && found.year && source.year !== found.year) differs.push('年份')
+  if(source.bibliography?.publicationType&&found.bibliography?.publicationType&&source.bibliography.publicationType!==found.bibliography.publicationType)differs.push('出版类型')
   if (source.authors.length && found.authors.length && !source.authors.every(author => found.authors.some(other => comparable(author.literal) === comparable(other.literal)))) differs.push('作者')
   return { status: differs.length ? 'mismatch' : 'matched', method: 'identifier-lookup', checkedAt,
     reason: differs.length ? `登记元数据与 DOI 查询在${differs.join('、')}上存在差异；原数据和证据保持不变。`
@@ -112,7 +113,7 @@ export async function applyIdentityLookup(io: FileStore, sourceId: string, expec
     invariant(source && digest(json(source)) === expectedSourceHash, 'STALE_SOURCE_VERSION', '核验期间来源记录发生改变，未覆盖原数据。')
     const identity = failureCode ? { status: 'unavailable' as const, method: 'identifier-lookup' as const, checkedAt: new Date().toISOString(),
       reason: `提供方核验请求未完成（${failureCode.slice(0, 100)}）；不据此断言来源不存在或伪造。` } : compareIdentity(source, found)
-    ledger.sources[sourceId] = { ...source, identity, provenance: [...source.provenance, { provider: failureCode ? 'crossref-identifier-attempt' : 'crossref-identifier-lookup', retrievedAt: identity.checkedAt!, ...(found && { recordId: found.recordId }) }] }
+    ledger.sources[sourceId] = { ...source, ...(identity.status==='matched'&&source.kind==='paper'&&!source.bibliography?.publicationType&&found?.bibliography?.publicationType&&{bibliography:{...source.bibliography,publicationType:found.bibliography.publicationType}}),identity, provenance: [...source.provenance, { provider: failureCode ? 'crossref-identifier-attempt' : 'crossref-identifier-lookup', retrievedAt: identity.checkedAt!, ...(found && { recordId: found.recordId }) }] }
     invalidateReviews(ledger, ['citation', 'integrity'])
     if (attempt) return [{ path: attempt.path, before: attempt.before, after: json(lookupRecordSchema.parse({ ...attempt.record, identity })) }]
     const path = `.scholarflow/research/identity_${newId('lookup')}.json`
@@ -174,3 +175,6 @@ export async function executeLookup(io: FileStore, plan: LookupPlan, provider: R
     return { attemptId: plan.id, errorCode: code }
   }
 }
+
+/** Explicit original links belong only to the exact sole DOI on the same line. */
+export function specifiedOriginalUrls(requirements:string,identifier:string){return requirements.split(/\r?\n/u).flatMap(line=>{const identifiers=[...line.matchAll(/10\.\d{4,9}\/[^\s"<>|)]+/gu)].map(row=>row[0].toLowerCase());return identifiers.length===1&&identifiers[0]===identifier.toLowerCase()?(line.match(/https:\/\/[^\s"<>)|]+/gu)??[]).filter(url=>!url.startsWith('https://doi.org/')):[]})}

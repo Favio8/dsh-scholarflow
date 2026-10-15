@@ -90,13 +90,14 @@ try {
   assert.equal(manifest.name, 'dsh-scholarflow')
   await readFile(join(profile, 'node_modules/dsh-scholarflow/docs/compatibility.md'))
   await start()
-  await page.locator('button[aria-label="ScholarFlow"]').click()
-  await page.getByRole('status').filter({ hasText: '已连接 Host' }).waitFor()
+  await page.getByRole('button',{name:'新建会话',exact:true}).first().waitFor()
   const workspace = await rpc('workspace/create', { request: { path: projectRoot } })
   assert.equal(workspace.ok, true)
-  const session = await rpc('session/create', { request: { workspaceId: workspace.value.workspace.workspaceId, agentPreset: 'scholarflow' } })
-  assert.equal(session.ok, true)
-  const context = { requestId: 'req_TEST_ONLY_lifecycle', workspaceId: workspace.value.workspace.workspaceId, sessionId: session.value.sessionId }
+  await page.reload();await page.locator(`[data-row-key="workspace:${workspace.value.workspace.workspaceId}"]`).hover()
+  const [created]=await Promise.all([page.waitForResponse(response=>response.request().postDataJSON()?.method==='session/create'),page.locator('button[aria-label*="TEST_ONLY 中文论文"][aria-label*="中新建会话"]').click()])
+  const session=(await created.json()).result.value
+  await page.locator('button[title="选择新任务使用的 Agent 预设"]').click();await page.locator('[class*="_item_"]').filter({hasText:/^ScholarFlow/}).click();await page.locator('.sf-wizard').waitFor()
+  const context = { requestId: 'req_TEST_ONLY_lifecycle', workspaceId: workspace.value.workspace.workspaceId, sessionId: session.sessionId }
   const preview = await rpc('scholarflow.v1/project.prepareInit', { request: { context, input: { title: 'TEST_ONLY 安装包项目', type: 'course-paper' } } })
   assert.equal(preview.value.ok, true)
   const initialized = await rpc('scholarflow.v1/project.initialize', { request: { context, planId: preview.value.data.planId, planHash: preview.value.data.planHash } })
@@ -109,7 +110,7 @@ try {
   assert.ok(!after.dependencies?.['dsh-scholarflow'])
   assert.ok(!after.dsh.profile.bundles.includes('dsh-scholarflow'))
   await start()
-  assert.equal(await page.locator('button[aria-label="ScholarFlow"]').count(), 0)
+  await page.getByRole('button',{name:'新建会话',exact:true}).first().click();await page.locator('button[title="选择新任务使用的 Agent 预设"]').click();assert.equal(await page.locator('[class*="_item_"]').filter({hasText:/^ScholarFlow/}).count(),0)
   assert.deepEqual(await tree(projectRoot), beforeUninstall)
   await writeFile(resolve('.dsh-tmp/package-lifecycle-latest.json'), JSON.stringify({ date: new Date().toISOString(), testOnly: true,
     installedTarball: true, nativeClientBoot: true, pluginRemoved: true, postRemovalNativeBoot: true, preservedProjectFiles: beforeUninstall.length,

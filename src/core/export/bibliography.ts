@@ -23,11 +23,12 @@ function bibtex(records: { key: string; type: string; title: string; authors: Le
     if (record.authors.length) fields.push(['author', bibAuthors(record.authors)])
     if (record.year) fields.push(['year', String(record.year)])
     fields.push(['title', bibEscape(record.title)])
-    if (record.venue) fields.push(['journal', bibEscape(record.venue)])
+    const conference=record.type==='paper'&&record.bibliography?.publicationType==='conference-paper'
+    if (record.venue) fields.push([conference?'booktitle':'journal', bibEscape(record.venue)])
     if (record.doi) fields.push(['doi', record.doi])
     if (record.url) fields.push(['url', record.url.replace(/[\\{}]/g, '')])
-    if(record.bibliography)for(const [key,value] of Object.entries(record.bibliography))if(value)fields.push([({issue:'number',publisherPlace:'address'} as Record<string,string>)[key]??key,bibEscape(value)])
-    return `@${bibEntryType(record.type)}{${record.key},\n` +
+    if(record.bibliography)for(const [key,value] of Object.entries(record.bibliography))if(value&&key!=='publicationType')fields.push([({issue:'number',publisherPlace:'address'} as Record<string,string>)[key]??key,bibEscape(value)])
+    return `@${conference?'inproceedings':bibEntryType(record.type)}{${record.key},\n` +
       fields.map(([name, value]) => `\t${name} = {${value}},`).join('\n') + '\n}\n'
   }).join('')
 }

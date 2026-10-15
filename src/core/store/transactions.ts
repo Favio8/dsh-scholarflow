@@ -8,6 +8,7 @@ const transactionSchema = z.object({ schemaVersion: z.literal(1), id, state: z.e
   changes: z.array(z.object({ path: relativePath, before: imageSchema, after: imageSchema, encoding: z.literal('base64').optional() }).strict()).min(1),
 }).strict()
 type Transaction = z.infer<typeof transactionSchema>
+const committedVersions=new WeakMap<object,Map<string,string>>()
 export interface Mutation { path: string; before: FileImage | undefined; after: string; encoding?: 'base64' }
 
 const imageHash = (text: string, encoding?: 'base64') => digest(encoding ? Buffer.from(text, 'base64') : text)
@@ -43,7 +44,7 @@ export async function commit(io: FileStore, mutations: Mutation[], fault?: (poin
     await writeImage(io, mutation, mutation.after, mutation.before)
     fault?.(`target-${i}-published`)
   }
-  await io.write(path, json({ ...txn, state: 'committed' }), journal)
+  const marked=await io.write(path, json({ ...txn, state: 'committed' }), journal),scope=io.cacheScope??io,versions=committedVersions.get(scope)??new Map<string,string>();committedVersions.set(scope,versions);if(versions.size>=8192)versions.delete(versions.keys().next().value!);versions.set(path,marked.version)
   fault?.('commit-marked')
   return txn.id
 }
@@ -52,9 +53,11 @@ export async function readTransactionJournals(io: FileStore) {
   const parent = '.scholarflow/transactions'
   if (!await io.stat(parent)) return []
   const rows: Array<{ path: string; journal: FileImage; txn: Transaction }> = []
+  const scope=io.cacheScope??io,versions=committedVersions.get(scope)??new Map<string,string>();committedVersions.set(scope,versions)
   for (const entry of await io.list(parent)) {
     if (entry.type !== 'directory') continue
     const path = `${entry.path}/manifest.json`
+    if(versions.has(path)){const entry=await io.stat(path);if(entry?.type==='file'&&entry.version&&versions.get(path)===entry.version)continue;versions.delete(path)}
     const journal = await io.read(path)
     if (!journal) throw new ScholarError('RECOVERY_CONFLICT', '事务日志不完整，项目仅可只读检查。')
     let raw: unknown
@@ -64,7 +67,7 @@ export async function readTransactionJournals(io: FileStore) {
     const txn = result.data
     invariant(txn.id === entry.path.split('/').at(-1) && new Set(txn.changes.map(c => c.path)).size === txn.changes.length,
       'RECOVERY_CONFLICT', '事务身份或目标索引不一致。')
-    if (txn.state === 'committed') continue
+    if (txn.state === 'committed') {if(versions.size>=8192)versions.delete(versions.keys().next().value!);versions.set(path,journal.version);continue}
     for (const change of txn.changes) {
       invariant(change.before === null || imageHash(change.before.text, change.encoding) === change.before.hash, 'RECOVERY_CONFLICT', '旧稿快照校验失败。')
       invariant(change.after !== null && imageHash(change.after.text, change.encoding) === change.after.hash, 'RECOVERY_CONFLICT', '新稿快照校验失败。')

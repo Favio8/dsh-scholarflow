@@ -251,12 +251,13 @@ export function apply(ctx: Host) {
     }, [workspace?.workspaceId, props.sessionId])
     useEffect(() => {
       if (!workspace || !props.sessionId) return
-      let live = true
+      let live = true,inFlight=false
       const timer = window.setInterval(() => {
-        if (!live || document.hidden || latest.current.busy || !latest.current.project?.initialized) return
+        if (!live || inFlight || document.hidden || latest.current.busy || !latest.current.project?.initialized) return
+        inFlight=true
         refreshRef.current().catch(error => {
           if (live) setError(`刷新未完成，当前页面和编辑仍保留：${error.message}`)
-        })
+        }).finally(()=>{inFlight=false})
       }, 10000)
       return () => { live = false; clearInterval(timer) }
     }, [workspace?.workspaceId, props.sessionId])
@@ -322,7 +323,7 @@ export function apply(ctx: Host) {
         </nav><FlowNavigation nodes={flowNodes(project,{...flowTask,review:flowReview,dirty:editor?.dirty,reviewActivity,delivery:deliveryValue})} current={flowCurrent} onNavigate={navigateFlow} />
         {/* v1.20: the progress report joins the work bar as a pill instead of a band of its own, so
             the run stays readable while the manuscript gets the height back (SF-185). */}
-        <div className="sf-toolbar-progress" hidden={tab!=='Draft'||outlineOpen}><DeliveryProgress key={`delivery_${bindingKey}`} project={project} dirty={editor?.dirty} api={api} context={context} refresh={refresh} onState={setDeliveryValue} onOpen={()=>navigateTab("Review")}/><WritingProgress key={`progress_${bindingKey}_${project.binding.projectId}`} variant="pill" project={project} api={api} context={context} refresh={refresh} onManage={navigateTab} onRecords={()=>{setHistoryView('runs');navigateTab('History')}} onCheck={(row:any)=>{navigateTab(row.page);if(row.page==='Draft')setView('preview');requestAnimationFrame(()=>{const selector=row.page==='Draft'?`[data-sf-block="${window.CSS.escape(row.key)}"]`:row.page==='Review'?`[data-sf-review-id="${window.CSS.escape(row.key)}"]`:undefined;if(selector)confirmationRoot.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({block:'center'})})}} onTask={(result:any)=>{if(bindingKey!==liveBinding.current)return;setGenerationMode(result.task?.mode);setFlowTask(previous=>({task:result.task,spec:result.spec??previous.spec??result.task?.spec}))}} /></div>
+        <div className="sf-toolbar-progress" hidden={tab!=='Draft'||outlineOpen}><DeliveryProgress key={`delivery_${bindingKey}`} project={project} dirty={editor?.dirty} api={api} context={context} refresh={refresh} onState={setDeliveryValue} onOpen={()=>navigateTab("Review")}/><WritingProgress enabled={!deliveryValue?.task} visible={tab==='Draft'&&!outlineOpen} key={`progress_${bindingKey}_${project.binding.projectId}`} variant="pill" project={project} api={api} context={context} refresh={refresh} onManage={navigateTab} onRecords={()=>{setHistoryView('runs');navigateTab('History')}} onCheck={(row:any)=>{navigateTab(row.page);if(row.page==='Draft')setView('preview');requestAnimationFrame(()=>{const selector=row.page==='Draft'?`[data-sf-block="${window.CSS.escape(row.key)}"]`:row.page==='Review'?`[data-sf-review-id="${window.CSS.escape(row.key)}"]`:undefined;if(selector)confirmationRoot.current?.querySelector<HTMLElement>(selector)?.scrollIntoView({block:'center'})})}} onTask={(result:any)=>{if(bindingKey!==liveBinding.current)return;setGenerationMode(result.task?.mode);setFlowTask(previous=>({task:result.task,spec:result.spec??previous.spec??result.task?.spec}))}} /></div>
         <details className="sf-paper-menu"><summary aria-label="更多论文选项"><WorkbenchIcon kind="more" /></summary><div className="sf-paper-menu-popover">
           {(['Overview','Settings','History'] as const).map(name=><button key={name} onClick={e=>{closeMenu(e.currentTarget);if(name==='History')setHistoryView('versions');navigateTab(name)}}>{TAB_LABELS[TABS.indexOf(name)]}</button>)}
         </div></details></div>

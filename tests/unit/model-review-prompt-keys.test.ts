@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { modelReviewKeys, modelReviewOutputSchema } from '../../src/shared/review.ts'
+import { modelReviewKeys, modelReviewOutputSchema,modelReviewEnums } from '../../src/shared/review.ts'
 import { MODEL_REVIEW_SYSTEM, CROSS_SECTION_REVIEW_SYSTEM } from '../../src/core/review/model.ts'
 
 // SF-186 regression. The prompts used to spell the recheck key as 「旧 issueId」 while the schema
@@ -22,6 +22,10 @@ test('the recheck key is named issueId, and oldIssueId is called out as wrong', 
   assert.ok(modelReviewKeys.recheck.includes('issueId'))
   for (const prompt of [MODEL_REVIEW_SYSTEM, CROSS_SECTION_REVIEW_SYSTEM])
     assert.match(prompt, /不是 oldIssueId/, 'the prompt must name the wrong spelling it keeps getting')
+})
+
+test('real-model enum failures receive the schema category and B0/B1/B2 vocabulary',()=>{
+  for(const prompt of [MODEL_REVIEW_SYSTEM,CROSS_SECTION_REVIEW_SYSTEM])for(const value of [...modelReviewEnums.category,...modelReviewEnums.severity])assert(prompt.includes(value))
 })
 
 test('a non-empty rechecks example exists in both prompts, since an empty one teaches no key names', () => {

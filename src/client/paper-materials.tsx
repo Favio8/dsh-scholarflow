@@ -5,6 +5,16 @@ import { ResearchResults } from './research-results.tsx'
 import { SfState } from './sf-state.tsx'
 import {bibliographyGroups,bibliographyCandidates} from '../core/export/citation-groups.ts'
 
+function SourceMetadata({source,api,context,run,busy,refresh}:any){
+  const [title,setTitle]=useState(source.title),[authors,setAuthors]=useState(source.authors.map((row:any)=>row.literal).join('\n')),[year,setYear]=useState(source.year?.toString()??''),[doi,setDoi]=useState(source.identifiers.doi??''),[url,setUrl]=useState(source.identifiers.url??''),[reason,setReason]=useState(''),[plan,setPlan]=useState<any>()
+  const change=(setter:any,value:string)=>{setter(value);setPlan(undefined)}
+  return <details className="sf-detail"><summary>核对出版信息</summary><p>补正同一来源的出版信息，保留引用键、原文与历史。确认后仍需 DOI 查询或进一步核对，不会直接认定身份匹配。</p>
+    <label>出版题名<input value={title} onChange={e=>change(setTitle,e.target.value)}/></label><label>作者（每行一位）<textarea value={authors} onChange={e=>change(setAuthors,e.target.value)}/></label><label>出版年份<input type="number" value={year} onChange={e=>change(setYear,e.target.value)}/></label>
+    <label>DOI<input value={doi} onChange={e=>change(setDoi,e.target.value)}/></label><label>出版来源网址<input value={url} onChange={e=>change(setUrl,e.target.value)}/></label><label>核对依据<textarea value={reason} onChange={e=>change(setReason,e.target.value)}/></label>
+    <button disabled={busy||!title.trim()||reason.trim().length<10} onClick={()=>run(async()=>setPlan(await api('sources.prepareMetadata',{context:context(),sourceId:source.id,metadata:{title:title.trim(),authors:authors.split('\n').map((row:string)=>row.trim()).filter(Boolean).map((literal:string)=>({literal})),...(year&&{year:Number(year)}),venue:source.venue,bibliography:source.bibliography,identifiers:{...source.identifiers,doi:doi.trim()||undefined,url:url.trim()||undefined}},reason})))}>预览出版信息补正</button>
+    {plan&&<section aria-label="出版信息补正预览"><p>{plan.before.title} → {plan.metadata.title}</p><p>DOI：{plan.before.identifiers.doi??'未提供'} → {plan.metadata.identifiers.doi??'未提供'}</p><p>作者：{plan.metadata.authors.map((row:any)=>row.literal).join('；')} · {plan.metadata.year??'年份未提供'}</p><p>{plan.reason}</p><button disabled={busy} onClick={()=>run(async()=>{await api('sources.confirmMetadata',{context:context(),planId:plan.planId,planHash:plan.planHash});setPlan(undefined);await refresh()})}>确认补正出版信息</button><button disabled={busy} onClick={()=>setPlan(undefined)}>保留原出版信息</button></section>}
+  </details>
+}
 export function PaperMaterials(props: any) {
   const { project, api, context, run, busy,refresh } = props
   const [parsed, setParsed] = useState<any>(), [index, setIndex] = useState(0)
@@ -34,6 +44,7 @@ export function PaperMaterials(props: any) {
     {candidates.map(rows=><section className="sf-duplicate-notice" key={rows[0].source.id}><p>「{rows[0].source.title}」有 {rows.length} 条疑似重复记录。</p><button disabled={busy} onClick={()=>run(async()=>{await api('sources.linkBibliography',{context:context(),primaryId:rows[0].source.id,sourceIds:rows.flatMap(row=>row.records.map(record=>record.id))});await refresh()})}>确认是同一篇论文</button></section>)}
     {groups.map(({source,records}) => <article className="sf-reference-row" data-sf-source-id={source.id} key={source.id}><strong>{source.title}</strong><p className="sf-muted">{source.authors.map(author => author.literal ?? author.family).join(', ')}{source.year && ` · ${source.year}`} · {records.some(row=>row.textAccess==='fulltext') ? '已取得全文文件，读取范围见关联资料' : records.some(row=>row.textAccess==='excerpt') ? '已取得摘录' : '仅出版信息'}</p>
       {source.identifiers.url && <a href={source.identifiers.url} target="_blank" rel="noopener noreferrer">查看来源 <WorkbenchIcon kind="external" /></a>}
+      <SourceMetadata key={JSON.stringify([source.id,source.title,source.authors,source.year,source.identifiers])} {...{source,api,context,run,busy,refresh}}/>
       {records.some(row=>row.materialId)&&<details className="sf-detail"><summary>关联的 {records.filter(row=>row.materialId).length} 份资料</summary>{records.filter(row=>row.materialId).map(row=><button key={row.id} disabled={busy} onClick={()=>run(async()=>{setParsed(await api('materials.read',{context:context(),materialId:row.materialId}));setIndex(0)})}>{project.ledger.materials[row.materialId!]?.projectRelativePath??'查看原文'}</button>)}</details>}
     </article>)}
     <details ref={maintenance} className="sf-material-maintenance"><summary>补充资料与维护引用</summary><Research {...props} /></details>

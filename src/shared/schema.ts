@@ -67,7 +67,7 @@ export const materialSchema = z.object({ id, projectRelativePath: relativePath, 
   parsedRanges: z.array(z.object({ kind: z.enum(['pages', 'paragraphs']), from: z.number().int().min(1), to: z.number().int().min(1) }).strict()),
   parser: z.object({ id: z.string(), version: z.string() }).strict().optional(), failureCode: z.string().optional(),
 }).strict()
-export const bibliographyMetadata=z.object({volume:z.string().max(100).optional(),issue:z.string().max(100).optional(),pages:z.string().max(200).optional(),publisher:z.string().max(1000).optional(),publisherPlace:z.string().max(1000).optional(),edition:z.string().max(100).optional()}).strict()
+export const bibliographyMetadata=z.object({publicationType:z.enum(['journal-article','conference-paper']).optional(),volume:z.string().max(100).optional(),issue:z.string().max(100).optional(),pages:z.string().max(200).optional(),publisher:z.string().max(1000).optional(),publisherPlace:z.string().max(1000).optional(),edition:z.string().max(100).optional()}).strict()
 export const sourceSchema = z.object({ id, kind: z.enum(['paper', 'dataset', 'web', 'book', 'user-result', 'other']), title: z.string().min(1), authors: z.array(z.object({ literal: z.string(), family: z.string().optional(), given: z.string().optional() }).strict()),bibliography:bibliographyMetadata.optional(),
   year: z.number().int().min(1).max(9999).optional(), venue: z.string().optional(), bibliographySourceId: id.optional(),
   identifiers: z.object({ doi: z.string().optional(), arxiv: z.string().optional(), url: z.string().optional(), other: z.array(z.string()).optional() }).strict(),

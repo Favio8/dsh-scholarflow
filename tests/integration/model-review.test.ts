@@ -44,6 +44,12 @@ async function prepare(io: MemoryStore) {
   return prepareModelReview(io, { context: { requestId: 'req_TEST_ONLY', workspaceId: 'workspace_TEST_ONLY', sessionId: 'session_TEST_ONLY', projectId: current.ledger.projectId,
     expectedLedgerRevision: current.ledger.revision } }, { providerId: 'TEST_ONLY-provider', modelId: 'TEST_ONLY-model' })
 }
+
+test('AT-204: a contribution finding belongs to its failed cross-section assessment without falsely failing a passed argument check',async()=>{
+  const {plan}=await setup(),candidate=output(plan,false);candidate.checks=candidate.checks.map(check=>({...check,status:check.id==='contribution_consistency'?'fail':'pass'}));candidate.findings=[{category:'structure',severity:'B1',assessmentId:'contribution_consistency',title:'TEST_ONLY misplaced setting description',explanation:'TEST_ONLY this cross-section setting belongs in the method description',suggestedFix:'TEST_ONLY place this scoped setting in its actual section',blockId:plan.context.blocks.find(block=>block.sourceText.includes(quote))!.id,quote,claimIds:[],evidenceIds:[],requirementIds:[]}]
+  assert.equal(validateModelReview(plan,candidate).checks.find(check=>check.id==='argument_assessment')!.status,'pass')
+  candidate.checks=candidate.checks.map(check=>({...check,status:'pass'}));assert.throws(()=>validateModelReview(plan,candidate),{code:'MODEL_REVIEW_INVALID'})
+})
 function output(plan: ModelReviewPlan, findings = true) {
   return { checks: [{ id: 'argument_assessment', status: findings ? 'fail' : 'pass', detail: 'TEST_ONLY 当前文字的论证范围已经按给定上下文检查。' },
     { id: 'style_assessment', status: 'pass', detail: 'TEST_ONLY 本轮只核对给定段落的文风，不提供接收概率。' },
@@ -178,11 +184,11 @@ test('model review gets one format repair, never creates fake completion, and ca
   assert.equal((await inspectReview(other.io)).report, undefined)
 })
 
-test('the only repair explains a real structure-finding versus argument-pass contradiction without dropping the finding', async () => {
+test('the only repair explains a finding versus its assigned assessment-pass contradiction without dropping the finding', async () => {
   const { io, plan } = await setup(), original = (await snapshot(io)).document.text
   const candidate = output(plan)
   candidate.checks[0].status = 'pass'
-  candidate.checks.find(row => row.id === 'contribution_consistency')!.status = 'fail'
+  candidate.checks.find(row => row.id === 'contribution_consistency')!.status = 'pass'
   candidate.findings[0].category = 'structure'
   candidate.findings[0].assessmentId = 'contribution_consistency'
   let calls = 0
@@ -191,11 +197,12 @@ test('the only repair explains a real structure-finding versus argument-pass con
     assert.match(call.repair, /具体违反合同：MODEL_REVIEW_INVALID/u)
     assert.match(call.repair, /structure、requirement、integrity/u)
     assert.match(call.repair, /不得删除真实问题/u)
-    candidate.checks[0].status = 'fail'
+    candidate.checks.find(row => row.id === 'contribution_consistency')!.status = 'fail'
     return json(candidate)
   })
   assert.equal(calls, 2); assert.equal(result.run.usedModelCalls, 2)
-  assert.equal(reportOf(result).checks.find(row => row.id === 'argument_assessment')!.status, 'fail')
+  assert.equal(reportOf(result).checks.find(row => row.id === 'argument_assessment')!.status, 'pass')
+  assert.equal(reportOf(result).checks.find(row => row.id === 'contribution_consistency')!.status, 'fail')
   assert.ok(reportOf(result).issues.some(row => row.category === 'structure' && row.location?.quote === quote))
   assert.equal((await snapshot(io)).document.text, original)
   assert.ok((await readModelReviewCheckpoint(io, result.run)).checkpoint.repair!.length <= 2000)

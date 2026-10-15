@@ -3,11 +3,11 @@ import '@citation-js/plugin-csl'
 import type {Source} from '../../shared/schema.ts'
 import {projectMarkdown} from '../editing/markdown.ts'
 
-export function sourceCsl(source:Source){return {id:source.citeKey,type:source.kind==='paper'?'article-journal':source.kind==='book'?'book':source.kind==='dataset'?'dataset':'webpage',
+export function sourceCsl(source:Source){return {id:source.citeKey,type:source.kind==='paper'&&source.bibliography?.publicationType==='conference-paper'?'paper-conference':source.kind==='paper'?'article-journal':source.kind==='book'?'book':source.kind==='dataset'?'dataset':'webpage',
   title:source.title,author:source.authors.map(({literal,family,given})=>family?{family,...(given&&{given})}:{literal}),
   ...(source.year&&{issued:{'date-parts':[[source.year]]}}),...(source.venue&&{'container-title':source.venue}),
   ...(source.identifiers.doi&&{DOI:source.identifiers.doi}),...(source.identifiers.url&&{URL:source.identifiers.url}),
-  ...(source.bibliography&&Object.fromEntries(Object.entries(source.bibliography).map(([key,value])=>[({pages:'page',publisherPlace:'publisher-place'} as Record<string,string>)[key]??key,value])))}}
+  ...(source.bibliography&&Object.fromEntries(Object.entries(source.bibliography).filter(([key])=>key!=='publicationType').map(([key,value])=>[({pages:'page',publisherPlace:'publisher-place'} as Record<string,string>)[key]??key,value])))}}
 export function apaReferences(sources:Source[]){
   if(!sources.length)return [] as Array<[string,string]>
   return (new Cite(sources.map(sourceCsl)).format('bibliography',{style:'apa',format:'text',asEntryArray:true}) as Array<[string,string]>).map(([id,text])=>[id,text.trim()] as [string,string])

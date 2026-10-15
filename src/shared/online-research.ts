@@ -7,7 +7,7 @@ export const searchInput = z.object({ query: z.string().trim().min(3).max(1000),
   yearFrom: z.number().int().min(1).max(9999).optional(), yearTo: z.number().int().min(1).max(9999).optional() }).strict()
   .refine(value => !value.yearFrom || !value.yearTo || value.yearFrom <= value.yearTo, 'Invalid year interval')
 export const candidateSchema = z.object({ candidateId: id, provider: z.literal('crossref'), recordId: doi, sourceUrl: z.url(), retrievedAt: z.iso.datetime(),
-  title: z.string().min(1).max(4000), authors: sourceSchema.shape.authors.max(100), year: sourceSchema.shape.year, venue: z.string().max(2000).optional(),
+  title: z.string().min(1).max(4000), authors: sourceSchema.shape.authors.max(100), year: sourceSchema.shape.year, venue: z.string().max(2000).optional(),bibliography:sourceSchema.shape.bibliography,
   identifiers: z.object({ doi, url: z.url() }).strict(), textAccess: z.literal('metadata'), kind: sourceSchema.shape.kind,
   warnings: z.array(z.string().max(2000)).max(20) }).strict()
 export type SourceCandidate = z.infer<typeof candidateSchema>

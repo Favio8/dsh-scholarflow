@@ -1,6 +1,6 @@
 {
   "name": "dsh-scholarflow",
-  "version": "1.0.0",
+  "version": "1.21.0",
   "private": true,
   "description": "ScholarFlow academic project workspace for DeepSeek Harness",
   "type": "module",

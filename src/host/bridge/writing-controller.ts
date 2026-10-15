@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import {compareIdentity,specifiedOriginalUrls} from '../../core/research/online.ts'
+import type {SourceCandidate} from '../../shared/online-research.ts'
 import { stringify, parseDocument } from 'yaml'
 import { creationSpec, requirementDraftSpec, creationPrepareRequest, writingTaskRequest, writingTaskAction, cowriteProposalRequest, cowriteSuggestion, writingTaskSchema, type WritingTask, type CreationSpec } from '../../shared/writing-task.ts'
 import { id, requestContext, hash } from '../../shared/schema.ts'
@@ -48,6 +50,8 @@ import { readOutlineResponse, parseOutlineJson } from './outline-response.ts'
 import { validateGeneration, assessOutline, outlineCandidateKey, outlineDocumentPlan } from '../../core/requirements/outline.ts'
 import { prepareWritingSourceConflict, resolveWritingSourceConflict } from '../../core/pipeline/source-conflict.ts'
 import { approveFirstDraft, deferDraftIssue } from '../../core/pipeline/first-draft.ts'
+import {commit} from '../../core/store/transactions.ts'
+import type {Source} from '../../shared/schema.ts'
 import { DraftStreamCache, BodyStreamDecoder, readDraftPreview } from './draft-streams.ts'
 import { sectionTarget } from '../../core/editing/sections.ts'
 
@@ -705,7 +709,8 @@ export class WritingController {
     const {assignmentPath:_legacyAssignment,...fields}=image.spec
     const spec={...fields,materials:input.materials,requirementSources:sources,online:input.online}
     await saveWritingSpec(io,spec,(await snapshot(io)).ledger.revision,true)
-    if(task){task.spec=spec;task.materialIndex=0;task.evidenceMaterialIndex=0;task.evidenceBlockIndex=0;if(input.online){task.researchComplete=false;task.searchQueries=[];task.searchQueryIndex=0}await saveWritingTask(io,task)}
+    if(task){await io.lock(async()=>commit(io,[{path:`.scholarflow/writing/input-history/${newId('writing_inputs')}.json`,before:undefined,after:json({schemaVersion:1,projectId:task.projectId,previousTask:task,nextInputs:{materials:spec.materials,online:spec.online,requirementSources:spec.requirementSources},confirmedBy:input.context.sessionId,confirmedAt:new Date().toISOString()})}]))
+      task.spec=spec;if(task.mode==='first-draft')task.firstDraftApproval=await approveFirstDraft(io,spec,input.context.sessionId);task.materialSummaries=[];task.materialIndex=0;task.evidenceMaterialIndex=0;task.evidenceBlockIndex=0;if(['materials','research','evidence','outline'].includes(task.stage))task.stage='materials';if(input.online){task.researchComplete=false;task.searchQueries=[];task.searchQueryIndex=0}await saveWritingTask(io,task)}
     return readWritingSpecImage(io)
   }
   async action(request: unknown, signal: AbortSignal) {
@@ -892,34 +897,37 @@ export class WritingController {
       if (!work.title || ids.length >= 4) break
       const doi = work.doi?.replace(/^https?:\/\/doi.org\//i, '').toLowerCase()
       let current = await snapshot(io), source = Object.values(current.ledger.sources).find(row => doi ? row.identifiers.doi === doi : row.identifiers.url === work.id)
-      if (source?.materialId && ['fulltext', 'excerpt'].includes(source.textAccess)) { if (!ids.includes(source.id)) ids.push(source.id); continue }
+
       let title = work.title, authors = work.authorships.map(row => row.author.display_name), year = work.publication_year ?? undefined
-      let verified = false
+      let verified:SourceCandidate|null = null,bibliography:Source['bibliography']|undefined
       if (doi) {
         task.usedSearchQueries++; await saveWritingTask(io, task)
         try { const metadata = await crossrefProvider(this.ctx.web).lookup(doi, signal)
-          if (metadata) { title = metadata.title; authors = metadata.authors.map(row => row.literal); year = metadata.year; verified = true }
+          if (metadata) { title = metadata.title; authors = metadata.authors.map(row => row.literal); year = metadata.year;bibliography=metadata.bibliography; verified = metadata }
         } catch (error) { signal.throwIfAborted(); noteTask(task, `${title}：出版身份核验暂未完成。`) }
       }
       if (!source) {
         current = await snapshot(io)
-        source = (await registerSource(io, { title, authors: authors.map(literal => ({ literal })), year, kind: 'paper', identifiers: { ...(doi && { doi }), url: work.id } }, current.ledger.revision)).source
+        source = (await registerSource(io, { title, authors: authors.map(literal => ({ literal })), year,bibliography, kind: 'paper', identifiers: { ...(doi && { doi }), url: work.id } }, current.ledger.revision)).source
       }
       current = await snapshot(io)
       await mutateLedger(io, current.ledger.revision, ledger => {
         const record = ledger.sources[source!.id]
         record.provenance.push({ provider: 'openalex', retrievedAt: new Date().toISOString(), recordId: work.id })
-        if (verified) record.identity = { status: 'matched', method: 'identifier-lookup', checkedAt: new Date().toISOString(), reason: 'Crossref 返回同一 DOI 出版元数据；尚未验证论点语义支持。' }
+        if (verified) record.identity = compareIdentity(record, verified)
       })
+      if(verified&&compareIdentity(source,verified).status==='mismatch'){noteTask(task, `${title}：已登记出版身份与实际查询不符，请预览补正；原记录与证据保留。`);await saveWritingTask(io,task);continue}
+      if (source?.materialId && ['fulltext', 'excerpt'].includes(source.textAccess)) { if (!ids.includes(source.id)) ids.push(source.id); continue }
       let acquired = false
-      for (const location of fulltextLocations(work)) {
+      const specified=doi?specifiedOriginalUrls(task.spec.requirements,doi).map(url=>({url,version:'user-specified-original',license:null})):[]
+      for (const location of [...specified,...fulltextLocations(work)]) {
         signal.throwIfAborted()
         try {
           const file = await fetchPublicFulltext(location.url, signal)
           const sourceId = await registerDownloadedText(io, { ...file, sourceId: source.id, title, authors, year, doi, version: location.version },
-            (bytes, media) => parseMaterialBytes(bytes, media, signal, undefined, true))
+            async(bytes, media)=>{const parsed=await parseMaterialBytes(bytes, media, signal, undefined, true);{const key=(text:string)=>text.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu,'').toLowerCase(),front=key(parsed.blocks.map(row=>row.text).join('\n').slice(0,6000));invariant(front.includes(key(title))&&authors.every(author=>front.includes(key(author))),'SOURCE_METADATA_NOT_IN_TEXT','下载原文的实际标题、作者与所查作品不符，未关联。')}return parsed})
           if (!ids.includes(sourceId)) ids.push(sourceId); acquired = true; break
-        } catch (error) { signal.throwIfAborted() }
+        } catch (error) { signal.throwIfAborted();if(error instanceof ScholarError&&error.code==='SOURCE_METADATA_NOT_IN_TEXT')noteTask(task, `${title}：下载文本身份不符，未关联为原文。`) }
       }
       if (!acquired) noteTask(task, `${title}：仅找到文献信息，未获得可读全文。`)
       task.onlineSources = [...new Set([...task.onlineSources, ...ids])]; await saveWritingTask(io, task)

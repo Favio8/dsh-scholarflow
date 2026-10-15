@@ -33,6 +33,12 @@ async function fixture(existing=false){
     }}
   return {...f,services,order}
 }
+
+test('AT-194/195: complete course delivery reads selected sources before gap-driven search instead of adding an unconditional broad search',async()=>{
+  const f=await fixture();f.task.spec.online=true;f.task.stage='materials';f.task.materialIndex=0;f.task.firstDraftApproval=await approveFirstDraft(f.io,f.task.spec,f.task.sessionId);await saveWritingSpec(f.io,f.task.spec,(await snapshot(f.io)).ledger.revision);await saveWritingTask(f.io,f.task)
+  await f.io.write('.scholarflow/task-delivery/creation-goal.json',JSON.stringify({schemaVersion:1,projectId:f.task.projectId,sessionId:f.task.sessionId,goal:'course-delivery'}),undefined)
+  let searches=0;f.services.search=async()=>{searches++;return []};await driveWritingTask(f.io,f.task,f.services);assert.equal(searches,0);assert.equal(f.task.status,'completed')
+})
 test('first draft follows body outline then actual summary, defers clarification and never auto-revises',async()=>{
   const f=await fixture();await driveWritingTask(f.io,f.task,f.services)
   assert.equal(f.task.status,'completed');assert.deepEqual(f.order,['body1','body2','summary'])

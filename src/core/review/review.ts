@@ -17,7 +17,7 @@ type Issue = Ledger['reviewIssues'][string]
 const CURRENT = '.scholarflow/reviews/current.json'
 // Compare decimal literals without rounding distinct large integers through IEEE-754.
 function decimalIdentity(raw:string){
-  const [mantissa,exponent='0']=raw.toLowerCase().split('e'),scale=Number(exponent)
+  const [mantissa,exponent='0']=raw.toLowerCase().replaceAll(',','').split('e'),scale=Number(exponent)
   if(!Number.isSafeInteger(scale))return raw.toLowerCase()
   const negative=mantissa.startsWith('-'),unsigned=mantissa.replace(/^[-+]/u,''),fraction=unsigned.split('.')[1]?.length??0,digits=unsigned.replace('.','').replace(/^0+/u,'')
   if(!digits)return '0'
@@ -46,10 +46,10 @@ export async function reviewInput(io: FileStore) {
   const goalFile=await io.read('.scholarflow/research/goal-profile.json'),goalProfile=goalFile?parseStored(researchGoalProfileSchema,goalFile.text,'RESEARCH_GOAL_INVALID','review.input'):undefined
   invariant(!goalProfile||goalProfile.projectId===current.ledger.projectId,'PROJECT_ID_CONFLICT','研究目标记录不属于当前项目。')
   contextHashes['.scholarflow/research/goal-profile.json']=goalFile?digest(goalFile.text):'missing'
-  const contextDependencyHash = digest(json({ evaluatorVersion: 'sf-review-v10-result-coverage', configHash: current.configHash,
+  const contextDependencyHash = digest(json({ evaluatorVersion: 'sf-review-v13-metric-parameters', configHash: current.configHash,
     requirements, materials, sources, evidence, claims, outline, materialHashes, contextHashes, formatting: current.ledger.documents.paper.formatting,
     reviewProfileHash: profile ? digest(profile.text) : 'missing' }))
-  return { current, materialHashes, contextDependencyHash,authorResultApproval,goalProfile,results, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v10-result-coverage',authorApprovalHash:approvalFile?digest(approvalFile.text):null, configHash: current.configHash, documentHash: current.document.contentHash,
+  return { current, materialHashes, contextDependencyHash,authorResultApproval,goalProfile,results, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v13-metric-parameters',authorApprovalHash:approvalFile?digest(approvalFile.text):null, configHash: current.configHash, documentHash: current.document.contentHash,
     revisionId: current.document.revisionId, requirements, materials, sources, evidence, claims, outline, claimAnchors,
     materialHashes, contextHashes, reviewProfileHash: profile ? digest(profile.text) : 'missing' })) }
 }
@@ -155,9 +155,9 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
       return evidence.kind === 'user-measurement' && evidence.validation === 'located' && evidence.measurement?.origin === 'user-supplied' &&
         source?.kind === 'user-result' && source.contentHash === evidence.sourceContentHash && source.materialId && materialHashes[source.materialId] === evidence.sourceContentHash })
     const resultIds=new Set(results.map(row=>row.id)),anchors=Object.values(ledger.claimAnchors).filter(anchor=>anchor.status==='current'&&anchor.documentHash===document.contentHash&&anchor.claimIds.some(id=>ledger.claims[id]?.evidenceLinks.some(link=>resultIds.has(link.evidenceId))))
-    const numbers=(text:string)=>[...text.matchAll(/(?<![A-Za-z\p{N}_.])[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?(?![A-Za-z\p{N}_.])/gu)].map(match=>decimalIdentity(match[0]))
+    const numbers=(text:string)=>[...text.matchAll(/(?<![A-Za-z\p{N}_.])[-+]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?(?![A-Za-z\p{N}_.])/gu)].map(match=>decimalIdentity(match[0]))
     const unit=(value:string)=>(({'％':'%','percent':'%','percentage':'%','percentage-points':'pp','个百分点':'pp','百分点':'pp','秒':'s','sec':'s','毫秒':'ms','微秒':'us','µs':'us','μs':'us'} as Record<string,string>)[value.trim().toLowerCase()]??value.trim().toLowerCase())
-    const quantities=(text:string)=>[...text.matchAll(/(?<![A-Za-z\p{N}_.])([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*(个百分点|百分点|毫秒|微秒|秒|%|％|ms\b|µs\b|μs\b|us\b|s\b|GiB\b|MiB\b|GB\b|MB\b)/gu)].map(match=>({value:decimalIdentity(match[1]),unit:unit(match[2])}))
+    const quantities=(text:string)=>[...text.matchAll(/(?<![A-Za-z\p{N}_.])([-+]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*(个百分点|百分点|毫秒|微秒|秒|%|％|ms\b|µs\b|μs\b|us\b|s\b|GiB\b|MiB\b|GB\b|MB\b)/gu)].map(match=>({value:decimalIdentity(match[1]),unit:unit(match[2])}))
     const unlinkedQuantities=projection.blocks.filter(block=>['paragraph','table'].includes(block.node.type)&&quantities(textOf(block.node)).length&&!anchors.some(anchor=>anchor.blockId===block.id)&&!projection.leaves.some(leaf=>leaf.start>=block.start&&leaf.end<=block.end&&leaf.citationKeys?.some(key=>Object.values(ledger.sources).some(source=>source.citeKey===key&&source.kind!=='user-result'))))
     for(const block of unlinkedQuantities)check(`result_unlinked_${block.id}`,'unknown','含数值及单位的段落尚无作者结果关联或外部文献引用，不能把其他段落已核对当作本段通过。','evidence','B1',{location:{blockId:block.id,sourceRange:{startUtf16:block.start,endUtf16:block.end},quote:document.text.slice(block.start,Math.min(block.end,block.start+4000)),blockTextHash:digest(document.text.slice(block.start,block.end))}})
     let numericMismatch=false
@@ -166,7 +166,8 @@ export function evaluateReview(input: Awaited<ReturnType<typeof reviewInput>>): 
       if(!block||digest(document.text.slice(block.start,block.end))!==anchor.blockTextHash){numericMismatch=true;continue}
       const ids=new Set(supporting.map(row=>row.id)),derived=input.results.comparisons.filter(row=>row.current&&row.evidenceIds.every(id=>ids.has(id)))
       const external=anchor.claimIds.flatMap(id=>ledger.claims[id]?.evidenceLinks??[]).map(link=>ledger.evidence[link.evidenceId]).filter(row=>row&&ledger.sources[row.sourceId]?.kind!=='user-result'&&row.validation==='located'&&materialHashes[ledger.sources[row.sourceId].materialId!]===row.sourceContentHash)
-      const allowed=[...supporting.flatMap(row=>[...numbers(String(row.measurement!.value)),...numbers(row.measurement!.conditions)]),...external.flatMap(row=>numbers(row.excerpt)),...derived.flatMap(row=>row.values.map(value=>decimalIdentity(String(value))))]
+      const authorContext=anchor.claimIds.flatMap(id=>ledger.claims[id]?.evidenceLinks??[]).filter(link=>['supports','partial'].includes(link.relation)).map(link=>ledger.evidence[link.evidenceId]).filter(row=>row&&row.kind!=='user-measurement'&&ledger.sources[row.sourceId]?.kind==='user-result'&&row.validation==='located'&&materialHashes[ledger.sources[row.sourceId].materialId!]===row.sourceContentHash)
+      const allowed=[...supporting.flatMap(row=>[...numbers(String(row.measurement!.value)),...numbers(row.measurement!.conditions),...[...row.measurement!.metric.matchAll(/\d+(?:\.\d+)?/gu)].map(match=>decimalIdentity(match[0]))]),...authorContext.flatMap(row=>numbers(row.excerpt)),...external.flatMap(row=>numbers(row.excerpt)),...derived.flatMap(row=>row.values.map(value=>decimalIdentity(String(value))))]
       const allowedQuantities=[...supporting.flatMap(row=>[...numbers(String(row.measurement!.value)).map(value=>({value,unit:unit(row.measurement!.unit??'')})),...quantities(row.measurement!.conditions)]),...external.flatMap(row=>quantities(row.excerpt)),...derived.flatMap(row=>{const record=row.record as any;return [{value:record.comparison.absoluteChange,unit:unit(record.comparison.changeUnit)},{value:record.comparison.relativePercent,unit:'%'},{value:record.left.value,unit:unit(record.left.unit)},{value:record.right.value,unit:unit(record.right.unit)}].filter(row=>Number.isFinite(row.value)).map(row=>({...row,value:decimalIdentity(String(row.value))}))})]
       const prose=projection.leaves.filter(leaf=>leaf.start>=block.start&&leaf.end<=block.end&&!leaf.citationKeys).map(leaf=>leaf.text).join(' '),actual=numbers(prose),unexpected=actual.filter(value=>!allowed.includes(value)),unitMismatch=quantities(prose).filter(quantity=>!allowedQuantities.some(allowed=>allowed.value===quantity.value&&allowed.unit===quantity.unit))
       if(unexpected.length||unitMismatch.length){numericMismatch=true;check(`result_value_${anchor.id}`,'fail',`结果段落数值或单位 ${[...unexpected.map(String),...unitMismatch.map(row=>`${row.value} ${row.unit}`)].join('、')} 未对应当前关联的作者原值、单位、条件或已确认推导。`,'integrity','B0',{evidenceIds:supporting.map(row=>row.id),claimIds:anchor.claimIds,location:{blockId:block.id,sourceRange:{startUtf16:block.start,endUtf16:block.end},quote:document.text.slice(block.start,Math.min(block.end,block.start+4000)),blockTextHash:anchor.blockTextHash}})}

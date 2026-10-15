@@ -19,7 +19,7 @@ export class MemoryStore implements FileStore {
   }
   async stat(path: string): Promise<FileEntry | undefined> {
     const file = this.files.get(path)
-    if (file) return { path, type: 'file', size: Buffer.byteLength(file.text) }
+    if (file) return { path, type: 'file', size: Buffer.byteLength(file.text),version:file.version }
     if (!path || [...this.files.keys()].some(key => key.startsWith(path + '/'))) return { path, type: 'directory', size: 0 }
   }
   async list(path: string): Promise<FileEntry[]> {

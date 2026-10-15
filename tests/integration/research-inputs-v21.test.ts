@@ -6,8 +6,8 @@ import {registerMaterial} from '../../src/core/materials/materials.ts'
 import {parseRegisteredMaterial} from '../../src/core/materials/parse.ts'
 import {parseMaterialBytes} from '../../src/host/parsers/parse.ts'
 import {parseResearchConfig,confirmResearchMaterialRoles} from '../../src/core/research/research-inputs.ts'
-import {registerSource} from '../../src/core/evidence/evidence.ts'
-import {locateEvidence} from '../../src/core/pipeline/writing-task.ts'
+import {registerSource,confirmEvidence} from '../../src/core/evidence/evidence.ts'
+import {locateEvidence,prepareWritingOutline} from '../../src/core/pipeline/writing-task.ts'
 import {createWritingTask} from '../../src/core/pipeline/writing-task-store.ts'
 import {creationSpec} from '../../src/shared/writing-task.ts'
 
@@ -29,4 +29,15 @@ test('AT-202/203/206: explicitly owned methods and inert JSON settings retain ex
   await parseRegisteredMaterial(io,material.material.id,material.revision,signal,(bytes,type)=>parseMaterialBytes(bytes,type,signal))
   await registerSource(io,{kind:'paper',title:'TEST_ONLY external publication',authors:[],identifiers:{},materialId:material.material.id},(await context()).expectedLedgerRevision)
   await assert.rejects(confirmResearchMaterialRoles(io,{context:await context(),roles:[{path:'external.txt',role:'results'}],authorConfirmed:true}),{code:'MEASUREMENT_ORIGIN_INVALID'})
+})
+
+test('AT-202/203: complete research repairs unknown evidence IDs through an explicit frozen alias map and never silently drops all claims',async()=>{
+  const io=new MemoryStore({'method.txt':'TEST_ONLY actual author method uses a fixed scoring rule.'});await initialize(io,await prepareInit(io,{title:'TEST_ONLY',type:'research-paper'}))
+  const signal=new AbortController().signal,a=await registerMaterial(io,{relativePath:'method.txt',role:'notes',confirmExcludedFile:false},0),parsed=await parseRegisteredMaterial(io,a.material.id,a.revision,signal,(bytes,type)=>parseMaterialBytes(bytes,type,signal)),source=await registerSource(io,{kind:'user-result',title:'TEST_ONLY own method',authors:[],identifiers:{},materialId:a.material.id},parsed.revision)
+  const located=await confirmEvidence(io,{sourceId:source.source.id,sourceContentHash:parsed.parsed.sourceContentHash,locator:parsed.parsed.blocks[0].locator,excerpt:parsed.parsed.blocks[0].text,kind:'quotation'},source.revision)
+  const spec=creationSpec.parse({title:'TEST_ONLY',type:'research-paper',language:'en',format:'latex',requirements:'TEST_ONLY describe the actual supplied method',targetLength:200,materials:['method.txt'],sections:[{id:'section_TEST_ONLY',title:'Method',targetLength:200}],online:false,manuscriptDir:'manuscript'}),task=await createWritingTask(io,spec,'TEST_ONLY','TEST_ONLY');task.mode='first-draft'
+  let calls=0
+  await prepareWritingOutline(io,task,async(system,data:any)=>{calls++;assert.equal(data.evidenceIdAliases.e0,located.evidence.id);assert.equal(data.evidence[0].originalId,located.evidence.id);if(calls===2)assert(system.includes('上一输出未满足'))
+    return JSON.stringify({question:null,claims:[{sectionId:'section_TEST_ONLY',text:'TEST_ONLY author supplied a fixed scoring rule',evidenceIds:[calls===1?'ev_truncated':'e0'],evidenceLinks:[{evidenceId:calls===1?'ev_truncated':'e0',relation:'supports',rationale:'TEST_ONLY exact original method statement'}],rationale:'TEST_ONLY scoped to supplied method'}]})},{strictEvidencePlanning:true})
+  assert.equal(calls,2);const current=await snapshot(io),claim=Object.values(current.ledger.claims)[0];assert.equal(claim.evidenceLinks[0].evidenceId,located.evidence.id);assert.equal(current.ledger.outline.sections[0].claimIds[0],claim.id)
 })

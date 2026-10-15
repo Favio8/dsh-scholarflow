@@ -37,6 +37,7 @@ const findingFields = {
   title: z.string().min(1).max(500), explanation: z.string().min(10).max(4000), suggestedFix: z.string().min(1).max(4000), blockId: id, quote: z.string().min(1).max(4000),
   claimIds: z.array(id).max(100), evidenceIds: z.array(id).max(100), requirementIds: z.array(id).max(100),
 }
+export const modelReviewEnums={category:findingFields.category.options,severity:findingFields.severity.options,status:semanticStatus.options} as const
 /** Key names as the model must spell them. Never retyped by hand into a prompt. */
 export const modelReviewKeys = {
   check: Object.keys({ id: z.enum(semanticReviewChecks), status: semanticStatus, detail: z.string().min(10).max(4000) }),

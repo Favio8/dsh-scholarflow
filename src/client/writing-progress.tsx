@@ -12,20 +12,20 @@ const STAGES: Record<string, string> = { materials: '读取工作区资料', res
  * in the middle column's bottom overlay, so this component never grows a large card that
  * pushes the text down; it reports real counts and keeps technical text one level deeper.
  */
-export function WritingProgress({ api, context, refresh, onTask, taskRevision, onManage,project,onRecords,onCheck,variant }: any) {
+export function WritingProgress({ api, context, refresh, onTask, taskRevision, onManage,project,onRecords,onCheck,variant,enabled=true,visible=true }: any) {
   const [task, setTask] = useState<WritingTask>(), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [elapsed, setElapsed] = useState(0)
   const [command,setCommand] = useState<string>()
   const latest = useRef({ context, refresh, onTask }); latest.current = { context, refresh, onTask }
   const revision = useRef<number | undefined>(undefined)
-  useEffect(() => { let live = true
-    const load = async () => { try { const result = await api('writingTask.inspect', { context: latest.current.context() }); if (!live) return
+  useEffect(() => { if(!enabled||!visible)return;let live = true,timer:number|undefined
+    const load = async () => { try { if(document.hidden)return;const result = await api('writingTask.inspect', { context: latest.current.context() }); if (!live) return
       if (revision.current !== result.task?.revision) { revision.current = result.task?.revision; latest.current.refresh().catch((error: Error) => live && setError(error.message)) }
       setTask(result.task); setError(result.taskDiagnostic?.message ?? ''); setElapsed(result.task?.elapsedMs ?? 0); latest.current.onTask?.(result)
-    } catch (error) { if (live) setError((error as Error).message) } }
-    load(); const timer = window.setInterval(load, 2000)
-    return () => { live = false; clearInterval(timer) }
-  }, [context().sessionId, taskRevision])
+    } catch (error) { if (live) setError((error as Error).message) } finally{if(live)timer=window.setTimeout(load,2000)} }
+    void load()
+    return () => { live = false; clearTimeout(timer) }
+  }, [context().sessionId, taskRevision,enabled,visible])
   const question = activeWritingQuestion(task)
   useEffect(()=>{if(command && ['pause','cancel'].includes(command) && task && !['running','queued'].includes(task.status))setCommand(undefined)},[task?.status,command])
   // A running task's elapsed time is shown as it grows; it is telemetry, never a deadline.

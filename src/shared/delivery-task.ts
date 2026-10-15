@@ -28,7 +28,7 @@ export const deliveryTaskSchema=z.object({schemaVersion:z.literal(1),id,projectI
   materialHashes:z.record(z.string(),hash),specHash:hash,sourceSelectionHash:hash,resourceHashes:z.record(z.string(),hash),
   allowStructure:z.boolean(),online:z.boolean(),requiredCheckIds:z.array(id),advisoryCheckIds:z.array(id),missingMaterials:z.array(z.string()),
   queries:z.array(z.object({key:hash,gapIds:z.array(id),query:z.string(),evidenceBefore:hash,evidenceAfter:hash.optional(),failureCode:z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/u).optional(),outcome:z.enum(['pending','progress','no-progress','unavailable'])}).strict()),
-  lastProgressHash:hash.optional(),progressHistory:z.array(hash).max(16).default([]),stalls:z.number().int().nonnegative().default(0),calls:z.array(z.object({runId:id,planHash:hash,stage:z.enum(['review','revision','research']),status:z.enum(['pending','succeeded','failed','unknown'])}).strict()),
+  lastProgressHash:hash.optional(),progressHistory:z.array(hash).max(16).default([]),gapRevisionEvidenceHash:hash.optional(),bestFactDebt:z.array(z.number().int().nonnegative()).length(5).optional(),stalls:z.number().int().nonnegative().default(0),calls:z.array(z.object({runId:id,planHash:hash,stage:z.enum(['review','revision','research']),status:z.enum(['pending','succeeded','failed','unknown'])}).strict()),
   acknowledgedUnknownCalls:z.record(id,z.string()).default({}),
   message:z.string(),createdAt:z.string(),updatedAt:z.string()}).strict()
 export type DeliveryTask=z.infer<typeof deliveryTaskSchema>

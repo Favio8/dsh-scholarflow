@@ -9,11 +9,12 @@ const work = z.object({ id: z.string(), doi: z.string().nullable().optional(), t
   best_oa_location: location.nullable().optional(), locations: z.array(location).default([]) })
 export type OpenWork = z.infer<typeof work>
 export async function openAlexSearch(web: HostWeb, query: string, signal: AbortSignal): Promise<OpenWork[]> {
-  const url = new URL('https://api.openalex.org/works')
-  url.searchParams.set('search', query); url.searchParams.set('filter', 'is_oa:true'); url.searchParams.set('per_page', '8')
+  const doi=query.match(/10\.\d{4,9}\/[^\s"<>]+/u)?.[0].replace(/[.,;]+$/u,'').toLowerCase(),url = new URL(doi?'https://api.openalex.org/works/https://doi.org/'+encodeURIComponent(doi):'https://api.openalex.org/works')
+  if(!doi){url.searchParams.set('search', query); url.searchParams.set('filter', 'is_oa:true'); url.searchParams.set('per_page', '8')}
   url.searchParams.set('select', 'id,doi,title,publication_year,authorships,best_oa_location,locations')
   const result = await web.fetch({ url: url.href }, signal)
   invariant(result.statusCode === 200 && !result.truncated && result.body.kind === 'text', 'RESEARCH_PROVIDER_FAILED', '公开文献检索暂不可用。')
+  if(doi){const found=work.parse(JSON.parse(result.body.content));invariant(found.doi?.replace(/^https?:\/\/doi.org\//iu,'').toLowerCase()===doi,'RESEARCH_RESPONSE_INVALID','指定 DOI 返回了不同作品，未纳入。');return [found]}
   return z.object({ results: z.array(work) }).parse(JSON.parse(result.body.content)).results
 }
 export function fulltextLocations(work: OpenWork) {

@@ -25,7 +25,7 @@ async function fixture() {
     listDir: async (target: any) => (await readdir(target.path, { withFileTypes: true })).map(row => ({ name: row.name, type: row.isDirectory() ? 'directory' : row.isFile() ? 'file' : 'other' })),
   } }
   const io = new HostFileStore(host, { canonicalRoot: root, manuscriptDir: 'manuscript', sessionId: 'ses_TEST_ONLY', revalidate: async () => {} }, new AbortController().signal)
-  return { root, path, io, calls }
+  return { root, path, io, calls,host }
 }
 test('fixed project resource byte capability preserves binary bytes without opening raw-material or arbitrary metadata paths', async () => {
   const { root, path, io, calls } = await fixture(), original = new Uint8Array([0, 255, 13, 10, 128])
@@ -129,3 +129,12 @@ test('the write gate refuses anything outside the owned project directories, inc
   assert.equal(await readFile(join(root, 'manuscript/paper.md'), 'utf8'), 'TEST_ONLY')
   for (const refused of ['manuscript-elsewhere', 'raw-materials']) await assert.rejects(stat(join(root, refused)), { code: 'ENOENT' })
 })
+
+test('downloaded original cache rejects synthetic sensitive links and corrupted content before returning bytes',async()=>{
+ const {root,io,calls}=await fixture(),{digest}=await import('../../src/core/store/files.ts'),bytes=Buffer.from('TEST_ONLY downloaded original'),hash=digest(bytes),path='.scholarflow/cache/writing-assets/'+hash.slice(7)+'.json';await mkdir(join(root,'.scholarflow/cache/writing-assets'),{recursive:true});const envelope=JSON.stringify({base64:bytes.toString('base64'),contentHash:hash});await writeFile(join(root,path),envelope);assert.deepEqual(Buffer.from(await io.readBytes(path,100)),bytes);await writeFile(join(root,path),JSON.stringify({base64:Buffer.from('TEST_ONLY corrupted').toString('base64'),contentHash:hash}));await assert.rejects(io.readBytes(path,100),{code:'MATERIAL_CACHE_CHANGED'});
+ const linkedPath='.scholarflow/cache/writing-assets/'+'a'.repeat(64)+'.json',secret=join(root,'TEST_ONLY-sensitive');await mkdir(secret);await writeFile(join(secret,'protected.json'),envelope);await symlink(secret,join(root,'.scholarflow/cache/writing-assets/linked'),process.platform==='win32'?'junction':'dir');const before=calls.length;await assert.rejects(io.readBytes('.scholarflow/cache/writing-assets/linked/protected.json',100),{code:'MATERIAL_CACHE_INVALID'});assert.equal(calls.length,before);await link(join(secret,'protected.json'),join(root,linkedPath));await assert.rejects(io.readBytes(linkedPath,100),{code:'SKILL_SOURCE_LINK'});assert.equal(calls.length,before);
+})
+
+test('Host recovery cache scopes share only the same filesystem provider and canonical project',async()=>{const {root,host,io}=await fixture(),binding={canonicalRoot:root,manuscriptDir:'manuscript',sessionId:'ses_TEST_ONLY',revalidate:async()=>{}};const same=new HostFileStore(host,binding,new AbortController().signal),otherProvider=new HostFileStore({fs:{...host.fs}},binding,new AbortController().signal),otherRoot=new HostFileStore(host,{...binding,canonicalRoot:join(root,'TEST_ONLY-other')},new AbortController().signal);assert.equal(io.cacheScope,same.cacheScope);assert.notEqual(io.cacheScope,otherProvider.cacheScope);assert.notEqual(io.cacheScope,otherRoot.cacheScope)})
+
+test('actual Cordis traced filesystem proxies retain one cache scope without bypassing contextual IO',async()=>{const {Context,Service}=await import('@deepseek-ai/cordis');const {root,host}=await fixture(),ctx=new Context();class TestFilesystem extends Service{constructor(ctx:any){super(ctx,'fs');Object.assign(this,host.fs)}}new TestFilesystem(ctx);const hostContext=ctx as any;assert.notEqual(hostContext.fs,hostContext.fs,'actual service access creates tracing proxies');const binding={canonicalRoot:root,manuscriptDir:'manuscript',sessionId:'ses_TEST_ONLY',revalidate:async()=>{}},a=new HostFileStore(ctx,binding,new AbortController().signal),b=new HostFileStore(ctx,binding,new AbortController().signal);assert.equal(a.cacheScope,b.cacheScope)})

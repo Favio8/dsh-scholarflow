@@ -21,7 +21,7 @@ function author(author: Source['authors'][number]): string | undefined {
 
 export function gbt7714Entry(source: Source, index: number): string {
   const authors = source.authors.map(author).filter(Boolean) as string[]
-  const tag = TAG[source.kind]
+  const tag = source.kind==='paper'&&source.bibliography?.publicationType==='conference-paper'?'[C]':TAG[source.kind]
   // [n] 作者. 题名[类型]. 刊名, 年, DOI.
   const authorText = authors.length ? `${authors.slice(0, 3).join(', ')}${authors.length > 3 ? ', et al' : ''}. ` : ''
   const head = `[${index}] ${authorText}${source.title}${tag ?? ''}.`

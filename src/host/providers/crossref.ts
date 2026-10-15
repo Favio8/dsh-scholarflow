@@ -7,11 +7,11 @@ import { digest } from '../../core/store/files.ts'
 // standalone fetch, API key, paid pool, full-text download or arbitrary URL.
 export type HostWeb = { fetch(request: { url: string }, signal: AbortSignal): Promise<{ url: string; statusCode: number;
   body: { kind: string; content: string }; truncated: boolean }> }
-const work = z.object({ DOI: doi, title: z.array(z.string().max(4000)).max(20),
+const work = z.object({ DOI: doi, title: z.array(z.string().max(4000)).max(20),subtitle:z.array(z.string().max(4000)).max(20).optional(),
   author: z.array(z.object({ family: z.string().max(500).optional(), given: z.string().max(500).optional(), name: z.string().max(1000).optional() })).max(100).optional(),
   'container-title': z.array(z.string().max(2000)).max(20).optional(), type: z.string().max(200).optional(),
   issued: z.object({ 'date-parts': z.array(z.array(z.number().int()).max(3)).max(3) }).optional() })
-const SELECT = 'DOI,title,author,container-title,type,issued'
+const SELECT = 'DOI,title,subtitle,author,container-title,type,issued'
 const warnings = ['Crossref 提供出版元数据；未取得摘要或全文，也未验证正文对论点的支持。']
 
 export function crossrefProvider(web: HostWeb): ResearchProvider {
@@ -39,8 +39,9 @@ export function crossrefProvider(web: HostWeb): ResearchProvider {
     } finally { inFlight = false }
   }
   const candidate = (raw: unknown): SourceCandidate => {
-    const record = work.parse(raw), title = record.title.find(value => value.trim())
-    invariant(title, 'RESEARCH_RESPONSE_INVALID', '提供方记录缺少标题，未将其纳入候选。')
+    const record = work.parse(raw), main = record.title.find(value => value.trim()),subtitle=record.subtitle?.find(value=>value.trim())
+    invariant(main, 'RESEARCH_RESPONSE_INVALID', '提供方记录缺少标题，未将其纳入候选。')
+    const title=subtitle&&!main.toLowerCase().endsWith(subtitle.toLowerCase())?`${main}: ${subtitle}`:main
     const year = record.issued?.['date-parts'][0]?.[0]
     const url = `https://doi.org/${encodeURI(record.DOI).replaceAll('#', '%23').replaceAll('?', '%3F')}`
     return candidateSchema.parse({ candidateId: `candidate_${digest(record.DOI).slice(7, 39)}`, provider: 'crossref', recordId: record.DOI,
@@ -48,6 +49,7 @@ export function crossrefProvider(web: HostWeb): ResearchProvider {
       title, authors: (record.author ?? []).map(author => ({ literal: author.name || [author.given, author.family].filter(Boolean).join(' '),
         ...(author.family && { family: author.family }), ...(author.given && { given: author.given }) })).filter(author => author.literal),
       ...(year && year >= 1 && year <= 9999 && { year }), ...(record['container-title']?.[0] && { venue: record['container-title'][0] }),
+      ...(['journal-article','proceedings-article'].includes(record.type??'')&&{bibliography:{publicationType:record.type==='proceedings-article'?'conference-paper':'journal-article'}}),
       identifiers: { doi: record.DOI, url }, textAccess: 'metadata', kind: record.type === 'dataset' ? 'dataset' : /book|monograph/.test(record.type ?? '') ? 'book' : 'paper', warnings })
   }
   return { id: 'crossref', capabilities: { search: true, lookupIdentifier: true, fullText: false },

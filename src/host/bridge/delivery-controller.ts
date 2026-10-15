@@ -49,8 +49,9 @@ export class DeliveryController{
     invariant(json(this.descriptor(model))===json(row.plan.model),'MODEL_SELECTION_CHANGED','当前宿主模型已改变，请重新预览。')
     const task=await startDeliveryTask(io,input.context,row.plan,{pid:process.pid,bootInstance:this.bootInstance});this.plans.delete(input.planId);const activate=()=>this.launch(io,input.context,task);if(!defer)activate();return {task,...(defer&&{activate})}
   }
-  async inspect(request:unknown,signal:AbortSignal){const input=z.object({context:requestContext,taskId:id.optional()}).strict().parse(request),{io}=await resolveStore(this.ctx,input.context,signal),result=io.observe?await io.observe(()=>inspectDeliveryTask(io,input.context,input.taskId)):await inspectDeliveryTask(io,input.context,input.taskId)
+  async inspect(request:unknown,signal:AbortSignal){const input=z.object({context:requestContext,taskId:id.optional()}).strict().parse(request),{io}=await resolveStore(this.ctx,input.context,signal);let result=io.observe?await io.observe(()=>inspectDeliveryTask(io,input.context,input.taskId)):await inspectDeliveryTask(io,input.context,input.taskId)
     if(result.task)try{await this.validateResources(io)}catch{return {...result,readiness:{state:'needs-check',reasons:['实际固定 Skill 资源不可用或字节已改变，请重新核对。']}}}
+    if(result.task&&['running','queued'].includes(result.task.status)&&!this.active.has(result.task.id))result=io.observe?await io.observe(()=>inspectDeliveryTask(io,input.context,input.taskId)):await inspectDeliveryTask(io,input.context,input.taskId)
     if(result.task?.phase==='awaiting-adoption'&&result.task.candidateId&&!this.active.has(result.task.id)&&await committedCandidateAdoption(io,input.context,result.task.id,result.task.candidateId))return {...result,recovery:'adoption-committed',readiness:{state:'needs-check',reasons:['采用已提交，后续复查与交付记录尚待恢复。']},task:{...result.task,adoptionDecided:true,phase:'recheck',status:'interrupted',message:'采用已保存，回执后的复查尚未完成；继续会复查实际主稿，不会重复采用。'}}
     if(result.task&&this.failures.has(result.task.id)&&!this.active.has(result.task.id))return {...result,task:{...result.task,status:'interrupted',message:`后台运行状态未能完整保存（${this.failures.get(result.task.id)}），请先检查恢复记录，再继续。`}}
     if(result.task&&['running','queued'].includes(result.task.status)&&!this.active.has(result.task.id))return {...result,task:{...result.task,status:'interrupted',message:'宿主执行已中断，进度保留；请明确继续。'}}
@@ -93,7 +94,7 @@ export class DeliveryController{
       }
       await locateEvidence(io,writing,stageModel,services.signal,()=>services.signal.aborted)
       const basis=await snapshot(io)
-      if(basis.document.initialPlaceholder||!basis.ledger.outline.sections.length){const prepared=await prepareWritingOutline(io,writing,stageModel);invariant(prepared,'RESEARCH_PLAN_INCOMPLETE','现有事实清单仍有必须决定的问题。')}
+      if(basis.document.initialPlaceholder||!basis.ledger.outline.sections.length||!basis.ledger.outline.sections.some(section=>section.claimIds.length)){const prepared=await prepareWritingOutline(io,writing,stageModel,{strictEvidencePlanning:true});invariant(prepared,'RESEARCH_PLAN_INCOMPLETE','现有事实清单仍有必须决定的问题。')}
       task.researchPrepared=true;task.researchInputHash=inputHash;await saveDeliveryTask(io,task,services.owner)
     }
     if(!task.candidateId){const base=await createCandidate(io,{...context,expectedLedgerRevision:(await snapshot(io)).ledger.revision},{taskId:task.id,text:(await snapshot(io)).document.text,scope:'document',reason:'保留已有主稿与确认结构，作为结果成稿候选的不可变基准。'});task.candidateId=base.candidate.id;task.candidateHash=base.candidateHash;await saveDeliveryTask(io,task,services.owner)}
@@ -161,7 +162,7 @@ export class DeliveryController{
       invariant(task.candidateId&&!task.adoptionDecided&&!task.pendingStructure,'DELIVERY_CANDIDATE_CHANGED','请选择尚未采用且范围已确认的当前候选。');await verifyDeliveryInputs(io,task)
       const old=(await readCandidate(io,task.id,task.candidateId,input.context,task.candidateHash)).candidate,subject=await reviewInput(await candidateView(io,old))
       if(subject.contextDependencyHash!==old.environmentHash){const refreshed=await createCandidate(io,{...input.context,expectedLedgerRevision:(await snapshot(io)).ledger.revision},{taskId:task.id,parentCandidateId:old.id,text:old.text,scope:'document',refreshDependencies:true,reason:'用户明确请求按当前范围重新核对已有候选，原稿与旧检查保留。'});task.candidateId=refreshed.candidate.id;task.candidateHash=refreshed.candidateHash}
-      task.checkId=undefined;task.checkHash=undefined;task.phase='candidate-check';task.status='queued';task.stalls=0;task.progressHistory=[];task.lastProgressHash=undefined;await saveDeliveryTask(io,task,{pid:process.pid,bootInstance:this.bootInstance});this.launch(io,input.context,task);return {task}
+      task.checkId=undefined;task.checkHash=undefined;task.phase='candidate-check';task.status='queued';task.stalls=0;task.bestFactDebt=undefined;task.progressHistory=[];task.lastProgressHash=undefined;await saveDeliveryTask(io,task,{pid:process.pid,bootInstance:this.bootInstance});this.launch(io,input.context,task);return {task}
     }
     if(input.action==='allow-structure'||input.action==='keep-structure'){
       invariant(task.pendingStructure&&task.candidateId&&task.candidateHash,'STRUCTURE_APPROVAL_INVALID','当前没有待决定的结构候选。');await verifyDeliveryInputs(io,task)
@@ -170,7 +171,7 @@ export class DeliveryController{
       const decision={candidateId:proposed.id,decision:input.action==='allow-structure'?'allow' as const:'keep' as const,at:new Date().toISOString()}
       if(decision.decision==='allow')task.allowStructure=true
       else{invariant(proposed.parentCandidateId,'STRUCTURE_APPROVAL_INVALID','首次结果成稿请调整要求后重新准备，不能猜测回退结构。');const parent=await readCandidate(io,task.id,proposed.parentCandidateId,input.context);task.candidateId=parent.candidate.id;task.candidateHash=parent.candidateHash}
-      task.pendingStructure=false;task.structureChoice=decision;task.phase='candidate-check';task.stalls=0;task.progressHistory=[];task.lastProgressHash=undefined;task.status='queued'
+      task.pendingStructure=false;task.structureChoice=decision;task.phase='candidate-check';task.stalls=0;task.bestFactDebt=undefined;task.progressHistory=[];task.lastProgressHash=undefined;task.status='queued'
       await saveDeliveryTask(io,task,{pid:process.pid,bootInstance:this.bootInstance},[{path:`${deliveryRoot(task.id)}/decisions/${newId('structure')}.json`,before:undefined,after:json({schemaVersion:1,projectId:task.projectId,sessionId:input.context.sessionId,taskId:task.id,originalApprovalHash:task.approvalHash,candidateHash:proposedRecord.candidateHash,decision})}]);this.launch(io,input.context,task);return {task}
     }
     if(input.action==='resume'){
@@ -198,6 +199,15 @@ export class DeliveryController{
     invariant(taskRow,'DELIVERY_TASK_MISSING','采用已保存，但任务索引缺失。');const task=taskRow.task;task.adoptionDecided=true;task.phase='recheck';task.adoptionPlanId=row.plan.id;await saveDeliveryTask(io,task,{pid:process.pid,bootInstance:this.bootInstance})
     try{const checked=await recheckAdoptedCandidate(io,{...input.context,expectedLedgerRevision:(await snapshot(io)).ledger.revision},row.plan);task.phase=checked.needsSemanticCheck?'recheck':'export';await saveDeliveryTask(io,task,{pid:process.pid,bootInstance:this.bootInstance});this.launch(io,input.context,task);return {...accepted,recheck:checked.needsSemanticCheck?'needs-semantic-check':'completed'}}
     catch{return {...accepted,recheck:'needs-attention'}}
+  }
+  async revise(request:unknown,signal:AbortSignal){const input=candidateRefRequest.extend({text:z.string().min(1).max(2*1024*1024),reason:z.string().trim().min(10).max(4000)}).strict().parse(request),{io}=await resolveStore(this.ctx,input.context,signal),row=await readDeliveryTask(io,input.context,input.taskId)
+    invariant(row&&!this.active.has(input.taskId)&&!row.task.adoptionDecided&&!row.task.pendingStructure&&row.task.candidateId===input.candidateId&&row.task.candidateHash===input.candidateHash,'DELIVERY_CANDIDATE_CHANGED','请先读取尚未采用且未运行中的当前候选。');await verifyDeliveryInputs(io,row.task)
+    const old=(await readCandidate(io,input.taskId,input.candidateId,input.context,input.candidateHash)).candidate,headings=(text:string)=>documentHeadings(text).map(({title,depth})=>({title,depth}))
+    invariant(json(headings(old.text))===json(headings(input.text)),'CANDIDATE_OUTLINE_INVALID','此入口保留当前章节；结构变化请先明确新的结构映射。')
+    const blocks=(text:string)=>projectMarkdown(text).blocks.filter(block=>block.node.type==='paragraph'||block.node.type==='table'),before=blocks(old.text),after=blocks(input.text)
+    invariant(before.length===after.length,'CANDIDATE_ANCHOR_INVALID','段落或表格数量变化时需要明确重新关联，不能猜测沿用位置。')
+    const created=await createCandidate(io,input.context,{taskId:input.taskId,parentCandidateId:old.id,refreshDependencies:true,text:input.text,scope:'document',reason:input.reason,paragraphClaims:after.flatMap((block,index)=>{const ids=[...new Set(Object.values(old.anchors).filter(anchor=>anchor.blockId===before[index].id).flatMap(anchor=>anchor.claimIds))];return ids.length?[{blockId:block.id,claimIds:ids}]:[]})}),task=row.task
+    task.candidateId=created.candidate.id;task.candidateHash=created.candidateHash;task.checkId=undefined;task.checkHash=undefined;task.phase='candidate-check';task.status='queued';task.stalls=0;task.bestFactDebt=undefined;task.progressHistory=[];task.lastProgressHash=undefined;task.message='人工修订已保留为新候选，正在按实际文本重新核对；主稿保持原样。';await saveDeliveryTask(io,task,{pid:process.pid,bootInstance:this.bootInstance});this.launch(io,input.context,task);return created
   }
   async candidate(request:unknown,signal:AbortSignal){const input=candidateRefRequest.parse(request),{io}=await resolveStore(this.ctx,input.context,signal),value=await readCandidate(io,input.taskId,input.candidateId,input.context,input.candidateHash),current=await snapshot(io);return {...value,factChanges:protectedChanges(current.document.text,value.candidate.text),claimChanges:Object.entries(value.candidate.claimUpdates??{}).map(([id,after])=>({id,before:current.ledger.claims[id]?.text,after:after.text}))}}
 }

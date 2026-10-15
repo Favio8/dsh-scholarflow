@@ -24,6 +24,16 @@ test('Crossref sends only approved query parameters and maps actual metadata wit
   assert.match(result.warnings.join(' '), /未通过元数据校验/u)
 })
 
+test('a separately supplied subtitle remains part of the publication identity',async()=>{
+  const provider=crossrefProvider({async fetch(){return response({...fixture,title:['TEST_ONLY Main'],subtitle:['actual publication subtitle']})}})
+  const record=await provider.lookup(fixture.DOI,new AbortController().signal)
+  assert.equal(record?.title,'TEST_ONLY Main: actual publication subtitle')
+})
+
+test('a publisher proceedings record carries conference identity into citation formatting',async()=>{
+  const provider=crossrefProvider({async fetch(){return response({...fixture,type:'proceedings-article'})}}),record=await provider.lookup(fixture.DOI,new AbortController().signal);assert.equal(record?.bibliography?.publicationType,'conference-paper')
+})
+
 test('identifier lookup normalizes DOI and refuses mismatching records, hostile redirects and incomplete bodies', async () => {
   let requested = ''
   const provider = crossrefProvider({ async fetch({ url }) { requested = url; return response(fixture) } })

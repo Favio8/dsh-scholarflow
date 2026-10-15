@@ -19,6 +19,7 @@ import {layoutVerificationRequest,recordLayoutVerification,inspectArtifactReview
 import {researchMaterialRoles,confirmResearchMaterialRoles} from '../core/research/research-inputs.ts'
 import { parseResultBytes,RESULT_MAX_BYTES } from '../core/research/result-parser.ts'
 import { DeliveryController } from './bridge/delivery-controller.ts'
+import {prepareSourceMetadata,confirmSourceMetadata,type SourceMetadataPlan} from '../core/research/source-metadata.ts'
 import { scanMaterials, registerMaterial, readParsed,selectMaterial } from '../core/materials/materials.ts'
 import { parseRegisteredMaterial } from '../core/materials/parse.ts'
 import { parseMaterialBytes } from './parsers/parse.ts'
@@ -124,6 +125,7 @@ const mutationRevision = (context: RequestContext) => {
 export class ScholarFlowRemote extends TypertRemoteService {
   private writingController: WritingController
   private deliveryController:DeliveryController
+  private sourceMetadataPlans=new Map<string,{plan:SourceMetadataPlan;peerId:string;expires:number}>()
   private sessionRegistration: SessionRegistration
   private initPlans = new Map<string, StoredInitPlan>()
   private workflowPlans = new Map<string, { plan: WorkflowStartPlan | WorkflowActionPlan; action: boolean; context: RequestContext; peerId: string; expires: number }>()
@@ -1277,6 +1279,8 @@ export class ScholarFlowRemote extends TypertRemoteService {
   async candidatePrepareAdoption(request:unknown,signal:AbortSignal){return applicationResult(async()=>this.deliveryController.prepareAdoption(request,this.requireOperator(),signal))}
   @Remote('candidate.adopt')
   async candidateAdopt(request:unknown,signal:AbortSignal){return applicationResult(async()=>this.deliveryController.adopt(request,this.requireOperator(),signal))}
+  @Remote('candidate.revise')
+  async candidateRevise(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();return this.deliveryController.revise(request,signal)})}
   // v1.2 requirement chain: read every member, structure what was read, propose an outline,
   // and adopt field by field. Reads are jobs, so the wizard sees real per-member progress.
   @Remote('creation.readRequirements')
@@ -2227,6 +2231,13 @@ export class ScholarFlowRemote extends TypertRemoteService {
       const revision = mutationRevision(input.context), { io } = await resolveStore(this.ctx, input.context, signal)
       return registerSource(io, input.source, revision) })
   }
+
+  @Remote('sources.prepareMetadata')
+  async sourceMetadataPrepare(request:unknown,signal:AbortSignal){return applicationResult(async()=>{const peerId=this.requireOperator(),{context}=inspectRequest.passthrough().parse(request),{io}=await resolveStore(this.ctx,context,signal)
+    for(const [key,row]of this.sourceMetadataPlans)if(row.expires<Date.now())this.sourceMetadataPlans.delete(key)
+    invariant(this.sourceMetadataPlans.size<8,'TOO_MANY_PENDING_PLANS','请先处理已有出版信息预览。');const plan=await prepareSourceMetadata(io,request);this.sourceMetadataPlans.set(plan.id,{plan,peerId,expires:Date.now()+600000});return {planId:plan.id,planHash:plan.planHash,before:plan.before,metadata:plan.input.metadata,reason:plan.input.reason}})}
+  @Remote('sources.confirmMetadata')
+  async sourceMetadataConfirm(request:unknown,signal:AbortSignal){return applicationResult(async()=>{const peerId=this.requireOperator(),input=runStartRequest.parse(request),row=this.sourceMetadataPlans.get(input.planId);invariant(row&&row.peerId===peerId&&row.expires>Date.now()&&row.plan.planHash===input.planHash,'INVALID_APPROVAL','请重新预览出版信息。');const {io}=await resolveStore(this.ctx,input.context,signal),result=await confirmSourceMetadata(io,input.context,row.plan);this.sourceMetadataPlans.delete(input.planId);return {source:result.ledger.sources[row.plan.before.id],revision:result.revision}})}
 
   @Remote('evidence.confirm')
   async evidenceConfirm(request: unknown, signal: AbortSignal) {

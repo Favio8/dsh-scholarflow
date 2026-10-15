@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { lstat, mkdir, open } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
+import {symbols} from '@deepseek-ai/cordis'
 import { relativePath } from '../../shared/schema.ts'
 import { sensitivePath } from '../../core/materials/materials.ts'
 import { ScholarError, invariant } from '../../shared/errors.ts'
@@ -10,6 +11,7 @@ import { type FileStore, type FileImage, type FileEntry, json, digest } from '..
 
 const bootInstance = randomUUID()
 const queues = new Map<string, Promise<unknown>>()
+const providerCacheScopes=new WeakMap<object,Map<string,object>>()
 type Host = any
 export interface GatewayBinding {
   canonicalRoot: string
@@ -20,12 +22,13 @@ export interface GatewayBinding {
 }
 
 export class HostFileStore implements FileStore {
+  readonly cacheScope:object
   private ctx: Host
   private binding: GatewayBinding
   private signal: AbortSignal
   private insideLock = false
   private insideObservation=false
-  constructor(ctx: Host, binding: GatewayBinding, signal: AbortSignal) { this.ctx = ctx; this.binding = binding; this.signal = signal }
+  constructor(ctx: Host, binding: GatewayBinding, signal: AbortSignal) { this.ctx = ctx; this.binding = binding; this.signal = signal;const traced=ctx.fs,provider=traced?.[symbols.original]??traced??ctx,scopes=providerCacheScopes.get(provider)??new Map<string,object>();providerCacheScopes.set(provider,scopes);const root=process.platform==='win32'?binding.canonicalRoot.toLowerCase():binding.canonicalRoot,scope=scopes.get(root)??{};if(scopes.size>=64&&!scopes.has(root))scopes.delete(scopes.keys().next().value!);scopes.set(root,scope);this.cacheScope=scope }
   private async target(path: string, write = false, signal: AbortSignal = this.signal) {
     if (path !== '') relativePath.parse(path)
     if (write) invariant(path.startsWith('.scholarflow/') || path.startsWith(this.binding.manuscriptDir + '/'), 'PATH_OUTSIDE_ALLOWED_ROOT', '写入范围必须是项目专属目录。')
@@ -60,10 +63,16 @@ export class HostFileStore implements FileStore {
     // file read itself instead of waiting for a step that can never finish.
     signal.throwIfAborted()
     if (path.startsWith('.scholarflow/cache/writing-assets/') && path.endsWith('.json')) {
+      invariant(/^\.scholarflow\/cache\/writing-assets\/[a-f0-9]{64}\.json$/u.test(path),'MATERIAL_CACHE_INVALID','公开全文缓存路径无效。')
+      await this.resourceTarget(path,'cache')
       const asset = await this.read(path)
       invariant(asset, 'MATERIAL_CACHE_MISSING', '公开全文缓存缺失，请重新获取。')
-      const bytes = Buffer.from(JSON.parse(asset.text).base64, 'base64')
+      const envelope=JSON.parse(asset.text)
+      invariant(typeof envelope.base64==='string'&&typeof envelope.contentHash==='string','MATERIAL_CACHE_INVALID','公开全文缓存记录无效。')
+      const bytes = Buffer.from(envelope.base64, 'base64')
+      invariant(digest(bytes)===envelope.contentHash&&path.endsWith(envelope.contentHash.slice(7)+'.json')&&envelope.base64===bytes.toString('base64'),'MATERIAL_CACHE_CHANGED','公开全文缓存身份或字节已改变，未返回内容。')
       invariant(bytes.byteLength <= maxBytes, 'CONTENT_TOO_LARGE', '公开全文超过读取限额。')
+      await this.resourceTarget(path,'cache')
       return bytes
     }
     const target = await this.target(path, false, signal)
@@ -85,10 +94,10 @@ export class HostFileStore implements FileStore {
     invariant(before.version===(await this.ctx.fs.stat(target,this.signal))?.version,'STALE_MATERIAL_VERSION','读取期间图片改变。')
     return bytes
   }
-  private async resourceTarget(path: string) {
+  private async resourceTarget(path: string,kind:'skill'|'cache'='skill') {
     this.signal.throwIfAborted()
     relativePath.parse(path)
-    invariant(path === '.scholarflow/skills' || path.startsWith('.scholarflow/skills/'), 'SKILL_RESOURCE_PATH_INVALID', '资源读取仅限本项目的私有 Skill 子树。')
+    invariant(kind==='skill'?(path === '.scholarflow/skills' || path.startsWith('.scholarflow/skills/')):path.startsWith('.scholarflow/cache/writing-assets/'), 'SKILL_RESOURCE_PATH_INVALID', '资源读取仅限本项目的明确专属子树。')
     invariant(!sensitivePath(path), 'SKILL_RESOURCE_PATH_INVALID', '私有资源不能包含敏感路径。')
     let parent = this.binding.canonicalRoot
     // Read native inode/link metadata only: the installed SDK lstat contract
@@ -129,7 +138,7 @@ export class HostFileStore implements FileStore {
   async stat(path: string): Promise<FileEntry | undefined> {
     if (!this.insideLock && !this.insideObservation) await queues.get(this.binding.canonicalRoot)?.catch(() => undefined)
     const result = await this.ctx.fs.stat(await this.target(path), this.signal)
-    return result ? { path, type: result.type === 'file' || result.type === 'directory' ? result.type : 'other', size: result.size } : undefined
+    return result ? { path, type: result.type === 'file' || result.type === 'directory' ? result.type : 'other', size: result.size,version:result.version } : undefined
   }
   async createResourceBytes(path: string, bytes: Uint8Array): Promise<void> {
     invariant(!this.binding.readOnly && this.insideLock, 'PROJECT_READONLY', '资源副本只能在已授权的项目写锁内创建。')
@@ -141,7 +150,7 @@ export class HostFileStore implements FileStore {
     const frozen = new Uint8Array(bytes)
     await this.binding.revalidate()
     const resolved = await this.ctx.sessionController.resolveAgent(this.binding.sessionId)
-    if (resolved.error) throw resolved.error
+    if (resolved.error) throw new ScholarError('HOST_SESSION_UNAVAILABLE', '宿主会话暂时无法取得写权限；请保留现有成果并检查该会话状态。', {hostCode: /^[a-z0-9_/-]{1,80}$/iu.test(resolved.error.code ?? '') ? resolved.error.code : 'unknown'})
     const policy = this.ctx.sandboxPolicy.resolve({ session: resolved.agent.session })
     invariant(policy.mode !== 'read-only', 'FS_SANDBOX_DENIED', '只读会话不能创建项目资源。')
     invariant(policy.workspaceRoot === this.binding.canonicalRoot || policy.mode === 'danger-full-access', 'PATH_OUTSIDE_ALLOWED_ROOT', '沙箱根与绑定项目不同。')
@@ -212,7 +221,7 @@ export class HostFileStore implements FileStore {
     const authorize = async () => {
       await this.binding.revalidate(); this.signal.throwIfAborted()
       const resolved = await this.ctx.sessionController.resolveAgent(this.binding.sessionId)
-      if (resolved.error) throw resolved.error
+      if (resolved.error) throw new ScholarError('HOST_SESSION_UNAVAILABLE', '宿主会话暂时无法取得写权限；请保留现有成果并检查该会话状态。', {hostCode: /^[a-z0-9_/-]{1,80}$/iu.test(resolved.error.code ?? '') ? resolved.error.code : 'unknown'})
       const policy = this.ctx.sandboxPolicy.resolve({ session: resolved.agent.session })
       invariant(policy.mode !== 'read-only', 'FS_SANDBOX_DENIED', '只读会话无法创建交付。')
       invariant(policy.workspaceRoot === this.binding.canonicalRoot || policy.mode === 'danger-full-access', 'PATH_OUTSIDE_ALLOWED_ROOT', '当前会话的输出权限与绑定工作区不同。')
@@ -247,7 +256,7 @@ export class HostFileStore implements FileStore {
     await this.binding.revalidate()
     const target = await this.target(path, true)
     const resolved = await this.ctx.sessionController.resolveAgent(this.binding.sessionId)
-    if (resolved.error) throw resolved.error
+    if (resolved.error) throw new ScholarError('HOST_SESSION_UNAVAILABLE', '宿主会话暂时无法取得写权限；请保留现有成果并检查该会话状态。', {hostCode: /^[a-z0-9_/-]{1,80}$/iu.test(resolved.error.code ?? '') ? resolved.error.code : 'unknown'})
     const policy = this.ctx.sandboxPolicy.resolve({ session: resolved.agent.session })
     const outcome = await this.ctx.fs.writeText(target, text, expected ? { kind: 'replaceIfVersion', version: expected.version } : { kind: 'createIfAbsent' }, this.signal, policy)
     return { text, version: outcome.version }
@@ -270,7 +279,7 @@ export class HostFileStore implements FileStore {
       }
       const anchor = await this.target(anchorPath, true)
       const resolved = await this.ctx.sessionController.resolveAgent(this.binding.sessionId)
-      if (resolved.error) throw resolved.error
+      if (resolved.error) throw new ScholarError('HOST_SESSION_UNAVAILABLE', '宿主会话暂时无法取得写权限；请保留现有成果并检查该会话状态。', {hostCode: /^[a-z0-9_/-]{1,80}$/iu.test(resolved.error.code ?? '') ? resolved.error.code : 'unknown'})
       const policy = this.ctx.sandboxPolicy.resolve({ session: resolved.agent.session })
       invariant(policy.mode !== 'read-only', 'FS_SANDBOX_DENIED', '当前会话为只读，不能提交项目变更。')
       invariant(policy.workspaceRoot === this.binding.canonicalRoot || policy.mode === 'danger-full-access', 'PATH_OUTSIDE_ALLOWED_ROOT', '沙箱根与绑定工作区不一致。')
