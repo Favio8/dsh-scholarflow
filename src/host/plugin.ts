@@ -13,6 +13,9 @@ import { newId, digest, json } from '../core/store/files.ts'
 import { invariant } from '../shared/errors.ts'
 import { scanRequest, registerMaterialRequest, parseMaterialRequest, readMaterialRequest } from '../shared/materials.ts'
 import { registerSourceRequest, confirmEvidenceRequest, upsertClaimRequest, confirmOutlineRequest } from '../shared/research.ts'
+import { resultPrepareRequest,resultConfirmRequest } from '../shared/results.ts'
+import { prepareResultImport,confirmResultImport,inspectResults,type ResultImportPlan } from '../core/research/results.ts'
+import { parseResultBytes,RESULT_MAX_BYTES } from '../core/research/result-parser.ts'
 import { scanMaterials, registerMaterial, readParsed,selectMaterial } from '../core/materials/materials.ts'
 import { parseRegisteredMaterial } from '../core/materials/parse.ts'
 import { parseMaterialBytes } from './parsers/parse.ts'
@@ -144,6 +147,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
   private proposalRevisionPlans = new Map<string, { plan: ProposalRevisionPlan; peerId: string; expires: number }>()
   private sourceRegistrationPlans = new Map<string, { plan: SourceRegistrationPlan; peerId: string; expires: number }>()
   private bibliographyPlans=new Map<string,{plan:BibliographyImportPlan;context:RequestContext;peerId:string;expires:number}>()
+  private resultPlans=new Map<string,{plan:ResultImportPlan;peerId:string;expires:number}>()
   private researchBatchPlans = new Map<string, { plan: ResearchBatchPlan; action?: ResearchBatchAction; context: RequestContext; peerId: string; expires: number }>()
   private skillSources = new Map<string, { source: LocalSkillSource; candidates: string[]; peerId: string; expires: number }>()
   private githubSources = new Map<string, { discovery: GithubDiscovery; peerId: string; expires: number }>()
@@ -167,6 +171,7 @@ export class ScholarFlowRemote extends TypertRemoteService {
     ctx.effect(() => () => this.skillCopyPlans.clear(), 'scholarflow: clear project Skill copy previews')
     ctx.effect(() => () => this.manuscriptPlans.clear(), 'scholarflow: clear manuscript import previews')
     ctx.effect(() => () => this.identityPlans.clear(), 'scholarflow: clear project identity previews')
+    ctx.effect(() => () => this.resultPlans.clear(), 'scholarflow: clear result mapping previews')
     ctx.effect(() => () => this.automaticPlans.clear(), 'scholarflow: clear automatic previews')
     ctx.effect(() => () => { this.draftSequencePlans.clear(); this.generationPlans.clear() }, 'scholarflow: clear draft previews')
     ctx.effect(() => () => { for (const active of this.running.values()) active.controller.abort('plugin-unload') }, 'scholarflow: stop owned stages')
@@ -2098,6 +2103,35 @@ export class ScholarFlowRemote extends TypertRemoteService {
   })}
   @Remote('sources.dismissBibliography')
   async sourcesDismissBibliography(request:unknown){return applicationResult(async()=>{const peerId=this.requireOperator(),input=z.object({planId:id}).strict().parse(request),row=this.bibliographyPlans.get(input.planId);if(row?.peerId===peerId)this.bibliographyPlans.delete(input.planId);return {dismissed:true}})}
+
+  @Remote('results.inspect')
+  async resultsInspect(request:unknown,signal:AbortSignal){return applicationResult(async()=>{this.requireOperator();const {context}=inspectRequest.parse(request),{io}=await resolveStore(this.ctx,context,signal);return inspectResults(io)})}
+  @Remote('results.inspectFile')
+  async resultsInspectFile(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
+    this.requireOperator();const input=z.object({context:requestContext,materialId:id,recordsPointer:z.string().max(1000).default('')}).strict().parse(request),{io}=await resolveStore(this.ctx,input.context,signal),current=await snapshot(io),material=current.ledger.materials[input.materialId]
+    invariant(material&&current.config.materials.include.includes(material.projectRelativePath),'MATERIAL_ACCESS_DENIED','请先选用结果文件。')
+    const bytes=await io.readBytes(material.projectRelativePath,RESULT_MAX_BYTES,signal),parsed=parseResultBytes(bytes,material.projectRelativePath,input.recordsPointer,signal)
+    return {sourceHash:digest(bytes),fields:parsed.fields,recordCount:parsed.records.length,cells:parsed.cells.filter(cell=>cell.recordIndex<5),readScope:'当前明确选择的结果记录；预览仅显示前五条。'}
+  })}
+  @Remote('results.prepareImport')
+  async resultsPrepareImport(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
+    const peerId=this.requireOperator(),input=resultPrepareRequest.parse(request),{io}=await resolveStore(this.ctx,input.context,signal)
+    for(const [key,row] of this.resultPlans)if(row.expires<Date.now())this.resultPlans.delete(key)
+    invariant(this.resultPlans.size<8,'TOO_MANY_PENDING_PLANS','请先处理已有结果映射预览。')
+    const plan=await prepareResultImport(io,input,signal);this.resultPlans.set(plan.id,{plan,peerId,expires:Date.now()+600000});return plan
+  })}
+  @Remote('results.confirmImport')
+  async resultsConfirmImport(request:unknown,signal:AbortSignal){return applicationResult(async()=>{
+    const peerId=this.requireOperator(),input=resultConfirmRequest.parse(request),row=this.resultPlans.get(input.planId)
+    invariant(row&&row.peerId===peerId&&row.expires>Date.now()&&row.plan.planHash===input.planHash,'INVALID_APPROVAL','请重新预览当前结果映射。')
+    const {io}=await resolveStore(this.ctx,input.context,signal);return confirmResultImport(io,input.context,row.plan,input.authorConfirmed)
+  })}
+  @Remote('results.prepareUpdate')
+  async resultsPrepareUpdate(request:unknown,signal:AbortSignal){return applicationResult(async()=>{const input=resultPrepareRequest.parse(request);invariant(input.previousExperimentId,'EXPERIMENT_REQUIRED','更新须选择当前实验版本。');return this.resultsPrepareImport(input,signal)})}
+  @Remote('results.confirmUpdate')
+  async resultsConfirmUpdate(request:unknown,signal:AbortSignal){return this.resultsConfirmImport(request,signal)}
+  @Remote('results.dismissImport')
+  async resultsDismissImport(request:unknown){return applicationResult(async()=>{const peerId=this.requireOperator(),{planId}=z.object({planId:id}).strict().parse(request);if(this.resultPlans.get(planId)?.peerId===peerId)this.resultPlans.delete(planId);return {dismissed:true}})}
 
   @Remote('sources.prepareRegistration')
   async sourcesPrepareRegistration(request: unknown, signal: AbortSignal) {

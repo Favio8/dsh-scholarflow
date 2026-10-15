@@ -57,6 +57,7 @@
     "@deepseek-ai/schemastery": "3.18.4",
     "@mozilla/readability": "^0.6.0",
     "@streamparser/json": "0.0.26",
+    "csv-parse": "7.0.3",
     "docx": "^9.8.1",
     "jszip": "3.10.1",
     "katex": "^0.19.0",
