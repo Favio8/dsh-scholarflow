@@ -22,11 +22,14 @@ export async function reviewInput(io: FileStore) {
   }
   const profile = await io.read('.scholarflow/profiles/review.md')
   const contextHashes: Record<string, string> = {}
-  for (const path of [current.config.writing.projectProfile, '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md', '.scholarflow/context/approvals.json', '.scholarflow/resources.lock.json']) {
+  for (const path of [current.config.writing.projectProfile, '.scholarflow/context/decisions.md', '.scholarflow/context/terminology.md', '.scholarflow/context/writing-memory.md', '.scholarflow/context/approvals.json', '.scholarflow/resources.lock.json', '.scholarflow/writing/requirements.json', '.scholarflow/research/experiments.json']) {
     const image = await io.read(path); contextHashes[path] = image ? digest(image.text) : 'missing'
   }
   const { requirements, materials, sources, evidence, claims, outline, claimAnchors } = current.ledger
-  return { current, materialHashes, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v6-current-user-results', configHash: current.configHash, documentHash: current.document.contentHash,
+  const contextDependencyHash = digest(json({ evaluatorVersion: 'sf-review-v7-candidate-subjects', configHash: current.configHash,
+    requirements, materials, sources, evidence, claims, outline, materialHashes, contextHashes, formatting: current.ledger.documents.paper.formatting,
+    reviewProfileHash: profile ? digest(profile.text) : 'missing' }))
+  return { current, materialHashes, contextDependencyHash, dependencyHash: digest(json({ evaluatorVersion: 'sf-review-v7-candidate-subjects', configHash: current.configHash, documentHash: current.document.contentHash,
     revisionId: current.document.revisionId, requirements, materials, sources, evidence, claims, outline, claimAnchors,
     materialHashes, contextHashes, reviewProfileHash: profile ? digest(profile.text) : 'missing' })) }
 }

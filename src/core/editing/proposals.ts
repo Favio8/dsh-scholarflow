@@ -175,7 +175,8 @@ async function documentMutation(io: FileStore, current: Snapshot, ledger: Ledger
   return { mutations, revisionId, documentHash, statistics }
 }
 export async function saveManual(io: FileStore, text: string, baseHash: string, revision: number,
-  adoption?: { origin: string; verify: (current: Snapshot) => Promise<void>; extra: Mutation[] }, formatting?: DocumentFormatting) {
+  adoption?: { origin: string; verify: (current: Snapshot) => Promise<void>; extra: Mutation[] | ((change: { revisionId: string; documentHash: string }) => Mutation[]);
+    finalize?: (ledger: Ledger, change: { revisionId: string; documentHash: string }) => void }, formatting?: DocumentFormatting) {
   return io.lock(async () => {
     const current = await writable(io)
     invariant(current.ledger.revision === revision, 'STALE_LEDGER_REVISION', '项目记录已更新，请重新读取。')
@@ -183,7 +184,9 @@ export async function saveManual(io: FileStore, text: string, baseHash: string, 
     await adoption?.verify(current)
     const ledger = structuredClone(current.ledger), change = await documentMutation(io, current, ledger, text, adoption?.origin ?? 'user-manual')
     if(formatting){const parsed=documentFormatting.parse(formatting);invariant([...parsed.characters,...parsed.paragraphs].every(row=>row.start<row.end&&row.end<=text.length&&unicodeBoundary(text,row.start)&&unicodeBoundary(text,row.end)),'FORMAT_RANGE_INVALID','排版范围已改变，请重新选择文字。');ledger.documents.paper.formatting=parsed}
-    const nextRevision = await publishLedger(io, current, ledger, [...change.mutations, ...(adoption?.extra ?? [])])
+    adoption?.finalize?.(ledger, change)
+    const extra = typeof adoption?.extra === 'function' ? adoption.extra(change) : adoption?.extra ?? []
+    const nextRevision = await publishLedger(io, current, ledger, [...change.mutations, ...extra])
     return { ...change, mutations: undefined, revision: nextRevision }
   })
 }
